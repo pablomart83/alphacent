@@ -11,6 +11,7 @@ aiosqlite==0.19.0
 # Trading
 ib-insync==0.9.86
 yfinance==1.1.0
+lark>=1.1.0
 
 # Data analysis
 pandas==2.1.3
