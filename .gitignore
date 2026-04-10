@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Database
+*.db
+*.db-journal
+
+# Logs
+logs/
+*.log
+
+# Config (sensitive)
+config/.encryption_key
+config/credentials.json
+config/live_credentials.json
+config/demo_credentials.json
+.env
+.env.*
+!.env.example
+
+# Backups
+backups/
+
+# Deploy secrets
+deploy/.env.deploy
+deploy/*.pem
+
+# Node
+node_modules/
+
+# Frontend build output
+frontend/dist/
+frontend/node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local test/debug files
+cookies.txt
+exports/
+models/

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Market Data</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .result {
+            background: #2a2a2a;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            border: 1px solid #444;
+        }
+        .success {
+            border-color: #0f0;
+        }
+        .error {
+            border-color: #f00;
+        }
+        button {
+            background: #0a0;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #0c0;
+        }
+        pre {
+            background: #000;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>AlphaCent Market Data Test</h1>
+    
+    <div>
+        <button onclick="testLogin()">1. Login</button>
+        <button onclick="testEURUSD()">2. Test EURUSD</button>
+        <button onclick="testAAPL()">3. Test AAPL</button>
+        <button onclick="testBTCUSD()">4. Test BTCUSD</button>
+        <button onclick="clearResults()">Clear</button>
+    </div>
+
+    <div id="results"></div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        
+        function addResult(title, data, isError = false) {
+            const div = document.createElement('div');
+            div.className = 'result ' + (isError ? 'error' : 'success');
+            div.innerHTML = `
+                <h3>${title}</h3>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+            document.getElementById('results').appendChild(div);
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function testLogin() {
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'admin123'
+                    })
+                });
+                
+                const data = await response.json();
+                addResult('Login', data, !response.ok);
+            } catch (error) {
+                addResult('Login Error', { error: error.message }, true);
+            }
+        }
+
+        async function testMarketData(symbol) {
+            try {
+                const response = await fetch(`${API_BASE}/market-data/${symbol}?mode=DEMO`, {
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                // Highlight the important fields
+                const result = {
+                    symbol: data.symbol,
+                    price: data.price,
+                    source: data.source,
+                    timestamp: data.timestamp,
+                    '---': '---',
+                    full_response: data
+                };
+                
+                addResult(`Market Data: ${symbol}`, result, !response.ok);
+            } catch (error) {
+                addResult(`Market Data Error: ${symbol}`, { error: error.message }, true);
+            }
+        }
+
+        async function testEURUSD() {
+            await testMarketData('EURUSD');
+        }
+
+        async function testAAPL() {
+            await testMarketData('AAPL');
+        }
+
+        async function testBTCUSD() {
+            await testMarketData('BTCUSD');
+        }
+
+        // Auto-run on load
+        window.onload = () => {
+            addResult('Instructions', {
+                step1: 'Click "1. Login" button first',
+                step2: 'Then click any "Test" button to fetch market data',
+                expected: 'You should see "source": "ETORO" and real prices',
+                note: 'If you see source: "YAHOO_FINANCE", the API is falling back to mock data'
+            });
+        };
+    </script>
+</body>
+</html>

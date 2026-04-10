@@ -1,0 +1,119 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Fault Condition** - Timeframe-Aware Threshold Application
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: Scope the property to concrete failing cases (hourly strategies with Sharpe 0.6-0.8, intraday strategies with 40-50% degradation)
+  - Test that hourly strategies (interval='1H') with Sharpe 0.75 and win rate 72% are rejected with "Sharpe 0.75 < 0.9" on unfixed code
+  - Test that intraday strategies (interval='15m') with 45% performance degradation are marked as overfitted on unfixed code
+  - Test that hourly strategies produce zero signals despite being active on unfixed code
+  - Test that hourly strategies with Sharpe 0.18 are retired prematurely on unfixed code
+  - The test assertions should match the Expected Behavior Properties from design (Properties 1-4)
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found to understand root cause
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
+
+- [x] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Daily and 4H Strategy Behavior Unchanged
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for daily strategies (interval='1d' or unspecified)
+  - Observe behavior on UNFIXED code for 4H strategies (interval='4h' or '4H')
+  - Observe that crypto strategies use min_sharpe_crypto and min_win_rate_crypto on unfixed code
+  - Observe that regime-aware adjustments (ranging_low_vol, risk_off) are applied on unfixed code
+  - Write property-based tests capturing observed behavior patterns from Preservation Requirements (Properties 5-8)
+  - Property-based testing generates many test cases for stronger guarantees
+  - Test that daily strategies with Sharpe 0.85 and win rate 44% are rejected (below 45% threshold)
+  - Test that daily strategies with Sharpe 0.92 and win rate 46% are activated
+  - Test that 4H strategies produce identical activation, validation, signal generation, and retirement results
+  - Test that crypto daily strategies use min_sharpe_crypto (0.2) and min_win_rate_crypto (0.3)
+  - Test that regime-aware threshold adjustments continue working for daily strategies
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [x] 3. Fix for intraday/hourly strategy threshold application
+
+  - [x] 3.1 Implement timeframe detection and threshold adjustment in evaluate_for_activation
+    - Add timeframe detection logic: check strategy.metadata.get('interval') and strategy.backtest_results.metadata.get('interval')
+    - Default to '1d' if interval not specified
+    - Read base thresholds from config FIRST (min_sharpe or min_sharpe_crypto based on asset class)
+    - Apply timeframe multipliers AFTER reading base thresholds:
+      - Hourly (1H, 2H): base_sharpe * 0.67, base_win_rate - 0.05
+      - Intraday (15m, 30m): base_sharpe * 0.44, base_win_rate - 0.07
+      - Daily/4H: no adjustment
+    - For crypto hourly: min_sharpe_crypto (0.2) * 0.67 = 0.13 Sharpe threshold
+    - For stock hourly: min_sharpe (0.8) * 0.67 = 0.53 Sharpe threshold
+    - Add logging: "Hourly strategy: Adjusted thresholds - Sharpe>X (from Y), WinRate>Z% (from W%)"
+    - _Bug_Condition: isBugCondition(strategy) where strategy.interval IN ['1h', '1H', '15m', '30m', '2h', '2H'] AND thresholdsUsed == dailyThresholds_
+    - _Expected_Behavior: Properties 1, 7 from design - timeframe-aware activation with crypto threshold preservation_
+    - _Preservation: Properties 5, 6 from design - daily and 4H strategies unchanged_
+    - _Requirements: 2.1, 2.4, 3.1, 3.2, 3.5_
+
+  - [x] 3.2 Implement timeframe-aware overfitting detection in walk_forward_validate
+    - Detect strategy interval using same logic as activation
+    - Adjust degradation threshold based on timeframe:
+      - Hourly: 40% degradation threshold (vs 30% for daily)
+      - Intraday: 50% degradation threshold
+      - Daily/4H: 30% degradation threshold (existing)
+    - Update overfitting check: test_sharpe < train_sharpe * degradation_threshold
+    - Add logging: "Hourly strategy: Using 40% degradation threshold for overfitting detection (vs 30% for daily)"
+    - _Bug_Condition: isBugCondition(strategy) where strategy.interval IN ['15m', '30m'] AND overfitting check uses 30% threshold_
+    - _Expected_Behavior: Property 2 from design - timeframe-aware walk-forward validation_
+    - _Preservation: Property 5 from design - daily strategy validation unchanged_
+    - _Requirements: 2.2, 3.1_
+
+  - [x] 3.3 Implement timeframe-aware signal generation in generate_signals
+    - Detect strategy interval at start of signal generation
+    - Pass detected interval to market_data.get_historical_data() instead of defaulting to '1d'
+    - Verify indicators are calculated on correct timeframe bars
+    - Add logging: "Generating signals for hourly strategy using 1h bars"
+    - _Bug_Condition: isBugCondition(strategy) where strategy.interval IN ['1h', '1H'] AND data fetched with interval='1d'_
+    - _Expected_Behavior: Property 3 from design - hourly signal generation with hourly data_
+    - _Preservation: Property 5 from design - daily signal generation unchanged_
+    - _Requirements: 2.3, 3.7_
+
+  - [x] 3.4 Implement timeframe-aware retirement thresholds in check_retirement_triggers
+    - Detect strategy interval using same logic as activation
+    - Apply timeframe multipliers to retirement thresholds:
+      - Hourly: Sharpe 0.15 (vs 0.2 for daily), win rate 30% (vs 35%)
+      - Intraday: Sharpe 0.10, win rate 28%
+      - Daily/4H: existing thresholds
+    - Adjust average loss check for intraday: 4x stop-loss (vs 3x for daily)
+    - Add logging: "Hourly strategy: Using retirement threshold Sharpe>0.15 (vs 0.2 for daily)"
+    - _Bug_Condition: isBugCondition(strategy) where strategy.interval IN ['1h', '1H', '15m', '30m'] AND retirement thresholds == dailyThresholds_
+    - _Expected_Behavior: Property 4 from design - timeframe-aware retirement_
+    - _Preservation: Property 5 from design - daily retirement unchanged_
+    - _Requirements: 2.5, 2.6, 3.1, 3.2_
+
+  - [x] 3.5 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - Timeframe-Aware Threshold Application
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - Verify hourly strategies with Sharpe 0.75 are now activated
+    - Verify intraday strategies with 45% degradation pass walk-forward validation
+    - Verify hourly strategies generate signals
+    - Verify hourly strategies with Sharpe 0.18 are not retired prematurely
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
+
+  - [x] 3.6 Verify preservation tests still pass
+    - **Property 2: Preservation** - Daily and 4H Strategy Behavior Unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Verify daily strategies produce identical activation results
+    - Verify 4H strategies produce identical results across all operations
+    - Verify crypto strategies still use min_sharpe_crypto and min_win_rate_crypto
+    - Verify regime-aware adjustments still work correctly
+    - Confirm all tests still pass after fix (no regressions)
+
+- [x] 4. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.

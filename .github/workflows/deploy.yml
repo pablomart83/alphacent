@@ -1,0 +1,157 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Manual trigger from GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy code to EC2
+        run: |
+          # Sync code (exclude secrets, local files, heavy dirs)
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/ec2_key" \
+            --exclude '.git/' \
+            --exclude 'venv/' \
+            --exclude 'node_modules/' \
+            --exclude 'frontend/node_modules/' \
+            --exclude '.hypothesis/' \
+            --exclude '__pycache__/' \
+            --exclude '*.db' \
+            --exclude '*.db-journal' \
+            --exclude 'logs/' \
+            --exclude 'backups/' \
+            --exclude '.DS_Store' \
+            --exclude 'deploy/.env.deploy' \
+            --exclude 'deploy/*.pem' \
+            --exclude 'config/.encryption_key' \
+            --exclude 'config/demo_credentials.json' \
+            --exclude 'config/live_credentials.json' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude 'frontend/dist/' \
+            ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/ubuntu/alphacent/
+
+      - name: Install dependencies and configure
+        run: |
+          ssh -i ~/.ssh/ec2_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          set -euo pipefail
+          cd /home/ubuntu/alphacent
+
+          # Setup venv if needed
+          if [ ! -d "venv" ]; then
+              python3.11 -m venv venv
+          fi
+          source venv/bin/activate
+
+          # Install Python deps
+          pip install --upgrade pip -q
+          pip install -e . -q
+          pip install pyyaml cryptography -q
+
+          # Ensure directories exist
+          mkdir -p logs logs/cycles config
+
+          # Fetch secrets from Secrets Manager and write config files
+          REGION="${{ secrets.AWS_REGION }}"
+
+          # Encryption key
+          ENCRYPTION_KEY=$(aws secretsmanager get-secret-value \
+              --secret-id alphacent/encryption-key --region $REGION \
+              --query SecretString --output text)
+          echo -n "$ENCRYPTION_KEY" > config/.encryption_key
+          chmod 600 config/.encryption_key
+
+          # eToro credentials
+          ETORO_CREDS=$(aws secretsmanager get-secret-value \
+              --secret-id alphacent/etoro-credentials --region $REGION \
+              --query SecretString --output text)
+          echo "$ETORO_CREDS" > config/demo_credentials.json
+          chmod 600 config/demo_credentials.json
+
+          # Patch API keys in YAML
+          python3.11 << 'PYEOF'
+          import yaml, subprocess
+
+          def get_secret(name):
+              r = subprocess.run(
+                  ["aws", "secretsmanager", "get-secret-value",
+                   "--secret-id", name, "--region", "${{ secrets.AWS_REGION }}",
+                   "--query", "SecretString", "--output", "text"],
+                  capture_output=True, text=True)
+              return r.stdout.strip()
+
+          with open("config/autonomous_trading.yaml") as f:
+              config = yaml.safe_load(f)
+
+          config["data_sources"]["financial_modeling_prep"]["api_key"] = get_secret("alphacent/fmp-api-key")
+          config["data_sources"]["alpha_vantage"]["api_key"] = get_secret("alphacent/alpha-vantage-api-key")
+          config["data_sources"]["fred"]["api_key"] = get_secret("alphacent/fred-api-key")
+
+          with open("config/autonomous_trading.yaml", "w") as f:
+              yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+          print("API keys patched")
+          PYEOF
+
+          # Create .env.production
+          PG_PASS=$(aws secretsmanager get-secret-value \
+              --secret-id alphacent/postgres-password --region $REGION \
+              --query SecretString --output text)
+          ADMIN_PASS=$(aws secretsmanager get-secret-value \
+              --secret-id alphacent/admin-password --region $REGION \
+              --query SecretString --output text)
+
+          cat > .env.production << ENVEOF
+          DATABASE_URL=postgresql://alphacent_user:${PG_PASS}@localhost/alphacent
+          ADMIN_PASSWORD=${ADMIN_PASS}
+          ENVEOF
+          chmod 600 .env.production
+
+          echo "Backend configured"
+          EOF
+
+      - name: Build frontend
+        run: |
+          ssh -i ~/.ssh/ec2_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          set -euo pipefail
+          cd /home/ubuntu/alphacent/frontend
+
+          npm install --production=false
+          VITE_API_BASE_URL=http://${{ secrets.EC2_HOST }} npm run build
+
+          echo "Frontend built"
+          EOF
+
+      - name: Restart service
+        run: |
+          ssh -i ~/.ssh/ec2_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << 'EOF'
+          sudo systemctl restart alphacent
+          sleep 5
+          curl -sf http://localhost:8000/health || echo "Health check pending..."
+          echo "Service restarted"
+          EOF
+
+      - name: Verify deployment
+        run: |
+          sleep 5
+          HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" http://${{ secrets.EC2_HOST }}/health || echo "000")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Deployment successful - health check passed"
+          else
+            echo "WARNING: Health check returned $HTTP_CODE (service may still be starting)"
+          fi

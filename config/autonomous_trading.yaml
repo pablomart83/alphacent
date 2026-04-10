@@ -1,0 +1,629 @@
+llm:
+  model: qwen2.5-coder:7b
+  temperature: 0.7
+autonomous:
+  enabled: true
+  watchlist_size: 5
+  proposal_frequency: daily
+  proposal_count: 200
+  max_active_strategies: 200
+  min_active_strategies: 10
+  backtested_ttl_cycles: 168
+autonomous_schedule:
+  enabled: true
+  frequency: daily
+  day_of_week: saturday
+  hour: 15
+  minute: 15
+activation_thresholds:
+  min_sharpe: 0.4
+  min_sharpe_crypto: 0.1
+  min_sharpe_commodity: 0.3
+  max_drawdown: 0.25
+  min_win_rate: 0.45
+  min_win_rate_crypto: 0.3
+  min_win_rate_commodity: 0.35
+  min_trades: 2
+  min_trades_alpha_edge: 2
+  min_trades_dsl: 4
+  min_trades_dsl_1h: 5
+  min_trades_dsl_4h: 3
+  min_trades_commodity: 2
+  min_return_per_trade:
+    stock: 0.0015
+    etf: 0.001
+    forex: 0.0005
+    crypto: 0.002
+    index: 0.001
+    commodity: 0.0015
+retirement_thresholds:
+  max_sharpe: 0.0
+  max_drawdown: 0.31
+  min_win_rate: 0.28
+  min_trades_for_evaluation: 10
+retirement_logic:
+  min_live_trades_before_evaluation: 5
+  rolling_window_days: 60
+  consecutive_failures_required: 3
+  probation_period_days: 30
+performance_feedback:
+  feedback_lookback_days: 60
+  min_trades_for_feedback: 5
+  max_weight_adjustment: 1.15
+  min_weight_adjustment: 0.7
+  weight_decay_per_day: 0.01
+validation_rules:
+  rsi:
+    entry_max: 65
+    exit_min: 50
+  stochastic:
+    entry_max: 30
+    exit_min: 70
+  bollinger_bands:
+    require_both_bands: false
+  macd:
+    allow_zero_cross: true
+  signal_overlap:
+    max_overlap_pct: 50
+  entry_opportunities:
+    min_entry_pct: 0.5
+    min_trades_per_month: 0.25
+    asset_class_thresholds:
+      stock:
+        min_entry_pct: 0.5
+      etf:
+        min_entry_pct: 0.3
+      forex:
+        min_entry_pct: 0.2
+      crypto:
+        min_entry_pct: 0.2
+      index:
+        min_entry_pct: 0.3
+      commodity:
+        min_entry_pct: 0.3
+  indicators:
+    min_indicators: 1
+    max_indicators: 5
+    allow_price_only: false
+  conditions:
+    min_entry_conditions: 1
+    min_exit_conditions: 1
+    max_conditions_per_type: 5
+signal_generation:
+  days: 120
+  strategy_timeout: 120
+  cache_ttl: 3500
+  dynamic_symbol_additions: 0
+  parallel_workers: 4
+  supported_intervals:
+  - 1d
+  - 4h
+  - 1h
+  default_interval: 1h
+backtest:
+  days: 730
+  warmup_days: 100
+  min_trades: 5
+  walk_forward:
+    train_days: 365
+    test_days: 180
+    direction_aware_thresholds:
+      default:
+        min_return: 0.0
+        min_sharpe: 0.3
+        min_win_rate: 0.45
+      ranging:
+        long:
+          min_return: -0.02
+          min_sharpe: 0.15
+          min_win_rate: 0.4
+        short:
+          min_return: 0.0
+          min_sharpe: 0.3
+          min_win_rate: 0.45
+      trending_up:
+        long:
+          min_return: 0.0
+          min_sharpe: 0.3
+          min_win_rate: 0.45
+        short:
+          min_return: -0.02
+          min_sharpe: 0.15
+          min_win_rate: 0.4
+      trending_down:
+        long:
+          min_return: -0.02
+          min_sharpe: 0.15
+          min_win_rate: 0.4
+        short:
+          min_return: 0.0
+          min_sharpe: 0.3
+          min_win_rate: 0.45
+      high_vol:
+        long:
+          min_return: -0.01
+          min_sharpe: 0.2
+          min_win_rate: 0.42
+        short:
+          min_return: -0.01
+          min_sharpe: 0.2
+          min_win_rate: 0.42
+  data_quality:
+    min_days_required: 400
+    fallback_days: 180
+  transaction_costs:
+    commission_per_share: 0.005
+    commission_percent: 0.001
+    slippage_percent: 0.0005
+    spread_percent: 0.0002
+    per_asset_class:
+      stock:
+        commission_percent: 0.0
+        spread_percent: 0.0003
+        slippage_percent: 0.0003
+      etf:
+        commission_percent: 0.0
+        spread_percent: 0.0002
+        slippage_percent: 0.0002
+      forex:
+        commission_percent: 0.0
+        spread_percent: 0.0005
+        slippage_percent: 0.0001
+      crypto:
+        commission_percent: 0.0
+        spread_percent: 0.0015
+        slippage_percent: 0.001
+      index:
+        commission_percent: 0.0
+        spread_percent: 0.0004
+        slippage_percent: 0.0003
+      commodity:
+        commission_percent: 0.0
+        spread_percent: 0.0005
+        slippage_percent: 0.0003
+  period_days: 730
+  adaptive_risk:
+    enabled: true
+    atr_sl_multiplier: 1.5
+    atr_tp_multiplier: 3.0
+    min_sl_pct: 0.01
+    max_sl_pct: 0.05
+    min_tp_pct: 0.02
+    max_tp_pct: 0.15
+    min_reward_risk_ratio: 1.5
+data_sources:
+  financial_modeling_prep:
+    enabled: true
+    api_key: REPLACE_VIA_SECRETS_MANAGER
+    rate_limit: 300
+    rate_limit_period: 60
+    cache_strategy: earnings_aware
+    cache_duration: 604800
+    earnings_aware_cache:
+      default_ttl: 604800
+      earnings_period_ttl: 86400
+      earnings_calendar_ttl: 604800
+  alpha_vantage:
+    enabled: true
+    api_key: REPLACE_VIA_SECRETS_MANAGER
+    rate_limit: 500
+    cache_duration: 86400
+  fred:
+    enabled: true
+    api_key: REPLACE_VIA_SECRETS_MANAGER
+    cache_duration: 86400
+  yahoo_finance:
+    enabled: true
+    cache_duration: 3600
+data_management:
+  retention:
+    historical_prices_days: 1000
+    filter_logs_days: 90
+    retired_strategy_days: 90
+  sync_schedule:
+    fmp_fundamentals_hours: 24
+    fmp_earnings_days: 7
+    yahoo_prices_hours: 24
+    fmp_forex_hours: 24
+  cleanup_enabled: true
+alpha_edge:
+  max_active_strategies: 10
+  min_conviction_score: 55
+  min_holding_period_days: 3
+  max_holding_period_days: 30
+  max_trades_per_strategy_per_month: 4
+  allow_multiple_positions_per_symbol: false
+  portfolio_risk:
+    max_sector_exposure_pct: 0.4
+    max_single_template_pct: 0.3
+    max_correlated_positions: 3
+    correlation_threshold: 0.75
+  rejection_blacklist:
+    threshold: 3
+    cooldown_days: 30
+  fundamental_filters:
+    enabled: true
+    min_checks_passed: 3
+    min_market_cap: 500000000
+    checks:
+      profitable: true
+      growing: true
+      reasonable_valuation: true
+      no_dilution: true
+      insider_buying: true
+  ml_filter:
+    enabled: false
+    min_confidence: 0.55
+    retrain_frequency_days: 30
+    features:
+    - rsi_14
+    - macd_signal
+    - volume_ratio
+    - price_vs_ma_50
+    - price_vs_ma_200
+    - sector_momentum
+    - market_regime
+    - vix_level
+  earnings_momentum:
+    enabled: true
+    market_cap_min: 300000000
+    market_cap_max: 2000000000
+    earnings_surprise_min: 0.05
+    revenue_growth_min: 0.1
+    entry_delay_days: 2
+    hold_period_days: 45
+    profit_target: 0.1
+    stop_loss: 0.05
+  sector_rotation:
+    enabled: true
+    max_positions: 3
+    rebalance_frequency_days: 30
+    top_sectors: 3
+    sectors:
+    - XLE
+    - XLF
+    - XLK
+    - XLU
+    - XLV
+    - XLI
+    - XLP
+    - XLY
+  quality_mean_reversion:
+    enabled: true
+    market_cap_min: 10000000000
+    min_roe: 0.15
+    max_debt_equity: 0.5
+    rsi_threshold: 45
+    oversold_threshold: 30
+    drawdown_threshold: 0.1
+    profit_target: 0.05
+    stop_loss: 0.03
+  dividend_aristocrat:
+    min_entry_gap_days: 180
+    pullback_confirmation_pct: 0.05
+    rsi_confirmation_threshold: 40
+  insider_buying:
+    min_net_purchases: 3
+    lookback_days: 90
+  end_of_month_momentum:
+    enabled: true
+  analyst_revision_momentum:
+    min_revision_pct: 0.05
+    min_consecutive_revisions: 2
+    profit_target: 0.12
+    stop_loss: 0.05
+  share_buyback:
+    min_buyback_pct: 0.01
+    rsi_max_entry: 60
+    profit_target: 0.1
+    stop_loss: 0.05
+  multi_factor_composite:
+    enabled: true
+    rebalance_frequency_days: 30
+    top_pct: 20
+    bottom_pct: 20
+    min_f_score_long: 6
+    max_f_score_short: 3
+    max_accruals_long: 0.05
+    min_accruals_short: 0.1
+    factor_weights:
+      value: 0.25
+      quality: 0.3
+      momentum: 0.2
+      growth: 0.25
+  fundamental_monitoring:
+    enabled: true
+    check_interval_hours: 24
+    earnings_miss_threshold: -0.05
+    revenue_decline_exit: true
+    sector_rotation_exit: true
+templates:
+- name: RSI Mean Reversion
+  enabled: true
+  priority: high
+- name: MACD Momentum
+  enabled: true
+  priority: medium
+- name: Bollinger Breakout
+  enabled: true
+  priority: medium
+- name: SMA Crossover
+  enabled: true
+  priority: low
+- name: Stochastic Reversion
+  enabled: true
+  priority: low
+symbols:
+  stocks:
+  - AAPL
+  - MSFT
+  - GOOGL
+  - AMZN
+  - TSLA
+  - META
+  - NVDA
+  - NFLX
+  - AMD
+  - INTC
+  - CSCO
+  - ADBE
+  - ORCL
+  - CRM
+  - AVGO
+  - QCOM
+  - TXN
+  - MU
+  - AMAT
+  - NOW
+  - PANW
+  - SHOP
+  - JPM
+  - V
+  - MA
+  - PYPL
+  - COIN
+  - GS
+  - MS
+  - BLK
+  - SCHW
+  - AXP
+  - WMT
+  - DIS
+  - BA
+  - JNJ
+  - PG
+  - UNH
+  - KO
+  - PEP
+  - MCD
+  - NKE
+  - COST
+  - HD
+  - LOW
+  - TGT
+  - SBUX
+  - GE
+  - LLY
+  - ABBV
+  - MRK
+  - PFE
+  - TMO
+  - ISRG
+  - DXCM
+  - MRNA
+  - AMGN
+  - XOM
+  - CVX
+  - COP
+  - SLB
+  - CAT
+  - HON
+  - RTX
+  - LMT
+  - UPS
+  - FDX
+  - LULU
+  - CMG
+  - UBER
+  - ABNB
+  - SNAP
+  - PLTR
+  - BABA
+  etfs:
+  - SPY
+  - QQQ
+  - IWM
+  - DIA
+  - GLD
+  - SLV
+  - VTI
+  - VOO
+  - XLE
+  - XLF
+  - XLK
+  - XLU
+  - XLV
+  - XLI
+  - XLP
+  - XLY
+  - TLT
+  - HYG
+  forex:
+  - EURUSD
+  - GBPUSD
+  - USDJPY
+  - AUDUSD
+  - USDCAD
+  - USDCHF
+  indices:
+  - SPX500
+  - NSDQ100
+  - DJ30
+  - UK100
+  - GER40
+  commodities:
+  - GOLD
+  - SILVER
+  - OIL
+  - COPPER
+  crypto:
+  - BTC
+  - ETH
+  - SOL
+  - XRP
+  - ADA
+  - AVAX
+  - DOT
+  - LINK
+  - NEAR
+  - LTC
+  - BCH
+asset_class_parameters:
+  stock:
+    stop_loss_pct: 0.04
+    take_profit_pct: 0.1
+    holding_period_days_min: 7
+    holding_period_days_max: 30
+    signal_hours: market_hours
+    volatility_tolerance: standard
+  etf:
+    stop_loss_pct: 0.045
+    take_profit_pct: 0.1
+    holding_period_days_min: 7
+    holding_period_days_max: 30
+    signal_hours: market_hours
+    volatility_tolerance: standard
+  forex:
+    stop_loss_pct: 0.015
+    take_profit_pct: 0.03
+    holding_period_days_min: 14
+    holding_period_days_max: 60
+    signal_hours: 24/5
+    volatility_tolerance: low
+  crypto:
+    stop_loss_pct: 0.06
+    take_profit_pct: 0.12
+    holding_period_days_min: 7
+    holding_period_days_max: 30
+    signal_hours: 24/7
+    volatility_tolerance: high
+  index:
+    stop_loss_pct: 0.04
+    take_profit_pct: 0.1
+    holding_period_days_min: 7
+    holding_period_days_max: 30
+    signal_hours: market_hours
+    volatility_tolerance: standard
+  commodity:
+    stop_loss_pct: 0.03
+    take_profit_pct: 0.08
+    holding_period_days_min: 10
+    holding_period_days_max: 45
+    signal_hours: market_hours
+    volatility_tolerance: medium
+advanced:
+  correlation_threshold: 0.7
+  risk_free_rate: 4.5
+similarity_detection:
+  enabled: false
+  strategy_similarity_threshold: 80
+  proposal_similarity_threshold: 70
+  symbol_correlation_threshold: 0.8
+  correlation_lookback_days: 90
+  correlation_cache_ttl_days: 7
+  similarity_check_timeout_ms: 100
+  weights:
+    indicator_similarity: 0.4
+    parameter_similarity: 0.3
+    rule_similarity: 0.3
+    symbol_penalty: 0.2
+directional_balance:
+  enabled: true
+  min_long_pct: 30
+  max_long_pct: 70
+  min_short_pct: 20
+  max_short_pct: 50
+position_management:
+  max_positions_per_symbol: 3
+  max_long_pct: 0.75
+  max_short_pct: 0.5
+  max_portfolio_drawdown_pct: 0.15
+  max_holding_period_days: 60
+  max_holding_period_days_intraday: 2
+  trailing_stops:
+    enabled: true
+    activation_pct: 0.05
+    distance_pct: 0.03
+  partial_exits:
+    enabled: true
+    levels:
+    - profit_pct: 0.05
+      exit_pct: 0.5
+    - profit_pct: 0.1
+      exit_pct: 0.25
+  correlation_adjustment:
+    enabled: true
+    threshold: 0.7
+    reduction_factor: 0.5
+  regime_based_sizing:
+    enabled: true
+    multipliers:
+      high_volatility: 0.5
+      low_volatility: 1.2
+      trending: 1.0
+      ranging: 1.0
+  portfolio_balance:
+    enabled: true
+    max_sector_exposure_pct: 0.4
+    max_directional_exposure_pct: 0.65
+    min_strategy_types: 1
+  directional_quotas:
+    enabled: true
+    adjacent_regime_reserve_pct: 0.2
+    ranging:
+      min_long_pct: 0.35
+      min_short_pct: 0.35
+    ranging_low_vol:
+      min_long_pct: 0.35
+      min_short_pct: 0.35
+    trending_up:
+      min_long_pct: 0.5
+      min_short_pct: 0.2
+    trending_down:
+      min_long_pct: 0.2
+      min_short_pct: 0.5
+    trending_down_weak:
+      min_long_pct: 0.3
+      min_short_pct: 0.4
+    high_volatility:
+      min_long_pct: 0.3
+      min_short_pct: 0.3
+  order_management:
+    cancel_stale_orders: true
+    stale_order_hours: 24
+    stale_order_timeout_hours: 24
+transaction_costs:
+  enabled: true
+  commission_per_trade: 0.0
+  spread_pct: 0.1
+  slippage_pct: 0.05
+  track_execution_quality: true
+regime_detection:
+  enabled: true
+  method: volatility_based
+  lookback_days: 60
+  high_volatility_threshold: 0.02
+  low_volatility_threshold: 0.01
+  strategy_preferences:
+    high_volatility:
+    - mean_reversion
+    - short
+    low_volatility:
+    - trend_following
+    - long
+    normal:
+    - all
+market_regime:
+  current: ranging_low_vol
+  confidence: 0.568971087412122
+  updated_at: '2026-04-09T23:50:39.472545'

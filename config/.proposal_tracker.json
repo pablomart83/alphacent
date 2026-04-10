@@ -1,0 +1,1118 @@
+{
+  "Crypto Hourly VWAP Reversion": {
+    "proposed": 15,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Crash Recovery": {
+    "proposed": 7,
+    "approved": 0,
+    "last_proposed": "2026-04-07T22:15:20.111406",
+    "last_approved": null
+  },
+  "Hourly RSI Overbought Short": {
+    "proposed": 65,
+    "approved": 16,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "Crypto Hourly Fast Stoch Reversal": {
+    "proposed": 16,
+    "approved": 0,
+    "last_proposed": "2026-04-08T13:10:39.378846",
+    "last_approved": null
+  },
+  "RSI Dip Buy": {
+    "proposed": 106,
+    "approved": 46,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:10:54.061880"
+  },
+  "MACD Bearish Short": {
+    "proposed": 47,
+    "approved": 4,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-07T17:37:13.820077"
+  },
+  "Crypto Hourly Capitulation ATR Snap": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-07T22:15:20.111406",
+    "last_approved": null
+  },
+  "Crypto Hourly Downtrend Extreme": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-08T13:10:39.378846",
+    "last_approved": null
+  },
+  "4H Crypto Downtrend ATR Snap": {
+    "proposed": 23,
+    "approved": 14,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "4H Stochastic Overbought Short": {
+    "proposed": 48,
+    "approved": 6,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "Crypto Hourly Double Extreme": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-08T13:10:39.378846",
+    "last_approved": null
+  },
+  "Crypto RSI Dip Buy": {
+    "proposed": 30,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Hourly Stoch Momentum Burst": {
+    "proposed": 12,
+    "approved": 0,
+    "last_proposed": "2026-04-08T12:22:52.029487",
+    "last_approved": null
+  },
+  "RSI Overbought Short": {
+    "proposed": 43,
+    "approved": 6,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T19:44:46.794015"
+  },
+  "Crypto Daily BB Lower Bounce": {
+    "proposed": 24,
+    "approved": 5,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-07T17:37:13.820077"
+  },
+  "Crypto Hourly Downtrend ATR Snap": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-07T21:59:28.457318",
+    "last_approved": null
+  },
+  "4H Downtrend Oversold Bounce": {
+    "proposed": 62,
+    "approved": 21,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "4H Crypto BB Band Walk": {
+    "proposed": 36,
+    "approved": 9,
+    "last_proposed": "2026-04-08T13:10:39.378846",
+    "last_approved": "2026-04-08T13:12:10.183257"
+  },
+  "Crypto Hourly Capitulation BB Crush": {
+    "proposed": 14,
+    "approved": 4,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T13:12:10.183257"
+  },
+  "Hourly BB Narrow Range Short": {
+    "proposed": 75,
+    "approved": 22,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Intraday Mean Reversion Short": {
+    "proposed": 66,
+    "approved": 12,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T20:02:15.951256"
+  },
+  "Intraday Momentum Burst Short": {
+    "proposed": 45,
+    "approved": 4,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "Fast EMA Crossover": {
+    "proposed": 95,
+    "approved": 37,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Crypto Hourly Bear Rally Momentum": {
+    "proposed": 6,
+    "approved": 3,
+    "last_proposed": "2026-04-07T22:15:20.111406",
+    "last_approved": "2026-04-07T22:16:50.144826"
+  },
+  "Crypto Hourly Capitulation RSI": {
+    "proposed": 15,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "Crypto Hourly VWAP Proxy Reversion": {
+    "proposed": 14,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Intraday Mean Reversion": {
+    "proposed": 103,
+    "approved": 44,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Crypto Daily Oversold Bounce": {
+    "proposed": 25,
+    "approved": 13,
+    "last_proposed": "2026-04-08T19:57:31.894531",
+    "last_approved": "2026-04-08T19:58:15.057615"
+  },
+  "Volume Climax Reversal Short": {
+    "proposed": 4,
+    "approved": 0,
+    "last_proposed": "2026-04-07T17:37:13.820077",
+    "last_approved": null
+  },
+  "4H Crypto Downtrend Bounce": {
+    "proposed": 14,
+    "approved": 5,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T20:43:50.197202"
+  },
+  "Triple EMA Bearish Short": {
+    "proposed": 14,
+    "approved": 0,
+    "last_proposed": "2026-04-07T17:37:13.820077",
+    "last_approved": null
+  },
+  "Weak Downtrend Bounce": {
+    "proposed": 68,
+    "approved": 26,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T20:43:50.197202"
+  },
+  "Crypto Hourly Tight BB Reversion": {
+    "proposed": 15,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "BB Middle Band Bounce": {
+    "proposed": 99,
+    "approved": 71,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Hourly Tight RSI Fade Short": {
+    "proposed": 66,
+    "approved": 11,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T13:47:28.886145"
+  },
+  "4H BB Squeeze Swing Short": {
+    "proposed": 67,
+    "approved": 6,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-07T17:37:13.820077"
+  },
+  "Stochastic Overbought Short": {
+    "proposed": 42,
+    "approved": 5,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T13:12:10.183257"
+  },
+  "EMA Downtrend Short": {
+    "proposed": 45,
+    "approved": 1,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-07T17:37:13.820077"
+  },
+  "Crypto Daily SMA Snap Back": {
+    "proposed": 25,
+    "approved": 8,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T12:24:18.538545"
+  },
+  "Volume Climax Reversal Long": {
+    "proposed": 6,
+    "approved": 0,
+    "last_proposed": "2026-04-07T17:37:13.820077",
+    "last_approved": null
+  },
+  "ATR Downside Breakout Short": {
+    "proposed": 43,
+    "approved": 3,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T19:58:15.057615"
+  },
+  "4H EMA Rejection Short": {
+    "proposed": 48,
+    "approved": 8,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-07T22:16:50.144826"
+  },
+  "Hourly BB Squeeze Breakdown Short": {
+    "proposed": 58,
+    "approved": 4,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Crypto Daily Stochastic Extreme": {
+    "proposed": 8,
+    "approved": 1,
+    "last_proposed": "2026-04-08T13:10:39.378846",
+    "last_approved": "2026-04-08T13:12:10.183257"
+  },
+  "Crypto Volatility Fade": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-08T10:51:59.342131",
+    "last_approved": null
+  },
+  "Crypto Hourly ATR Snap": {
+    "proposed": 9,
+    "approved": 0,
+    "last_proposed": "2026-04-07T22:15:20.111406",
+    "last_approved": null
+  },
+  "4H Lower High Short": {
+    "proposed": 54,
+    "approved": 18,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T13:12:10.183257"
+  },
+  "Crypto Hourly Downtrend VWAP Snap": {
+    "proposed": 15,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "SMA Proximity Entry": {
+    "proposed": 103,
+    "approved": 49,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T13:55:33.872594"
+  },
+  "Hourly RSI Oversold Bounce": {
+    "proposed": 86,
+    "approved": 29,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Crypto Hourly Deep Dip Buy": {
+    "proposed": 15,
+    "approved": 3,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-08T20:43:50.197202"
+  },
+  "Hourly MACD Signal Cross Short": {
+    "proposed": 63,
+    "approved": 4,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "Crypto Hourly MACD Divergence Rally": {
+    "proposed": 22,
+    "approved": 3,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-07T22:16:50.144826"
+  },
+  "Hourly Stochastic Reversal Short": {
+    "proposed": 86,
+    "approved": 30,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "4H BB Upper Rejection Short": {
+    "proposed": 49,
+    "approved": 6,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T13:12:10.183257"
+  },
+  "Bollinger Band Short": {
+    "proposed": 41,
+    "approved": 6,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "Hourly EMA Crossover Short": {
+    "proposed": 58,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "High-VIX Mean Reversion Long": {
+    "proposed": 70,
+    "approved": 24,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T20:43:50.197202"
+  },
+  "4H MACD Bearish Cross Short": {
+    "proposed": 43,
+    "approved": 7,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T20:43:50.197202"
+  },
+  "OBV Bullish Divergence Long": {
+    "proposed": 48,
+    "approved": 0,
+    "last_proposed": "2026-04-07T17:37:13.820077",
+    "last_approved": null
+  },
+  "Crypto Hourly Downtrend Breakout": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "Commodity Hourly Oversold Bounce Long": {
+    "proposed": 61,
+    "approved": 22,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-08T12:24:18.538545"
+  },
+  "Commodity Daily Breakdown Short": {
+    "proposed": 46,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "4H RSI Overbought Fade Short": {
+    "proposed": 46,
+    "approved": 2,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T13:19:37.535727"
+  },
+  "4H Commodity EMA Rejection Short": {
+    "proposed": 44,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "Moving Average Breakdown Short": {
+    "proposed": 40,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "Price Breakdown Short": {
+    "proposed": 40,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "Crypto Pullback Buy": {
+    "proposed": 13,
+    "approved": 0,
+    "last_proposed": "2026-04-09T22:08:48.794800",
+    "last_approved": null
+  },
+  "Crypto Volume Spike Entry": {
+    "proposed": 17,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Hourly EMA Momentum": {
+    "proposed": 20,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Hourly Trend Pullback": {
+    "proposed": 14,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Hourly Momentum Continuation": {
+    "proposed": 13,
+    "approved": 0,
+    "last_proposed": "2026-04-09T20:00:50.549448",
+    "last_approved": null
+  },
+  "Crypto Hourly BB Expansion Ride": {
+    "proposed": 19,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Hourly MACD Momentum": {
+    "proposed": 20,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Hourly Breakout Continuation": {
+    "proposed": 15,
+    "approved": 0,
+    "last_proposed": "2026-04-09T20:00:50.549448",
+    "last_approved": null
+  },
+  "Crypto Hourly ADX Trend Entry": {
+    "proposed": 13,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto MACD Trend": {
+    "proposed": 19,
+    "approved": 0,
+    "last_proposed": "2026-04-09T22:41:54.154796",
+    "last_approved": null
+  },
+  "Crypto Hourly VWAP Trend": {
+    "proposed": 15,
+    "approved": 0,
+    "last_proposed": "2026-04-09T22:08:48.794800",
+    "last_approved": null
+  },
+  "Crypto EMA Ribbon": {
+    "proposed": 14,
+    "approved": 0,
+    "last_proposed": "2026-04-09T22:08:48.794800",
+    "last_approved": null
+  },
+  "4H Crypto Trend Rider": {
+    "proposed": 17,
+    "approved": 2,
+    "last_proposed": "2026-04-09T22:41:54.154796",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "4H Crypto Volume Breakout": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-09T13:54:23.314383",
+    "last_approved": null
+  },
+  "Crypto Fast EMA Momentum": {
+    "proposed": 16,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Low-Vol STOCH Swing": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Stochastic Recovery": {
+    "proposed": 7,
+    "approved": 0,
+    "last_proposed": "2026-04-09T22:41:54.154796",
+    "last_approved": null
+  },
+  "Crypto BB Squeeze Breakout Long": {
+    "proposed": 9,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto STOCH Mid Scalp": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Quiet EMA Hug Long": {
+    "proposed": 7,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Defensive Sector Rotation Long": {
+    "proposed": 20,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "High VIX Oversold Bounce": {
+    "proposed": 20,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "Crypto Weekend Range": {
+    "proposed": 8,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "4H Crypto Consolidation Break": {
+    "proposed": 6,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Gold Momentum Long": {
+    "proposed": 20,
+    "approved": 20,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "Crypto Hourly Range Scalp": {
+    "proposed": 6,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Hourly Spike Fade": {
+    "proposed": 5,
+    "approved": 0,
+    "last_proposed": "2026-04-09T22:41:54.154796",
+    "last_approved": null
+  },
+  "Crypto BB Mean Reversion": {
+    "proposed": 5,
+    "approved": 0,
+    "last_proposed": "2026-04-09T22:08:48.794800",
+    "last_approved": null
+  },
+  "Crypto SMA Proximity Long": {
+    "proposed": 9,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto EMA Touch Scalp": {
+    "proposed": 4,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Quiet MACD Momentum": {
+    "proposed": 5,
+    "approved": 4,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:10:54.061880"
+  },
+  "Crypto BB Squeeze Breakout": {
+    "proposed": 7,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "ATR Dynamic Trend Follow": {
+    "proposed": 20,
+    "approved": 6,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T20:43:50.197202"
+  },
+  "EURUSD Policy Divergence Short": {
+    "proposed": 25,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "Bear Rally Fade Short": {
+    "proposed": 26,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "ATR Dynamic Trend Follow Short": {
+    "proposed": 25,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "Pairs Trading Market Neutral": {
+    "proposed": 32,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Sector Rotation": {
+    "proposed": 22,
+    "approved": 21,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Quality Mean Reversion": {
+    "proposed": 22,
+    "approved": 21,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Earnings Miss Momentum Short": {
+    "proposed": 21,
+    "approved": 21,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Sector Rotation Short": {
+    "proposed": 13,
+    "approved": 13,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "Relative Value": {
+    "proposed": 13,
+    "approved": 13,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "Quality Deterioration Short": {
+    "proposed": 8,
+    "approved": 8,
+    "last_proposed": "2026-04-08T18:29:59.698914",
+    "last_approved": "2026-04-08T18:29:59.729980"
+  },
+  "Multi-Factor Composite Short": {
+    "proposed": 8,
+    "approved": 8,
+    "last_proposed": "2026-04-08T18:29:59.698914",
+    "last_approved": "2026-04-08T18:29:59.729980"
+  },
+  "Accruals Quality Short": {
+    "proposed": 8,
+    "approved": 8,
+    "last_proposed": "2026-04-08T18:29:59.698914",
+    "last_approved": "2026-04-08T18:29:59.729980"
+  },
+  "FCF Yield Value Long": {
+    "proposed": 8,
+    "approved": 8,
+    "last_proposed": "2026-04-08T18:29:59.698914",
+    "last_approved": "2026-04-08T18:29:59.729980"
+  },
+  "Shareholder Yield Long": {
+    "proposed": 7,
+    "approved": 7,
+    "last_proposed": "2026-04-08T18:29:59.698914",
+    "last_approved": "2026-04-08T18:29:59.729980"
+  },
+  "Quality Value Combo Long": {
+    "proposed": 7,
+    "approved": 7,
+    "last_proposed": "2026-04-08T18:29:59.698914",
+    "last_approved": "2026-04-08T18:29:59.729980"
+  },
+  "Deleveraging Long": {
+    "proposed": 7,
+    "approved": 7,
+    "last_proposed": "2026-04-08T18:29:59.698914",
+    "last_approved": "2026-04-08T18:29:59.729980"
+  },
+  "Earnings Momentum": {
+    "proposed": 1,
+    "approved": 0,
+    "last_proposed": "2026-04-08T16:13:24.228699",
+    "last_approved": null
+  },
+  "Dividend Aristocrat": {
+    "proposed": 9,
+    "approved": 8,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Insider Buying": {
+    "proposed": 9,
+    "approved": 8,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "BTC Lead-Lag Altcoin Momentum": {
+    "proposed": 9,
+    "approved": 1,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-08T22:23:01.096121"
+  },
+  "Keltner Channel Breakout Short": {
+    "proposed": 3,
+    "approved": 0,
+    "last_proposed": "2026-04-08T22:21:38.650014",
+    "last_approved": null
+  },
+  "RSI Midrange Momentum": {
+    "proposed": 20,
+    "approved": 10,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "SMA Envelope Reversion Long": {
+    "proposed": 19,
+    "approved": 10,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Tight RSI Mean Reversion": {
+    "proposed": 17,
+    "approved": 2,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T13:55:33.872594"
+  },
+  "Low Vol RSI Mean Reversion": {
+    "proposed": 18,
+    "approved": 8,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Accumulation Zone Long Ranging": {
+    "proposed": 21,
+    "approved": 6,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "MACD Zero Cross Long": {
+    "proposed": 20,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Quiet RSI Oscillator": {
+    "proposed": 4,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Hourly Stochastic Reversal Long": {
+    "proposed": 21,
+    "approved": 10,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "Stochastic Midrange Long": {
+    "proposed": 21,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Micro RSI Scalp": {
+    "proposed": 3,
+    "approved": 0,
+    "last_proposed": "2026-04-09T20:00:50.549448",
+    "last_approved": null
+  },
+  "Dual MA Volume Surge": {
+    "proposed": 19,
+    "approved": 3,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:10:54.061880"
+  },
+  "Crypto Narrow RSI Oscillator": {
+    "proposed": 6,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Tight BB Scalp": {
+    "proposed": 6,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Quiet Stochastic Swing": {
+    "proposed": 7,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Crypto Quiet BB Midband Bounce": {
+    "proposed": 7,
+    "approved": 0,
+    "last_proposed": "2026-04-09T22:41:54.154796",
+    "last_approved": null
+  },
+  "VWAP Reversion Long Ranging": {
+    "proposed": 19,
+    "approved": 13,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Triple EMA Alignment": {
+    "proposed": 22,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "EMA Ribbon Expansion Long": {
+    "proposed": 23,
+    "approved": 9,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Hourly BB Narrow Range Long": {
+    "proposed": 18,
+    "approved": 11,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "Crypto SMA Reversion": {
+    "proposed": 6,
+    "approved": 3,
+    "last_proposed": "2026-04-09T22:08:48.794800",
+    "last_approved": "2026-04-09T19:30:21.051318"
+  },
+  "RSI Range Oscillator Long Ranging": {
+    "proposed": 19,
+    "approved": 1,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T13:55:33.872594"
+  },
+  "Narrow BB Scalp Long": {
+    "proposed": 20,
+    "approved": 5,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "EMA Pullback Momentum": {
+    "proposed": 20,
+    "approved": 8,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Hourly MACD Signal Cross Long": {
+    "proposed": 22,
+    "approved": 2,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "Crypto Keltner Range Trade": {
+    "proposed": 7,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "BB Squeeze EMA Trend": {
+    "proposed": 21,
+    "approved": 3,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Low Vol Breakout": {
+    "proposed": 19,
+    "approved": 9,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "BB Mean Reversion Long Ranging": {
+    "proposed": 19,
+    "approved": 4,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Stochastic Momentum": {
+    "proposed": 23,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "MACD RSI Confirmed Momentum": {
+    "proposed": 21,
+    "approved": 9,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Low-VIX Trend Following Long": {
+    "proposed": 20,
+    "approved": 9,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "4H RSI Pullback Buy": {
+    "proposed": 21,
+    "approved": 5,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "BB Stochastic Recovery": {
+    "proposed": 19,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "4H MACD Trend Continuation": {
+    "proposed": 18,
+    "approved": 5,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "Hourly EMA Crossover Long": {
+    "proposed": 20,
+    "approved": 1,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T13:35:12.826038"
+  },
+  "BB Midband Reversion Tight": {
+    "proposed": 18,
+    "approved": 10,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "RSI Higher Low Recovery": {
+    "proposed": 21,
+    "approved": 6,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "4H BB Squeeze Swing Long": {
+    "proposed": 16,
+    "approved": 5,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:10:54.061880"
+  },
+  "Volume Dry-Up Reversal Long": {
+    "proposed": 21,
+    "approved": 14,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "Hourly Tight RSI Bounce": {
+    "proposed": 21,
+    "approved": 9,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "ATR Contraction Breakout Long": {
+    "proposed": 17,
+    "approved": 5,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Keltner Channel Bounce Long Ranging": {
+    "proposed": 18,
+    "approved": 3,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:10:54.061880"
+  },
+  "Opening Range Breakout": {
+    "proposed": 19,
+    "approved": 1,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T13:47:28.886145"
+  },
+  "Bollinger Regime-Gated Mean Reversion": {
+    "proposed": 20,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Keltner Midline Bounce Long": {
+    "proposed": 21,
+    "approved": 7,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:44:05.785331"
+  },
+  "SMA Trend Momentum": {
+    "proposed": 19,
+    "approved": 5,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:10:54.061880"
+  },
+  "RSI EMA Confluence Long": {
+    "proposed": 20,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Hourly BB Squeeze Breakout": {
+    "proposed": 22,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "4H Stochastic Swing Long": {
+    "proposed": 20,
+    "approved": 9,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Gap Down Reversal Long": {
+    "proposed": 19,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "SMA Envelope Reversion Short": {
+    "proposed": 16,
+    "approved": 3,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T20:02:15.951256"
+  },
+  "SMA Rejection Short Ranging": {
+    "proposed": 16,
+    "approved": 4,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Gap Up Reversal Short": {
+    "proposed": 16,
+    "approved": 1,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T13:47:28.886145"
+  },
+  "ATR Contraction Breakdown Short": {
+    "proposed": 16,
+    "approved": 1,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T19:30:21.051318"
+  },
+  "RSI Overbought Short Ranging": {
+    "proposed": 16,
+    "approved": 2,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:10:54.061880"
+  },
+  "RSI EMA Confluence Short": {
+    "proposed": 16,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "MACD Zero Cross Short": {
+    "proposed": 16,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "MACD Bearish Short Ranging": {
+    "proposed": 16,
+    "approved": 2,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T22:10:54.061880"
+  },
+  "Stochastic Overbought Short Ranging": {
+    "proposed": 16,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Stochastic Midrange Short": {
+    "proposed": 16,
+    "approved": 1,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T13:47:28.886145"
+  },
+  "Bollinger Regime-Gated Mean Reversion Short": {
+    "proposed": 16,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "BB Upper Band Short Ranging": {
+    "proposed": 16,
+    "approved": 3,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "EMA Ribbon Expansion Short": {
+    "proposed": 16,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  },
+  "Narrow BB Scalp Short": {
+    "proposed": 16,
+    "approved": 1,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": "2026-04-09T23:49:20.968545"
+  },
+  "Crypto Tight Channel Bounce": {
+    "proposed": 6,
+    "approved": 0,
+    "last_proposed": "2026-04-09T23:47:08.795049",
+    "last_approved": null
+  }
+}

@@ -1,0 +1,1421 @@
+{
+  "entries": [
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "AXP",
+      "count": 1,
+      "timestamp": "2026-04-07T16:51:03.852430"
+    },
+    {
+      "template": "High-VIX Mean Reversion Long",
+      "symbol": "NZDUSD",
+      "count": 3,
+      "timestamp": "2026-04-07T22:17:52.861213"
+    },
+    {
+      "template": "Crypto Daily Oversold Bounce",
+      "symbol": "LINK",
+      "count": 3,
+      "timestamp": "2026-04-07T22:17:52.903317"
+    },
+    {
+      "template": "Weak Downtrend Bounce",
+      "symbol": "GER40",
+      "count": 2,
+      "timestamp": "2026-04-08T20:44:44.314592"
+    },
+    {
+      "template": "Crypto Daily Oversold Bounce",
+      "symbol": "BCH",
+      "count": 1,
+      "timestamp": "2026-04-07T16:51:12.349683"
+    },
+    {
+      "template": "Crypto Daily Oversold Bounce",
+      "symbol": "ETH",
+      "count": 3,
+      "timestamp": "2026-04-07T22:17:55.575742"
+    },
+    {
+      "template": "Hourly RSI Overbought Short",
+      "symbol": "DJ30",
+      "count": 3,
+      "timestamp": "2026-04-08T22:23:41.744023"
+    },
+    {
+      "template": "Hourly RSI Oversold Bounce",
+      "symbol": "AUDUSD",
+      "count": 3,
+      "timestamp": "2026-04-07T22:18:01.450739"
+    },
+    {
+      "template": "Hourly BB Narrow Range Short",
+      "symbol": "NSDQ100",
+      "count": 3,
+      "timestamp": "2026-04-08T10:55:41.348877"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "CMG",
+      "count": 1,
+      "timestamp": "2026-04-07T16:51:48.606396"
+    },
+    {
+      "template": "Hourly RSI Overbought Short",
+      "symbol": "DXCM",
+      "count": 1,
+      "timestamp": "2026-04-07T16:52:03.582747"
+    },
+    {
+      "template": "4H Crypto BB Band Walk",
+      "symbol": "LTC",
+      "count": 1,
+      "timestamp": "2026-04-07T16:52:03.646230"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "GER40",
+      "count": 1,
+      "timestamp": "2026-04-07T16:52:03.685464"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "MELI",
+      "count": 1,
+      "timestamp": "2026-04-07T16:52:03.743849"
+    },
+    {
+      "template": "4H Crypto Downtrend ATR Snap",
+      "symbol": "XRP",
+      "count": 3,
+      "timestamp": "2026-04-08T22:24:11.822585"
+    },
+    {
+      "template": "Crypto Daily SMA Snap Back",
+      "symbol": "NEAR",
+      "count": 3,
+      "timestamp": "2026-04-08T12:26:20.027117"
+    },
+    {
+      "template": "Hourly Tight RSI Fade Short",
+      "symbol": "GER40",
+      "count": 2,
+      "timestamp": "2026-04-07T22:18:10.520586"
+    },
+    {
+      "template": "Crypto Hourly MACD Divergence Rally",
+      "symbol": "NEAR",
+      "count": 2,
+      "timestamp": "2026-04-07T22:18:13.556160"
+    },
+    {
+      "template": "4H Downtrend Oversold Bounce",
+      "symbol": "DOT",
+      "count": 1,
+      "timestamp": "2026-04-07T16:52:06.792985"
+    },
+    {
+      "template": "Crypto Hourly Bear Rally Momentum",
+      "symbol": "ETH",
+      "count": 3,
+      "timestamp": "2026-04-07T22:18:13.617427"
+    },
+    {
+      "template": "Hourly RSI Oversold Bounce",
+      "symbol": "XLV",
+      "count": 2,
+      "timestamp": "2026-04-07T22:03:50.411136"
+    },
+    {
+      "template": "Commodity Hourly Oversold Bounce Long",
+      "symbol": "OIL",
+      "count": 5,
+      "timestamp": "2026-04-08T12:26:16.746546"
+    },
+    {
+      "template": "Intraday Mean Reversion Short",
+      "symbol": "SNAP",
+      "count": 3,
+      "timestamp": "2026-04-07T22:18:16.545509"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "MSFT",
+      "count": 3,
+      "timestamp": "2026-04-08T13:14:06.364915"
+    },
+    {
+      "template": "RSI Dip Buy",
+      "symbol": "UK100",
+      "count": 3,
+      "timestamp": "2026-04-08T10:55:05.536136"
+    },
+    {
+      "template": "High-VIX Mean Reversion Long",
+      "symbol": "MSFT",
+      "count": 1,
+      "timestamp": "2026-04-07T22:02:55.910435"
+    },
+    {
+      "template": "Crypto Daily SMA Snap Back",
+      "symbol": "BCH",
+      "count": 2,
+      "timestamp": "2026-04-07T22:17:55.531464"
+    },
+    {
+      "template": "Intraday Momentum Burst Short",
+      "symbol": "NSDQ100",
+      "count": 1,
+      "timestamp": "2026-04-07T22:03:20.120854"
+    },
+    {
+      "template": "Hourly BB Narrow Range Short",
+      "symbol": "NVDA",
+      "count": 3,
+      "timestamp": "2026-04-08T10:55:23.124825"
+    },
+    {
+      "template": "Weak Downtrend Bounce",
+      "symbol": "GBPUSD",
+      "count": 3,
+      "timestamp": "2026-04-08T19:58:55.687975"
+    },
+    {
+      "template": "Crypto Hourly Capitulation BB Crush",
+      "symbol": "BTC",
+      "count": 3,
+      "timestamp": "2026-04-08T13:13:51.226415"
+    },
+    {
+      "template": "Hourly RSI Oversold Bounce",
+      "symbol": "HD",
+      "count": 3,
+      "timestamp": "2026-04-08T10:55:47.266506"
+    },
+    {
+      "template": "4H Crypto Downtrend ATR Snap",
+      "symbol": "NEAR",
+      "count": 3,
+      "timestamp": "2026-04-08T13:13:57.319272"
+    },
+    {
+      "template": "Hourly Tight RSI Fade Short",
+      "symbol": "ABNB",
+      "count": 1,
+      "timestamp": "2026-04-07T22:03:50.369331"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "XLV",
+      "count": 1,
+      "timestamp": "2026-04-07T22:03:50.481788"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "SNOW",
+      "count": 1,
+      "timestamp": "2026-04-07T22:03:50.547922"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "GBPUSD",
+      "count": 3,
+      "timestamp": "2026-04-08T20:45:02.412944"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "PYPL",
+      "count": 2,
+      "timestamp": "2026-04-09T22:45:34.122642"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "QQQ",
+      "count": 1,
+      "timestamp": "2026-04-07T22:17:55.490048"
+    },
+    {
+      "template": "Weak Downtrend Bounce",
+      "symbol": "MSFT",
+      "count": 1,
+      "timestamp": "2026-04-07T22:17:58.506589"
+    },
+    {
+      "template": "Hourly RSI Overbought Short",
+      "symbol": "COPPER",
+      "count": 3,
+      "timestamp": "2026-04-08T13:20:03.007942"
+    },
+    {
+      "template": "4H Crypto Downtrend Bounce",
+      "symbol": "LTC",
+      "count": 1,
+      "timestamp": "2026-04-07T22:18:04.373149"
+    },
+    {
+      "template": "RSI Dip Buy",
+      "symbol": "ITA",
+      "count": 2,
+      "timestamp": "2026-04-08T12:26:19.802018"
+    },
+    {
+      "template": "High-VIX Mean Reversion Long",
+      "symbol": "XRP",
+      "count": 2,
+      "timestamp": "2026-04-08T20:44:41.847521"
+    },
+    {
+      "template": "Hourly Tight RSI Fade Short",
+      "symbol": "DJ30",
+      "count": 3,
+      "timestamp": "2026-04-08T20:44:56.439908"
+    },
+    {
+      "template": "RSI Dip Buy",
+      "symbol": "AUDUSD",
+      "count": 2,
+      "timestamp": "2026-04-08T12:25:52.580726"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "NSDQ100",
+      "count": 3,
+      "timestamp": "2026-04-08T22:23:47.864085"
+    },
+    {
+      "template": "4H Crypto BB Band Walk",
+      "symbol": "BCH",
+      "count": 3,
+      "timestamp": "2026-04-08T13:13:36.130602"
+    },
+    {
+      "template": "Hourly BB Narrow Range Short",
+      "symbol": "CRWD",
+      "count": 3,
+      "timestamp": "2026-04-08T14:48:10.919177"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "SMCI",
+      "count": 1,
+      "timestamp": "2026-04-08T10:55:41.282982"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "FXI",
+      "count": 1,
+      "timestamp": "2026-04-08T10:55:47.373767"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "CRWD",
+      "count": 3,
+      "timestamp": "2026-04-08T14:48:11.046217"
+    },
+    {
+      "template": "Intraday Momentum Burst Short",
+      "symbol": "VOO",
+      "count": 1,
+      "timestamp": "2026-04-08T10:55:47.484456"
+    },
+    {
+      "template": "High-VIX Mean Reversion Long",
+      "symbol": "DOT",
+      "count": 3,
+      "timestamp": "2026-04-08T19:45:13.925228"
+    },
+    {
+      "template": "4H Crypto Downtrend Bounce",
+      "symbol": "BCH",
+      "count": 2,
+      "timestamp": "2026-04-08T20:44:47.376708"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "QCOM",
+      "count": 1,
+      "timestamp": "2026-04-08T12:25:52.807848"
+    },
+    {
+      "template": "Intraday Mean Reversion Short",
+      "symbol": "CRWD",
+      "count": 1,
+      "timestamp": "2026-04-08T12:26:10.735033"
+    },
+    {
+      "template": "SMA Proximity Entry",
+      "symbol": "SCHW",
+      "count": 1,
+      "timestamp": "2026-04-08T12:26:10.800973"
+    },
+    {
+      "template": "4H Crypto Downtrend ATR Snap",
+      "symbol": "ADA",
+      "count": 2,
+      "timestamp": "2026-04-08T20:44:53.455524"
+    },
+    {
+      "template": "Hourly RSI Oversold Bounce",
+      "symbol": "XLY",
+      "count": 1,
+      "timestamp": "2026-04-08T12:26:10.904288"
+    },
+    {
+      "template": "Crypto Hourly Deep Dip Buy",
+      "symbol": "DOT",
+      "count": 3,
+      "timestamp": "2026-04-08T20:44:56.644486"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "SPX500",
+      "count": 3,
+      "timestamp": "2026-04-08T20:44:41.797870"
+    },
+    {
+      "template": "Hourly BB Narrow Range Short",
+      "symbol": "DJ30",
+      "count": 1,
+      "timestamp": "2026-04-08T13:13:26.768683"
+    },
+    {
+      "template": "Crypto Daily Oversold Bounce",
+      "symbol": "AVAX",
+      "count": 3,
+      "timestamp": "2026-04-08T19:58:55.528644"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "QQQ",
+      "count": 1,
+      "timestamp": "2026-04-08T13:13:26.876008"
+    },
+    {
+      "template": "Hourly RSI Oversold Bounce",
+      "symbol": "COP",
+      "count": 1,
+      "timestamp": "2026-04-08T13:13:26.919128"
+    },
+    {
+      "template": "Hourly BB Narrow Range Short",
+      "symbol": "XLF",
+      "count": 1,
+      "timestamp": "2026-04-08T13:13:39.160476"
+    },
+    {
+      "template": "Hourly Tight RSI Fade Short",
+      "symbol": "AUDUSD",
+      "count": 1,
+      "timestamp": "2026-04-08T13:13:42.246748"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "ARKK",
+      "count": 2,
+      "timestamp": "2026-04-08T20:44:56.513668"
+    },
+    {
+      "template": "4H BB Upper Rejection Short",
+      "symbol": "NATGAS",
+      "count": 1,
+      "timestamp": "2026-04-08T13:14:06.317143"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "ZINC",
+      "count": 3,
+      "timestamp": "2026-04-08T19:58:55.636927"
+    },
+    {
+      "template": "Bollinger Band Short",
+      "symbol": "ZINC",
+      "count": 2,
+      "timestamp": "2026-04-08T22:24:02.851282"
+    },
+    {
+      "template": "RSI Dip Buy",
+      "symbol": "FXI",
+      "count": 3,
+      "timestamp": "2026-04-08T19:58:55.570895"
+    },
+    {
+      "template": "High-VIX Mean Reversion Long",
+      "symbol": "PG",
+      "count": 1,
+      "timestamp": "2026-04-08T14:48:02.236959"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "TXN",
+      "count": 1,
+      "timestamp": "2026-04-08T14:48:02.328126"
+    },
+    {
+      "template": "Quality Mean Reversion",
+      "symbol": "LULU",
+      "count": 1,
+      "timestamp": "2026-04-08T14:48:02.403717"
+    },
+    {
+      "template": "Hourly MACD Signal Cross Short",
+      "symbol": "XHB",
+      "count": 1,
+      "timestamp": "2026-04-08T14:48:10.848527"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "ADBE",
+      "count": 1,
+      "timestamp": "2026-04-08T14:48:10.984065"
+    },
+    {
+      "template": "ATR Dynamic Trend Follow",
+      "symbol": "XLF",
+      "count": 1,
+      "timestamp": "2026-04-08T14:48:11.089346"
+    },
+    {
+      "template": "Sector Rotation",
+      "symbol": "XLF",
+      "count": 20,
+      "timestamp": "2026-04-09T23:50:27.233601"
+    },
+    {
+      "template": "Sector Rotation Short",
+      "symbol": "XLF",
+      "count": 13,
+      "timestamp": "2026-04-08T22:24:23.878292"
+    },
+    {
+      "template": "Relative Value",
+      "symbol": "LULU",
+      "count": 4,
+      "timestamp": "2026-04-08T15:45:40.078567"
+    },
+    {
+      "template": "Earnings Miss Momentum Short",
+      "symbol": "ADBE",
+      "count": 1,
+      "timestamp": "2026-04-08T14:55:50.486604"
+    },
+    {
+      "template": "Quality Deterioration Short",
+      "symbol": "LULU",
+      "count": 1,
+      "timestamp": "2026-04-08T14:55:50.770577"
+    },
+    {
+      "template": "Multi-Factor Composite Short",
+      "symbol": "LULU",
+      "count": 1,
+      "timestamp": "2026-04-08T14:55:50.813231"
+    },
+    {
+      "template": "Accruals Quality Short",
+      "symbol": "LULU",
+      "count": 1,
+      "timestamp": "2026-04-08T14:55:50.855173"
+    },
+    {
+      "template": "FCF Yield Value Long",
+      "symbol": "LULU",
+      "count": 3,
+      "timestamp": "2026-04-08T15:45:40.252993"
+    },
+    {
+      "template": "Quality Mean Reversion",
+      "symbol": "PYPL",
+      "count": 1,
+      "timestamp": "2026-04-08T15:18:36.826650"
+    },
+    {
+      "template": "Quality Deterioration Short",
+      "symbol": "TXN",
+      "count": 3,
+      "timestamp": "2026-04-08T15:56:19.080126"
+    },
+    {
+      "template": "Accruals Quality Short",
+      "symbol": "TXN",
+      "count": 3,
+      "timestamp": "2026-04-08T15:56:19.257838"
+    },
+    {
+      "template": "Shareholder Yield Long",
+      "symbol": "LULU",
+      "count": 2,
+      "timestamp": "2026-04-08T15:45:40.293879"
+    },
+    {
+      "template": "Quality Value Combo Long",
+      "symbol": "LULU",
+      "count": 2,
+      "timestamp": "2026-04-08T15:45:40.335200"
+    },
+    {
+      "template": "Deleveraging Long",
+      "symbol": "LULU",
+      "count": 2,
+      "timestamp": "2026-04-08T15:45:40.376848"
+    },
+    {
+      "template": "Quality Mean Reversion",
+      "symbol": "AAPL",
+      "count": 1,
+      "timestamp": "2026-04-08T15:45:39.988694"
+    },
+    {
+      "template": "Earnings Miss Momentum Short",
+      "symbol": "MRK",
+      "count": 1,
+      "timestamp": "2026-04-08T15:45:40.423336"
+    },
+    {
+      "template": "Quality Mean Reversion",
+      "symbol": "META",
+      "count": 4,
+      "timestamp": "2026-04-08T17:32:22.772953"
+    },
+    {
+      "template": "Earnings Miss Momentum Short",
+      "symbol": "NVDA",
+      "count": 1,
+      "timestamp": "2026-04-08T15:56:18.911066"
+    },
+    {
+      "template": "Relative Value",
+      "symbol": "NOC",
+      "count": 1,
+      "timestamp": "2026-04-08T15:56:19.019185"
+    },
+    {
+      "template": "FCF Yield Value Long",
+      "symbol": "NOC",
+      "count": 1,
+      "timestamp": "2026-04-08T15:56:19.298982"
+    },
+    {
+      "template": "Shareholder Yield Long",
+      "symbol": "NOC",
+      "count": 1,
+      "timestamp": "2026-04-08T15:56:19.346026"
+    },
+    {
+      "template": "Quality Value Combo Long",
+      "symbol": "NOC",
+      "count": 1,
+      "timestamp": "2026-04-08T15:56:19.395129"
+    },
+    {
+      "template": "Deleveraging Long",
+      "symbol": "NOC",
+      "count": 1,
+      "timestamp": "2026-04-08T15:56:19.449251"
+    },
+    {
+      "template": "FCF Yield Value Long",
+      "symbol": "ASML",
+      "count": 4,
+      "timestamp": "2026-04-08T18:30:35.534109"
+    },
+    {
+      "template": "Earnings Miss Momentum Short",
+      "symbol": "ZIM",
+      "count": 1,
+      "timestamp": "2026-04-08T17:32:22.835957"
+    },
+    {
+      "template": "Deleveraging Long",
+      "symbol": "GD",
+      "count": 1,
+      "timestamp": "2026-04-08T18:30:35.580396"
+    },
+    {
+      "template": "Shareholder Yield Long",
+      "symbol": "NEM",
+      "count": 1,
+      "timestamp": "2026-04-08T18:30:35.764119"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "IWM",
+      "count": 1,
+      "timestamp": "2026-04-08T19:45:13.756058"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "DJ30",
+      "count": 2,
+      "timestamp": "2026-04-09T13:48:00.707113"
+    },
+    {
+      "template": "ATR Dynamic Trend Follow",
+      "symbol": "BTC",
+      "count": 1,
+      "timestamp": "2026-04-08T19:45:14.100113"
+    },
+    {
+      "template": "RSI Overbought Short",
+      "symbol": "ISRG",
+      "count": 1,
+      "timestamp": "2026-04-08T19:45:16.601572"
+    },
+    {
+      "template": "ATR Dynamic Trend Follow",
+      "symbol": "USDCAD",
+      "count": 1,
+      "timestamp": "2026-04-08T19:45:16.674241"
+    },
+    {
+      "template": "ATR Downside Breakout Short",
+      "symbol": "LOW",
+      "count": 2,
+      "timestamp": "2026-04-08T19:58:58.504305"
+    },
+    {
+      "template": "High-VIX Mean Reversion Long",
+      "symbol": "GER40",
+      "count": 1,
+      "timestamp": "2026-04-08T19:58:55.488778"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "CMG",
+      "count": 1,
+      "timestamp": "2026-04-08T19:58:58.575659"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "SPX500",
+      "count": 1,
+      "timestamp": "2026-04-08T20:44:47.307530"
+    },
+    {
+      "template": "Intraday Momentum Burst Short",
+      "symbol": "SNOW",
+      "count": 2,
+      "timestamp": "2026-04-08T22:24:11.882590"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "NOC",
+      "count": 3,
+      "timestamp": "2026-04-09T22:12:09.262528"
+    },
+    {
+      "template": "RSI Dip Buy",
+      "symbol": "GER40",
+      "count": 1,
+      "timestamp": "2026-04-08T22:23:35.787693"
+    },
+    {
+      "template": "4H Crypto Downtrend ATR Snap",
+      "symbol": "LTC",
+      "count": 1,
+      "timestamp": "2026-04-08T22:23:47.733987"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "V",
+      "count": 1,
+      "timestamp": "2026-04-08T22:23:47.793924"
+    },
+    {
+      "template": "4H Crypto Trend Rider",
+      "symbol": "NEAR",
+      "count": 2,
+      "timestamp": "2026-04-09T22:45:18.947998"
+    },
+    {
+      "template": "Volume Dry-Up Reversal Long",
+      "symbol": "ARKK",
+      "count": 2,
+      "timestamp": "2026-04-09T13:56:08.834707"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "GE",
+      "count": 3,
+      "timestamp": "2026-04-09T19:31:01.384086"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "DIA",
+      "count": 1,
+      "timestamp": "2026-04-09T13:35:52.658550"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "ITA",
+      "count": 3,
+      "timestamp": "2026-04-09T20:02:51.150793"
+    },
+    {
+      "template": "Keltner Midline Bounce Long",
+      "symbol": "ARKK",
+      "count": 1,
+      "timestamp": "2026-04-09T13:36:10.711626"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "USDCAD",
+      "count": 1,
+      "timestamp": "2026-04-09T13:36:10.760137"
+    },
+    {
+      "template": "Low-VIX Trend Following Long",
+      "symbol": "LOW",
+      "count": 1,
+      "timestamp": "2026-04-09T13:36:19.782569"
+    },
+    {
+      "template": "ATR Contraction Breakout Long",
+      "symbol": "DIA",
+      "count": 1,
+      "timestamp": "2026-04-09T13:36:31.864769"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Long",
+      "symbol": "OIL",
+      "count": 2,
+      "timestamp": "2026-04-09T19:31:28.109140"
+    },
+    {
+      "template": "BB Midband Reversion Tight",
+      "symbol": "DBA",
+      "count": 3,
+      "timestamp": "2026-04-09T22:12:18.282663"
+    },
+    {
+      "template": "SMA Envelope Reversion Long",
+      "symbol": "PG",
+      "count": 1,
+      "timestamp": "2026-04-09T13:36:59.061145"
+    },
+    {
+      "template": "Tight RSI Mean Reversion",
+      "symbol": "LTC",
+      "count": 1,
+      "timestamp": "2026-04-09T13:36:59.111061"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "SNAP",
+      "count": 1,
+      "timestamp": "2026-04-09T13:36:59.256055"
+    },
+    {
+      "template": "SMA Trend Momentum",
+      "symbol": "AMZN",
+      "count": 1,
+      "timestamp": "2026-04-09T13:37:02.082043"
+    },
+    {
+      "template": "4H Stochastic Swing Long",
+      "symbol": "NATGAS",
+      "count": 3,
+      "timestamp": "2026-04-09T22:45:31.017785"
+    },
+    {
+      "template": "Volume Dry-Up Reversal Long",
+      "symbol": "DXCM",
+      "count": 1,
+      "timestamp": "2026-04-09T13:37:02.218514"
+    },
+    {
+      "template": "MACD RSI Confirmed Momentum",
+      "symbol": "ADA",
+      "count": 1,
+      "timestamp": "2026-04-09T13:37:05.027761"
+    },
+    {
+      "template": "Dividend Aristocrat",
+      "symbol": "PEP",
+      "count": 7,
+      "timestamp": "2026-04-09T23:50:27.342090"
+    },
+    {
+      "template": "Low-VIX Trend Following Long",
+      "symbol": "SPY",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:03.712238"
+    },
+    {
+      "template": "Low Vol Breakout",
+      "symbol": "SPY",
+      "count": 2,
+      "timestamp": "2026-04-09T22:11:48.266571"
+    },
+    {
+      "template": "Hourly Tight RSI Fade Short",
+      "symbol": "ORCL",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:06.735604"
+    },
+    {
+      "template": "Volume Dry-Up Reversal Long",
+      "symbol": "LMT",
+      "count": 3,
+      "timestamp": "2026-04-09T19:31:04.044914"
+    },
+    {
+      "template": "Hourly Tight RSI Bounce",
+      "symbol": "LTC",
+      "count": 3,
+      "timestamp": "2026-04-09T20:02:51.110817"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Long",
+      "symbol": "XLE",
+      "count": 3,
+      "timestamp": "2026-04-09T22:11:54.214152"
+    },
+    {
+      "template": "Opening Range Breakout",
+      "symbol": "PANW",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:21.813118"
+    },
+    {
+      "template": "Accumulation Zone Long Ranging",
+      "symbol": "USO",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:21.866743"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "LULU",
+      "count": 3,
+      "timestamp": "2026-04-09T19:31:16.054000"
+    },
+    {
+      "template": "Crypto Quiet MACD Momentum",
+      "symbol": "BTC",
+      "count": 3,
+      "timestamp": "2026-04-09T22:12:27.463597"
+    },
+    {
+      "template": "Hourly BB Narrow Range Long",
+      "symbol": "VRTX",
+      "count": 2,
+      "timestamp": "2026-04-09T20:03:00.270895"
+    },
+    {
+      "template": "Keltner Channel Bounce Long Ranging",
+      "symbol": "NKE",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:45.989022"
+    },
+    {
+      "template": "BB Midband Reversion Tight",
+      "symbol": "XRP",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:46.057242"
+    },
+    {
+      "template": "Crypto SMA Reversion",
+      "symbol": "XRP",
+      "count": 3,
+      "timestamp": "2026-04-09T19:31:40.049910"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Long",
+      "symbol": "NOC",
+      "count": 3,
+      "timestamp": "2026-04-09T20:03:03.265838"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "TSLA",
+      "count": 3,
+      "timestamp": "2026-04-09T23:50:18.134381"
+    },
+    {
+      "template": "ATR Contraction Breakout Long",
+      "symbol": "GER40",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:52.211629"
+    },
+    {
+      "template": "SMA Envelope Reversion Long",
+      "symbol": "DBA",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:52.281941"
+    },
+    {
+      "template": "4H MACD Trend Continuation",
+      "symbol": "DJ30",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:52.327804"
+    },
+    {
+      "template": "SMA Trend Momentum",
+      "symbol": "ABNB",
+      "count": 1,
+      "timestamp": "2026-04-09T13:48:58.020441"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "BLK",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:06.367451"
+    },
+    {
+      "template": "SMA Trend Momentum",
+      "symbol": "HYG",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:08.971225"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "NSDQ100",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:09.032252"
+    },
+    {
+      "template": "VWAP Reversion Long Ranging",
+      "symbol": "GLD",
+      "count": 3,
+      "timestamp": "2026-04-09T22:45:03.882218"
+    },
+    {
+      "template": "Low Vol Breakout",
+      "symbol": "SPX500",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:14.773835"
+    },
+    {
+      "template": "Tight RSI Mean Reversion",
+      "symbol": "GLD",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:17.805759"
+    },
+    {
+      "template": "SMA Rejection Short Ranging",
+      "symbol": "XLV",
+      "count": 3,
+      "timestamp": "2026-04-09T22:12:06.270426"
+    },
+    {
+      "template": "RSI Higher Low Recovery",
+      "symbol": "BTC",
+      "count": 3,
+      "timestamp": "2026-04-09T20:02:54.252335"
+    },
+    {
+      "template": "Low-VIX Trend Following Long",
+      "symbol": "DJ30",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:23.910925"
+    },
+    {
+      "template": "Narrow BB Scalp Long",
+      "symbol": "VRTX",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:23.956974"
+    },
+    {
+      "template": "Intraday Mean Reversion Short",
+      "symbol": "LOW",
+      "count": 2,
+      "timestamp": "2026-04-09T20:03:00.205577"
+    },
+    {
+      "template": "Hourly Tight RSI Bounce",
+      "symbol": "GBPUSD",
+      "count": 3,
+      "timestamp": "2026-04-09T20:03:03.221363"
+    },
+    {
+      "template": "Hourly BB Narrow Range Long",
+      "symbol": "MCD",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:24.165720"
+    },
+    {
+      "template": "RSI Range Oscillator Long Ranging",
+      "symbol": "UBER",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:29.855066"
+    },
+    {
+      "template": "4H Stochastic Swing Long",
+      "symbol": "SOL",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:29.927697"
+    },
+    {
+      "template": "Hourly MACD Signal Cross Long",
+      "symbol": "UK100",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:32.899729"
+    },
+    {
+      "template": "Volume Dry-Up Reversal Long",
+      "symbol": "GER40",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:33.015027"
+    },
+    {
+      "template": "Low-VIX Trend Following Long",
+      "symbol": "BTC",
+      "count": 2,
+      "timestamp": "2026-04-09T19:31:40.110200"
+    },
+    {
+      "template": "Fast EMA Crossover",
+      "symbol": "GLD",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:33.181794"
+    },
+    {
+      "template": "MACD RSI Confirmed Momentum",
+      "symbol": "DIA",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:38.930065"
+    },
+    {
+      "template": "SMA Envelope Reversion Short",
+      "symbol": "LLY",
+      "count": 3,
+      "timestamp": "2026-04-09T20:03:09.234746"
+    },
+    {
+      "template": "SMA Envelope Reversion Long",
+      "symbol": "TSLA",
+      "count": 1,
+      "timestamp": "2026-04-09T13:56:39.078351"
+    },
+    {
+      "template": "Earnings Miss Momentum Short",
+      "symbol": "VRTX",
+      "count": 5,
+      "timestamp": "2026-04-09T23:50:27.282529"
+    },
+    {
+      "template": "VWAP Reversion Long Ranging",
+      "symbol": "SLV",
+      "count": 2,
+      "timestamp": "2026-04-09T20:02:48.657031"
+    },
+    {
+      "template": "RSI Dip Buy",
+      "symbol": "XLE",
+      "count": 3,
+      "timestamp": "2026-04-09T22:11:42.346188"
+    },
+    {
+      "template": "Low Vol RSI Mean Reversion",
+      "symbol": "GLD",
+      "count": 2,
+      "timestamp": "2026-04-09T22:11:45.124862"
+    },
+    {
+      "template": "Low Vol RSI Mean Reversion",
+      "symbol": "NOC",
+      "count": 1,
+      "timestamp": "2026-04-09T19:31:04.000136"
+    },
+    {
+      "template": "Low Vol Breakout",
+      "symbol": "AAPL",
+      "count": 1,
+      "timestamp": "2026-04-09T19:31:15.995207"
+    },
+    {
+      "template": "Keltner Midline Bounce Long",
+      "symbol": "GD",
+      "count": 2,
+      "timestamp": "2026-04-09T22:45:22.035837"
+    },
+    {
+      "template": "VWAP Reversion Long Ranging",
+      "symbol": "SHOP",
+      "count": 2,
+      "timestamp": "2026-04-09T23:50:15.009376"
+    },
+    {
+      "template": "Low Vol Breakout",
+      "symbol": "XLU",
+      "count": 2,
+      "timestamp": "2026-04-09T22:45:22.124665"
+    },
+    {
+      "template": "Intraday Mean Reversion",
+      "symbol": "XLE",
+      "count": 1,
+      "timestamp": "2026-04-09T19:31:34.174761"
+    },
+    {
+      "template": "4H Stochastic Swing Long",
+      "symbol": "USDCHF",
+      "count": 2,
+      "timestamp": "2026-04-09T23:50:15.179524"
+    },
+    {
+      "template": "4H MACD Trend Continuation",
+      "symbol": "AMAT",
+      "count": 1,
+      "timestamp": "2026-04-09T19:31:37.046082"
+    },
+    {
+      "template": "SMA Trend Momentum",
+      "symbol": "XLY",
+      "count": 1,
+      "timestamp": "2026-04-09T19:31:40.226894"
+    },
+    {
+      "template": "BB Mean Reversion Long Ranging",
+      "symbol": "WEAT",
+      "count": 3,
+      "timestamp": "2026-04-09T23:50:18.240052"
+    },
+    {
+      "template": "Hourly RSI Overbought Short",
+      "symbol": "UNG",
+      "count": 1,
+      "timestamp": "2026-04-09T19:31:43.157162"
+    },
+    {
+      "template": "ATR Contraction Breakout Long",
+      "symbol": "UNH",
+      "count": 1,
+      "timestamp": "2026-04-09T19:31:46.162210"
+    },
+    {
+      "template": "RSI Midrange Momentum",
+      "symbol": "JNJ",
+      "count": 1,
+      "timestamp": "2026-04-09T20:02:54.172242"
+    },
+    {
+      "template": "EMA Pullback Momentum",
+      "symbol": "ARKK",
+      "count": 1,
+      "timestamp": "2026-04-09T20:02:57.298414"
+    },
+    {
+      "template": "BB Midband Reversion Tight",
+      "symbol": "BTC",
+      "count": 1,
+      "timestamp": "2026-04-09T20:03:00.338569"
+    },
+    {
+      "template": "RSI Midrange Momentum",
+      "symbol": "XLY",
+      "count": 1,
+      "timestamp": "2026-04-09T20:03:03.144901"
+    },
+    {
+      "template": "Low Vol Breakout",
+      "symbol": "BTC",
+      "count": 1,
+      "timestamp": "2026-04-09T20:03:03.333213"
+    },
+    {
+      "template": "Low Vol RSI Mean Reversion",
+      "symbol": "SMCI",
+      "count": 1,
+      "timestamp": "2026-04-09T20:03:03.395485"
+    },
+    {
+      "template": "4H RSI Pullback Buy",
+      "symbol": "AUDUSD",
+      "count": 2,
+      "timestamp": "2026-04-09T23:50:18.304985"
+    },
+    {
+      "template": "4H RSI Pullback Buy",
+      "symbol": "AVAX",
+      "count": 1,
+      "timestamp": "2026-04-09T20:03:06.274514"
+    },
+    {
+      "template": "MACD RSI Confirmed Momentum",
+      "symbol": "HYG",
+      "count": 1,
+      "timestamp": "2026-04-09T22:11:45.178911"
+    },
+    {
+      "template": "BB Middle Band Bounce",
+      "symbol": "META",
+      "count": 1,
+      "timestamp": "2026-04-09T22:11:48.183584"
+    },
+    {
+      "template": "Narrow BB Scalp Long",
+      "symbol": "NOC",
+      "count": 1,
+      "timestamp": "2026-04-09T22:11:48.225625"
+    },
+    {
+      "template": "Low-VIX Trend Following Long",
+      "symbol": "QQQ",
+      "count": 1,
+      "timestamp": "2026-04-09T22:11:54.156258"
+    },
+    {
+      "template": "Keltner Midline Bounce Long",
+      "symbol": "BTC",
+      "count": 1,
+      "timestamp": "2026-04-09T22:12:24.388086"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Long",
+      "symbol": "MCD",
+      "count": 1,
+      "timestamp": "2026-04-09T22:12:27.396941"
+    },
+    {
+      "template": "EMA Pullback Momentum",
+      "symbol": "VOO",
+      "count": 1,
+      "timestamp": "2026-04-09T22:44:52.404378"
+    },
+    {
+      "template": "Narrow BB Scalp Long",
+      "symbol": "TSLA",
+      "count": 1,
+      "timestamp": "2026-04-09T22:44:55.097608"
+    },
+    {
+      "template": "Hourly Tight RSI Bounce",
+      "symbol": "NOC",
+      "count": 1,
+      "timestamp": "2026-04-09T22:45:06.925627"
+    },
+    {
+      "template": "Hourly RSI Overbought Short",
+      "symbol": "TSLA",
+      "count": 1,
+      "timestamp": "2026-04-09T22:45:13.016663"
+    },
+    {
+      "template": "Volume Dry-Up Reversal Long",
+      "symbol": "META",
+      "count": 1,
+      "timestamp": "2026-04-09T22:45:13.067882"
+    },
+    {
+      "template": "4H RSI Pullback Buy",
+      "symbol": "BCH",
+      "count": 1,
+      "timestamp": "2026-04-09T22:45:15.954619"
+    },
+    {
+      "template": "Narrow BB Scalp Long",
+      "symbol": "XRP",
+      "count": 1,
+      "timestamp": "2026-04-09T22:45:22.080146"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Short",
+      "symbol": "BABA",
+      "count": 1,
+      "timestamp": "2026-04-09T22:45:25.055163"
+    },
+    {
+      "template": "Hourly Stochastic Reversal Long",
+      "symbol": "COP",
+      "count": 1,
+      "timestamp": "2026-04-09T22:45:28.037899"
+    },
+    {
+      "template": "Hourly MACD Signal Cross Long",
+      "symbol": "AMD",
+      "count": 1,
+      "timestamp": "2026-04-09T22:45:28.113600"
+    },
+    {
+      "template": "Hourly RSI Oversold Bounce",
+      "symbol": "COIN",
+      "count": 2,
+      "timestamp": "2026-04-09T23:50:27.182867"
+    },
+    {
+      "template": "Accumulation Zone Long Ranging",
+      "symbol": "SLV",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:00.062107"
+    },
+    {
+      "template": "EMA Pullback Momentum",
+      "symbol": "DJ30",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:00.111552"
+    },
+    {
+      "template": "Low Vol Breakout",
+      "symbol": "QQQ",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:00.153023"
+    },
+    {
+      "template": "Hourly Tight RSI Bounce",
+      "symbol": "CRWD",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:12.095702"
+    },
+    {
+      "template": "SMA Envelope Reversion Long",
+      "symbol": "XRP",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:12.238420"
+    },
+    {
+      "template": "SMA Rejection Short Ranging",
+      "symbol": "XLP",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:15.055490"
+    },
+    {
+      "template": "BB Squeeze EMA Trend",
+      "symbol": "UK100",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:15.111053"
+    },
+    {
+      "template": "ATR Contraction Breakout Long",
+      "symbol": "BTC",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:18.062171"
+    },
+    {
+      "template": "EMA Pullback Momentum",
+      "symbol": "HON",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:18.176987"
+    },
+    {
+      "template": "Low Vol RSI Mean Reversion",
+      "symbol": "AVAX",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:24.204012"
+    },
+    {
+      "template": "BB Upper Band Short Ranging",
+      "symbol": "SBUX",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:24.265016"
+    },
+    {
+      "template": "EMA Ribbon Expansion Long",
+      "symbol": "PANW",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:24.314594"
+    },
+    {
+      "template": "RSI Higher Low Recovery",
+      "symbol": "PLATINUM",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:24.381573"
+    },
+    {
+      "template": "BB Squeeze EMA Trend",
+      "symbol": "UNH",
+      "count": 1,
+      "timestamp": "2026-04-09T23:50:27.129008"
+    }
+  ],
+  "updated": "2026-04-09T23:50:27.343284"
+}

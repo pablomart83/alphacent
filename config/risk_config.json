@@ -1,0 +1,11 @@
+{
+  "DEMO": {
+    "max_position_size_pct": 0.05,
+    "max_exposure_pct": 0.9,
+    "max_daily_loss_pct": 0.2,
+    "max_drawdown_pct": 0.25,
+    "position_risk_pct": 0.05,
+    "stop_loss_pct": 0.03,
+    "take_profit_pct": 0.08
+  }
+}

@@ -1,0 +1,205 @@
+"""
+eToro Instrument ID to Symbol mappings.
+
+This file contains only the mapping dictionaries with no dependencies,
+allowing fast imports for symbol normalization.
+"""
+
+# Reverse mapping: Instrument ID to Symbol
+# Used to convert eToro instrument IDs back to readable symbols
+INSTRUMENT_ID_TO_SYMBOL = {
+    # Forex
+    1: "EURUSD",
+    2: "GBPUSD",
+    5: "USDJPY",
+    7: "AUDUSD",
+    4: "USDCAD",
+    6: "USDCHF",
+    3: "NZDUSD",
+    8: "EURGBP",
+    
+    # Commodities
+    17: "OIL",
+    18: "GOLD",
+    19: "SILVER",
+    21: "COPPER",
+    22: "NATGAS",
+    40: "PLATINUM",
+    343: "NICKEL",
+    344: "ALUMINUM",
+    340: "ZINC",
+    558: "RUBBER",
+    
+    # Indices
+    27: "SPX500",
+    28: "NSDQ100",
+    29: "DJ30",
+    30: "UK100",
+    32: "GER40",
+    
+    # Cryptocurrencies
+    100000: "BTC",
+    100001: "ETH",
+    100002: "BCH",
+    100003: "XRP",
+    100005: "LTC",
+    100017: "ADA",
+    100037: "DOT",
+    100040: "LINK",
+    100043: "DOGE",
+    100063: "SOL",
+    100085: "AVAX",
+    100315: "APT",
+    100330: "INJ",
+    100333: "ARB",
+    100334: "RENDER",
+    100335: "OP",
+    100337: "NEAR",
+    100340: "SUI",
+    
+    # US Stocks
+    1001: "AAPL",
+    1003: "META",
+    1004: "MSFT",
+    1005: "AMZN",
+    1010: "BA",
+    1013: "CSCO",
+    1016: "DIS",
+    1017: "GE",
+    1018: "HD",
+    1021: "INTC",
+    1022: "JNJ",
+    1023: "JPM",
+    1024: "KO",
+    1025: "MCD",
+    1029: "PG",
+    1032: "UNH",
+    1035: "WMT",
+    1041: "MA",
+    1042: "NKE",
+    1043: "PEP",
+    1046: "V",
+    1111: "TSLA",
+    1126: "ADBE",
+    1127: "NFLX",
+    1135: "ORCL",
+    1137: "NVDA",
+    1142: "SBUX",
+    1155: "BABA",
+    1186: "UBER",
+    1461: "COST",
+    1474: "LOW",
+    1484: "PYPL",
+    1490: "TGT",
+    1832: "AMD",
+    1839: "CRM",
+    1979: "SNAP",
+    6168: "COIN",
+    6434: "GOOGL",
+    7991: "PLTR",
+    8047: "ABNB",
+
+    # US Stocks (additional — verified 2026-03-06 against eToro metadata API)
+    1012: "CAT",
+    1976: "MS",
+    1467: "GS",
+    1009: "AXP",
+    1027: "MRK",
+    1028: "PFE",
+    1033: "RTX",
+    1036: "XOM",
+    1469: "HON",
+    1130: "MU",
+    1802: "SCHW",
+    1136: "LMT",
+    1138: "FDX",
+    1143: "AMGN",
+    # 1275: "UPS",  # Removed — flagged untradable on eToro DEMO
+    1452: "ABBV",
+    1485: "QCOM",
+    1510: "COP",
+    1567: "LLY",
+    1592: "TMO",
+    1634: "TXN",
+    1661: "BLK",
+    1706: "AMAT",
+    1945: "CMG",
+    4148: "SHOP",
+    4260: "NOW",
+    4124: "PANW",
+    4236: "AVGO",
+    4251: "ISRG",
+    4253: "SLB",
+    4309: "LULU",
+    4382: "DXCM",
+    6152: "MRNA",
+    # CVX on eToro is "CVX.US" (ID 1014) = Chevron stock.
+    # NOT 100512 which is "Convex Finance" crypto token.
+    1014: "CVX",
+
+    # New stocks (verified 2026-04-06 via eToro search API)
+    4481: "TSM",
+    4244: "ASML",
+    1365: "ARM",
+    1545: "NOC",
+    1534: "GD",
+    6844: "NVO",
+    1465: "GILD",
+    5506: "CRWD",
+    7999: "SNOW",
+    4108: "MELI",
+
+    # New stocks batch 2 (verified 2026-04-06 via eToro search API)
+    1757: "NEM",
+    1555: "FCX",
+    1594: "NEE",
+    6678: "ZIM",
+    1069: "SMCI",
+    4358: "MRVL",
+    4346: "FTNT",
+    1972: "REGN",
+    1103: "VALE",
+    4179: "VRTX",
+
+    # ETFs
+    3000: "SPY",
+    3005: "IWM",
+    3006: "QQQ",
+    3026: "DIA",
+    3025: "GLD",
+    4237: "VTI",
+    4238: "VOO",
+    4430: "SLV",
+
+    # Sector ETFs (additional — verified 2026-02-24)
+    3004: "XLF",
+    3008: "XLE",
+    3013: "XLU",
+    3017: "XLV",
+    3019: "XLI",
+    3020: "TLT",
+    3021: "XLK",
+    3022: "XLP",
+    3023: "HYG",
+    3024: "XLY",
+
+    # New ETFs (verified 2026-04-06 via eToro search API)
+    10867: "XHB",
+    4431: "XBI",
+    3166: "ARKK",
+    6961: "ITA",
+    3010: "FXI",
+
+    # Commodity ETFs (verified 2026-04-06 via eToro search API)
+    3007: "USO",
+    3018: "UNG",
+    3102: "DBA",
+    3104: "WEAT",
+    3208: "PALL",
+    8748: "URA",
+    10805: "COPX",
+}
+
+# Reverse mapping: Symbol to Instrument ID
+# Used to look up instrument IDs from symbols
+SYMBOL_TO_INSTRUMENT_ID = {v: k for k, v in INSTRUMENT_ID_TO_SYMBOL.items()}

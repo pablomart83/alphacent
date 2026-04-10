@@ -1,0 +1,83 @@
+# Implementation Plan
+
+- [ ] 1. Write bug condition exploration test
+  - **Property 1: Fault Condition** - Analytics Endpoints Return Zeros When filled_price Is None
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate the bug exists
+  - **Scoped PBT Approach**: Generate `PositionORM`-like records with valid P&L data (`entry_price`, `current_price`, `unrealized_pnl`, `realized_pnl`) alongside `OrderORM` records with `filled_price=None`. Assert that analytics endpoints return non-zero metrics derived from position data.
+  - Create test file `tests/test_analytics_bugfix_pbt.py`
+  - Use `hypothesis` with `@given` strategies to generate sets of position records with varying P&L values
+  - Test `get_performance_analytics`: assert `total_return != 0.0` or equity curve is non-empty when positions with P&L exist
+  - Test `get_strategy_attribution`: assert non-empty attribution list when positions exist for strategies
+  - Test `get_trade_analytics`: assert `total_trades > 0` and `win_rate` reflects position data when closed positions exist
+  - Test `get_correlation_matrix`: assert non-empty return arrays when positions exist for 2+ strategies
+  - The test assertions match the Expected Behavior Properties from design (Property 1)
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists because endpoints use OrderORM.filled_price which is None)
+  - Document counterexamples found: endpoints return zeros despite position data existing
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 2.2, 2.3, 2.4, 2.5_
+
+- [ ] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - Non-Analytics Endpoint Behavior Unchanged
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for non-buggy inputs (endpoints not affected by the bug)
+  - Add preservation tests to `tests/test_analytics_bugfix_pbt.py`
+  - Observe: Alpha Edge endpoints (`get_fundamental_filter_stats`, `get_ml_filter_stats`, `get_conviction_score_distribution`, `get_strategy_template_performance`) query their own log tables and return data independently of order P&L
+  - Observe: `get_regime_analysis` derives data from `StrategyORM.rules` and `StrategyORM.performance` metadata
+  - Observe: `export_trade_journal` uses `TradeJournal` class for CSV export
+  - Observe: `get_correlation_matrix` with <2 strategies returns empty matrix with `avg_correlation=0.0` and `diversification_score=1.0`
+  - Observe: `check_submitted_orders` performs symbol normalization, dedup checks, and strategy_id assignment
+  - Write property-based tests: for all non-buggy inputs (Alpha Edge, Regime Analysis, Trade Journal, correlation empty state), the endpoints produce the same results before and after fix
+  - Use `hypothesis` strategies to generate varied inputs for Alpha Edge queries (different time periods, strategy IDs)
+  - Verify tests PASS on UNFIXED code (confirms baseline behavior to preserve)
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7_
+
+- [ ] 3. Fix analytics endpoints and order fill paths
+  - [ ] 3.1 Switch analytics endpoints from OrderORM to PositionORM in `src/api/routers/analytics.py`
+    - Refactor `get_performance_analytics` to query `PositionORM` instead of `OrderORM`. Use `realized_pnl` for closed positions (`closed_at IS NOT NULL`) and `unrealized_pnl` for open positions. Build equity curve from position timestamps. Calculate Sharpe, Sortino, drawdown, win rate, profit factor from position-level P&L.
+    - Refactor `get_strategy_attribution` to group positions by `strategy_id`, sum `realized_pnl + unrealized_pnl` per strategy, calculate contribution percentages and win rates from position data.
+    - Refactor `get_trade_analytics` to use closed positions as completed trades. Calculate win/loss from `realized_pnl`, holding time from `opened_at`/`closed_at`, build win/loss distribution from position P&L.
+    - Fix `get_correlation_matrix` return calculation to use position P&L data instead of falling back to `OrderORM.filled_price`.
+    - _Bug_Condition: isBugCondition(input) where orders have filled_price=None AND endpoint_name IN ['performance', 'strategy-attribution', 'trade-analytics', 'correlation-matrix']_
+    - _Expected_Behavior: Analytics endpoints return populated metrics derived from PositionORM data (entry_price, current_price, unrealized_pnl, realized_pnl, closed_at)_
+    - _Preservation: Alpha Edge, Regime Analysis, Trade Journal, correlation empty state, position sync, order monitor dedup must remain unchanged_
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+  - [ ] 3.2 Set filled_price in `check_submitted_orders` in `src/core/order_monitor.py`
+    - In the `if order_filled:` block, after setting `order.filled_at` and `order.filled_quantity`, add `order.filled_price = etoro_pos.entry_price` when `etoro_pos` is available
+    - Also set `filled_price` in the `pending_` placeholder branch where orders are matched by symbol
+    - _Bug_Condition: order transitions to FILLED but filled_price remains None_
+    - _Expected_Behavior: order.filled_price = etoro_pos.entry_price_
+    - _Preservation: Symbol normalization, dedup checks, strategy_id assignment must remain unchanged_
+    - _Requirements: 2.6, 3.6_
+  - [ ] 3.3 Set filled_price in `run_signal_generation_sync` in `src/core/trading_scheduler.py`
+    - When order status is FILLED (status 2, 3, or 7), set `order_orm.filled_price` from eToro position data before committing
+    - Fix position `entry_price` fallback to use actual eToro entry price when available
+    - _Bug_Condition: order transitions to FILLED via immediate path but filled_price remains None_
+    - _Expected_Behavior: order_orm.filled_price set from eToro position entry_price_
+    - _Preservation: Position creation logic, entry_price fallback chain must continue working_
+    - _Requirements: 2.7, 3.7_
+  - [ ] 3.4 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - Analytics Endpoints Return Populated Data From Positions
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+  - [ ] 3.5 Verify preservation tests still pass
+    - **Property 2: Preservation** - Non-Analytics Endpoint Behavior Unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all tests still pass after fix (no regressions)
+
+- [ ] 4. Checkpoint - Ensure all tests pass
+  - Run full test suite: `pytest tests/test_analytics_bugfix_pbt.py -v`
+  - Ensure all property-based tests pass (both fault condition and preservation)
+  - Run existing analytics-related tests to confirm no regressions: `pytest tests/ -v -k "analytics or trade_journal or order_monitor or performance"`
+  - Ensure all tests pass, ask the user if questions arise.

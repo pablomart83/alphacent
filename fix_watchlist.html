@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fix Watchlist</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 40px;
+            background: #1a1a1a;
+            color: #fff;
+            text-align: center;
+        }
+        .box {
+            background: #2a2a2a;
+            padding: 30px;
+            margin: 20px auto;
+            border-radius: 10px;
+            border: 2px solid #0a0;
+            max-width: 600px;
+        }
+        h1 {
+            color: #0f0;
+        }
+        button {
+            background: #0a0;
+            color: #fff;
+            border: none;
+            padding: 15px 30px;
+            margin: 10px;
+            cursor: pointer;
+            border-radius: 5px;
+            font-size: 16px;
+            font-family: monospace;
+        }
+        button:hover {
+            background: #0c0;
+        }
+        .info {
+            background: #333;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            text-align: left;
+        }
+        .success {
+            color: #0f0;
+            font-size: 20px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>🔧 Fix AlphaCent Watchlist</h1>
+        
+        <div class="info">
+            <p><strong>Problem:</strong> Your watchlist has wrong symbols (BTC, TSLA) that don't work with eToro API.</p>
+            <p><strong>Solution:</strong> Replace with correct symbols (BTCUSD, EURUSD, etc.)</p>
+        </div>
+
+        <button onclick="fixWatchlist()">✅ Fix Watchlist Now</button>
+        
+        <div id="result"></div>
+
+        <div class="info" style="margin-top: 30px;">
+            <p><strong>New Watchlist:</strong></p>
+            <ul style="list-style: none; padding: 0;">
+                <li>✓ EURUSD - EUR/USD (Real eToro data)</li>
+                <li>✓ BTCUSD - Bitcoin (Real eToro data)</li>
+                <li>✓ AAPL - Apple (Real eToro data)</li>
+                <li>✓ MSFT - Microsoft (Real eToro data)</li>
+                <li>✓ GOOGL - Google (Real eToro data)</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        function fixWatchlist() {
+            try {
+                // Set the correct watchlist
+                const correctWatchlist = ['EURUSD', 'BTCUSD', 'AAPL', 'MSFT', 'GOOGL'];
+                localStorage.setItem('alphacent_watchlist', JSON.stringify(correctWatchlist));
+                
+                // Show success message
+                document.getElementById('result').innerHTML = `
+                    <div class="success">
+                        ✅ Watchlist Fixed!<br>
+                        <small>Redirecting to dashboard in 2 seconds...</small>
+                    </div>
+                `;
+                
+                // Redirect to dashboard after 2 seconds
+                setTimeout(() => {
+                    window.location.href = 'http://localhost:5173';
+                }, 2000);
+                
+            } catch (error) {
+                document.getElementById('result').innerHTML = `
+                    <div style="color: #f00;">
+                        ❌ Error: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        // Auto-fix on load (optional)
+        // Uncomment the line below to auto-fix without clicking button
+        // window.onload = fixWatchlist;
+    </script>
+</body>
+</html>

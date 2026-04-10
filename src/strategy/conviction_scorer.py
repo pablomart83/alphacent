@@ -1,0 +1,560 @@
+"""
+Conviction Scorer - Scores trading signals based on evidence of profitability.
+
+Philosophy: The best predictor of a profitable trade is a strategy that has
+already proven it works on out-of-sample data. Walk-forward validation IS
+the evidence. Everything else is secondary.
+
+Scoring dimensions (0-100):
+1. Walk-forward edge (0-40): OOS Sharpe, win rate, trade count, consistency
+2. Signal quality (0-25): Confidence, risk management, indicator alignment
+3. Regime fit (0-20): Strategy type vs current market regime
+4. Asset tradability (0-15): Liquidity, spread cost, data quality
+
+Only signals with conviction > threshold are traded.
+"""
+
+import logging
+import math
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
+from src.models.dataclasses import Strategy, TradingSignal
+from src.strategy.fundamental_filter import FundamentalFilter, FundamentalFilterReport
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ConvictionScore:
+    """Conviction score breakdown."""
+    total_score: float  # 0-100
+    signal_strength_score: float  # legacy name kept for DB compatibility
+    fundamental_score: float  # legacy name kept for DB compatibility
+    regime_alignment_score: float  # legacy name kept for DB compatibility
+    breakdown: Dict[str, Any]
+
+    def passes_threshold(self, threshold: float) -> bool:
+        """Check if score passes threshold."""
+        return self.total_score >= threshold
+
+
+class ConvictionScorer:
+    """
+    Scores trading signals based on evidence of profitability.
+
+    The core insight: these strategies already passed walk-forward validation.
+    The conviction score should measure HOW STRONG that evidence is, not
+    re-litigate whether the strategy is "good enough" with arbitrary checks.
+    """
+
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        database: Any,
+        fundamental_filter: Optional[FundamentalFilter] = None,
+        market_analyzer: Optional[Any] = None
+    ):
+        self.config = config
+        self.database = database
+        self.fundamental_filter = fundamental_filter
+        self.market_analyzer = market_analyzer
+
+        alpha_edge_config = config.get('alpha_edge', {})
+        self.min_conviction_score = alpha_edge_config.get('min_conviction_score', 70)
+
+        logger.info(f"ConvictionScorer initialized - Min score: {self.min_conviction_score}")
+
+    def score_signal(
+        self,
+        signal: TradingSignal,
+        strategy: Strategy,
+        fundamental_report: Optional[FundamentalFilterReport] = None
+    ) -> ConvictionScore:
+        """Score a trading signal based on evidence of profitability."""
+
+        # 1. Walk-forward edge (max 40) — the strongest predictor
+        wf_score = self._score_walkforward_edge(strategy)
+
+        # 2. Signal quality (max 25) — confidence, risk mgmt, indicator alignment
+        signal_score = self._score_signal_quality(signal, strategy)
+
+        # 3. Regime fit (max 20) — does strategy type match current market?
+        regime_score = self._score_regime_fit(strategy)
+
+        # 4. Asset tradability (max 15) — liquidity, spread, data quality
+        asset_score = self._score_asset_tradability(signal.symbol, fundamental_report)
+
+        total_score = wf_score + signal_score + regime_score + asset_score
+
+        breakdown = {
+            'walkforward_edge': {
+                'score': wf_score,
+                'max': 40,
+                'details': self._get_wf_details(strategy)
+            },
+            'signal_quality': {
+                'score': signal_score,
+                'max': 25,
+                'details': self._get_signal_details(signal, strategy)
+            },
+            'regime_fit': {
+                'score': regime_score,
+                'max': 20,
+                'details': self._get_regime_details(strategy)
+            },
+            'asset_tradability': {
+                'score': asset_score,
+                'max': 15,
+                'details': self._get_asset_details(signal.symbol)
+            },
+            # Legacy keys for backward compatibility with frontend/analytics
+            'signal_strength': {
+                'score': signal_score,
+                'max': 25,
+            },
+            'fundamental_quality': {
+                'score': asset_score,
+                'max': 15,
+            },
+            'regime_alignment': {
+                'score': regime_score,
+                'max': 20,
+            },
+        }
+
+        conviction = ConvictionScore(
+            total_score=total_score,
+            signal_strength_score=signal_score,
+            fundamental_score=asset_score,
+            regime_alignment_score=regime_score,
+            breakdown=breakdown
+        )
+
+        logger.info(
+            f"Conviction score for {signal.symbol}: {total_score:.1f}/100 "
+            f"(wf_edge: {wf_score:.1f}, signal: {signal_score:.1f}, "
+            f"regime: {regime_score:.1f}, asset: {asset_score:.1f})"
+        )
+
+        self._log_conviction_score(signal, strategy, conviction)
+        return conviction
+
+    # ─── 1. WALK-FORWARD EDGE (max 40 points) ───────────────────────────
+    def _score_walkforward_edge(self, strategy: Strategy) -> float:
+        """
+        Score based on walk-forward out-of-sample performance.
+
+        This is the most important dimension. A strategy that produced
+        Sharpe 3.0 on unseen data is far more trustworthy than one at 0.3.
+
+        Breakdown:
+        - OOS Sharpe ratio: 0-20 points (logarithmic — diminishing returns above 2.0)
+        - Win rate quality: 0-8 points (>60% is strong, >50% is acceptable)
+        - Trade count confidence: 0-7 points (more trades = more statistical significance)
+        - Train/test consistency: 0-5 points (both positive = consistent edge)
+        """
+        meta = strategy.metadata or {}
+        perf = strategy.backtest_results
+
+        score = 0.0
+
+        # --- OOS Sharpe (max 20) ---
+        test_sharpe = meta.get('wf_test_sharpe', 0)
+        if perf and hasattr(perf, 'sharpe_ratio'):
+            test_sharpe = test_sharpe or perf.sharpe_ratio
+
+        if test_sharpe and not (math.isinf(test_sharpe) or math.isnan(test_sharpe)):
+            # Logarithmic scaling: Sharpe 0.5→8, 1.0→12, 2.0→17, 3.0→19, 5.0→20
+            if test_sharpe > 0:
+                sharpe_pts = min(20.0, 8.0 + 6.0 * math.log(1 + test_sharpe))
+            else:
+                sharpe_pts = max(0.0, 4.0 + test_sharpe * 4.0)  # Negative Sharpe → 0-4 pts
+            score += sharpe_pts
+
+        # --- Win rate quality (max 8) ---
+        win_rate = None
+        if perf and hasattr(perf, 'win_rate'):
+            win_rate = perf.win_rate
+        if win_rate is not None:
+            if win_rate >= 0.65:
+                score += 8.0
+            elif win_rate >= 0.55:
+                score += 6.0
+            elif win_rate >= 0.48:
+                score += 4.0
+            elif win_rate >= 0.40:
+                score += 2.0
+            # Below 40% win rate: 0 points (need very high R:R to compensate)
+
+        # --- Trade count confidence (max 7) ---
+        total_trades = 0
+        if perf and hasattr(perf, 'total_trades'):
+            total_trades = perf.total_trades or 0
+        if total_trades >= 15:
+            score += 7.0  # High statistical confidence
+        elif total_trades >= 8:
+            score += 5.0
+        elif total_trades >= 4:
+            score += 3.0
+        elif total_trades >= 2:
+            score += 1.0
+
+        # --- Train/test consistency (max 5) ---
+        train_sharpe = meta.get('wf_train_sharpe', 0)
+        if train_sharpe and test_sharpe:
+            both_positive = train_sharpe > 0 and test_sharpe > 0
+            if both_positive:
+                # Both periods profitable — consistent edge
+                ratio = min(test_sharpe, train_sharpe) / max(test_sharpe, train_sharpe) if max(test_sharpe, train_sharpe) > 0 else 0
+                score += 2.0 + ratio * 3.0  # 2-5 points based on consistency
+            elif test_sharpe > 0:
+                # Test positive but train negative — edge emerged recently
+                score += 1.0
+
+        return min(40.0, score)
+
+    # ─── 2. SIGNAL QUALITY (max 25 points) ──────────────────────────────
+    def _score_signal_quality(self, signal: TradingSignal, strategy: Strategy) -> float:
+        """
+        Score the quality of the current signal.
+
+        Breakdown:
+        - Signal confidence (max 12): How strong is the technical trigger?
+        - Risk management (max 8): SL/TP defined, reasonable R:R ratio
+        - Indicator alignment (max 5): Multiple confirming conditions
+        """
+        score = 0.0
+
+        # --- Signal confidence (max 12) ---
+        if hasattr(signal, 'confidence') and signal.confidence:
+            confidence = signal.confidence
+
+            # Regime-adjust: low-vol signals are naturally weaker but still valid
+            regime_multiplier = 1.0
+            if self.market_analyzer:
+                try:
+                    sub_regime, _, _, _ = self.market_analyzer.detect_sub_regime()
+                    regime_name = sub_regime.value if hasattr(sub_regime, 'value') else str(sub_regime)
+                    if 'low_vol' in regime_name.lower():
+                        regime_multiplier = 1.4
+                    elif 'high_vol' in regime_name.lower():
+                        regime_multiplier = 0.9
+                except Exception:
+                    pass
+
+            adjusted = min(1.0, confidence * regime_multiplier)
+            score += adjusted * 12.0
+
+        # --- Risk management (max 8) ---
+        has_sl = strategy.risk_params and strategy.risk_params.stop_loss_pct
+        has_tp = strategy.risk_params and strategy.risk_params.take_profit_pct
+
+        if has_sl and has_tp:
+            score += 5.0
+            # Bonus for good R:R ratio
+            sl = strategy.risk_params.stop_loss_pct
+            tp = strategy.risk_params.take_profit_pct
+            if sl > 0:
+                rr = tp / sl
+                if rr >= 2.0:
+                    score += 3.0  # Excellent R:R
+                elif rr >= 1.5:
+                    score += 2.0
+                elif rr >= 1.0:
+                    score += 1.0
+        elif has_sl:
+            score += 3.0  # At least has downside protection
+        elif has_tp:
+            score += 1.0
+
+        # --- Indicator alignment (max 5) ---
+        entry_conditions = strategy.rules.get('entry_conditions', []) if strategy.rules else []
+        if len(entry_conditions) >= 3:
+            score += 5.0
+        elif len(entry_conditions) == 2:
+            score += 3.0
+        elif len(entry_conditions) == 1:
+            score += 1.5
+
+        return min(25.0, score)
+
+    # ─── 3. REGIME FIT (max 20 points) ──────────────────────────────────
+    def _score_regime_fit(self, strategy: Strategy) -> float:
+        """
+        Score how well the strategy type fits the current market regime.
+
+        Key insight: a strategy that passed walk-forward IN the current regime
+        already has regime validation baked in. This score is a secondary
+        confirmation, not a veto.
+
+        Strong match: 20, Neutral: 12, Weak: 5 (never 0 — WF already validated)
+        """
+        if not self.market_analyzer:
+            return 10.0  # Neutral when we can't detect regime
+
+        try:
+            # Crypto strategies use BTC/ETH regime
+            is_crypto = False
+            if strategy.metadata:
+                is_crypto = strategy.metadata.get('crypto_optimized', False)
+            if not is_crypto and strategy.symbols:
+                try:
+                    from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+                    is_crypto = strategy.symbols[0].upper() in set(DEMO_ALLOWED_CRYPTO)
+                except ImportError:
+                    pass
+
+            if is_crypto:
+                sub_regime, _, _, _ = self.market_analyzer.detect_sub_regime(symbols=['BTC', 'ETH'])
+            else:
+                sub_regime, _, _, _ = self.market_analyzer.detect_sub_regime()
+
+            regime_key = sub_regime.value.lower().replace(' ', '_') if hasattr(sub_regime, 'value') else 'unknown'
+
+            # Detect strategy type
+            strategy_type = self._detect_strategy_type(strategy)
+
+            # Alignment map — which strategy types thrive in which regimes
+            alignment = {
+                'trending_up':          {'strong': ['trend_following', 'momentum', 'breakout'], 'neutral': ['mean_reversion']},
+                'trending_up_strong':   {'strong': ['trend_following', 'momentum', 'breakout'], 'neutral': []},
+                'trending_up_weak':     {'strong': ['trend_following', 'momentum'], 'neutral': ['breakout', 'mean_reversion']},
+                'trending_down':        {'strong': ['mean_reversion', 'momentum'], 'neutral': ['trend_following', 'volatility']},
+                'trending_down_strong': {'strong': ['mean_reversion', 'momentum'], 'neutral': ['volatility']},
+                'trending_down_weak':   {'strong': ['mean_reversion', 'momentum'], 'neutral': ['trend_following', 'volatility', 'breakout']},
+                'ranging':              {'strong': ['mean_reversion'], 'neutral': ['volatility', 'momentum']},
+                'ranging_low_vol':      {'strong': ['mean_reversion', 'trend_following'], 'neutral': ['breakout', 'momentum']},
+                'ranging_high_vol':     {'strong': ['mean_reversion', 'volatility'], 'neutral': ['momentum']},
+                'high_volatility':      {'strong': ['mean_reversion', 'volatility'], 'neutral': ['momentum']},
+                'low_volatility':       {'strong': ['trend_following', 'breakout'], 'neutral': ['momentum', 'mean_reversion']},
+            }
+
+            # Find best matching regime key (longest prefix match)
+            regime_map = alignment.get(regime_key, {})
+            if not regime_map:
+                best_key, best_len = None, 0
+                for key in alignment:
+                    if regime_key.startswith(key) and len(key) > best_len:
+                        best_key, best_len = key, len(key)
+                if best_key:
+                    regime_map = alignment[best_key]
+
+            if strategy_type in regime_map.get('strong', []):
+                return 20.0
+            elif strategy_type in regime_map.get('neutral', []):
+                return 12.0
+            else:
+                # "Weak" match — but WF already validated, so give 5 not 0
+                return 5.0
+
+        except Exception as e:
+            logger.warning(f"Error scoring regime fit: {e}")
+            return 10.0
+
+    # ─── 4. ASSET TRADABILITY (max 15 points) ───────────────────────────
+    def _score_asset_tradability(
+        self,
+        symbol: str,
+        fundamental_report: Optional[FundamentalFilterReport]
+    ) -> float:
+        """
+        Score how tradable the asset is — liquidity, spread cost, data quality.
+
+        This replaces the old "fundamental quality" score. The key insight:
+        fundamental analysis is irrelevant for walk-forward validated DSL strategies.
+        What matters is whether we can EXECUTE the trade efficiently.
+
+        - Tier 1 (15 pts): Ultra-liquid (SPY, QQQ, AAPL, BTC, ETH, major forex)
+        - Tier 2 (13 pts): Very liquid (large-cap stocks, major ETFs, SOL, XRP)
+        - Tier 3 (11 pts): Liquid (mid-cap stocks, sector ETFs, indices, commodities)
+        - Tier 4 (9 pts): Moderate (small-cap, minor crypto, minor ETFs)
+        - Tier 5 (7 pts): Thin (NEAR, niche symbols)
+
+        Bonus: +2 pts if fundamental report passed (confirms quality for stocks)
+        """
+        from src.core.tradeable_instruments import (
+            DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+            DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+            DEMO_ALLOWED_ETFS,
+        )
+        sym = symbol.upper().split(':')[0]
+
+        # --- Tier 1: Ultra-liquid (tightest spreads, deepest books) ---
+        TIER_1 = {'SPY', 'QQQ', 'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA',
+                   'BTC', 'ETH', 'EURUSD', 'GBPUSD', 'USDJPY', 'SPX500', 'NSDQ100'}
+        if sym in TIER_1:
+            score = 15.0
+        # --- Tier 2: Very liquid ---
+        elif sym in {'IWM', 'DIA', 'VTI', 'VOO', 'GLD', 'XLE', 'XLF', 'XLK',
+                      'SOL', 'XRP', 'JPM', 'V', 'MA', 'NFLX', 'AMD', 'AVGO',
+                      'DJ30', 'GER40', 'UK100', 'GOLD', 'OIL'}:
+            score = 13.0
+        # --- Tier 3: Liquid ---
+        elif sym in set(DEMO_ALLOWED_ETFS):
+            score = 12.0  # All ETFs are at least tier 3 — they're exchange-traded, liquid
+        elif sym in set(DEMO_ALLOWED_FOREX):
+            score = 13.0
+        elif sym in set(DEMO_ALLOWED_INDICES):
+            score = 12.0
+        elif sym in set(DEMO_ALLOWED_COMMODITIES):
+            score = 11.0
+        elif sym in set(DEMO_ALLOWED_CRYPTO):
+            # Crypto tiers by market cap
+            CRYPTO_SCORES = {
+                'BTC': 15.0, 'ETH': 15.0,
+                'SOL': 13.0, 'XRP': 13.0, 'ADA': 11.0,
+                'AVAX': 10.0, 'DOT': 10.0, 'LINK': 10.0, 'LTC': 11.0, 'BCH': 11.0,
+                'NEAR': 8.0,
+            }
+            score = CRYPTO_SCORES.get(sym, 9.0)
+        else:
+            # Stocks — base 10, most are liquid enough
+            score = 10.0
+
+        # Fundamental quality bonus for stocks (max +2)
+        # This is a BONUS, not a requirement. Walk-forward already validated the strategy.
+        if fundamental_report and fundamental_report.fundamental_data:
+            if fundamental_report.checks_total > 0:
+                pass_ratio = fundamental_report.checks_passed / fundamental_report.checks_total
+                if pass_ratio >= 0.6:
+                    score += 2.0  # Strong fundamentals = slight edge
+                elif pass_ratio >= 0.4:
+                    score += 1.0
+
+        return min(15.0, score)
+
+    # ─── STRATEGY TYPE DETECTION ────────────────────────────────────────
+    def _detect_strategy_type(self, strategy: Strategy) -> str:
+        """Detect strategy type from metadata or name."""
+        if strategy.metadata:
+            st = strategy.metadata.get('template_type') or strategy.metadata.get('strategy_type')
+            if st:
+                return st
+
+        if hasattr(strategy, 'name') and strategy.name:
+            name = strategy.name.lower()
+            if any(kw in name for kw in ['mean reversion', 'rsi dip', 'bb mean', 'sma reversion',
+                    'keltner', 'stochastic recovery', 'crash recovery', 'volatility fade',
+                    'pullback', 'oversold', 'reversion', 'capitulation', 'dip buy',
+                    'downtrend oversold', 'deep dip', 'proximity', 'bb middle',
+                    'lower bounce', 'snap back', 'downtrend bounce']):
+                return 'mean_reversion'
+            elif any(kw in name for kw in ['trend', 'ema crossover', 'ema ribbon',
+                    'momentum burst', 'sma trend', 'dual ma', 'macd divergence']):
+                return 'trend_following'
+            elif any(kw in name for kw in ['breakout', 'squeeze', 'volume spike',
+                    'opening range', 'low vol breakout', 'downtrend breakout',
+                    'volume climax']):
+                return 'breakout'
+            elif any(kw in name for kw in ['momentum', 'macd', 'stoch momentum']):
+                return 'momentum'
+            elif any(kw in name for kw in ['volatility', 'vix', 'atr']):
+                return 'volatility'
+            elif any(kw in name for kw in ['short', 'overbought', 'bearish',
+                    'lower high', 'breakdown']):
+                return 'mean_reversion'
+
+        return 'unknown'
+
+    # ─── DETAIL GETTERS (for breakdown logging) ─────────────────────────
+
+    def _get_wf_details(self, strategy: Strategy) -> Dict[str, Any]:
+        meta = strategy.metadata or {}
+        perf = strategy.backtest_results
+        return {
+            'wf_test_sharpe': meta.get('wf_test_sharpe'),
+            'wf_train_sharpe': meta.get('wf_train_sharpe'),
+            'walk_forward_validated': meta.get('walk_forward_validated', False),
+            'total_trades': perf.total_trades if perf and hasattr(perf, 'total_trades') else None,
+            'win_rate': perf.win_rate if perf and hasattr(perf, 'win_rate') else None,
+        }
+
+    def _get_signal_details(self, signal: TradingSignal, strategy: Strategy) -> Dict[str, Any]:
+        entry_conditions = strategy.rules.get('entry_conditions', []) if strategy.rules else []
+        return {
+            'entry_conditions_count': len(entry_conditions),
+            'has_stop_loss': bool(strategy.risk_params and strategy.risk_params.stop_loss_pct),
+            'has_profit_target': bool(strategy.risk_params and strategy.risk_params.take_profit_pct),
+            'signal_confidence': getattr(signal, 'confidence', None),
+        }
+
+    # Legacy alias for backward compatibility
+    def _get_signal_strength_details(self, signal: TradingSignal, strategy: Strategy) -> Dict[str, Any]:
+        return self._get_signal_details(signal, strategy)
+
+    def _get_regime_details(self, strategy: Strategy) -> Dict[str, Any]:
+        if not self.market_analyzer:
+            return {'status': 'no_analyzer'}
+        try:
+            market_context = self.market_analyzer.get_market_context()
+            return {
+                'current_regime': market_context.get('regime', 'unknown'),
+                'strategy_type': self._detect_strategy_type(strategy),
+                'vix_level': market_context.get('vix', None),
+            }
+        except Exception as e:
+            return {'error': str(e)}
+
+    def _get_asset_details(self, symbol: str) -> Dict[str, Any]:
+        from src.core.tradeable_instruments import (
+            DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+            DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+            DEMO_ALLOWED_ETFS,
+        )
+        sym = symbol.upper().split(':')[0]
+        if sym in set(DEMO_ALLOWED_CRYPTO):
+            asset_class = 'crypto'
+        elif sym in set(DEMO_ALLOWED_ETFS):
+            asset_class = 'etf'
+        elif sym in set(DEMO_ALLOWED_FOREX):
+            asset_class = 'forex'
+        elif sym in set(DEMO_ALLOWED_INDICES):
+            asset_class = 'index'
+        elif sym in set(DEMO_ALLOWED_COMMODITIES):
+            asset_class = 'commodity'
+        else:
+            asset_class = 'stock'
+        return {'symbol': sym, 'asset_class': asset_class}
+
+    # Legacy alias
+    def _get_fundamental_details(self, fundamental_report: Optional[FundamentalFilterReport]) -> Dict[str, Any]:
+        if not fundamental_report:
+            return {'status': 'no_data'}
+        return {
+            'checks_passed': fundamental_report.checks_passed,
+            'checks_total': fundamental_report.checks_total,
+            'passed': fundamental_report.passed,
+            'results': [
+                {'check': r.check_name, 'passed': r.passed, 'value': r.value}
+                for r in fundamental_report.results
+            ],
+        }
+
+    def _log_conviction_score(self, signal: TradingSignal, strategy: Strategy, conviction: ConvictionScore) -> None:
+        """Log conviction score to database."""
+        try:
+            from src.models.orm import ConvictionScoreLogORM
+            from datetime import datetime
+
+            log_entry = ConvictionScoreLogORM(
+                strategy_id=strategy.id,
+                symbol=signal.symbol,
+                signal_type=signal.action.value,
+                conviction_score=conviction.total_score,
+                signal_strength_score=conviction.signal_strength_score,
+                fundamental_quality_score=conviction.fundamental_score,
+                regime_alignment_score=conviction.regime_alignment_score,
+                passed_threshold=conviction.passes_threshold(self.min_conviction_score),
+                threshold=self.min_conviction_score,
+                timestamp=datetime.now()
+            )
+
+            session = self.database.get_session()
+            try:
+                session.add(log_entry)
+                session.commit()
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.error(f"Failed to log conviction score: {e}")
