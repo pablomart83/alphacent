@@ -1,0 +1,368 @@
+# ============================================================
+# AlphaCent Symbol Universe — Single Source of Truth
+# ============================================================
+# To add a new symbol:
+#   1. Add it under the correct asset_class section below
+#   2. Include: symbol, etoro_id, sector
+#   3. Restart the backend
+#
+# Asset classes: stock, etf, forex, index, commodity, crypto
+# The system uses asset_class to determine:
+#   - Whether to fetch fundamental data (stocks only)
+#   - Data quality thresholds (crypto wider, forex tighter)
+#   - Market hours (crypto 24/7, forex 24/5, stocks market hours)
+#   - Position sizing and risk parameters
+# ============================================================
+
+stocks:
+  # --- Tech Giants ---
+  - { symbol: AAPL, etoro_id: 1001, sector: Technology }
+  - { symbol: MSFT, etoro_id: 1004, sector: Technology }
+  - { symbol: GOOGL, etoro_id: 6434, sector: Technology }
+  - { symbol: AMZN, etoro_id: 1005, sector: Technology }
+  - { symbol: TSLA, etoro_id: 1111, sector: Technology }
+  - { symbol: META, etoro_id: 1003, sector: Technology }
+  - { symbol: NVDA, etoro_id: 1137, sector: Technology }
+  - { symbol: NFLX, etoro_id: 1127, sector: Technology }
+  - { symbol: AMD, etoro_id: 1832, sector: Technology }
+  - { symbol: INTC, etoro_id: 1021, sector: Technology }
+  - { symbol: CSCO, etoro_id: 1013, sector: Technology }
+  - { symbol: ADBE, etoro_id: 1126, sector: Technology }
+  - { symbol: ORCL, etoro_id: 1135, sector: Technology }
+  - { symbol: CRM, etoro_id: 1839, sector: Technology }
+  # --- Mega-cap tech/growth ---
+  - { symbol: AVGO, etoro_id: 4236, sector: Technology }
+  - { symbol: QCOM, etoro_id: 1485, sector: Technology }
+  - { symbol: TXN, etoro_id: 1634, sector: Technology }
+  - { symbol: MU, etoro_id: 1130, sector: Technology }
+  - { symbol: AMAT, etoro_id: 1706, sector: Technology }
+  - { symbol: NOW, etoro_id: 4260, sector: Technology }
+  - { symbol: PANW, etoro_id: 4124, sector: Technology }
+  - { symbol: SHOP, etoro_id: 4148, sector: Technology }
+  # --- AI / Data Center Infrastructure ---
+  - { symbol: APP, etoro_id: 6218, sector: Technology }
+  - { symbol: VRT, etoro_id: 8867, sector: Technology }
+  - { symbol: DELL, etoro_id: 4261, sector: Technology }
+  - { symbol: HPE, etoro_id: 4312, sector: Technology }
+  - { symbol: EQIX, etoro_id: 4268, sector: Technology }
+  - { symbol: DLR, etoro_id: 4289, sector: Technology }
+  - { symbol: GEV, etoro_id: 1341, sector: Utilities }
+  - { symbol: CEG, etoro_id: 8601, sector: Utilities }
+  - { symbol: VST, etoro_id: 4363, sector: Utilities }
+  # --- Semiconductors ---
+  - { symbol: TSM, etoro_id: 4481, sector: Technology }
+  - { symbol: ASML, etoro_id: 4244, sector: Technology }
+  - { symbol: ARM, etoro_id: 1365, sector: Technology }
+  - { symbol: KLAC, etoro_id: 4317, sector: Technology }
+  - { symbol: LRCX, etoro_id: 1906, sector: Technology }
+  - { symbol: ON, etoro_id: 4397, sector: Technology }
+  - { symbol: NXPI, etoro_id: 4121, sector: Technology }
+  - { symbol: MPWR, etoro_id: 6471, sector: Technology }
+  - { symbol: ADI, etoro_id: 4264, sector: Technology }
+  - { symbol: MCHP, etoro_id: 4313, sector: Technology }
+  - { symbol: SMCI, etoro_id: 1069, sector: Technology }
+  - { symbol: MRVL, etoro_id: 4358, sector: Technology }
+  # --- Software / Cloud ---
+  - { symbol: INTU, etoro_id: 1914, sector: Technology }
+  - { symbol: CDNS, etoro_id: 4326, sector: Technology }
+  - { symbol: SNPS, etoro_id: 4329, sector: Technology }
+  - { symbol: DDOG, etoro_id: 6414, sector: Technology }
+  - { symbol: ZS, etoro_id: 4403, sector: Technology }
+  - { symbol: NET, etoro_id: 5712, sector: Technology }
+  - { symbol: MDB, etoro_id: 4406, sector: Technology }
+  - { symbol: TEAM, etoro_id: 4286, sector: Technology }
+  - { symbol: WDAY, etoro_id: 4263, sector: Technology }
+  - { symbol: VEEV, etoro_id: 4323, sector: Technology }
+  - { symbol: OKTA, etoro_id: 4389, sector: Technology }
+  - { symbol: PATH, etoro_id: 6921, sector: Technology }
+  # --- Cybersecurity ---
+  - { symbol: CRWD, etoro_id: 5506, sector: Technology }
+  - { symbol: FTNT, etoro_id: 4346, sector: Technology }
+  # --- AI Software ---
+  - { symbol: AI, etoro_id: 8954, sector: Technology }
+  - { symbol: SOUN, etoro_id: 10683, sector: Technology }
+  - { symbol: IONQ, etoro_id: 9425, sector: Technology }
+  - { symbol: BBAI, etoro_id: 10674, sector: Technology }
+  # --- Finance ---
+  - { symbol: JPM, etoro_id: 1023, sector: Finance }
+  - { symbol: V, etoro_id: 1046, sector: Finance }
+  - { symbol: MA, etoro_id: 1041, sector: Finance }
+  - { symbol: PYPL, etoro_id: 1484, sector: Finance }
+  - { symbol: COIN, etoro_id: 6168, sector: Finance }
+  - { symbol: GS, etoro_id: 1467, sector: Finance }
+  - { symbol: MS, etoro_id: 1976, sector: Finance }
+  - { symbol: BLK, etoro_id: 1661, sector: Finance }
+  - { symbol: SCHW, etoro_id: 1802, sector: Finance }
+  - { symbol: AXP, etoro_id: 1009, sector: Finance }
+  - { symbol: C, etoro_id: 1037, sector: Finance }
+  - { symbol: BAC, etoro_id: 1011, sector: Finance }
+  - { symbol: WFC, etoro_id: 1495, sector: Finance }
+  - { symbol: USB, etoro_id: 1556, sector: Finance }
+  - { symbol: PNC, etoro_id: 1600, sector: Finance }
+  - { symbol: TFC, etoro_id: 1683, sector: Finance }
+  - { symbol: SPGI, etoro_id: 1855, sector: Finance }
+  - { symbol: MCO, etoro_id: 4106, sector: Finance }
+  - { symbol: ICE, etoro_id: 2193, sector: Finance }
+  - { symbol: CME, etoro_id: 4033, sector: Finance }
+  - { symbol: FICO, etoro_id: 9077, sector: Finance }
+  - { symbol: GPN, etoro_id: 4310, sector: Finance }
+  # --- Fintech ---
+  - { symbol: AFRM, etoro_id: 8108, sector: Finance }
+  - { symbol: SOFI, etoro_id: 9255, sector: Finance }
+  - { symbol: HOOD, etoro_id: 9272, sector: Finance }
+  - { symbol: NU, etoro_id: 8597, sector: Finance }
+  - { symbol: GRAB, etoro_id: 9250, sector: Finance }
+  # --- Consumer / Retail ---
+  - { symbol: WMT, etoro_id: 1035, sector: Consumer }
+  - { symbol: DIS, etoro_id: 1016, sector: Consumer }
+  - { symbol: PG, etoro_id: 1029, sector: Consumer }
+  - { symbol: KO, etoro_id: 1024, sector: Consumer }
+  - { symbol: PEP, etoro_id: 1043, sector: Consumer }
+  - { symbol: MCD, etoro_id: 1025, sector: Consumer }
+  - { symbol: NKE, etoro_id: 1042, sector: Consumer }
+  - { symbol: COST, etoro_id: 1461, sector: Consumer }
+  - { symbol: HD, etoro_id: 1018, sector: Consumer }
+  - { symbol: LOW, etoro_id: 1474, sector: Consumer }
+  - { symbol: TGT, etoro_id: 1490, sector: Consumer }
+  - { symbol: SBUX, etoro_id: 1142, sector: Consumer }
+  - { symbol: LULU, etoro_id: 4309, sector: Consumer }
+  - { symbol: CMG, etoro_id: 1945, sector: Consumer }
+  - { symbol: TJX, etoro_id: 1535, sector: Consumer }
+  - { symbol: ROST, etoro_id: 1663, sector: Consumer }
+  - { symbol: ORLY, etoro_id: 1758, sector: Consumer }
+  - { symbol: AZO, etoro_id: 1696, sector: Consumer }
+  - { symbol: MNST, etoro_id: 4111, sector: Consumer }
+  - { symbol: EL, etoro_id: 1665, sector: Consumer }
+  - { symbol: CL, etoro_id: 1050, sector: Consumer }
+  - { symbol: KMB, etoro_id: 1558, sector: Consumer }
+  - { symbol: CAVA, etoro_id: 1188, sector: Consumer }
+  - { symbol: MELI, etoro_id: 4108, sector: Consumer }
+  - { symbol: CPNG, etoro_id: 6904, sector: Consumer }
+  - { symbol: DASH, etoro_id: 8048, sector: Consumer }
+  - { symbol: RBLX, etoro_id: 6916, sector: Consumer }
+  - { symbol: DUOL, etoro_id: 8637, sector: Consumer }
+  - { symbol: HIMS, etoro_id: 9518, sector: Consumer }
+  - { symbol: CELH, etoro_id: 8925, sector: Consumer }
+  - { symbol: ONON, etoro_id: 9427, sector: Consumer }
+  # --- Healthcare / Pharma / Biotech ---
+  - { symbol: JNJ, etoro_id: 1022, sector: Healthcare }
+  - { symbol: UNH, etoro_id: 1032, sector: Healthcare }
+  - { symbol: LLY, etoro_id: 1567, sector: Healthcare }
+  - { symbol: ABBV, etoro_id: 1452, sector: Healthcare }
+  - { symbol: MRK, etoro_id: 1027, sector: Healthcare }
+  - { symbol: PFE, etoro_id: 1028, sector: Healthcare }
+  - { symbol: TMO, etoro_id: 1592, sector: Healthcare }
+  - { symbol: ISRG, etoro_id: 4251, sector: Healthcare }
+  - { symbol: DXCM, etoro_id: 4382, sector: Healthcare }
+  - { symbol: MRNA, etoro_id: 6152, sector: Healthcare }
+  - { symbol: AMGN, etoro_id: 1143, sector: Healthcare }
+  - { symbol: NVO, etoro_id: 6844, sector: Healthcare }
+  - { symbol: GILD, etoro_id: 1465, sector: Healthcare }
+  - { symbol: REGN, etoro_id: 1972, sector: Healthcare }
+  - { symbol: VRTX, etoro_id: 4179, sector: Healthcare }
+  - { symbol: BMY, etoro_id: 1603, sector: Healthcare }
+  - { symbol: ZTS, etoro_id: 4194, sector: Healthcare }
+  - { symbol: SYK, etoro_id: 1689, sector: Healthcare }
+  - { symbol: BSX, etoro_id: 6624, sector: Healthcare }
+  - { symbol: MDT, etoro_id: 1477, sector: Healthcare }
+  - { symbol: EW, etoro_id: 4265, sector: Healthcare }
+  - { symbol: A, etoro_id: 1764, sector: Healthcare }
+  - { symbol: DHR, etoro_id: 1563, sector: Healthcare }
+  - { symbol: IQV, etoro_id: 1834, sector: Healthcare }
+  # --- Energy ---
+  - { symbol: XOM, etoro_id: 1036, sector: Energy }
+  - { symbol: CVX, etoro_id: 1014, sector: Energy }
+  - { symbol: COP, etoro_id: 1510, sector: Energy }
+  - { symbol: SLB, etoro_id: 4253, sector: Energy }
+  - { symbol: LNG, etoro_id: 4102, sector: Energy }
+  - { symbol: OKE, etoro_id: 1638, sector: Energy }
+  - { symbol: WMB, etoro_id: 1496, sector: Energy }
+  - { symbol: KMI, etoro_id: 1601, sector: Energy }
+  - { symbol: ET, etoro_id: 1511, sector: Energy }
+  - { symbol: FANG, etoro_id: 4339, sector: Energy }
+  - { symbol: DVN, etoro_id: 1568, sector: Energy }
+  - { symbol: EOG, etoro_id: 1581, sector: Energy }
+  - { symbol: MPC, etoro_id: 1503, sector: Energy }
+  - { symbol: VLO, etoro_id: 1497, sector: Energy }
+  # --- Nuclear / Clean Energy ---
+  - { symbol: CCJ, etoro_id: 6634, sector: Energy }
+  - { symbol: UEC, etoro_id: 9536, sector: Energy }
+  - { symbol: LEU, etoro_id: 9979, sector: Energy }
+  - { symbol: FSLR, etoro_id: 1117, sector: Energy }
+  - { symbol: ENPH, etoro_id: 5634, sector: Energy }
+  # --- Defense ---
+  - { symbol: BA, etoro_id: 1010, sector: Industrials }
+  - { symbol: RTX, etoro_id: 1033, sector: Industrials }
+  - { symbol: LMT, etoro_id: 1136, sector: Industrials }
+  - { symbol: NOC, etoro_id: 1545, sector: Industrials }
+  - { symbol: GD, etoro_id: 1534, sector: Industrials }
+  - { symbol: HII, etoro_id: 1765, sector: Industrials }
+  - { symbol: LHX, etoro_id: 1868, sector: Industrials }
+  - { symbol: TDG, etoro_id: 4163, sector: Industrials }
+  - { symbol: HWM, etoro_id: 6741, sector: Industrials }
+  - { symbol: LDOS, etoro_id: 1859, sector: Industrials }
+  - { symbol: BAH, etoro_id: 1833, sector: Industrials }
+  # --- Industrials ---
+  - { symbol: CAT, etoro_id: 1012, sector: Industrials }
+  - { symbol: HON, etoro_id: 1469, sector: Industrials }
+  - { symbol: GE, etoro_id: 1017, sector: Industrials }
+  - { symbol: FDX, etoro_id: 1138, sector: Industrials }
+  - { symbol: DE, etoro_id: 1526, sector: Industrials }
+  - { symbol: EMR, etoro_id: 1544, sector: Industrials }
+  - { symbol: ETN, etoro_id: 4273, sector: Industrials }
+  - { symbol: ITW, etoro_id: 1609, sector: Industrials }
+  - { symbol: PH, etoro_id: 1631, sector: Industrials }
+  - { symbol: ROK, etoro_id: 1780, sector: Industrials }
+  - { symbol: GWW, etoro_id: 1681, sector: Industrials }
+  - { symbol: FAST, etoro_id: 4212, sector: Industrials }
+  - { symbol: URI, etoro_id: 1822, sector: Industrials }
+  - { symbol: ZIM, etoro_id: 6678, sector: Industrials }
+  # --- European Defense ---
+  - { symbol: RHM.DE, etoro_id: 2587, sector: Industrials }
+  - { symbol: RR.L, etoro_id: 2072, sector: Industrials }
+  # --- Materials / Mining ---
+  - { symbol: NEM, etoro_id: 1757, sector: Commodities }
+  - { symbol: FCX, etoro_id: 1555, sector: Commodities }
+  - { symbol: VALE, etoro_id: 1103, sector: Commodities }
+  - { symbol: BHP, etoro_id: 4235, sector: Commodities }
+  - { symbol: RIO, etoro_id: 4240, sector: Commodities }
+  - { symbol: SCCO, etoro_id: 6149, sector: Commodities }
+  - { symbol: ALB, etoro_id: 1177, sector: Commodities }
+  - { symbol: MP, etoro_id: 8886, sector: Commodities }
+  # --- Utilities ---
+  - { symbol: NEE, etoro_id: 1594, sector: Utilities }
+  # --- Telecom ---
+  - { symbol: T, etoro_id: 1030, sector: Telecom }
+  - { symbol: VZ, etoro_id: 1034, sector: Telecom }
+  - { symbol: TMUS, etoro_id: 4254, sector: Telecom }
+  - { symbol: CHTR, etoro_id: 1704, sector: Telecom }
+  - { symbol: CMCSA, etoro_id: 1459, sector: Telecom }
+  # --- REITs ---
+  - { symbol: AMT, etoro_id: 1946, sector: Real Estate }
+  - { symbol: PLD, etoro_id: 4259, sector: Real Estate }
+  - { symbol: CCI, etoro_id: 4255, sector: Real Estate }
+  - { symbol: PSA, etoro_id: 4270, sector: Real Estate }
+  - { symbol: O, etoro_id: 4307, sector: Real Estate }
+  # --- Autos / EV ---
+  - { symbol: F, etoro_id: 1112, sector: Consumer }
+  - { symbol: GM, etoro_id: 1501, sector: Consumer }
+  - { symbol: STLA, etoro_id: 8101, sector: Consumer }
+  - { symbol: RIVN, etoro_id: 9287, sector: Consumer }
+  - { symbol: LCID, etoro_id: 9256, sector: Consumer }
+  - { symbol: TM, etoro_id: 1045, sector: Consumer }
+  # --- International ---
+  - { symbol: BABA, etoro_id: 1155, sector: Technology }
+  - { symbol: SONY, etoro_id: 1044, sector: Technology }
+  - { symbol: SPOT, etoro_id: 1156, sector: Technology }
+  - { symbol: SE, etoro_id: 5960, sector: Technology }
+  - { symbol: SAP, etoro_id: 8678, sector: Technology }
+  - { symbol: GLOB, etoro_id: 8656, sector: Technology }
+  # --- Crypto-Adjacent ---
+  - { symbol: MSTR, etoro_id: 6473, sector: Crypto }
+  - { symbol: MARA, etoro_id: 6244, sector: Crypto }
+  - { symbol: RIOT, etoro_id: 6270, sector: Crypto }
+  - { symbol: HUT, etoro_id: 8671, sector: Crypto }
+  # --- Space / Frontier ---
+  - { symbol: RKLB, etoro_id: 9085, sector: Industrials }
+  - { symbol: ASTS, etoro_id: 10088, sector: Technology }
+  - { symbol: LUNR, etoro_id: 10967, sector: Industrials }
+  # --- High-Momentum Growth ---
+  - { symbol: UBER, etoro_id: 1186, sector: Technology }
+  - { symbol: ABNB, etoro_id: 8047, sector: Technology }
+  - { symbol: SNAP, etoro_id: 1979, sector: Technology }
+  - { symbol: PLTR, etoro_id: 7991, sector: Technology }
+  - { symbol: SNOW, etoro_id: 7999, sector: Technology }
+
+etfs:
+  # --- Broad Market ---
+  - { symbol: SPY, etoro_id: 3000, sector: Broad Market ETF }
+  - { symbol: QQQ, etoro_id: 3006, sector: Technology ETF }
+  - { symbol: IWM, etoro_id: 3005, sector: Broad Market ETF }
+  - { symbol: DIA, etoro_id: 3026, sector: Broad Market ETF }
+  - { symbol: VTI, etoro_id: 4237, sector: Broad Market ETF }
+  - { symbol: VOO, etoro_id: 4238, sector: Broad Market ETF }
+  # --- Precious Metals ---
+  - { symbol: GLD, etoro_id: 3025, sector: Commodities ETF }
+  - { symbol: SLV, etoro_id: 4430, sector: Commodities ETF }
+  # --- Sector Rotation (SPDR) ---
+  - { symbol: XLE, etoro_id: 3008, sector: Energy }
+  - { symbol: XLF, etoro_id: 3004, sector: Finance }
+  - { symbol: XLK, etoro_id: 3021, sector: Technology }
+  - { symbol: XLU, etoro_id: 3013, sector: Utilities }
+  - { symbol: XLV, etoro_id: 3017, sector: Healthcare }
+  - { symbol: XLI, etoro_id: 3019, sector: Industrials }
+  - { symbol: XLP, etoro_id: 3022, sector: Consumer }
+  - { symbol: XLY, etoro_id: 3024, sector: Consumer }
+  # --- Bonds ---
+  - { symbol: TLT, etoro_id: 3020, sector: Bonds ETF }
+  - { symbol: HYG, etoro_id: 3023, sector: Bonds ETF }
+  # --- Thematic ---
+  - { symbol: XHB, etoro_id: 10867, sector: Real Estate }
+  - { symbol: XBI, etoro_id: 4431, sector: Healthcare }
+  - { symbol: ARKK, etoro_id: 3166, sector: Technology ETF }
+  - { symbol: ITA, etoro_id: 6961, sector: Industrials }
+  - { symbol: FXI, etoro_id: 3010, sector: International ETF }
+  # --- Commodity ---
+  - { symbol: USO, etoro_id: 3007, sector: Commodities ETF }
+  - { symbol: UNG, etoro_id: 3018, sector: Commodities ETF }
+  - { symbol: DBA, etoro_id: 3102, sector: Commodities ETF }
+  - { symbol: WEAT, etoro_id: 3104, sector: Commodities ETF }
+  - { symbol: PALL, etoro_id: 3208, sector: Commodities ETF }
+  - { symbol: URA, etoro_id: 8748, sector: Energy }
+  - { symbol: COPX, etoro_id: 10805, sector: Commodities ETF }
+  # --- International ---
+  - { symbol: EEM, etoro_id: 3001, sector: International ETF }
+  - { symbol: EWZ, etoro_id: 3012, sector: International ETF }
+  - { symbol: KWEB, etoro_id: 4450, sector: International ETF }
+  # --- Semiconductor ---
+  - { symbol: SOXX, etoro_id: 4463, sector: Technology ETF }
+  - { symbol: SMH, etoro_id: 6357, sector: Technology ETF }
+  # --- Cybersecurity ---
+  - { symbol: CIBR, etoro_id: 6320, sector: Technology ETF }
+  # --- Leveraged ---
+  - { symbol: SOXL, etoro_id: 3226, sector: Technology ETF }
+  - { symbol: TQQQ, etoro_id: 4465, sector: Technology ETF }
+  - { symbol: SQQQ, etoro_id: 4459, sector: Technology ETF }
+  - { symbol: SPXU, etoro_id: 3232, sector: Broad Market ETF }
+  - { symbol: UPRO, etoro_id: 3244, sector: Broad Market ETF }
+  - { symbol: DFEN, etoro_id: 3175, sector: Industrials }
+
+forex:
+  - { symbol: EURUSD, etoro_id: 1, sector: Forex }
+  - { symbol: GBPUSD, etoro_id: 2, sector: Forex }
+  - { symbol: NZDUSD, etoro_id: 3, sector: Forex }
+  - { symbol: USDCAD, etoro_id: 4, sector: Forex }
+  - { symbol: USDJPY, etoro_id: 5, sector: Forex }
+  - { symbol: USDCHF, etoro_id: 6, sector: Forex }
+  - { symbol: AUDUSD, etoro_id: 7, sector: Forex }
+  - { symbol: EURGBP, etoro_id: 8, sector: Forex }
+
+indices:
+  - { symbol: SPX500, etoro_id: 27, sector: Indices }
+  - { symbol: NSDQ100, etoro_id: 28, sector: Indices }
+  - { symbol: DJ30, etoro_id: 29, sector: Indices }
+  - { symbol: UK100, etoro_id: 30, sector: Indices }
+  - { symbol: GER40, etoro_id: 32, sector: Indices }
+
+commodities:
+  - { symbol: GOLD, etoro_id: 18, sector: Commodities }
+  - { symbol: SILVER, etoro_id: 19, sector: Commodities }
+  - { symbol: OIL, etoro_id: 17, sector: Commodities }
+  - { symbol: COPPER, etoro_id: 21, sector: Commodities }
+  - { symbol: NATGAS, etoro_id: 22, sector: Commodities }
+  - { symbol: PLATINUM, etoro_id: 40, sector: Commodities }
+  - { symbol: ALUMINUM, etoro_id: 344, sector: Commodities }
+  - { symbol: ZINC, etoro_id: 340, sector: Commodities }
+
+crypto:
+  - { symbol: BTC, etoro_id: 100000, sector: Crypto }
+  - { symbol: ETH, etoro_id: 100001, sector: Crypto }
+  - { symbol: SOL, etoro_id: 100063, sector: Crypto }
+  - { symbol: XRP, etoro_id: 100003, sector: Crypto }
+  - { symbol: ADA, etoro_id: 100017, sector: Crypto }
+  - { symbol: AVAX, etoro_id: 100085, sector: Crypto }
+  - { symbol: DOT, etoro_id: 100037, sector: Crypto }
+  - { symbol: LINK, etoro_id: 100040, sector: Crypto }
+  - { symbol: NEAR, etoro_id: 100337, sector: Crypto }
+  - { symbol: LTC, etoro_id: 100005, sector: Crypto }
+  - { symbol: BCH, etoro_id: 100002, sector: Crypto }

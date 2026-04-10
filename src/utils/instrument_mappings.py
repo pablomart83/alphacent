@@ -1,382 +1,48 @@
 """
-eToro Instrument ID to Symbol mappings.
+eToro Instrument ID to Symbol mappings — reads from SymbolRegistry.
 
-All IDs verified against eToro DEMO API on 2026-04-10.
-This file contains only the mapping dictionaries with no dependencies,
-allowing fast imports for symbol normalization.
+All data lives in config/symbols.yaml.
+This module provides backward-compatible dict exports.
 """
 
-# Reverse mapping: Instrument ID to Symbol
-INSTRUMENT_ID_TO_SYMBOL = {
-    # ============================================================
-    # FOREX
-    # ============================================================
-    1: "EURUSD",
-    2: "GBPUSD",
-    3: "NZDUSD",
-    4: "USDCAD",
-    5: "USDJPY",
-    6: "USDCHF",
-    7: "AUDUSD",
-    8: "EURGBP",
+from src.core.symbol_registry import get_registry
 
-    # ============================================================
-    # COMMODITIES
-    # ============================================================
-    17: "OIL",
-    18: "GOLD",
-    19: "SILVER",
-    21: "COPPER",
-    22: "NATGAS",
-    40: "PLATINUM",
-    340: "ZINC",
-    343: "NICKEL",
-    344: "ALUMINUM",
 
-    # ============================================================
-    # INDICES
-    # ============================================================
-    27: "SPX500",
-    28: "NSDQ100",
-    29: "DJ30",
-    30: "UK100",
-    32: "GER40",
+class _LazyDict:
+    """Dict-like that loads from registry on first access."""
+    def __init__(self, attr):
+        self._attr = attr
+        self._cache = None
 
-    # ============================================================
-    # CRYPTO
-    # ============================================================
-    100000: "BTC",
-    100001: "ETH",
-    100002: "BCH",
-    100003: "XRP",
-    100005: "LTC",
-    100017: "ADA",
-    100037: "DOT",
-    100040: "LINK",
-    100043: "DOGE",
-    100063: "SOL",
-    100085: "AVAX",
-    100315: "APT",
-    100330: "INJ",
-    100333: "ARB",
-    100334: "RENDER",
-    100335: "OP",
-    100337: "NEAR",
-    100340: "SUI",
+    def _get(self):
+        if self._cache is None:
+            self._cache = getattr(get_registry(), self._attr)()
+        return self._cache
 
-    # ============================================================
-    # US STOCKS — Original (verified 2026-02-24)
-    # ============================================================
-    1001: "AAPL",
-    1003: "META",
-    1004: "MSFT",
-    1005: "AMZN",
-    1009: "AXP",
-    1010: "BA",
-    1012: "CAT",
-    1013: "CSCO",
-    1014: "CVX",
-    1016: "DIS",
-    1017: "GE",
-    1018: "HD",
-    1021: "INTC",
-    1022: "JNJ",
-    1023: "JPM",
-    1024: "KO",
-    1025: "MCD",
-    1027: "MRK",
-    1028: "PFE",
-    1029: "PG",
-    1030: "T",
-    1032: "UNH",
-    1033: "RTX",
-    1034: "VZ",
-    1035: "WMT",
-    1036: "XOM",
-    1041: "MA",
-    1042: "NKE",
-    1043: "PEP",
-    1044: "SONY",
-    1045: "TM",
-    1046: "V",
-    1050: "CL",
-    1069: "SMCI",
-    1111: "TSLA",
-    1112: "F",
-    1117: "FSLR",
-    1126: "ADBE",
-    1127: "NFLX",
-    1130: "MU",
-    1135: "ORCL",
-    1136: "LMT",
-    1137: "NVDA",
-    1138: "FDX",
-    1142: "SBUX",
-    1143: "AMGN",
-    1155: "BABA",
-    1156: "SPOT",
-    1177: "ALB",
-    1186: "UBER",
-    1188: "CAVA",
-    1192: "BIRK",
-    1341: "GEV",
-    1452: "ABBV",
-    1459: "CMCSA",
-    1461: "COST",
-    1465: "GILD",
-    1467: "GS",
-    1469: "HON",
-    1474: "LOW",
-    1477: "MDT",
-    1483: "PSX",
-    1484: "PYPL",
-    1485: "QCOM",
-    1490: "TGT",
-    1495: "WFC",
-    1496: "WMB",
-    1497: "VLO",
-    1501: "GM",
-    1503: "MPC",
-    1510: "COP",
-    1511: "ET",
-    1526: "DE",
-    1534: "GD",
-    1535: "TJX",
-    1544: "EMR",
-    1545: "NOC",
-    1555: "FCX",
-    1556: "USB",
-    1558: "KMB",
-    1563: "DHR",
-    1567: "LLY",
-    1568: "DVN",
-    1581: "EOG",
-    1592: "TMO",
-    1594: "NEE",
-    1600: "PNC",
-    1601: "KMI",
-    1603: "BMY",
-    1609: "ITW",
-    1631: "PH",
-    1634: "TXN",
-    1638: "OKE",
-    1661: "BLK",
-    1663: "ROST",
-    1665: "EL",
-    1681: "GWW",
-    1683: "TFC",
-    1689: "SYK",
-    1696: "AZO",
-    1704: "CHTR",
-    1706: "AMAT",
-    1757: "NEM",
-    1758: "ORLY",
-    1764: "A",
-    1765: "HII",
-    1780: "ROK",
-    1802: "SCHW",
-    1822: "URI",
-    1832: "AMD",
-    1833: "BAH",
-    1834: "IQV",
-    1839: "CRM",
-    1851: "PXD",
-    1855: "SPGI",
-    1859: "LDOS",
-    1868: "LHX",
-    1906: "LRCX",
-    1914: "INTU",
-    1945: "CMG",
-    1946: "AMT",
-    1976: "MS",
-    1979: "SNAP",
+    def __getitem__(self, key):
+        return self._get()[key]
 
-    # ============================================================
-    # US STOCKS — Expanded (verified 2026-04-10)
-    # ============================================================
-    2193: "ICE",
-    4011: "ANSS",
-    4033: "CME",
-    4102: "LNG",
-    4106: "MCO",
-    4108: "MELI",
-    4111: "MNST",
-    4121: "NXPI",
-    4124: "PANW",
-    4148: "SHOP",
-    4163: "TDG",
-    4177: "VRSK",
-    4194: "ZTS",
-    4212: "FAST",
-    4235: "BHP",
-    4236: "AVGO",
-    4240: "RIO",
-    4244: "ASML",
-    4251: "ISRG",
-    4253: "SLB",
-    4254: "TMUS",
-    4255: "CCI",
-    4259: "PLD",
-    4260: "NOW",
-    4261: "DELL",
-    4263: "WDAY",
-    4264: "ADI",
-    4265: "EW",
-    4268: "EQIX",
-    4270: "PSA",
-    4273: "ETN",
-    4286: "TEAM",
-    4289: "DLR",
-    4307: "O",
-    4309: "LULU",
-    4310: "GPN",
-    4312: "HPE",
-    4313: "MCHP",
-    4317: "KLAC",
-    4323: "VEEV",
-    4326: "CDNS",
-    4329: "SNPS",
-    4339: "FANG",
-    4346: "FTNT",
-    4358: "MRVL",
-    4363: "VST",
-    4378: "PAYC",
-    4382: "DXCM",
-    4389: "OKTA",
-    4397: "ON",
-    4403: "ZS",
-    4406: "MDB",
-    4481: "TSM",
-    5506: "CRWD",
-    5634: "ENPH",
-    5660: "RUN",
-    5712: "NET",
-    5960: "SE",
-    6149: "SCCO",
-    6152: "MRNA",
-    6168: "COIN",
-    6218: "APP",
-    6244: "MARA",
-    6270: "RIOT",
-    6414: "DDOG",
-    6434: "GOOGL",
-    6471: "MPWR",
-    6473: "MSTR",
-    6624: "BSX",
-    6634: "CCJ",
-    6678: "ZIM",
-    6692: "ESTC",
-    6741: "HWM",
-    6844: "NVO",
-    6904: "CPNG",
-    6916: "RBLX",
-    6921: "PATH",
-    7991: "PLTR",
-    7999: "SNOW",
-    8047: "ABNB",
-    8048: "DASH",
-    8101: "STLA",
-    8108: "AFRM",
-    8585: "GTLB",
-    8601: "CEG",
-    8637: "DUOL",
-    8656: "GLOB",
-    8671: "HUT",
-    8678: "SAP",
-    8867: "VRT",
-    8886: "MP",
-    8925: "CELH",
-    8954: "AI",
-    9077: "FICO",
-    9085: "RKLB",
-    9250: "GRAB",
-    9255: "SOFI",
-    9256: "LCID",
-    9272: "HOOD",
-    9287: "RIVN",
-    9425: "IONQ",
-    9427: "ONON",
-    9518: "HIMS",
-    9536: "UEC",
-    9979: "LEU",
-    10088: "ASTS",
-    10674: "BBAI",
-    10683: "SOUN",
-    10967: "LUNR",
-    12200: "ETOR",
+    def __contains__(self, key):
+        return key in self._get()
 
-    # Missing from original batch (verified 2026-04-06)
-    1365: "ARM",
-    1972: "REGN",
-    4179: "VRTX",
-    1103: "VALE",
+    def __iter__(self):
+        return iter(self._get())
 
-    # ============================================================
-    # EUROPEAN STOCKS (verified 2026-04-10)
-    # ============================================================
-    2072: "RR.L",
-    2110: "BA.L",
-    2587: "RHM.DE",
-    8678: "SAP",
+    def __len__(self):
+        return len(self._get())
 
-    # ============================================================
-    # US STOCKS — Finance (verified 2026-04-10)
-    # ============================================================
-    1011: "BAC",
-    1037: "C",
-    8597: "NU",
-    9077: "FICO",
+    def get(self, key, default=None):
+        return self._get().get(key, default)
 
-    # ============================================================
-    # ETFs — Original
-    # ============================================================
-    3000: "SPY",
-    3004: "XLF",
-    3005: "IWM",
-    3006: "QQQ",
-    3007: "USO",
-    3008: "XLE",
-    3010: "FXI",
-    3013: "XLU",
-    3017: "XLV",
-    3018: "UNG",
-    3019: "XLI",
-    3020: "TLT",
-    3021: "XLK",
-    3022: "XLP",
-    3023: "HYG",
-    3024: "XLY",
-    3025: "GLD",
-    3026: "DIA",
-    3102: "DBA",
-    3104: "WEAT",
-    3166: "ARKK",
-    3208: "PALL",
-    4237: "VTI",
-    4238: "VOO",
-    4430: "SLV",
-    4431: "XBI",
-    6961: "ITA",
-    8748: "URA",
-    10805: "COPX",
-    10867: "XHB",
+    def items(self):
+        return self._get().items()
 
-    # ============================================================
-    # ETFs — Expanded (verified 2026-04-10)
-    # ============================================================
-    3001: "EEM",
-    3012: "EWZ",
-    3175: "DFEN",
-    3226: "SOXL",
-    3232: "SPXU",
-    3244: "UPRO",
-    4450: "KWEB",
-    4459: "SQQQ",
-    4463: "SOXX",
-    4465: "TQQQ",
-    6320: "CIBR",
-    6357: "SMH",
-}
+    def keys(self):
+        return self._get().keys()
 
-# Reverse mapping: Symbol to Instrument ID
-SYMBOL_TO_INSTRUMENT_ID = {v: k for k, v in INSTRUMENT_ID_TO_SYMBOL.items()}
+    def values(self):
+        return self._get().values()
+
+
+INSTRUMENT_ID_TO_SYMBOL = _LazyDict("get_etoro_id_to_symbol")
+SYMBOL_TO_INSTRUMENT_ID = _LazyDict("get_symbol_to_etoro_id")

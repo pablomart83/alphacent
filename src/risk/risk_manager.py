@@ -25,162 +25,20 @@ logger = logging.getLogger(__name__)
 # For non-stock asset classes (forex, crypto, commodities, indices),
 # each is treated as its own "sector" for diversification purposes.
 
-SYMBOL_SECTOR_MAP: Dict[str, str] = {
-    # --- Technology ---
-    "AAPL": "Technology", "MSFT": "Technology", "GOOGL": "Technology",
-    "AMZN": "Technology", "TSLA": "Technology", "META": "Technology",
-    "NVDA": "Technology", "NFLX": "Technology", "AMD": "Technology",
-    "INTC": "Technology", "CSCO": "Technology", "ADBE": "Technology",
-    "ORCL": "Technology", "CRM": "Technology", "AVGO": "Technology",
-    "QCOM": "Technology", "TXN": "Technology", "MU": "Technology",
-    "AMAT": "Technology", "NOW": "Technology", "PANW": "Technology",
-    "SHOP": "Technology", "UBER": "Technology",
-    "ABNB": "Technology", "SNAP": "Technology", "PLTR": "Technology",
-    "BABA": "Technology", "TSM": "Technology", "ASML": "Technology", "ARM": "Technology",
-    "CRWD": "Technology", "SNOW": "Technology", "FTNT": "Technology",
-    "SMCI": "Technology", "MRVL": "Technology",
-    # AI / Data Center Infrastructure
-    "APP": "Technology", "VRT": "Technology", "DELL": "Technology",
-    "HPE": "Technology", "EQIX": "Technology", "DLR": "Technology",
-    "GEV": "Utilities", "CEG": "Utilities", "VST": "Utilities",
-    # Semiconductors (expanded)
-    "KLAC": "Technology", "LRCX": "Technology", "ON": "Technology",
-    "NXPI": "Technology", "MPWR": "Technology", "ADI": "Technology", "MCHP": "Technology",
-    # Software / Cloud
-    "INTU": "Technology", "CDNS": "Technology", "SNPS": "Technology",
-    "DDOG": "Technology", "ZS": "Technology", "NET": "Technology",
-    "MDB": "Technology", "TEAM": "Technology", "WDAY": "Technology",
-    "VEEV": "Technology", "OKTA": "Technology", "PATH": "Technology",
-    # AI Software
-    "AI": "Technology", "SOUN": "Technology", "IONQ": "Technology", "BBAI": "Technology",
-    # International Tech
-    "SONY": "Technology", "SAP": "Technology", "SPOT": "Technology",
-    "SE": "Technology", "GLOB": "Technology",
+SYMBOL_SECTOR_MAP: Dict[str, str] = {}
 
-    # --- Finance ---
-    "JPM": "Finance", "V": "Finance", "MA": "Finance",
-    "PYPL": "Finance", "COIN": "Finance", "GS": "Finance",
-    "MS": "Finance", "BLK": "Finance", "SCHW": "Finance", "AXP": "Finance",
-    "C": "Finance", "BAC": "Finance", "WFC": "Finance",
-    "USB": "Finance", "PNC": "Finance", "TFC": "Finance",
-    "SPGI": "Finance", "MCO": "Finance", "ICE": "Finance",
-    "CME": "Finance", "FICO": "Finance", "GPN": "Finance",
-    # Fintech
-    "AFRM": "Finance", "SOFI": "Finance", "HOOD": "Finance",
-    "NU": "Finance", "GRAB": "Finance",
+def _load_sector_map():
+    """Load sector map from SymbolRegistry (config/symbols.yaml)."""
+    global SYMBOL_SECTOR_MAP
+    try:
+        from src.core.symbol_registry import get_registry
+        SYMBOL_SECTOR_MAP = get_registry().get_sector_map()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Could not load sector map from registry: {e}")
 
-    # --- Healthcare ---
-    "JNJ": "Healthcare", "UNH": "Healthcare", "LLY": "Healthcare",
-    "ABBV": "Healthcare", "MRK": "Healthcare", "PFE": "Healthcare",
-    "TMO": "Healthcare", "ISRG": "Healthcare", "DXCM": "Healthcare",
-    "MRNA": "Healthcare", "AMGN": "Healthcare", "NVO": "Healthcare",
-    "GILD": "Healthcare", "REGN": "Healthcare", "VRTX": "Healthcare",
-    "BMY": "Healthcare", "ZTS": "Healthcare", "SYK": "Healthcare",
-    "BSX": "Healthcare", "MDT": "Healthcare", "EW": "Healthcare",
-    "A": "Healthcare", "DHR": "Healthcare", "IQV": "Healthcare",
-
-    # --- Energy ---
-    "XOM": "Energy", "CVX": "Energy", "COP": "Energy", "SLB": "Energy",
-    "LNG": "Energy", "OKE": "Energy", "WMB": "Energy", "KMI": "Energy", "ET": "Energy",
-    "FANG": "Energy", "DVN": "Energy", "EOG": "Energy",
-    "MPC": "Energy", "VLO": "Energy", "PSX": "Energy",
-    # Nuclear / Clean Energy
-    "CCJ": "Energy", "UEC": "Energy", "LEU": "Energy",
-    "FSLR": "Energy", "ENPH": "Energy",
-
-    # --- Industrials / Defense ---
-    "BA": "Industrials", "CAT": "Industrials", "HON": "Industrials",
-    "RTX": "Industrials", "LMT": "Industrials", "FDX": "Industrials", "GE": "Industrials",
-    "NOC": "Industrials", "GD": "Industrials",
-    "HII": "Industrials", "LHX": "Industrials", "TDG": "Industrials",
-    "HWM": "Industrials", "LDOS": "Industrials", "BAH": "Industrials",
-    "DE": "Industrials", "EMR": "Industrials", "ETN": "Industrials",
-    "ITW": "Industrials", "PH": "Industrials", "ROK": "Industrials",
-    "GWW": "Industrials", "FAST": "Industrials", "URI": "Industrials",
-    # European Defense
-    "RHM.DE": "Industrials", "RR.L": "Industrials",
-    # Shipping
-    "ZIM": "Industrials",
-
-    # --- Consumer ---
-    "WMT": "Consumer", "DIS": "Consumer", "PG": "Consumer",
-    "KO": "Consumer", "PEP": "Consumer", "MCD": "Consumer",
-    "NKE": "Consumer", "COST": "Consumer", "HD": "Consumer",
-    "LOW": "Consumer", "TGT": "Consumer", "SBUX": "Consumer",
-    "LULU": "Consumer", "CMG": "Consumer", "MELI": "Consumer",
-    "TJX": "Consumer", "ROST": "Consumer", "ORLY": "Consumer",
-    "AZO": "Consumer", "MNST": "Consumer", "EL": "Consumer",
-    "CL": "Consumer", "KMB": "Consumer", "CAVA": "Consumer",
-    "CPNG": "Consumer", "DASH": "Consumer", "RBLX": "Consumer",
-    "DUOL": "Consumer", "HIMS": "Consumer", "CELH": "Consumer", "ONON": "Consumer",
-    # International consumer
-    "TM": "Consumer",
-
-    # --- Telecom ---
-    "T": "Telecom", "VZ": "Telecom", "TMUS": "Telecom",
-    "CHTR": "Telecom", "CMCSA": "Telecom",
-
-    # --- REITs ---
-    "AMT": "Real Estate", "PLD": "Real Estate", "CCI": "Real Estate",
-    "PSA": "Real Estate", "O": "Real Estate",
-
-    # --- Autos / EV ---
-    "F": "Consumer", "GM": "Consumer", "STLA": "Consumer",
-    "RIVN": "Consumer", "LCID": "Consumer",
-
-    # --- Materials / Mining ---
-    "NEM": "Commodities", "FCX": "Commodities", "VALE": "Commodities",
-    "BHP": "Commodities", "RIO": "Commodities", "SCCO": "Commodities",
-    "ALB": "Commodities", "MP": "Commodities",
-
-    # --- Utilities ---
-    "NEE": "Utilities",
-
-    # --- Crypto-Adjacent ---
-    "MSTR": "Crypto", "MARA": "Crypto", "RIOT": "Crypto", "HUT": "Crypto",
-
-    # --- Space / Frontier ---
-    "RKLB": "Industrials", "ASTS": "Technology", "LUNR": "Industrials",
-
-    # --- ETFs ---
-    "SPY": "Broad Market ETF", "QQQ": "Technology ETF", "IWM": "Broad Market ETF",
-    "DIA": "Broad Market ETF", "VTI": "Broad Market ETF", "VOO": "Broad Market ETF",
-    "GLD": "Commodities ETF", "SLV": "Commodities ETF",
-    "XLE": "Energy", "XLF": "Finance", "XLK": "Technology",
-    "XLU": "Utilities", "XLV": "Healthcare", "XLI": "Industrials",
-    "XLP": "Consumer", "XLY": "Consumer",
-    "TLT": "Bonds ETF", "HYG": "Bonds ETF",
-    "XHB": "Real Estate", "XBI": "Healthcare",
-    "ARKK": "Technology ETF", "ITA": "Industrials", "FXI": "International ETF",
-    "USO": "Commodities ETF", "UNG": "Commodities ETF", "DBA": "Commodities ETF",
-    "WEAT": "Commodities ETF", "PALL": "Commodities ETF",
-    "URA": "Energy", "COPX": "Commodities ETF",
-    "EEM": "International ETF", "EWZ": "International ETF", "KWEB": "International ETF",
-    "SOXX": "Technology ETF", "SMH": "Technology ETF", "CIBR": "Technology ETF",
-    "SOXL": "Technology ETF", "TQQQ": "Technology ETF", "SQQQ": "Technology ETF",
-    "SPXU": "Broad Market ETF", "UPRO": "Broad Market ETF", "DFEN": "Industrials",
-
-    # --- Forex ---
-    "EURUSD": "Forex", "GBPUSD": "Forex", "USDJPY": "Forex",
-    "AUDUSD": "Forex", "USDCAD": "Forex", "USDCHF": "Forex",
-    "NZDUSD": "Forex", "EURGBP": "Forex",
-
-    # --- Indices ---
-    "SPX500": "Indices", "NSDQ100": "Indices", "DJ30": "Indices",
-    "UK100": "Indices", "GER40": "Indices",
-
-    # --- Commodities ---
-    "GOLD": "Commodities", "SILVER": "Commodities",
-    "OIL": "Commodities", "COPPER": "Commodities",
-    "NATGAS": "Commodities", "PLATINUM": "Commodities", "NICKEL": "Commodities",
-    "ALUMINUM": "Commodities", "ZINC": "Commodities", "RUBBER": "Commodities",
-
-    # --- Crypto ---
-    "BTC": "Crypto", "ETH": "Crypto", "SOL": "Crypto",
-    "XRP": "Crypto", "ADA": "Crypto", "AVAX": "Crypto",
-    "DOT": "Crypto", "LINK": "Crypto", "NEAR": "Crypto",
-    "LTC": "Crypto", "BCH": "Crypto",
-}
+# Load on import
+_load_sector_map()
 
 
 def get_symbol_sector(symbol: str) -> str:
