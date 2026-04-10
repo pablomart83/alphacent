@@ -182,6 +182,8 @@ def create_app() -> FastAPI:
             "http://localhost:5173",  # Vite dev server
             "http://localhost:5174",  # Vite dev server (alternate port)
             "http://34.252.61.149",   # EC2 production
+            "https://alphacent.co.uk",  # Production HTTPS
+            "https://www.alphacent.co.uk",  # Production HTTPS www
         ],
         allow_credentials=True,
         allow_methods=["*"],
