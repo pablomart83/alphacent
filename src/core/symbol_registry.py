@@ -52,6 +52,10 @@ class SymbolRegistry:
             symbols = []
             for entry in entries:
                 sym = entry["symbol"]
+                # YAML parses bare ON/NO/YES as booleans — force string
+                if not isinstance(sym, str):
+                    sym = str(sym)
+                    logger.warning(f"Symbol '{sym}' in {asset_class} was parsed as {type(entry['symbol']).__name__} — quote it in symbols.yaml")
                 etoro_id = entry.get("etoro_id")
                 sector = entry.get("sector", "Unknown")
 

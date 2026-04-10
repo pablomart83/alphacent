@@ -55,7 +55,7 @@ stocks:
   - { symbol: ARM, etoro_id: 1365, sector: Technology }
   - { symbol: KLAC, etoro_id: 4317, sector: Technology }
   - { symbol: LRCX, etoro_id: 1906, sector: Technology }
-  - { symbol: ON, etoro_id: 4397, sector: Technology }
+  - { symbol: "ON", etoro_id: 4397, sector: Technology }
   - { symbol: NXPI, etoro_id: 4121, sector: Technology }
   - { symbol: MPWR, etoro_id: 6471, sector: Technology }
   - { symbol: ADI, etoro_id: 4264, sector: Technology }
