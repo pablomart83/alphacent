@@ -13,64 +13,92 @@ export const Login: FC<LoginProps> = ({ onLogin }) => {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     clearError();
-
-    if (!username || !password) {
-      return;
-    }
-
+    if (!username || !password) return;
     const result = await login(username, password);
-    if (result) {
-      onLogin();
-    }
+    if (result) onLogin();
   };
 
   return (
-    <div 
-      className="min-h-screen flex items-center justify-center px-4" 
-      style={{ backgroundColor: 'var(--color-dark-bg)' }}
-    >
-      <div 
-        className="p-8 rounded-lg border max-w-md w-full" 
-        style={{ 
-          backgroundColor: 'var(--color-dark-surface)', 
-          borderColor: 'var(--color-dark-border)' 
-        }}
-      >
-        <div className="mb-8 text-center">
-          <h1 
-            className="text-3xl font-bold mb-2 whitespace-normal"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(135deg, #0a0e1a 0%, #111827 50%, #0a0e1a 100%)',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif',
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: '420px',
+        padding: '48px 40px',
+        background: 'rgba(17, 24, 39, 0.8)',
+        border: '1px solid rgba(55, 65, 81, 0.5)',
+        borderRadius: '16px',
+        backdropFilter: 'blur(20px)',
+        boxShadow: '0 25px 50px rgba(0, 0, 0, 0.5)',
+      }}>
+        {/* Logo & Branding */}
+        <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '56px',
+            height: '56px',
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+            marginBottom: '20px',
+            fontSize: '24px',
+            fontWeight: 700,
+            color: '#ffffff',
+            letterSpacing: '-1px',
+          }}>
+            α
+          </div>
+          <h1 style={{
+            fontSize: '28px',
+            fontWeight: 700,
+            color: '#f9fafb',
+            margin: '0 0 8px 0',
+            letterSpacing: '-0.5px',
+          }}>
             AlphaCent
           </h1>
-          <p 
-            className="text-sm whitespace-normal"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
+          <p style={{
+            fontSize: '14px',
+            color: '#6b7280',
+            margin: 0,
+            fontWeight: 400,
+          }}>
             Autonomous Trading Platform
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {error && (
-            <div 
-              className="p-3 rounded text-sm border whitespace-normal break-words"
-              style={{ 
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                borderColor: 'var(--color-accent-red)',
-                color: 'var(--color-accent-red)'
-              }}
-            >
-              {error}
-            </div>
-          )}
+        {/* Error */}
+        {error && (
+          <div style={{
+            padding: '12px 16px',
+            marginBottom: '24px',
+            borderRadius: '8px',
+            fontSize: '13px',
+            color: '#fca5a5',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.2)',
+          }}>
+            {error}
+          </div>
+        )}
 
-          <div>
-            <label 
-              htmlFor="username" 
-              className="block text-sm font-medium mb-2"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
+        {/* Form */}
+        <form onSubmit={handleSubmit}>
+          <div style={{ marginBottom: '20px' }}>
+            <label htmlFor="username" style={{
+              display: 'block',
+              fontSize: '13px',
+              fontWeight: 500,
+              color: '#9ca3af',
+              marginBottom: '8px',
+            }}>
               Username
             </label>
             <input
@@ -78,19 +106,36 @@ export const Login: FC<LoginProps> = ({ onLogin }) => {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="login-input"
               placeholder="Enter username"
               disabled={isLoading}
               required
+              autoComplete="username"
+              autoFocus
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                fontSize: '14px',
+                color: '#f3f4f6',
+                background: '#0a0e1a',
+                border: '1px solid #1f2937',
+                borderRadius: '8px',
+                outline: 'none',
+                transition: 'border-color 0.2s',
+                boxSizing: 'border-box',
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+              onBlur={(e) => e.target.style.borderColor = '#1f2937'}
             />
           </div>
 
-          <div>
-            <label 
-              htmlFor="password" 
-              className="block text-sm font-medium mb-2"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
+          <div style={{ marginBottom: '28px' }}>
+            <label htmlFor="password" style={{
+              display: 'block',
+              fontSize: '13px',
+              fontWeight: 500,
+              color: '#9ca3af',
+              marginBottom: '8px',
+            }}>
               Password
             </label>
             <input
@@ -98,32 +143,62 @@ export const Login: FC<LoginProps> = ({ onLogin }) => {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="login-input"
               placeholder="Enter password"
               disabled={isLoading}
               required
+              autoComplete="current-password"
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                fontSize: '14px',
+                color: '#f3f4f6',
+                background: '#0a0e1a',
+                border: '1px solid #1f2937',
+                borderRadius: '8px',
+                outline: 'none',
+                transition: 'border-color 0.2s',
+                boxSizing: 'border-box',
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#3b82f6'}
+              onBlur={(e) => e.target.style.borderColor = '#1f2937'}
             />
           </div>
 
           <button
             type="submit"
             disabled={isLoading || !username || !password}
-            className="w-full py-3 rounded font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
-            style={{ 
-              backgroundColor: 'var(--color-accent-blue)',
-              color: '#ffffff'
+            style={{
+              width: '100%',
+              padding: '12px',
+              fontSize: '14px',
+              fontWeight: 600,
+              color: '#ffffff',
+              background: isLoading ? '#1e40af' : 'linear-gradient(135deg, #3b82f6, #2563eb)',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: (!username || !password || isLoading) ? 'not-allowed' : 'pointer',
+              opacity: (!username || !password || isLoading) ? 0.5 : 1,
+              transition: 'all 0.2s',
+              letterSpacing: '0.3px',
             }}
           >
-            {isLoading ? 'Logging in...' : 'Login'}
+            {isLoading ? 'Signing in...' : 'Sign In'}
           </button>
         </form>
 
-        <div className="mt-6 text-center text-sm">
-          <p 
-            className="whitespace-normal"
-            style={{ color: 'var(--color-text-tertiary)' }}
-          >
-            Demo credentials: admin / admin123
+        {/* Footer */}
+        <div style={{
+          marginTop: '32px',
+          paddingTop: '20px',
+          borderTop: '1px solid rgba(55, 65, 81, 0.3)',
+          textAlign: 'center',
+        }}>
+          <p style={{
+            fontSize: '12px',
+            color: '#4b5563',
+            margin: 0,
+          }}>
+            Secured connection · v1.0.0
           </p>
         </div>
       </div>

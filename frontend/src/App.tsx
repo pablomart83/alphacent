@@ -96,11 +96,17 @@ function App() {
     setIsAuthenticated(true);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     wsManager.disconnect();
-    authService.logout();
+    try {
+      await authService.logout();
+    } catch {
+      // Ignore logout API errors
+    }
+    localStorage.removeItem('username');
     setIsAuthenticated(false);
     validationDone.current = false;
+    window.location.href = '/login';
   };
 
   if (isLoading || isValidating) {
