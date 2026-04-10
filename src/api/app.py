@@ -50,7 +50,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     # Initialize database (fast, local file)
     logger.info("Initializing database...")
-    db = init_database("alphacent.db")
+    init_database("alphacent.db")
+    db = get_database()
     logger.info(f"Database initialized")
 
     # Connect auth manager to DB and ensure admin user exists
