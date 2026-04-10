@@ -362,7 +362,6 @@ class OrderMonitor:
                     else:
                         # Check 2: Was there a recent exit order for this position?
                         try:
-                            from src.models.orm import OrderORM
                             recent_exit = session.query(OrderORM).filter(
                                 OrderORM.strategy_id == db_pos.strategy_id,
                                 OrderORM.symbol == db_pos.symbol,
@@ -1202,8 +1201,7 @@ class OrderMonitor:
                     matched_strategy_id = pos.strategy_id  # Default: "etoro_position"
                     matched_order_id = None
                     try:
-                        from src.models.orm import OrderORM
-                        from src.models.enums import OrderStatus, OrderSide
+                        from src.models.enums import OrderSide
                         
                         # First: try to match by eToro order ID if available on the position
                         etoro_pos_id = pos.etoro_position_id
