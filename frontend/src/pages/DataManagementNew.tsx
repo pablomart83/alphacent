@@ -6,6 +6,7 @@ import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { usePolling } from '../hooks/usePolling';
 import { apiClient } from '../services/api';
 import { classifyError } from '../lib/errors';
+import { utcToLocal } from '../lib/date-utils';
 import { toast } from 'sonner';
 
 interface SyncStatus {
@@ -137,7 +138,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
   const formatAge = (iso: string | null) => {
     if (!iso) return '—';
-    const age = (Date.now() - new Date(iso).getTime()) / 1000;
+    const age = (Date.now() - utcToLocal(iso).getTime()) / 1000;
     if (age < 0) return 'just now';
     if (age < 60) return `${Math.round(age)}s ago`;
     if (age < 3600) return `${Math.round(age / 60)}m ago`;
@@ -146,7 +147,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
   const formatDate = (iso: string | null) => {
     if (!iso) return 'Never';
-    return new Date(iso).toLocaleString();
+    return utcToLocal(iso).toLocaleString();
   };
 
   const db = status?.db_stats;
