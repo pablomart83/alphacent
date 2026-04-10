@@ -2067,12 +2067,18 @@ class MonitoringService:
 
                 sector = get_symbol_sector(symbol)
 
-                # Only check stocks — skip ETFs, forex, crypto, indices, commodities
+                # Only check individual stocks — skip ETFs, forex, crypto, indices, commodities, REITs
                 if sector in (
                     "Forex", "Crypto", "Indices", "Commodities",
-                    "Broad Market ETF", "Technology ETF", "Commodities ETF", "Bonds ETF",
-                ):
+                ) or sector.endswith("ETF"):
                     continue
+                # Also skip if symbol is in the ETF list directly
+                try:
+                    from src.core.tradeable_instruments import DEMO_ALLOWED_ETFS
+                    if symbol.upper() in set(DEMO_ALLOWED_ETFS):
+                        continue
+                except ImportError:
+                    pass
 
                 checked += 1
                 exit_reasons: List[str] = []

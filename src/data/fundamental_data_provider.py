@@ -296,28 +296,20 @@ class FundamentalDataProvider:
         """
         # Skip symbols that don't have traditional fundamental data
         # Instead of a hardcoded list, dynamically check against asset class lists.
-        # Commodities, forex, indices, and crypto don't have earnings/P&E/revenue.
+        # Commodities, forex, indices, crypto, and ETFs don't have earnings/P&E/revenue.
         try:
             from src.core.tradeable_instruments import (
                 DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_FOREX,
                 DEMO_ALLOWED_INDICES, DEMO_ALLOWED_CRYPTO,
+                DEMO_ALLOWED_ETFS,
             )
             _non_fundamental = (
                 set(DEMO_ALLOWED_COMMODITIES) | set(DEMO_ALLOWED_FOREX) |
-                set(DEMO_ALLOWED_INDICES) | set(DEMO_ALLOWED_CRYPTO)
+                set(DEMO_ALLOWED_INDICES) | set(DEMO_ALLOWED_CRYPTO) |
+                set(DEMO_ALLOWED_ETFS)
             )
         except ImportError:
             _non_fundamental = set()
-        
-        # Also skip broad market / sector / bond ETFs (no earnings data)
-        _non_fundamental_etfs = {
-            'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO',
-            'GLD', 'SLV', 'TLT', 'HYG', 'AGG',
-            'XLE', 'XLF', 'XLK', 'XLU', 'XLV', 'XLI', 'XLP', 'XLY',
-            'XHB', 'XBI', 'ARKK', 'ITA', 'FXI',
-            'USO', 'UNG', 'DBA', 'WEAT', 'PALL', 'URA', 'COPX',
-        }
-        _non_fundamental |= _non_fundamental_etfs
         
         if symbol.upper() in _non_fundamental:
             logger.debug(f"Skipping fundamental data fetch for {symbol} (non-fundamental asset)")
@@ -1145,10 +1137,11 @@ class FundamentalDataProvider:
         """
         from src.core.tradeable_instruments import (
             DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
-            DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES
+            DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+            DEMO_ALLOWED_ETFS,
         )
         sym = symbol.upper()
-        non_equity = set(DEMO_ALLOWED_CRYPTO + DEMO_ALLOWED_FOREX + DEMO_ALLOWED_INDICES + DEMO_ALLOWED_COMMODITIES)
+        non_equity = set(DEMO_ALLOWED_CRYPTO + DEMO_ALLOWED_FOREX + DEMO_ALLOWED_INDICES + DEMO_ALLOWED_COMMODITIES + DEMO_ALLOWED_ETFS)
         if sym in non_equity:
             return []
 

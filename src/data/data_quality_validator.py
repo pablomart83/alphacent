@@ -198,22 +198,32 @@ class DataQualityValidator:
     
     def _is_crypto_symbol(self, symbol: str) -> bool:
         """Check if symbol is a cryptocurrency."""
-        crypto_symbols = [
-            "BTC", "BTCUSD", "ETH", "ETHUSD", "XRP", "XRPUSD",
-            "LTC", "LTCUSD", "BCH", "BCHUSD", "ADA", "ADAUSD",
-            "DOT", "DOTUSD", "LINK", "LINKUSD", "XLM", "XLMUSD",
-            "DOGE", "DOGEUSD", "MATIC", "MATICUSD", "SOL", "SOLUSD",
-            "AVAX", "AVAXUSD", "NEAR", "NEARUSD",
-        ]
-        return symbol.upper() in crypto_symbols
+        try:
+            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+            crypto_set = set(DEMO_ALLOWED_CRYPTO)
+            # Also match USD-suffixed variants (BTCUSD, ETHUSD, etc.)
+            sym = symbol.upper()
+            return sym in crypto_set or sym.replace("USD", "") in crypto_set
+        except ImportError:
+            crypto_symbols = [
+                "BTC", "BTCUSD", "ETH", "ETHUSD", "XRP", "XRPUSD",
+                "LTC", "LTCUSD", "BCH", "BCHUSD", "ADA", "ADAUSD",
+                "DOT", "DOTUSD", "LINK", "LINKUSD", "SOL", "SOLUSD",
+                "AVAX", "AVAXUSD", "NEAR", "NEARUSD", "DOGE", "DOGEUSD",
+            ]
+            return symbol.upper() in crypto_symbols
     
     def _is_forex_symbol(self, symbol: str) -> bool:
         """Check if symbol is a forex pair."""
-        forex_symbols = [
-            "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD",
-            "USDCHF", "NZDUSD", "EURGBP", "EURJPY", "GBPJPY"
-        ]
-        return symbol.upper() in forex_symbols
+        try:
+            from src.core.tradeable_instruments import DEMO_ALLOWED_FOREX
+            return symbol.upper() in set(DEMO_ALLOWED_FOREX)
+        except ImportError:
+            forex_symbols = [
+                "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCAD",
+                "USDCHF", "NZDUSD", "EURGBP",
+            ]
+            return symbol.upper() in forex_symbols
     
     def _check_price_jumps(
         self,

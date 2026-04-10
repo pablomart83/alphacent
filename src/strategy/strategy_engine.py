@@ -4599,20 +4599,22 @@ class StrategyEngine:
                     continue
                 
                 # Apply fundamental filter (only for equity symbols with actual signals)
-                # Commodities, forex, indices, and crypto don't have earnings/P&E/revenue data.
+                # Commodities, forex, indices, crypto, and ETFs don't have earnings/P&E/revenue data.
                 # Applying the fundamental filter to them always fails (0/5 checks) and kills
-                # every signal. Only filter stocks and equity ETFs.
+                # every signal. Only filter individual stocks.
                 fundamental_report = None
                 _skip_fundamental = False
                 try:
                     from src.core.tradeable_instruments import (
                         DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_FOREX,
                         DEMO_ALLOWED_INDICES, DEMO_ALLOWED_CRYPTO,
+                        DEMO_ALLOWED_ETFS,
                     )
                     _sig_sym = signal.symbol.upper()
                     _non_equity = (
                         set(DEMO_ALLOWED_COMMODITIES) | set(DEMO_ALLOWED_FOREX) |
-                        set(DEMO_ALLOWED_INDICES) | set(DEMO_ALLOWED_CRYPTO)
+                        set(DEMO_ALLOWED_INDICES) | set(DEMO_ALLOWED_CRYPTO) |
+                        set(DEMO_ALLOWED_ETFS)
                     )
                     if _sig_sym in _non_equity:
                         _skip_fundamental = True
