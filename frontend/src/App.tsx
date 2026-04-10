@@ -72,13 +72,7 @@ function App() {
         return;
       }
       
-      // No cached session — try auto-login
-      try {
-        await authService.login('admin', 'admin123');
-        setIsAuthenticated(true);
-      } catch {
-        // Backend not available — show login page
-      }
+      // No cached session — show login page
       setIsLoading(false);
     };
 
@@ -103,8 +97,10 @@ function App() {
   };
 
   const handleLogout = () => {
+    wsManager.disconnect();
     authService.logout();
     setIsAuthenticated(false);
+    validationDone.current = false;
   };
 
   if (isLoading || isValidating) {
