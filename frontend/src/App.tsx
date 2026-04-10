@@ -104,6 +104,8 @@ function App() {
       // Ignore logout API errors
     }
     localStorage.removeItem('username');
+    localStorage.removeItem('role');
+    localStorage.removeItem('permissions');
     setIsAuthenticated(false);
     validationDone.current = false;
     window.location.href = '/login';

@@ -100,10 +100,12 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 }
             )
         
-        # Get username and add to request state
+        # Get username, role, permissions and add to request state
         username = auth_manager.get_session_user(session_id)
         request.state.username = username
         request.state.session_id = session_id
+        request.state.role = auth_manager.get_session_role(session_id)
+        request.state.permissions = auth_manager.get_session_permissions(session_id)
         
         # Process request
         response = await call_next(request)

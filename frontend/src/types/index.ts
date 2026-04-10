@@ -306,6 +306,11 @@ export interface AuthResponse {
   token: string;
   user: {
     username: string;
+    role?: string;
+    permissions?: {
+      pages: string[];
+      actions: string[];
+    };
   };
 }
 

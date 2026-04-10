@@ -1,7 +1,7 @@
 """Core trading engine components."""
 
 from .config import Configuration, ConfigurationError, CredentialManager, get_config
-from .auth import AuthenticationManager, SessionManager, User, Session
+from .auth import AuthenticationManager, SessionManager, Session, ROLE_PERMISSIONS
 from .validation import InputValidator, ValidationError, InputType
 from .security import (
     RateLimiter, RateLimitConfig, SecurityLogger, SecurityEventType,
@@ -15,7 +15,7 @@ __all__ = [
     "get_config",
     "AuthenticationManager",
     "SessionManager",
-    "User",
+    "ROLE_PERMISSIONS",
     "Session",
     "InputValidator",
     "ValidationError",

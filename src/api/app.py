@@ -45,11 +45,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     session_manager = SessionManager(auth_manager, cleanup_interval_seconds=300)
     session_manager.start_automatic_cleanup()
 
-    # Create default user if no users exist
-    if not auth_manager.users:
-        logger.info("Creating default user: admin")
-        auth_manager.create_user("admin", "admin123")
-
     # Initialize dependencies
     init_dependencies(auth_manager, session_manager)
 
@@ -57,6 +52,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info("Initializing database...")
     db = init_database("alphacent.db")
     logger.info(f"Database initialized")
+
+    # Connect auth manager to DB and ensure admin user exists
+    auth_manager.set_database(db)
+    auth_manager.ensure_admin_exists("admin123")
 
     # Restore system state (fast, DB read)
     from src.core.system_state_manager import get_system_state_manager

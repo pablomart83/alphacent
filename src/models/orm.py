@@ -1012,3 +1012,30 @@ class AlertHistoryORM(Base):
             "link_page": self.link_page,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class UserORM(Base):
+    """User accounts with role-based permissions."""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, nullable=False, unique=True, index=True)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="viewer")  # admin, trader, viewer
+    permissions = Column(NumpySafeJSON, nullable=False, default=dict)  # {"pages": [...], "actions": [...]}
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    last_login = Column(DateTime, nullable=True)
+    created_by = Column(String, nullable=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "username": self.username,
+            "role": self.role,
+            "permissions": self.permissions or {},
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_login": self.last_login.isoformat() if self.last_login else None,
+            "created_by": self.created_by,
+        }

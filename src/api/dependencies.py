@@ -159,3 +159,36 @@ def get_db_session():
         yield session
     finally:
         session.close()
+
+
+def require_role(*allowed_roles: str):
+    """
+    Dependency that checks if the current user has one of the allowed roles.
+    Usage: Depends(require_role("admin", "trader"))
+    """
+    def checker(request: Request) -> str:
+        role = getattr(request.state, "role", None)
+        username = getattr(request.state, "username", None)
+        if not username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        if role not in allowed_roles:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+        return username
+    return checker
+
+
+def require_action(action: str):
+    """
+    Dependency that checks if the current user has a specific action permission.
+    Usage: Depends(require_action("manage_users"))
+    """
+    def checker(request: Request) -> str:
+        permissions = getattr(request.state, "permissions", {})
+        username = getattr(request.state, "username", None)
+        if not username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        allowed_actions = permissions.get("actions", [])
+        if action not in allowed_actions:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission denied: {action}")
+        return username
+    return checker

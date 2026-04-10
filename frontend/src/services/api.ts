@@ -1292,6 +1292,53 @@ class ApiClient {
     const response = await this.client.get<ApiResponse<any>>('/data/monitoring/status');
     return this.handleResponse(response);
   }
+
+  // --- User Management ---
+
+  async changePassword(oldPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post('/auth/change-password', {
+      old_password: oldPassword,
+      new_password: newPassword,
+    });
+    return response.data;
+  }
+
+  async getCurrentUser(): Promise<any> {
+    const response = await this.client.get('/auth/me');
+    return response.data;
+  }
+
+  async listUsers(): Promise<any[]> {
+    const response = await this.client.get('/auth/users');
+    return response.data.users;
+  }
+
+  async createUser(username: string, password: string, role: string): Promise<any> {
+    const response = await this.client.post('/auth/users', { username, password, role });
+    return response.data;
+  }
+
+  async updateUser(username: string, updates: { role?: string; permissions?: any; is_active?: boolean }): Promise<any> {
+    const response = await this.client.put(`/auth/users/${username}`, updates);
+    return response.data;
+  }
+
+  async deleteUser(username: string): Promise<any> {
+    const response = await this.client.delete(`/auth/users/${username}`);
+    return response.data;
+  }
+
+  async resetUserPassword(username: string, newPassword: string): Promise<any> {
+    const response = await this.client.post(`/auth/users/${username}/reset-password`, {
+      new_password: newPassword,
+    });
+    return response.data;
+  }
+
+  async getRoles(): Promise<Record<string, any>> {
+    const response = await this.client.get('/auth/roles');
+    return response.data.roles;
+  }
 }
 
 // Export singleton instance

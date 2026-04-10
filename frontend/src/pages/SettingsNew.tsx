@@ -6,7 +6,8 @@ import { motion } from 'framer-motion';
 import { 
   Settings as SettingsIcon, Shield, Bell, Key, Activity,
   Save, RotateCcw, Eye, EyeOff, CheckCircle,
-  AlertTriangle, Info, Target, TrendingUp, Keyboard
+  AlertTriangle, Info, Target, TrendingUp, Keyboard, Users,
+  UserPlus, Trash2, RotateCw, Lock
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
@@ -20,6 +21,7 @@ import { Checkbox } from '../components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { useTradingMode } from '../contexts/TradingModeContext';
 import { apiClient } from '../services/api';
+import { authService } from '../services/auth';
 import { TradingMode, type ApiUsageStats } from '../types';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
@@ -149,6 +151,23 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     browser_push_enabled: false,
   });
   const [alertConfigLoading, setAlertConfigLoading] = useState(false);
+
+  // User management state
+  const [userList, setUserList] = useState<any[]>([]);
+  const [userListLoading, setUserListLoading] = useState(false);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState('viewer');
+  const [createUserLoading, setCreateUserLoading] = useState(false);
+  const [changePasswordOld, setChangePasswordOld] = useState('');
+  const [changePasswordNew, setChangePasswordNew] = useState('');
+  const [changePasswordConfirm, setChangePasswordConfirm] = useState('');
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false);
+  const [resetPasswordUser, setResetPasswordUser] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState<string | null>(null);
+  const isAdmin = authService.isAdmin();
 
   // API Config Form
   const apiForm = useForm<ApiConfigFormData>({
@@ -602,6 +621,110 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     }
   };
 
+  // User management functions
+  const loadUsers = async () => {
+    if (!isAdmin) return;
+    setUserListLoading(true);
+    try {
+      const users = await apiClient.listUsers();
+      setUserList(users);
+    } catch {
+      // Non-admin users will get 403 — that's fine
+    } finally {
+      setUserListLoading(false);
+    }
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUsername || !newPassword) {
+      toast.error('Username and password are required');
+      return;
+    }
+    setCreateUserLoading(true);
+    try {
+      await apiClient.createUser(newUsername, newPassword, newRole);
+      toast.success(`User '${newUsername}' created`);
+      setNewUsername('');
+      setNewPassword('');
+      setNewRole('viewer');
+      setShowCreateUser(false);
+      await loadUsers();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to create user');
+    } finally {
+      setCreateUserLoading(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (changePasswordNew !== changePasswordConfirm) {
+      toast.error('New passwords do not match');
+      return;
+    }
+    if (changePasswordNew.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    setChangePasswordLoading(true);
+    try {
+      await apiClient.changePassword(changePasswordOld, changePasswordNew);
+      toast.success('Password changed successfully');
+      setChangePasswordOld('');
+      setChangePasswordNew('');
+      setChangePasswordConfirm('');
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to change password');
+    } finally {
+      setChangePasswordLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (targetUser: string) => {
+    if (resetPasswordValue.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+    try {
+      await apiClient.resetUserPassword(targetUser, resetPasswordValue);
+      toast.success(`Password reset for '${targetUser}'`);
+      setResetPasswordUser(null);
+      setResetPasswordValue('');
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to reset password');
+    }
+  };
+
+  const handleDeleteUser = async (targetUser: string) => {
+    try {
+      await apiClient.deleteUser(targetUser);
+      toast.success(`User '${targetUser}' deleted`);
+      setDeleteConfirmUser(null);
+      await loadUsers();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to delete user');
+    }
+  };
+
+  const handleToggleActive = async (targetUser: string, currentActive: boolean) => {
+    try {
+      await apiClient.updateUser(targetUser, { is_active: !currentActive });
+      toast.success(`User '${targetUser}' ${!currentActive ? 'activated' : 'deactivated'}`);
+      await loadUsers();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to update user');
+    }
+  };
+
+  const handleRoleChange = async (targetUser: string, newRoleValue: string) => {
+    try {
+      await apiClient.updateUser(targetUser, { role: newRoleValue });
+      toast.success(`Role updated for '${targetUser}'`);
+      await loadUsers();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || 'Failed to update role');
+    }
+  };
+
 
 
   if (loading) {
@@ -648,7 +771,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
         {/* Tabs */}
         <Tabs defaultValue="trading-mode" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-9 lg:w-auto lg:inline-grid">
             <TabsTrigger value="trading-mode" className="flex items-center gap-2">
               <Activity className="h-4 w-4" />
               <span className="hidden sm:inline">Trading Mode</span>
@@ -676,6 +799,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
             <TabsTrigger value="notifications" className="flex items-center gap-2">
               <Bell className="h-4 w-4" />
               <span className="hidden sm:inline">Alerts</span>
+            </TabsTrigger>
+            <TabsTrigger value="users" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              <span className="hidden sm:inline">Users</span>
             </TabsTrigger>
             <TabsTrigger value="shortcuts" className="flex items-center gap-2">
               <Keyboard className="h-4 w-4" />
@@ -2249,6 +2376,275 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Users & Security Tab */}
+          <TabsContent value="users" className="space-y-6">
+            {/* Change Password — available to all users */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Lock className="h-5 w-5 text-blue-500" />
+                  Change Password
+                </CardTitle>
+                <CardDescription>Update your account password</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4 max-w-md">
+                <div className="space-y-2">
+                  <Label htmlFor="old-password">Current Password</Label>
+                  <Input
+                    id="old-password"
+                    type="password"
+                    value={changePasswordOld}
+                    onChange={(e) => setChangePasswordOld(e.target.value)}
+                    placeholder="Enter current password"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-password">New Password</Label>
+                  <Input
+                    id="new-password"
+                    type="password"
+                    value={changePasswordNew}
+                    onChange={(e) => setChangePasswordNew(e.target.value)}
+                    placeholder="Min 6 characters"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-password">Confirm New Password</Label>
+                  <Input
+                    id="confirm-password"
+                    type="password"
+                    value={changePasswordConfirm}
+                    onChange={(e) => setChangePasswordConfirm(e.target.value)}
+                    placeholder="Repeat new password"
+                  />
+                </div>
+                <Button
+                  onClick={handleChangePassword}
+                  disabled={changePasswordLoading || !changePasswordOld || !changePasswordNew || !changePasswordConfirm}
+                >
+                  {changePasswordLoading ? 'Changing...' : 'Change Password'}
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* User Management — admin only */}
+            {isAdmin && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <Users className="h-5 w-5 text-blue-500" />
+                        User Management
+                      </CardTitle>
+                      <CardDescription>Create, edit, and manage user accounts and roles</CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={loadUsers} disabled={userListLoading}>
+                        <RotateCw className={cn("h-4 w-4 mr-1", userListLoading && "animate-spin")} />
+                        Refresh
+                      </Button>
+                      <Button size="sm" onClick={() => setShowCreateUser(true)}>
+                        <UserPlus className="h-4 w-4 mr-1" />
+                        New User
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {/* Role legend */}
+                  <div className="flex gap-4 mb-4 text-xs text-gray-400">
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-red-500 mr-1" />Admin — full access, user management</span>
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1" />Trader — trade, manage strategies</span>
+                    <span><span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />Viewer — read-only dashboard access</span>
+                  </div>
+
+                  {/* Create user form */}
+                  {showCreateUser && (
+                    <div className="mb-4 p-4 border border-gray-700 rounded-lg bg-dark-surface space-y-3">
+                      <h4 className="text-sm font-medium text-gray-200">Create New User</h4>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <Label htmlFor="create-username" className="text-xs">Username</Label>
+                          <Input
+                            id="create-username"
+                            value={newUsername}
+                            onChange={(e) => setNewUsername(e.target.value)}
+                            placeholder="username"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="create-password" className="text-xs">Password</Label>
+                          <Input
+                            id="create-password"
+                            type="password"
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            placeholder="min 6 chars"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="create-role" className="text-xs">Role</Label>
+                          <select
+                            id="create-role"
+                            value={newRole}
+                            onChange={(e) => setNewRole(e.target.value)}
+                            className="w-full h-10 rounded-md border border-gray-700 bg-dark-bg px-3 text-sm text-gray-200"
+                          >
+                            <option value="admin">Admin</option>
+                            <option value="trader">Trader</option>
+                            <option value="viewer">Viewer</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={handleCreateUser} disabled={createUserLoading}>
+                          {createUserLoading ? 'Creating...' : 'Create'}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => { setShowCreateUser(false); setNewUsername(''); setNewPassword(''); }}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* User list */}
+                  {userList.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                      <p>Click Refresh to load users</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-gray-700 text-gray-400">
+                            <th className="text-left py-2 px-3">Username</th>
+                            <th className="text-left py-2 px-3">Role</th>
+                            <th className="text-left py-2 px-3">Status</th>
+                            <th className="text-left py-2 px-3">Created</th>
+                            <th className="text-left py-2 px-3">Last Login</th>
+                            <th className="text-right py-2 px-3">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {userList.map((user) => (
+                            <tr key={user.username} className="border-b border-gray-800 hover:bg-gray-800/50">
+                              <td className="py-2 px-3 font-medium text-gray-200">
+                                {user.username}
+                                {user.username === authService.getUsername() && (
+                                  <span className="ml-2 text-xs text-blue-400">(you)</span>
+                                )}
+                              </td>
+                              <td className="py-2 px-3">
+                                {user.username === authService.getUsername() ? (
+                                  <span className={cn(
+                                    "px-2 py-0.5 rounded text-xs font-medium",
+                                    user.role === 'admin' ? 'bg-red-900/30 text-red-400' :
+                                    user.role === 'trader' ? 'bg-yellow-900/30 text-yellow-400' :
+                                    'bg-blue-900/30 text-blue-400'
+                                  )}>
+                                    {user.role}
+                                  </span>
+                                ) : (
+                                  <select
+                                    value={user.role}
+                                    onChange={(e) => handleRoleChange(user.username, e.target.value)}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded text-xs font-medium border-0 cursor-pointer",
+                                      user.role === 'admin' ? 'bg-red-900/30 text-red-400' :
+                                      user.role === 'trader' ? 'bg-yellow-900/30 text-yellow-400' :
+                                      'bg-blue-900/30 text-blue-400'
+                                    )}
+                                  >
+                                    <option value="admin">admin</option>
+                                    <option value="trader">trader</option>
+                                    <option value="viewer">viewer</option>
+                                  </select>
+                                )}
+                              </td>
+                              <td className="py-2 px-3">
+                                <button
+                                  onClick={() => user.username !== authService.getUsername() && handleToggleActive(user.username, user.is_active)}
+                                  disabled={user.username === authService.getUsername()}
+                                  className={cn(
+                                    "px-2 py-0.5 rounded text-xs font-medium",
+                                    user.is_active ? 'bg-green-900/30 text-green-400' : 'bg-gray-700 text-gray-400',
+                                    user.username !== authService.getUsername() && 'cursor-pointer hover:opacity-80'
+                                  )}
+                                >
+                                  {user.is_active ? 'Active' : 'Disabled'}
+                                </button>
+                              </td>
+                              <td className="py-2 px-3 text-gray-400 text-xs">
+                                {user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}
+                              </td>
+                              <td className="py-2 px-3 text-gray-400 text-xs">
+                                {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                {user.username !== authService.getUsername() && (
+                                  <div className="flex items-center justify-end gap-1">
+                                    {resetPasswordUser === user.username ? (
+                                      <div className="flex items-center gap-1">
+                                        <Input
+                                          type="password"
+                                          value={resetPasswordValue}
+                                          onChange={(e) => setResetPasswordValue(e.target.value)}
+                                          placeholder="new password"
+                                          className="h-7 w-32 text-xs"
+                                        />
+                                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleResetPassword(user.username)}>
+                                          Set
+                                        </Button>
+                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setResetPasswordUser(null); setResetPasswordValue(''); }}>
+                                          ✕
+                                        </Button>
+                                      </div>
+                                    ) : deleteConfirmUser === user.username ? (
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-xs text-red-400">Delete?</span>
+                                        <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => handleDeleteUser(user.username)}>
+                                          Yes
+                                        </Button>
+                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setDeleteConfirmUser(null)}>
+                                          No
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setResetPasswordUser(user.username)} title="Reset password">
+                                          <Key className="h-3 w-3" />
+                                        </Button>
+                                        <Button size="sm" variant="ghost" className="h-7 text-xs text-red-400 hover:text-red-300" onClick={() => setDeleteConfirmUser(user.username)} title="Delete user">
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {!isAdmin && (
+              <Card>
+                <CardContent className="py-8 text-center text-gray-500">
+                  <Shield className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p>User management is only available to administrators.</p>
+                  <p className="text-xs mt-1">Your role: <span className="text-gray-300">{authService.getRole()}</span></p>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           {/* Keyboard Shortcuts Tab */}

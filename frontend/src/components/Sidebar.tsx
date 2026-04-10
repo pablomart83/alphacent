@@ -1,5 +1,6 @@
 import { type FC } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { authService } from '../services/auth';
 
 interface SidebarProps {
   onLogout: () => void;
@@ -7,10 +8,26 @@ interface SidebarProps {
   queuedOrdersCount?: number;
 }
 
+// Map route paths to permission page names
+const PAGE_PERMISSION_MAP: Record<string, string> = {
+  '/': 'overview',
+  '/portfolio': 'portfolio',
+  '/orders': 'orders',
+  '/strategies': 'strategies',
+  '/autonomous': 'autonomous',
+  '/risk': 'risk',
+  '/analytics': 'analytics',
+  '/data': 'data',
+  '/watchlist': 'watchlist',
+  '/settings': 'settings',
+};
+
 export const Sidebar: FC<SidebarProps> = ({ onLogout, pendingClosuresCount = 0, queuedOrdersCount = 0 }) => {
   const location = useLocation();
+  const permissions = authService.getPermissions();
+  const allowedPages = permissions.pages || [];
 
-  const navItems = [
+  const allNavItems = [
     { path: '/', label: 'Overview', icon: '◆' },
     { path: '/portfolio', label: 'Portfolio', icon: '◇', badge: pendingClosuresCount > 0 ? pendingClosuresCount : undefined },
     { path: '/orders', label: 'Orders', icon: '◈', badge: queuedOrdersCount > 0 ? queuedOrdersCount : undefined },
@@ -22,6 +39,14 @@ export const Sidebar: FC<SidebarProps> = ({ onLogout, pendingClosuresCount = 0, 
     { path: '/watchlist', label: 'Watchlist', icon: '◧' },
     { path: '/settings', label: 'Settings', icon: '◐' },
   ];
+
+  // Filter nav items based on user permissions (show all if no permissions loaded yet)
+  const navItems = allowedPages.length > 0
+    ? allNavItems.filter(item => {
+        const pageName = PAGE_PERMISSION_MAP[item.path];
+        return !pageName || allowedPages.includes(pageName);
+      })
+    : allNavItems;
 
   const isActive = (path: string) => {
     return location.pathname === path;
@@ -73,6 +98,9 @@ export const Sidebar: FC<SidebarProps> = ({ onLogout, pendingClosuresCount = 0, 
           <p className="text-xs text-gray-500">Logged in as</p>
           <p className="text-sm text-gray-300 font-mono">
             {localStorage.getItem('username') || 'User'}
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5 capitalize">
+            {authService.getRole()}
           </p>
         </div>
         <button
