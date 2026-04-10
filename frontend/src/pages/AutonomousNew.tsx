@@ -21,6 +21,7 @@ import { usePolling } from '../hooks/usePolling';
 import { apiClient } from '../services/api';
 import { wsManager } from '../services/websocket';
 import { cn, formatCurrency, formatPercentage, formatTimestamp } from '../lib/utils';
+import { utcToLocal } from '../lib/date-utils';
 import { classifyError } from '../lib/errors';
 import type { 
   AutonomousStatus, SystemStatus, Strategy, Order, SystemState 
@@ -158,7 +159,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
       // Filter orders to only show autonomous orders (those with strategy_id)
       const autonomousOrders = ordersData
         .filter(order => order.strategy_id)
-        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .sort((a, b) => utcToLocal(b.created_at).getTime() - utcToLocal(a.created_at).getTime())
         .slice(0, 50); // Last 50 orders
       setOrders(autonomousOrders);
 
@@ -675,7 +676,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
       cell: ({ row }) => (
         <div className="text-right">
           <span className="text-xs text-muted-foreground whitespace-nowrap">
-            {new Date(row.original.created_at).toLocaleString('en-US', {
+            {utcToLocal(row.original.created_at).toLocaleString('en-US', {
               month: 'short',
               day: 'numeric',
               hour: '2-digit',
@@ -762,7 +763,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
       cell: ({ row }) => (
         <div className="text-right">
           <span className="text-xs text-muted-foreground whitespace-nowrap">
-            {new Date(row.original.created_at).toLocaleString('en-US', {
+            {utcToLocal(row.original.created_at).toLocaleString('en-US', {
               month: 'short',
               day: 'numeric',
               hour: '2-digit',
@@ -1785,7 +1786,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           .map((s) => (
                           <tr key={s.id} className="border-b border-border/50 hover:bg-muted/30">
                             <td className="py-2 pr-2 text-xs text-muted-foreground whitespace-nowrap">
-                              {new Date(s.created_at).toLocaleString('en-US', {
+                              {utcToLocal(s.created_at).toLocaleString('en-US', {
                                 month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
                               })}
                             </td>

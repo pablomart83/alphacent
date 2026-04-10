@@ -22,6 +22,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useTradingMode } from '../contexts/TradingModeContext';
 import { apiClient } from '../services/api';
 import { authService } from '../services/auth';
+import { formatDate, formatDateTime } from '../lib/date-utils';
 import { TradingMode, type ApiUsageStats } from '../types';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
@@ -2579,10 +2580,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                 </button>
                               </td>
                               <td className="py-2 px-3 text-gray-400 text-xs">
-                                {user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}
+                                {user.created_at ? formatDate(user.created_at) : '—'}
                               </td>
                               <td className="py-2 px-3 text-gray-400 text-xs">
-                                {user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}
+                                {user.last_login ? formatDateTime(user.last_login) : 'Never'}
                               </td>
                               <td className="py-2 px-3 text-right">
                                 {user.username !== authService.getUsername() && (

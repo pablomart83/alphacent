@@ -22,6 +22,7 @@ import { usePolling } from '../hooks/usePolling';
 import { apiClient } from '../services/api';
 import { wsManager } from '../services/websocket';
 import { cn, formatCurrency, formatPercentage, formatTimestamp } from '../lib/utils';
+import { utcToLocal } from '../lib/date-utils';
 import { classifyError, type ClassifiedError } from '../lib/errors';
 import type { Position, RiskParams } from '../types';
 import { ColumnDef } from '@tanstack/react-table';
@@ -156,7 +157,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
       // Set risk history (use backend data if available, otherwise empty)
       if (historyData && historyData.history) {
         setRiskHistory(historyData.history.map((item: any) => ({
-          date: new Date(item.timestamp).toLocaleDateString('en-US', { 
+          date: utcToLocal(item.timestamp).toLocaleDateString('en-US', { 
             month: 'short', 
             day: 'numeric',
             ...(timePeriod === '1D' ? { hour: '2-digit' } : {})

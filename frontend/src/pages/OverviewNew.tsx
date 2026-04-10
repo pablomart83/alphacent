@@ -20,6 +20,7 @@ import { usePolling } from '../hooks/usePolling';
 import { apiClient } from '../services/api';
 import { wsManager } from '../services/websocket';
 import { cn, formatCurrency, formatPercentage } from '../lib/utils';
+import { utcToLocal, formatDate } from '../lib/date-utils';
 import { classifyError } from '../lib/errors';
 import { toast } from 'sonner';
 import { useEffect } from 'react';
@@ -258,7 +259,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                           dataKey="date"
                           tick={{ fill: '#9ca3af', fontSize: 10 }}
                           tickFormatter={(v) => {
-                            const d = new Date(v);
+                            const d = utcToLocal(v);
                             return `${d.getMonth() + 1}/${d.getDate()}`;
                           }}
                           interval="preserveStartEnd"
@@ -273,7 +274,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                           contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
                           labelStyle={{ color: '#9ca3af' }}
                           formatter={(value: any) => [formatCurrency(value as number), 'Equity']}
-                          labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                          labelFormatter={(label) => formatDate(label)}
                         />
                         <Area
                           type="monotone"
@@ -330,7 +331,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                           dataKey="date"
                           tick={{ fill: '#9ca3af', fontSize: 10 }}
                           tickFormatter={(v) => {
-                            const d = new Date(v);
+                            const d = utcToLocal(v);
                             return `${d.getMonth() + 1}/${d.getDate()}`;
                           }}
                           interval="preserveStartEnd"
@@ -345,7 +346,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                           contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
                           labelStyle={{ color: '#9ca3af' }}
                           formatter={(value: any) => [`${(value as number).toFixed(2)}%`, 'Drawdown']}
-                          labelFormatter={(label) => new Date(label).toLocaleDateString()}
+                          labelFormatter={(label) => formatDate(label)}
                         />
                         <Area
                           type="monotone"

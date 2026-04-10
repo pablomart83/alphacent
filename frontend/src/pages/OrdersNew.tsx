@@ -24,6 +24,7 @@ import type { Order, OrderStatus, Position, ExecutionQualityData } from '../type
 import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
 import { format, subDays, startOfDay, endOfDay, formatDistanceToNow } from 'date-fns';
+import { utcToLocal } from '../lib/date-utils';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
@@ -152,7 +153,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       
       // Sort by created_at descending (most recent first)
       const sortedOrders = ordersData.sort((a, b) => 
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        utcToLocal(b.created_at).getTime() - utcToLocal(a.created_at).getTime()
       );
       
       // Map as OrderWithMetrics (execution metrics populated later if analytics tab is viewed)
@@ -318,7 +319,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     
     let matchesDate = true;
     if (dateRange.from || dateRange.to) {
-      const orderDate = new Date(order.created_at);
+      const orderDate = utcToLocal(order.created_at);
       if (dateRange.from && orderDate < startOfDay(dateRange.from)) matchesDate = false;
       if (dateRange.to && orderDate > endOfDay(dateRange.to)) matchesDate = false;
     }
@@ -328,7 +329,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
   // Order flow timeline (last 24 hours)
   const last24Hours = orders.filter(o => {
-    const orderTime = new Date(o.created_at).getTime();
+    const orderTime = utcToLocal(o.created_at).getTime();
     const now = Date.now();
     return now - orderTime <= 24 * 60 * 60 * 1000;
   });
@@ -338,7 +339,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     const hourStart = Date.now() - (hour + 1) * 60 * 60 * 1000;
     const hourEnd = Date.now() - hour * 60 * 60 * 1000;
     const hourOrders = last24Hours.filter(o => {
-      const orderTime = new Date(o.created_at).getTime();
+      const orderTime = utcToLocal(o.created_at).getTime();
       return orderTime >= hourStart && orderTime < hourEnd;
     });
     return {
@@ -360,7 +361,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
   const periodDays = getPeriodDays();
   const periodStart = startOfDay(subDays(new Date(), periodDays)).getTime();
   const analyticsOrders = orders.filter(o => {
-    const orderTime = new Date(o.created_at).getTime();
+    const orderTime = utcToLocal(o.created_at).getTime();
     return orderTime >= periodStart;
   });
 
@@ -401,7 +402,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       ? Date.now() - day * 60 * 60 * 1000
       : endOfDay(subDays(new Date(), day)).getTime();
     const dayOrders = orders.filter(o => {
-      const orderTime = new Date(o.created_at).getTime();
+      const orderTime = utcToLocal(o.created_at).getTime();
       return orderTime >= dayStart && orderTime <= dayEnd;
     });
     const dayFilled = dayOrders.filter(o => o.status === 'FILLED').length;
@@ -1350,7 +1351,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                 ) : (
                   <div className="space-y-3">
                     {queuedOrders.map((order) => {
-                      const age = formatDistanceToNow(new Date(order.created_at), { addSuffix: true });
+                      const age = formatDistanceToNow(utcToLocal(order.created_at), { addSuffix: true });
                       const isWaitingForMarket = !marketStatus.isOpen;
                       return (
                         <motion.div
