@@ -74,5 +74,5 @@ Thumbs.db
 # Local test/debug files
 cookies.txt
 exports/
-models/
+/models/
 alphacent.db.backup_*
