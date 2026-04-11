@@ -270,8 +270,16 @@ class OrderMonitor:
             logger.info(f"  Found {len(db_open_positions)} open positions in DB")
 
             # --- Step 1a: Positions on eToro but not in DB → create DB records ---
+            # Also check ALL positions (including closed) to avoid duplicate key violations
+            all_db_positions_by_etoro_id = {
+                p.etoro_position_id: p
+                for p in session.query(PositionORM).filter(
+                    PositionORM.etoro_position_id.isnot(None)
+                ).all()
+            }
+
             for etoro_id, etoro_pos in etoro_pos_by_id.items():
-                if etoro_id not in db_pos_by_etoro_id:
+                if etoro_id not in db_pos_by_etoro_id and etoro_id not in all_db_positions_by_etoro_id:
                     normalized_symbol = normalize_symbol(etoro_pos.symbol)
 
                     # Try to match to a recent order for strategy_id
