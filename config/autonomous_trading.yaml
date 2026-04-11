@@ -33,7 +33,7 @@ activation_thresholds:
     stock: 0.0015
     etf: 0.001
     forex: 0.0005
-    crypto: 0.002
+    crypto: 0.04
     index: 0.001
     commodity: 0.0015
 retirement_thresholds:
@@ -469,15 +469,6 @@ symbols:
   crypto:
   - BTC
   - ETH
-  - SOL
-  - XRP
-  - ADA
-  - AVAX
-  - DOT
-  - LINK
-  - NEAR
-  - LTC
-  - BCH
 asset_class_parameters:
   stock:
     stop_loss_pct: 0.04
@@ -503,8 +494,8 @@ asset_class_parameters:
   crypto:
     stop_loss_pct: 0.06
     take_profit_pct: 0.12
-    holding_period_days_min: 7
-    holding_period_days_max: 30
+    holding_period_days_min: 21
+    holding_period_days_max: 60
     signal_hours: 24/7
     volatility_tolerance: high
   index:

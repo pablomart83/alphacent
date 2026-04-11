@@ -4450,6 +4450,29 @@ Generate a CORRECTED strategy that addresses all errors:"""
                         base_score = max(0.0, base_score - 8)
             except Exception:
                 pass  # Carry data unavailable — no adjustment
+
+        # --- Crypto halving cycle bias at proposal time -----------------------
+        # Boost/penalize crypto proposals based on where we are in the halving cycle.
+        # In accumulation/early_bull phases, boost low-frequency trend templates.
+        # In distribution/bear phases, penalize all crypto proposals.
+        if asset_class == 'crypto' and self.market_analyzer:
+            try:
+                cycle = self.market_analyzer.get_crypto_cycle_phase()
+                recommendation = cycle.get('recommendation', 'hold')
+                is_low_freq = template.metadata and template.metadata.get('low_frequency')
+
+                if recommendation == 'accumulate':
+                    base_score = min(100.0, base_score + 15)
+                    if is_low_freq:
+                        base_score = min(100.0, base_score + 5)  # Extra boost for patient strategies
+                elif recommendation == 'hold':
+                    base_score = min(100.0, base_score + 5)
+                elif recommendation == 'reduce':
+                    base_score = max(0.0, base_score - 15)
+                elif recommendation == 'avoid':
+                    base_score = max(0.0, base_score - 25)
+            except Exception:
+                pass
         
         return base_score
 

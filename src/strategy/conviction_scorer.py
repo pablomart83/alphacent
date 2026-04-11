@@ -91,6 +91,11 @@ class ConvictionScorer:
         carry_adjustment = self._score_carry_bias(signal)
         total_score += carry_adjustment
 
+        # Crypto halving cycle adjustment (±5 points)
+        # Boosts during accumulation/early bull, penalizes during distribution/bear
+        crypto_cycle_adjustment = self._score_crypto_cycle(signal)
+        total_score += crypto_cycle_adjustment
+
         breakdown = {
             'walkforward_edge': {
                 'score': wf_score,
@@ -533,6 +538,42 @@ class ConvictionScorer:
             }
         except Exception as e:
             return {'applicable': True, 'error': str(e)}
+
+    def _score_crypto_cycle(self, signal: TradingSignal) -> float:
+        """
+        Apply crypto halving cycle adjustment for BTC/ETH signals.
+
+        Boosts conviction during favorable cycle phases (accumulation, early bull),
+        reduces it during unfavorable phases (distribution, early bear).
+        Non-crypto signals return 0.
+
+        Returns ±5 points max.
+        """
+        if not self.market_analyzer:
+            return 0.0
+
+        sym = signal.symbol.upper().split(':')[0]
+        from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+        if sym not in set(DEMO_ALLOWED_CRYPTO):
+            return 0.0
+
+        try:
+            cycle = self.market_analyzer.get_crypto_cycle_phase()
+            recommendation = cycle.get('recommendation', 'hold')
+
+            if recommendation == 'accumulate':
+                return 5.0
+            elif recommendation == 'hold':
+                return 2.0
+            elif recommendation == 'reduce':
+                return -3.0
+            elif recommendation == 'avoid':
+                return -5.0
+            return 0.0
+
+        except Exception as e:
+            logger.debug(f"Could not compute crypto cycle score: {e}")
+            return 0.0
 
     # ─── STRATEGY TYPE DETECTION ────────────────────────────────────────
     def _detect_strategy_type(self, strategy: Strategy) -> str:

@@ -970,6 +970,80 @@ class MarketStatisticsAnalyzer:
         'USDCHF': ('USD', 'CHF'),
     }
 
+    def get_crypto_cycle_phase(self) -> Dict[str, Any]:
+        """
+        Determine the current phase of the Bitcoin halving cycle.
+
+        Bitcoin halvings occur roughly every 4 years (210,000 blocks).
+        Historical halvings:
+        - 2012-11-28, 2016-07-09, 2020-05-11, 2024-04-19
+
+        Cycle phases (months since halving):
+        - accumulation (0-6): Post-halving, supply shock building
+        - early_bull (6-12): Supply shock kicks in, price starts rising
+        - mid_bull (12-18): Strongest gains historically
+        - late_bull (18-24): Euphoria, diminishing returns
+        - distribution (24-30): Top formation, smart money exits
+        - early_bear (30-36): Decline begins
+        - capitulation (36-48): Bottom formation
+
+        Returns:
+            Dict with phase, months_since_halving, cycle_score (0-100),
+            and recommendation ('accumulate', 'hold', 'reduce', 'avoid')
+        """
+        cache_key = "crypto_cycle"
+        cached = self._get_cached(cache_key, 86400)  # Cache for 24h
+        if cached is not None:
+            return cached
+
+        from datetime import datetime as dt
+
+        last_halving = dt(2024, 4, 19)
+        now = dt.now()
+        months_since = (now.year - last_halving.year) * 12 + (now.month - last_halving.month)
+
+        if months_since <= 6:
+            phase = 'accumulation'
+            score = 85
+            recommendation = 'accumulate'
+        elif months_since <= 12:
+            phase = 'early_bull'
+            score = 90
+            recommendation = 'accumulate'
+        elif months_since <= 18:
+            phase = 'mid_bull'
+            score = 75
+            recommendation = 'hold'
+        elif months_since <= 24:
+            phase = 'late_bull'
+            score = 50
+            recommendation = 'reduce'
+        elif months_since <= 30:
+            phase = 'distribution'
+            score = 25
+            recommendation = 'reduce'
+        elif months_since <= 36:
+            phase = 'early_bear'
+            score = 15
+            recommendation = 'avoid'
+        else:
+            phase = 'capitulation'
+            score = 40  # Contrarian accumulation zone
+            recommendation = 'accumulate'
+
+        result = {
+            'phase': phase,
+            'months_since_halving': months_since,
+            'cycle_score': score,
+            'recommendation': recommendation,
+            'last_halving': last_halving.isoformat(),
+            'next_halving_approx': dt(2028, 4, 1).isoformat(),
+        }
+
+        self._set_cached(cache_key, result)
+        logger.info(f"Crypto cycle: {phase} ({months_since}mo since halving), score={score}, rec={recommendation}")
+        return result
+
     def get_carry_rates(self) -> Dict[str, Any]:
         """
         Fetch central bank rates from FRED and compute carry differentials

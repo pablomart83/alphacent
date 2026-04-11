@@ -7332,6 +7332,130 @@ class StrategyTemplateLibrary:
             }
         ))
 
+        # ===== CRYPTO HIGH-CONVICTION MOMENTUM TEMPLATES =====
+        # Designed for eToro's 1% per-side fee structure.
+        # Key principles:
+        # - Maximum 2-4 trades per quarter to minimize cost drag
+        # - Target 10%+ per trade to overcome 2% round-trip cost
+        # - BTC/ETH only (most liquid, best data, strongest trends)
+        # - Daily/weekly timeframes only (no intraday scalping)
+        # - Regime-aware: only enter on confirmed trend shifts
+
+        # Crypto Trend Breakout — enter on 50-day high breakout, exit on 20-day low
+        # Classic Turtle-style breakout adapted for crypto's larger moves.
+        # Expects 2-3 trades/year with 15-40% per trade.
+        templates.append(StrategyTemplate(
+            name="Crypto Trend Breakout",
+            description="Buy on 50-day high breakout with volume confirmation. Exit on 20-day low. Low frequency, high conviction.",
+            strategy_type=StrategyType.BREAKOUT,
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
+            entry_conditions=[
+                "CLOSE > RESISTANCE AND RSI(14) > 50 AND RSI(14) < 75"
+            ],
+            exit_conditions=[
+                "CLOSE < SMA(20)"
+            ],
+            required_indicators=["Support", "Resistance", "RSI", "SMA:20"],
+            default_parameters={
+                "entry_lookback": 50,
+                "exit_lookback": 20,
+                "rsi_period": 14,
+                "stop_loss_pct": 0.08,
+                "take_profit_pct": 0.25
+            },
+            expected_trade_frequency="1 trade/quarter",
+            expected_holding_period="30-90 days",
+            risk_reward_ratio=3.0,
+            metadata={"direction": "long", "crypto_optimized": True, "skip_param_override": True, "low_frequency": True}
+        ))
+
+        # Crypto Weekly SMA Trend — buy when weekly close above SMA(10) weekly
+        # Uses daily SMA(50) as proxy for weekly SMA(10). Very slow, very patient.
+        # Catches the big 3-6 month crypto rallies.
+        templates.append(StrategyTemplate(
+            name="Crypto Weekly Trend Follow",
+            description="Buy when price crosses above SMA(50) with ADX > 20 confirming trend. Hold until SMA(50) breakdown. Quarterly frequency.",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
+            entry_conditions=[
+                "CLOSE > SMA(50) AND ADX(14) > 20 AND RSI(14) > 45 AND RSI(14) < 70"
+            ],
+            exit_conditions=[
+                "CLOSE < SMA(50) OR ADX(14) < 15"
+            ],
+            required_indicators=["SMA:50", "ADX", "RSI"],
+            default_parameters={
+                "sma_period": 50,
+                "adx_period": 14,
+                "adx_entry": 20,
+                "adx_exit": 15,
+                "stop_loss_pct": 0.10,
+                "take_profit_pct": 0.30
+            },
+            expected_trade_frequency="1-2 trades/year",
+            expected_holding_period="30-120 days",
+            risk_reward_ratio=3.0,
+            metadata={"direction": "long", "crypto_optimized": True, "skip_param_override": True, "low_frequency": True}
+        ))
+
+        # Crypto Deep Dip Accumulation — buy extreme monthly oversold
+        # When BTC/ETH drops 30%+ from recent high and RSI < 30 on daily,
+        # it's historically been a strong accumulation zone.
+        # Expects 1-2 trades/year with 20-50% upside.
+        templates.append(StrategyTemplate(
+            name="Crypto Deep Dip Accumulation",
+            description="Buy when price drops 25%+ below SMA(50) with daily RSI < 30. Extreme oversold accumulation. Hold for recovery.",
+            strategy_type=StrategyType.MEAN_REVERSION,
+            market_regimes=[MarketRegime.TRENDING_DOWN, MarketRegime.TRENDING_DOWN_STRONG, MarketRegime.TRENDING_DOWN_WEAK],
+            entry_conditions=[
+                "CLOSE < SMA(50) * 0.75 AND RSI(14) < 30"
+            ],
+            exit_conditions=[
+                "CLOSE > SMA(50) OR RSI(14) > 65"
+            ],
+            required_indicators=["SMA:50", "RSI"],
+            default_parameters={
+                "sma_period": 50,
+                "deviation_pct": 0.25,
+                "rsi_period": 14,
+                "rsi_entry": 30,
+                "rsi_exit": 65,
+                "stop_loss_pct": 0.12,
+                "take_profit_pct": 0.35
+            },
+            expected_trade_frequency="1 trade/year",
+            expected_holding_period="30-180 days",
+            risk_reward_ratio=3.0,
+            metadata={"direction": "long", "crypto_optimized": True, "skip_param_override": True, "low_frequency": True}
+        ))
+
+        # Crypto Golden Cross — buy on SMA(50) crossing above SMA(200)
+        # The classic institutional signal. Fires maybe once per cycle.
+        # Historically captures the bulk of crypto bull runs.
+        templates.append(StrategyTemplate(
+            name="Crypto Golden Cross",
+            description="Buy on SMA(50) crossing above SMA(200) — classic bull market signal. Exit on death cross.",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING],
+            entry_conditions=[
+                "SMA(50) CROSSES_ABOVE SMA(200) AND CLOSE > SMA(50)"
+            ],
+            exit_conditions=[
+                "CLOSE < SMA(200)"
+            ],
+            required_indicators=["SMA:50", "SMA:200"],
+            default_parameters={
+                "fast_period": 50,
+                "slow_period": 200,
+                "stop_loss_pct": 0.12,
+                "take_profit_pct": 0.40
+            },
+            expected_trade_frequency="1 trade/cycle",
+            expected_holding_period="60-365 days",
+            risk_reward_ratio=3.5,
+            metadata={"direction": "long", "crypto_optimized": True, "skip_param_override": True, "low_frequency": True}
+        ))
+
         return templates
     
     def get_all_templates(self) -> List[StrategyTemplate]:
