@@ -323,3 +323,209 @@ curl https://alphacent.co.uk/health
 - Added `lark` to `requirements.txt` (DSL parser dependency missing on EC2)
 - Added `/control` to Nginx proxy regex (was falling through to SPA catch-all)
 - **Files**: `src/core/order_monitor.py`, `src/api/app.py`, `requirements.txt`
+
+
+### Session Improvements (April 11, 2026 — Session 2)
+
+#### 65. CloudWatch Monitoring & Alerting ✅
+- CloudWatch Agent installed on EC2 (memory + disk metrics every 5 min)
+- App heartbeat cron pushing health status every minute
+- 5 alarms: status check failed, CPU >80% (10min), memory >85% (10min), disk >80%, app down (15min)
+- SNS topic `alphacent-alerts` → email notifications
+- IAM role updated with CloudWatch + SNS permissions
+- **Files**: `deploy/cloudwatch-setup.sh`, `deploy/cloudwatch-iam-policy.sh`, `deploy/heartbeat.sh`
+
+#### 66. GitHub Actions Deploy Fix ✅
+- Added `--checksum` to rsync (fixes clock-skew file skip bug)
+- Changed `.env.*` exclude to explicit `.env.production` (wildcard was too broad)
+- Fixed frontend build to use `https://alphacent.co.uk` + `wss://alphacent.co.uk` (was `http://$EC2_HOST`)
+- Fixed verify step to use HTTPS
+- **Files**: `.github/workflows/deploy.yml`
+
+#### 67. FMP Rate Limiter Bug Fix ✅
+- Moved `record_call()` into `_fmp_request` so each individual API call is counted
+- Previously called once per symbol in `_fetch_from_fmp`, undercounting by 4-5x
+- Added `base_url` parameter to `_fmp_request` for v4 endpoints
+- Cleaned up 3 stale `record_call()` in `get_institutional_ownership`, `get_price_target_consensus`, `get_upgrades_downgrades`
+- **Files**: `src/data/fundamental_data_provider.py`
+
+#### 68. FMP Insider Trading 404 Fix ✅
+- Insider trading endpoint was hitting `/stable/insider-trading` (doesn't exist)
+- Fixed to use `https://financialmodelingprep.com/api/v4/insider-trading`
+- **Files**: `src/data/fundamental_data_provider.py`
+
+#### 69. Non-US Symbol FMP Skip ✅
+- `RR.L` (Rolls-Royce) and `RHM.DE` (Rheinmetall) returning 402 Payment Required
+- Added skip for symbols containing `.` in `get_fundamental_data()` and `get_historical_fundamentals()`
+- **Files**: `src/data/fundamental_data_provider.py`
+
+#### 70. Forex Carry Bias Integration ✅
+- `get_carry_rates()` in `MarketStatisticsAnalyzer` — fetches central bank rates from FRED for USD, EUR, GBP, JPY, AUD, CAD, CHF
+- Computes rate differentials for each forex pair (EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF)
+- `_score_carry_bias()` in `ConvictionScorer` — ±1 to ±5 points on forex signal conviction based on carry alignment
+- Carry bias at proposal time in `_score_symbol_for_template()` — +10 for with-carry, -8 for against-carry, +5 extra for mean-reversion on high-carry pairs
+- **Files**: `src/strategy/market_analyzer.py`, `src/strategy/conviction_scorer.py`, `src/strategy/strategy_proposer.py`
+
+#### 71. Transaction Cost Model Correction ✅ (CRITICAL)
+- Forex was 3-7x too high (0.06% → 0.02% per side) — eToro majors are 1-2 pips
+- Crypto was 4x too low (0.25% → 1.1% per side) — eToro charges 1% per side
+- Stocks/ETFs adjusted for CFD costs (0.05% → 0.17% per side) — eToro CFDs are 0.15%
+- Indices were 3x too high (0.07% → 0.025%) — eToro SPX500/NSDQ100 = 0.015%
+- Impact: All 18 crypto strategies would fail under real costs; forex strategies now pass activation
+- **Files**: `config/autonomous_trading.yaml`
+
+#### 72. Crypto Trading Overhaul ✅
+- **4 new low-frequency momentum templates**: Crypto Trend Breakout, Crypto Weekly Trend Follow, Crypto Deep Dip Accumulation, Crypto Golden Cross
+- **Halving cycle overlay**: `get_crypto_cycle_phase()` — determines accumulation/bull/distribution/bear phase, feeds into proposal scoring (+15/-25) and conviction scoring (±5)
+- **BTC/ETH only**: Removed 9 altcoins from `config/symbols.yaml` — eToro's 1% fee makes altcoin strategies unprofitable
+- **Min return per trade**: Crypto bumped from 0.2% to 4% — only strategies generating 4%+ per trade pass activation
+- **Min holding period**: Crypto bumped from 7 to 21 days — kills high-frequency scalping
+- **Stochastic validation**: Bumped `entry_max` from 30 to 35 to unblock crypto templates
+- **Regime coverage fix**: Added RANGING_LOW_VOL to all new crypto templates (current regime)
+- **Files**: `config/autonomous_trading.yaml`, `config/symbols.yaml`, `src/strategy/strategy_templates.py`, `src/strategy/market_analyzer.py`, `src/strategy/conviction_scorer.py`
+
+#### 73. Per-Asset-Class Regime Detection ✅
+- `_detect_forex_regime()` using EURUSD, GBPUSD, USDJPY as benchmarks
+- `_detect_commodity_regime()` using GOLD, OIL, SILVER as benchmarks
+- Crypto already had independent detection via BTC/ETH
+- Wired into `_filter_templates_by_macro_regime()` — each asset class uses its own regime for template selection
+- **Files**: `src/strategy/strategy_proposer.py`
+
+#### 74. Comprehensive Regime Analytics Tab ✅
+- New `/analytics/regime-comprehensive` endpoint returning per-asset-class regimes, FRED macro data, crypto cycle, carry rates, performance by regime, transitions, strategy heatmap
+- Frontend regime tab now shows: Current Market Regimes (4 asset classes), Macro Market Context (12 FRED indicators), Bitcoin Halving Cycle, Forex Carry Rates, Performance by Regime, Regime Transitions, Strategy Performance Heatmap
+- Regime data fetched in Phase 1 (no flash of empty state on tab switch)
+- **Files**: `src/api/routers/analytics.py`, `frontend/src/pages/AnalyticsNew.tsx`, `frontend/src/services/api.ts`
+
+---
+
+## Current System State (April 11, 2026 — Updated)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$124K, equity ~$465K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto — BTC/ETH only)
+- **Active strategies:** ~101 (including 18 crypto that will be retired under new cost model)
+- **Open positions:** ~123
+- **Monitoring:** 24/7 + CloudWatch alerting (5 alarms, email notifications)
+- **Market regime:** Equity: ranging_low_vol, Crypto: trending_up_strong, Forex: ranging_low_vol, Commodity: ranging_high_vol
+- **Crypto cycle:** ~24 months post-halving (late_bull/distribution boundary)
+
+---
+
+## Open Items (Updated)
+
+### From V9 Session
+1. Signal generation — Are conviction scores using meaningful inputs? *(partially addressed with carry bias + cycle overlay)*
+2. Template-symbol matching — Should template weights decay over time?
+3. Risk controls — Portfolio-level VaR check before new positions
+4. Order execution — Is signal coordination too aggressive?
+5. Performance feedback loop — Is it chasing past winners?
+
+### Infrastructure
+- ~~Change default admin password~~ ✅
+- ~~CloudWatch monitoring/alerting~~ ✅
+- ~~GitHub Actions deploy fix~~ ✅
+- ~~FMP rate limiter bug~~ ✅
+- Security group ports 80/443 — decided to keep open with auth ✅
+- Consider t3.small downgrade — waiting on CloudWatch memory data (1 week)
+- FMP API rate limit (300/min) — monitor with corrected per-call counting
+
+### Data
+- ~~Forex carry bias~~ ✅ (wired into scoring)
+- Transcript sentiment — Module built but not integrated
+- ~~FMP `/insider-trading` 404~~ ✅ (fixed to v4 endpoint)
+- ~~Non-US symbol 402 errors~~ ✅ (skip symbols with `.`)
+
+### Analytics
+- Historical stress tests (COVID, Lehman, SVB)
+- Drawdown recovery analysis
+- R-Multiple distribution
+- **SPY benchmark comparison on equity curve** ← MISSING, high priority
+
+---
+
+## UI/UX Overhaul — Research & Design Brief
+
+### Research Findings: How Top Quant Platforms Structure Their UI
+
+**QuantConnect (industry standard for quant platforms):**
+- Results page layout: Runtime statistics banner at top → Equity curve with benchmark overlay (SPY default) → Drawdown chart → Exposure chart → Holdings table → Orders table → Trades table → Logs
+- Built-in charts: Strategy Equity, Capacity, Drawdown, Benchmark, Exposure, Asset Sales Volume, Portfolio Turnover, Portfolio Margin, Performance
+- Key insight: Equity curve and benchmark are ALWAYS visible together — this is the #1 thing institutional investors look at
+- Statistics shown: Equity, Fees, Holdings, Net Profit, PSR (Probabilistic Sharpe Ratio), Return, Unrealized, Volume
+- Asset plots: Individual asset price charts with order event annotations (buy/sell arrows)
+
+**Institutional Trading Platforms (Bloomberg Terminal, Refinitiv Eikon):**
+- Dark theme is dominant — reduces eye strain for 12+ hour sessions
+- Information density is high but organized in clear visual hierarchy
+- Color coding: green/red for P&L, blue for neutral/informational, yellow/orange for warnings
+- Key metrics always visible without scrolling (sticky headers, summary bars)
+- Charts are interactive with zoom, pan, crosshair, and period selectors (1D, 1W, 1M, 3M, 1Y, ALL)
+
+**Design Principles from Research:**
+- Data-first: Show numbers, not decorations. Every pixel should convey information.
+- Hierarchy: Most important metrics (P&L, Sharpe, drawdown) at the top, always visible
+- Consistency: Same chart style, same color coding, same interaction patterns across all pages
+- Density: Institutional users want MORE data per screen, not less. Whitespace is wasted space.
+- Benchmark: ALWAYS show performance relative to a benchmark (SPY for equities, BTC for crypto)
+
+### Current AlphaCent UI Issues
+
+1. **Missing SPY benchmark on equity curve** — The #1 thing any CIO looks at. Our equity curve shows absolute performance but no benchmark comparison. Need SPY overlay on the same chart.
+
+2. **Page structure inconsistency** — Each page has a different layout pattern. Overview, Strategies, Orders, Risk, Analytics, Autonomous, Settings all feel like different apps.
+
+3. **Information density too low** — Large cards with single metrics waste screen space. Institutional users want dense metric grids.
+
+4. **Charts lack interactivity** — No zoom, no period selectors, no crosshair. Static charts feel amateur.
+
+5. **No global summary bar** — Top quant platforms have a persistent summary bar showing key metrics (equity, daily P&L, open positions, active strategies) visible on every page.
+
+6. **Color coding inconsistent** — Some pages use green/red for P&L, others don't. No consistent visual language.
+
+7. **Loading states** — Tab switches show empty states briefly before data loads. Need skeleton loaders or pre-fetched data.
+
+8. **Mobile responsiveness** — Cards stack poorly on smaller screens. Grid layouts break.
+
+### Proposed UI/UX Improvements (Next Session)
+
+#### Priority 1: Equity Curve with SPY Benchmark
+- Add SPY price data to the equity curve chart (normalized to same starting point)
+- Show alpha (portfolio return - SPY return) as a separate line or shaded area
+- Period selectors: 1W, 1M, 3M, 6M, 1Y, ALL
+- Drawdown chart below equity curve (synchronized zoom)
+
+#### Priority 2: Global Summary Bar
+- Persistent bar at top of every page (below navbar)
+- Shows: Total Equity, Daily P&L ($ and %), Open Positions, Active Strategies, Current Regime, System Health
+- Updates in real-time via WebSocket
+
+#### Priority 3: Overview Page Redesign
+- Hero section: Equity curve with SPY benchmark (full width)
+- Below: 4-column metric grid (Equity, Daily P&L, Sharpe, Max Drawdown)
+- Below: 2-column layout — Left: Position summary by asset class, Right: Recent trades
+- Below: Strategy pipeline (proposed → backtested → active → retired)
+
+#### Priority 4: Consistent Design System
+- Standardize card sizes, padding, font sizes across all pages
+- Consistent color coding: green (#22c55e) for positive, red (#ef4444) for negative, blue (#3b82f6) for neutral
+- Consistent chart styling: dark background, grid lines, axis labels
+- Consistent table styling: alternating row colors, sortable columns, pagination
+
+#### Priority 5: Chart Interactivity
+- Add Recharts/Lightweight Charts zoom and pan
+- Period selectors on all time-series charts
+- Crosshair with tooltip showing exact values
+- Click-to-drill-down on data points
+
+#### Priority 6: Page-Specific Improvements
+- **Strategies page**: Add mini equity curves per strategy, sortable by Sharpe/return/trades
+- **Risk page**: Add correlation matrix heatmap, sector exposure pie chart
+- **Orders page**: Add order flow timeline visualization
+- **Autonomous page**: Add cycle pipeline visualization (propose → WF → backtest → activate)
+
+#### Priority 7: Performance Optimizations
+- Pre-fetch all tab data on page load (not just active tab)
+- WebSocket-driven real-time updates for equity, positions, P&L
+- Lazy load heavy charts only when scrolled into view
+- Cache API responses client-side with SWR or React Query
