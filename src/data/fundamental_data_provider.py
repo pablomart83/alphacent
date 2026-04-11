@@ -315,6 +315,12 @@ class FundamentalDataProvider:
             logger.debug(f"Skipping fundamental data fetch for {symbol} (non-fundamental asset)")
             return None
         
+        # FMP starter plan only covers US-listed securities.
+        # Skip non-US exchange symbols (contain '.') to avoid 402 errors.
+        if '.' in symbol.upper():
+            logger.debug(f"Skipping fundamental data for non-US symbol {symbol}")
+            return None
+        
         # Check memory cache first (fastest)
         if use_cache:
             cached = self.cache.get(symbol)
@@ -1153,6 +1159,12 @@ class FundamentalDataProvider:
         sym = symbol.upper()
         non_equity = set(DEMO_ALLOWED_CRYPTO + DEMO_ALLOWED_FOREX + DEMO_ALLOWED_INDICES + DEMO_ALLOWED_COMMODITIES + DEMO_ALLOWED_ETFS)
         if sym in non_equity:
+            return []
+
+        # FMP starter plan only covers US-listed securities.
+        # Skip non-US exchange symbols (contain '.') to avoid 402 errors.
+        if '.' in sym:
+            logger.debug(f"Skipping FMP fundamentals for non-US symbol {sym}")
             return []
 
         cached = self._get_quarterly_from_db(symbol, quarters)
