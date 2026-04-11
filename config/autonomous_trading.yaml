@@ -159,28 +159,28 @@ backtest:
     per_asset_class:
       stock:
         commission_percent: 0.0
-        spread_percent: 0.0003
-        slippage_percent: 0.0003
+        spread_percent: 0.0015
+        slippage_percent: 0.0002
       etf:
         commission_percent: 0.0
-        spread_percent: 0.0002
+        spread_percent: 0.0015
         slippage_percent: 0.0002
       forex:
         commission_percent: 0.0
-        spread_percent: 0.0005
-        slippage_percent: 0.0001
+        spread_percent: 0.00015
+        slippage_percent: 0.00005
       crypto:
-        commission_percent: 0.0
-        spread_percent: 0.0015
+        commission_percent: 0.01
+        spread_percent: 0.0
         slippage_percent: 0.001
       index:
         commission_percent: 0.0
-        spread_percent: 0.0004
-        slippage_percent: 0.0003
+        spread_percent: 0.00015
+        slippage_percent: 0.0001
       commodity:
         commission_percent: 0.0
-        spread_percent: 0.0005
-        slippage_percent: 0.0003
+        spread_percent: 0.0004
+        slippage_percent: 0.0002
   period_days: 730
   adaptive_risk:
     enabled: true
