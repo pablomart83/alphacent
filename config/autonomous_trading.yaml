@@ -57,7 +57,7 @@ validation_rules:
     entry_max: 65
     exit_min: 50
   stochastic:
-    entry_max: 30
+    entry_max: 35
     exit_min: 70
   bollinger_bands:
     require_both_bands: false
