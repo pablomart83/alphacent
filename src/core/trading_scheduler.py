@@ -1355,80 +1355,54 @@ class TradingScheduler:
         for (normalized_symbol, direction), signal_list in signals_by_symbol_direction.items():
             # Check if we already have a position in this normalized symbol/direction
             existing_key = (normalized_symbol, direction)
-            if existing_key in existing_positions_map:
-                # Interval-aware dedup: intraday and daily strategies are different timeframes.
-                # An intraday BUY on NVDA (holds hours) should NOT block a daily BUY on NVDA (holds weeks).
-                # Only block if the SAME timeframe category already has a position.
-                existing_count = len(existing_positions_map[existing_key])
-                
-                # Determine if the incoming signals are intraday or daily
-                # Check each signal's strategy metadata
-                intraday_signals = []
-                daily_signals = []
+            existing_count = len(existing_positions_map.get(existing_key, []))
+            
+            # How many more positions can we open for this symbol/direction?
+            current_pending_count = pending_orders_per_symbol.get((normalized_symbol, direction), 0)
+            total_active = existing_count + current_pending_count
+            remaining_slots = MAX_STRATEGIES_PER_SYMBOL - total_active
+            
+            if remaining_slots <= 0:
+                # Already at max positions for this symbol/direction
                 for strategy_id, signal, strategy_name in signal_list:
-                    strategy, _ = strategy_map.get(strategy_id, (None, None))
-                    is_intraday_signal = False
-                    if strategy and hasattr(strategy, 'metadata') and strategy.metadata:
-                        is_intraday_signal = strategy.metadata.get('intraday', False)
-                    if is_intraday_signal:
-                        intraday_signals.append((strategy_id, signal, strategy_name))
-                    else:
-                        daily_signals.append((strategy_id, signal, strategy_name))
-                
-                # Block intraday signals only if intraday positions exist for this symbol/direction
-                blocked_intraday = []
-                passed_intraday = []
-                if intraday_signals:
-                    if existing_key in intraday_position_keys:
-                        blocked_intraday = intraday_signals
-                    else:
-                        passed_intraday = intraday_signals
-                
-                # Block daily signals only if daily positions exist for this symbol/direction
-                blocked_daily = []
-                passed_daily = []
-                if daily_signals:
-                    if existing_key in daily_position_keys:
-                        blocked_daily = daily_signals
-                    else:
-                        passed_daily = daily_signals
-                
-                # Log blocked signals
-                for strategy_id, signal, strategy_name in blocked_intraday + blocked_daily:
                     self._log_coordination_rejection(
                         signal=signal,
                         strategy_name=strategy_name,
-                        rejection_reason=f"Duplicate: {existing_count} existing {direction} position(s) in {normalized_symbol}",
+                        rejection_reason=f"Symbol limit: {total_active} existing {direction} position(s)/orders in {normalized_symbol} (max: {MAX_STRATEGIES_PER_SYMBOL})",
                     )
-                position_duplicate_count += len(blocked_intraday) + len(blocked_daily)
+                position_duplicate_count += len(signal_list)
+                continue
+            
+            if existing_count > 0:
+                # We have positions but haven't hit the limit yet.
+                # Filter out signals from strategies that ALREADY have a position
+                # in this symbol/direction (same-strategy dedup), but allow
+                # signals from OTHER strategies (multi-strategy confluence).
+                existing_strategy_ids = set()
+                for pos in existing_positions_map.get(existing_key, []):
+                    if hasattr(pos, 'strategy_id') and pos.strategy_id:
+                        existing_strategy_ids.add(pos.strategy_id)
                 
-                # Continue with passed signals (different timeframe from existing positions)
-                remaining_signals = passed_intraday + passed_daily
-                if not remaining_signals:
+                new_strategy_signals = []
+                for strategy_id, signal, strategy_name in signal_list:
+                    if strategy_id in existing_strategy_ids:
+                        # This specific strategy already has a position — block
+                        self._log_coordination_rejection(
+                            signal=signal,
+                            strategy_name=strategy_name,
+                            rejection_reason=f"Same-strategy duplicate: already has {direction} position in {normalized_symbol}",
+                        )
+                        position_duplicate_count += 1
+                    else:
+                        new_strategy_signals.append((strategy_id, signal, strategy_name))
+                
+                if not new_strategy_signals:
                     continue
-                # Replace signal_list with only the passed signals for downstream processing
-                signal_list = remaining_signals
-            
-            # Correlation filter disabled — we only care about same-symbol dedup
-            # Different correlated symbols (e.g., AAPL and MSFT) are allowed
-            
-            # Check symbol-level limit (across all strategies)
-            symbol_key = (normalized_symbol, direction)
-            current_pending_count = pending_orders_per_symbol.get(symbol_key, 0)
-            current_position_count = len(existing_positions_map.get(existing_key, []))
-            total_strategies_for_symbol = current_pending_count + current_position_count
-            
-            if total_strategies_for_symbol >= MAX_STRATEGIES_PER_SYMBOL:
-                logger.warning(
-                    f"Symbol limit reached: {total_strategies_for_symbol} strategies already trading {normalized_symbol} {direction} "
-                    f"(max: {MAX_STRATEGIES_PER_SYMBOL}), filtering {len(signal_list)} new signal(s)"
-                )
-                symbol_limit_count += len(signal_list)
-                continue  # Skip all signals for this symbol/direction
+                signal_list = new_strategy_signals
             
             # Filter signals that already have pending orders
-            # Check BOTH same-strategy duplicates AND cross-strategy duplicates
-            # for the same symbol/direction (prevents 2 strategies both ordering HYG LONG)
+            # Same-strategy dedup only: a strategy can't double-order the same symbol/direction
+            # Cross-strategy is allowed — multiple strategies trading same symbol is confluence
             filtered_signals = []
             for strategy_id, signal, strategy_name in signal_list:
                 # Same-strategy dedup: this strategy already has a pending order
@@ -1441,20 +1415,6 @@ class TradingScheduler:
                     )
                     pending_order_duplicate_count += 1
                     continue  # Skip this strategy's signal
-                
-                # Cross-strategy dedup: ANY strategy already has a pending order for this symbol/direction
-                cross_strategy_pending = False
-                for (pid, psym, pdir), orders in pending_orders_map.items():
-                    if psym == normalized_symbol and pdir == direction and pid != strategy_id:
-                        logger.info(
-                            f"Cross-strategy pending order: {normalized_symbol} {direction} already has "
-                            f"{len(orders)} pending order(s) from another strategy, filtering {strategy_name}"
-                        )
-                        cross_strategy_pending = True
-                        pending_order_duplicate_count += 1
-                        break
-                if cross_strategy_pending:
-                    continue
                 
                 filtered_signals.append((strategy_id, signal, strategy_name))
             
@@ -1470,28 +1430,33 @@ class TradingScheduler:
                 coordinated_results[strategy_id].append(signal)
             else:
                 # Multiple strategies want to trade this symbol/direction
+                # Allow up to remaining_slots signals through, sorted by confidence
                 logger.info(
-                    f"Signal coordination: {len(filtered_signals)} strategies want to trade {normalized_symbol} {direction}"
+                    f"Signal coordination: {len(filtered_signals)} strategies want to trade {normalized_symbol} {direction} "
+                    f"({remaining_slots} slot(s) available)"
                 )
 
                 # Sort by confidence (highest first)
                 filtered_signals.sort(key=lambda x: x[1].confidence, reverse=True)
 
-                # Keep only the highest-confidence signal
-                best_strategy_id, best_signal, best_strategy_name = filtered_signals[0]
-                if best_strategy_id not in coordinated_results:
-                    coordinated_results[best_strategy_id] = []
-                coordinated_results[best_strategy_id].append(best_signal)
+                # Keep top N signals based on remaining slots
+                slots_to_fill = min(remaining_slots, len(filtered_signals))
+                kept_signals = filtered_signals[:slots_to_fill]
+                dropped_signals = filtered_signals[slots_to_fill:]
 
-                logger.info(
-                    f"  ✅ Kept: {best_strategy_name} (confidence={best_signal.confidence:.2f})"
-                )
+                for strategy_id, signal, strategy_name in kept_signals:
+                    if strategy_id not in coordinated_results:
+                        coordinated_results[strategy_id] = []
+                    coordinated_results[strategy_id].append(signal)
+                    logger.info(
+                        f"  ✅ Kept: {strategy_name} (confidence={signal.confidence:.2f})"
+                    )
 
                 # Log filtered signals
-                for strategy_id, signal, strategy_name in filtered_signals[1:]:
+                for strategy_id, signal, strategy_name in dropped_signals:
                     logger.info(
                         f"  ❌ Filtered: {strategy_name} (confidence={signal.confidence:.2f}) "
-                        f"- lower confidence than {best_strategy_name}"
+                        f"- max {MAX_STRATEGIES_PER_SYMBOL} positions per symbol reached"
                     )
                     filtered_count += 1
 

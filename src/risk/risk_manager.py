@@ -417,18 +417,9 @@ class RiskManager:
             # pushed the size below eToro's minimum, bump back up to minimum.
             # The system decided to trade this signal — submit at minimum rather than failing.
             MINIMUM_ORDER_SIZE_POST = 2000.0
-            try:
-                from src.core.tradeable_instruments import DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_FOREX, DEMO_ALLOWED_INDICES
-                sym_upper = signal.symbol.upper() if hasattr(signal, 'symbol') else ''
-                if sym_upper in set(DEMO_ALLOWED_COMMODITIES) or sym_upper in set(DEMO_ALLOWED_FOREX) or sym_upper in set(DEMO_ALLOWED_INDICES):
-                    MINIMUM_ORDER_SIZE_POST = 1000.0
-            except (ImportError, AttributeError):
-                pass
 
             if 0 < position_size < MINIMUM_ORDER_SIZE_POST:
-                # Same 3x guard as calculate_position_size: don't silently inflate
-                # a $50 position to $1000 after correlation/regime adjustments.
-                MAX_BUMP_RATIO_POST = 3.0
+                MAX_BUMP_RATIO_POST = 10.0
                 if position_size > 0 and MINIMUM_ORDER_SIZE_POST / position_size > MAX_BUMP_RATIO_POST:
                     logger.warning(
                         f"Post-adjustment size ${position_size:.2f} below eToro minimum "
@@ -652,26 +643,15 @@ class RiskManager:
         # Cap at available capital
         position_size = min(position_size, available_capital)
 
-        # Ensure minimum order size per asset class
-        # $2000 minimum for stocks/ETFs/crypto to avoid noise positions
-        # $1000 minimum for commodities/forex/indices (eToro minimum)
+        # Ensure minimum order size: $2000 across all asset classes
         MINIMUM_ORDER_SIZE = 2000.0
-        try:
-            from src.core.tradeable_instruments import DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_FOREX, DEMO_ALLOWED_INDICES
-            sym_upper = signal.symbol.upper() if hasattr(signal, 'symbol') else ''
-            if sym_upper in set(DEMO_ALLOWED_COMMODITIES) or sym_upper in set(DEMO_ALLOWED_FOREX) or sym_upper in set(DEMO_ALLOWED_INDICES):
-                MINIMUM_ORDER_SIZE = 1000.0
-        except (ImportError, AttributeError):
-            pass
 
         if position_size < MINIMUM_ORDER_SIZE:
-            # Guard: only bump to minimum if it's within 3x of the calculated size.
-            # Bumping from $50 to $1000 is a 20x increase — that's not "rounding up
-            # to minimum", that's taking on 20x the intended risk. A PM would never
-            # approve silently turning a $50 position into a $1000 position.
-            # If the gap is too large, the strategy's allocation is simply too small
-            # for this asset class — reject and let the user know.
-            MAX_BUMP_RATIO = 3.0
+            # Bump to minimum if the calculated size is at least $200 (10x guard).
+            # A strategy that wants to trade with $400-$500 gets bumped to $2K —
+            # that's acceptable, the strategy has conviction and we want meaningful
+            # position sizes. Only reject truly tiny allocations (<$200).
+            MAX_BUMP_RATIO = 10.0
             if available_capital >= MINIMUM_ORDER_SIZE and remaining_exposure >= MINIMUM_ORDER_SIZE:
                 if position_size > 0 and MINIMUM_ORDER_SIZE / position_size > MAX_BUMP_RATIO:
                     logger.warning(
