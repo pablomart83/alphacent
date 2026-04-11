@@ -471,9 +471,85 @@ class TradingScheduler:
                         f"(confidence: {signal.confidence:.2f}, reasoning: {signal.reasoning})"
                     )
 
+                    # ── EXIT SIGNAL HANDLING ──────────────────────────────
+                    # Exit signals close the strategy's open position for this symbol.
+                    # They bypass risk validation and position sizing — the strategy's
+                    # DSL exit conditions have fired, meaning the edge is gone.
+                    from src.models.enums import SignalAction as _SignalAction
+                    if signal.action in [_SignalAction.EXIT_LONG, _SignalAction.EXIT_SHORT]:
+                        try:
+                            from src.utils.symbol_normalizer import normalize_symbol as _norm_exit
+                            _exit_sym = _norm_exit(signal.symbol)
+                            _exit_side = PositionSide.LONG if signal.action == _SignalAction.EXIT_LONG else PositionSide.SHORT
+
+                            # Find the open position for this strategy + symbol + side
+                            pos_to_close = session.query(PositionORM).filter(
+                                PositionORM.strategy_id == strategy.id,
+                                PositionORM.symbol == signal.symbol,
+                                PositionORM.side == _exit_side,
+                                PositionORM.closed_at.is_(None),
+                                PositionORM.pending_closure == False,
+                            ).first()
+
+                            if not pos_to_close:
+                                logger.debug(
+                                    f"Exit signal for {signal.symbol} but no open {_exit_side.value} "
+                                    f"position found for strategy {strategy.name}"
+                                )
+                                continue
+
+                            # Mark position for closure with DSL exit reason
+                            pos_to_close.pending_closure = True
+                            exit_conditions = strategy.rules.get("exit_conditions", []) if strategy.rules else []
+                            conditions_str = " AND ".join(exit_conditions[:3])  # Truncate for readability
+                            pos_to_close.closure_reason = (
+                                f"Strategy exit signal: {conditions_str} "
+                                f"(confidence: {signal.confidence:.2f})"
+                            )
+                            session.commit()
+
+                            logger.info(
+                                f"✅ Exit signal processed: {strategy.name} → close {_exit_side.value} "
+                                f"{signal.symbol} (position {pos_to_close.id[:8]}..., "
+                                f"unrealized P&L: ${pos_to_close.unrealized_pnl:.2f})"
+                            )
+
+                            # Log the decision
+                            self._log_signal_decision(
+                                session=session,
+                                signal=signal,
+                                strategy_name=strategy.name,
+                                decision="ACCEPTED",
+                                rejection_reason=None,
+                            )
+
+                            # Save close order to DB for tracking
+                            import uuid as _exit_uuid
+                            from src.models.enums import OrderSide as _ExitOrderSide, OrderType as _ExitOrderType
+                            close_order = OrderORM(
+                                id=str(_exit_uuid.uuid4()),
+                                strategy_id=strategy.id,
+                                symbol=signal.symbol,
+                                side=_ExitOrderSide.SELL if _exit_side == PositionSide.LONG else _ExitOrderSide.BUY,
+                                order_type=_ExitOrderType.MARKET,
+                                quantity=pos_to_close.invested_amount or 0,
+                                status=OrderStatus.PENDING,
+                                submitted_at=datetime.now(),
+                                order_action='close',
+                            )
+                            session.add(close_order)
+                            session.commit()
+
+                            orders_executed += 1
+
+                        except Exception as e:
+                            logger.error(f"Failed to process exit signal for {signal.symbol}: {e}")
+                            session.rollback()
+                        continue  # Skip the ENTRY logic below
+
+                    # ── ENTRY SIGNAL HANDLING ─────────────────────────────
                     # In-run dedup: skip if we already submitted an order for this symbol/direction
                     from src.utils.symbol_normalizer import normalize_symbol as _norm
-                    from src.models.enums import SignalAction as _SignalAction
                     _sig_sym = _norm(signal.symbol)
                     _sig_dir = "LONG" if signal.action in [_SignalAction.ENTER_LONG] else "SHORT"
                     if (_sig_sym, _sig_dir) in orders_submitted_this_run:
@@ -1306,6 +1382,9 @@ class TradingScheduler:
         
         # Group signals by NORMALIZED symbol and direction
         signals_by_symbol_direction = {}  # (normalized_symbol, direction) -> [(strategy_id, signal, strategy_name)]
+        # Collect EXIT signals separately — they don't need coordination,
+        # each strategy's exit is independent (close its own position)
+        exit_signals = []  # [(strategy_id, signal, strategy_name)]
 
         for strategy_id, signals in batch_results.items():
             strategy, _ = strategy_map.get(strategy_id, (None, None))
@@ -1318,8 +1397,11 @@ class TradingScheduler:
                     direction = "LONG"
                 elif signal.action in [SignalAction.ENTER_SHORT]:
                     direction = "SHORT"
+                elif signal.action in [SignalAction.EXIT_LONG, SignalAction.EXIT_SHORT]:
+                    # Exit signals — collect for processing after entries
+                    exit_signals.append((strategy_id, signal, strategy.name))
+                    continue
                 else:
-                    # Exit signals - don't coordinate these
                     continue
                 
                 # Normalize signal symbol to handle GE vs ID_1017 vs 1017
@@ -1505,6 +1587,19 @@ class TradingScheduler:
                     )
         except Exception as e:
             logger.debug(f"Portfolio snapshot failed: {e}")
+
+        # Add EXIT signals to coordinated results — they bypass coordination
+        # because each strategy's exit is independent (close its own position)
+        if exit_signals:
+            logger.info(f"Exit signals: {len(exit_signals)} strategy exit signals to process")
+            for strategy_id, signal, strategy_name in exit_signals:
+                if strategy_id not in coordinated_results:
+                    coordinated_results[strategy_id] = []
+                coordinated_results[strategy_id].append(signal)
+                logger.info(
+                    f"  Exit signal: {strategy_name} → {signal.action.value} {signal.symbol} "
+                    f"(confidence: {signal.confidence:.2f})"
+                )
 
         return coordinated_results
 
