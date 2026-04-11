@@ -257,9 +257,13 @@ class TradingScheduler:
             ).all()
             
             # Filter BACKTESTED to only those approved for activation
+            # Exclude strategies marked for pending retirement (let positions close via SL/TP)
             active_strategies = [
                 s for s in active_strategies
-                if s.status in (StrategyStatus.DEMO, StrategyStatus.LIVE)
+                if (
+                    s.status in (StrategyStatus.DEMO, StrategyStatus.LIVE)
+                    and not (isinstance(s.strategy_metadata, dict) and s.strategy_metadata.get('pending_retirement'))
+                )
                 or (s.status == StrategyStatus.BACKTESTED 
                     and isinstance(s.strategy_metadata, dict) 
                     and s.strategy_metadata.get('activation_approved'))

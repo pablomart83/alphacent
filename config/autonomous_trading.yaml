@@ -471,43 +471,43 @@ symbols:
   - ETH
 asset_class_parameters:
   stock:
-    stop_loss_pct: 0.04
-    take_profit_pct: 0.1
+    stop_loss_pct: 0.06
+    take_profit_pct: 0.15
     holding_period_days_min: 7
     holding_period_days_max: 30
     signal_hours: market_hours
     volatility_tolerance: standard
   etf:
-    stop_loss_pct: 0.045
-    take_profit_pct: 0.1
+    stop_loss_pct: 0.06
+    take_profit_pct: 0.15
     holding_period_days_min: 7
     holding_period_days_max: 30
     signal_hours: market_hours
     volatility_tolerance: standard
   forex:
-    stop_loss_pct: 0.015
-    take_profit_pct: 0.03
+    stop_loss_pct: 0.02
+    take_profit_pct: 0.05
     holding_period_days_min: 14
     holding_period_days_max: 60
     signal_hours: 24/5
     volatility_tolerance: low
   crypto:
-    stop_loss_pct: 0.06
-    take_profit_pct: 0.12
+    stop_loss_pct: 0.08
+    take_profit_pct: 0.20
     holding_period_days_min: 21
     holding_period_days_max: 60
     signal_hours: 24/7
     volatility_tolerance: high
   index:
-    stop_loss_pct: 0.04
-    take_profit_pct: 0.1
+    stop_loss_pct: 0.05
+    take_profit_pct: 0.12
     holding_period_days_min: 7
     holding_period_days_max: 30
     signal_hours: market_hours
     volatility_tolerance: standard
   commodity:
-    stop_loss_pct: 0.03
-    take_profit_pct: 0.08
+    stop_loss_pct: 0.04
+    take_profit_pct: 0.10
     holding_period_days_min: 10
     holding_period_days_max: 45
     signal_hours: market_hours
@@ -543,15 +543,15 @@ position_management:
   max_holding_period_days_intraday: 2
   trailing_stops:
     enabled: true
-    activation_pct: 0.05
-    distance_pct: 0.03
+    activation_pct: 0.08
+    distance_pct: 0.04
   partial_exits:
     enabled: true
     levels:
-    - profit_pct: 0.05
-      exit_pct: 0.5
-    - profit_pct: 0.1
-      exit_pct: 0.25
+    - profit_pct: 0.10
+      exit_pct: 0.33
+    - profit_pct: 0.18
+      exit_pct: 0.33
   correlation_adjustment:
     enabled: true
     threshold: 0.7

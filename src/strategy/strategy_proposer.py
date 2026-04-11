@@ -747,10 +747,10 @@ class StrategyProposer:
         """
         # --- Per-type baseline SL/TP (before volatility adjustment) ---
         type_profiles = {
-            StrategyType.MEAN_REVERSION: {"sl": 0.02, "tp": 0.04, "trailing": False},
-            StrategyType.TREND_FOLLOWING: {"sl": 0.04, "tp": 0.10, "trailing": True},
-            StrategyType.BREAKOUT:        {"sl": 0.03, "tp": 0.08, "trailing": True},
-            StrategyType.VOLATILITY:      {"sl": 0.035, "tp": 0.07, "trailing": False},
+            StrategyType.MEAN_REVERSION: {"sl": 0.03, "tp": 0.08, "trailing": False},
+            StrategyType.TREND_FOLLOWING: {"sl": 0.05, "tp": 0.15, "trailing": True},
+            StrategyType.BREAKOUT:        {"sl": 0.04, "tp": 0.10, "trailing": True},
+            StrategyType.VOLATILITY:      {"sl": 0.04, "tp": 0.10, "trailing": False},
         }
         profile = type_profiles.get(strategy_type, type_profiles[StrategyType.MEAN_REVERSION])
 
@@ -782,10 +782,10 @@ class StrategyProposer:
             atr_ratio = stats.get("volatility_metrics", {}).get("atr_ratio", None)
 
         if atr_ratio and atr_ratio > 0:
-            # ATR-based minimum: SL must be at least 1.5x ATR to survive normal noise
-            atr_floor_sl = atr_ratio * 1.5
+            # ATR-based minimum: SL must be at least 2x ATR to survive normal noise
+            atr_floor_sl = atr_ratio * 2.0
             # Preserve the template's R:R ratio when widening
-            original_rr = tp / sl if sl > 0 else 2.0
+            original_rr = tp / sl if sl > 0 else 2.5
             
             if has_template_sl:
                 # Template specified SL — use it as starting point but enforce ATR floor
@@ -805,8 +805,8 @@ class StrategyProposer:
                     )
             else:
                 # No template SL — blend ATR with type baseline (original behavior)
-                vol_sl = atr_ratio * 1.5
-                vol_tp = atr_ratio * 3.0
+                vol_sl = atr_ratio * 2.0
+                vol_tp = atr_ratio * 5.0
                 sl = (sl + vol_sl) / 2
                 tp = (tp + vol_tp) / 2
                 logger.info(
@@ -825,12 +825,12 @@ class StrategyProposer:
             )
 
         # Clamp to sane bounds
-        sl = max(0.01, min(sl, 0.08))   # 1% – 8%
-        tp = max(0.02, min(tp, 0.20))   # 2% – 20%
+        sl = max(0.015, min(sl, 0.12))   # 1.5% – 12%
+        tp = max(0.03, min(tp, 0.30))    # 3% – 30%
 
-        # Ensure TP > SL (at least 1.5:1 reward-to-risk)
-        if tp < sl * 1.5:
-            tp = sl * 2.0
+        # Ensure TP > SL (at least 2:1 reward-to-risk)
+        if tp < sl * 2.0:
+            tp = sl * 2.5
 
         return RiskConfig(
             stop_loss_pct=round(sl, 4),
@@ -907,9 +907,9 @@ class StrategyProposer:
         if override_tp is not None and override_tp > risk_config.take_profit_pct:
             risk_config.take_profit_pct = round(override_tp, 4)
 
-        # Ensure TP > SL (at least 1.5:1 reward-to-risk)
-        if risk_config.take_profit_pct < risk_config.stop_loss_pct * 1.5:
-            risk_config.take_profit_pct = round(risk_config.stop_loss_pct * 2.0, 4)
+        # Ensure TP > SL (at least 2:1 reward-to-risk)
+        if risk_config.take_profit_pct < risk_config.stop_loss_pct * 2.0:
+            risk_config.take_profit_pct = round(risk_config.stop_loss_pct * 2.5, 4)
 
         logger.info(
             f"Asset class override for {symbol} ({asset_class}): "

@@ -2360,6 +2360,32 @@ class MonitoringService:
                     StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
                 ).all()
                 
+                # Finalize pending retirements: strategies marked for retirement
+                # whose positions have all closed naturally via SL/TP
+                pending_retirement_strats = [
+                    s for s in active_strategies
+                    if isinstance(s.strategy_metadata, dict) and s.strategy_metadata.get('pending_retirement')
+                ]
+                for strat_orm in pending_retirement_strats:
+                    open_count = session.query(PositionORM).filter(
+                        PositionORM.strategy_id == strat_orm.id,
+                        PositionORM.closed_at.is_(None)
+                    ).count()
+                    if open_count == 0:
+                        meta = strat_orm.strategy_metadata
+                        reason = meta.get('pending_retirement_reason', 'Pending retirement completed')
+                        logger.info(f"[StrategyHealth] Finalizing retirement of {strat_orm.name} (all positions closed): {reason}")
+                        strat_orm.status = StrategyStatus.RETIRED
+                        strat_orm.retired_at = datetime.now()
+                        meta['retirement_reason'] = reason
+                        meta['retired_by'] = meta.get('retired_by', 'pending_retirement')
+                        meta.pop('pending_retirement', None)
+                        meta.pop('pending_retirement_reason', None)
+                        meta.pop('pending_retirement_at', None)
+                        strat_orm.strategy_metadata = meta
+                        flag_modified(strat_orm, 'strategy_metadata')
+                        result["retired"] += 1
+                
                 if not active_strategies:
                     return result
                 
@@ -2519,18 +2545,29 @@ class MonitoringService:
                         if 'expectancy' in details:
                             retirement_reason += f", expectancy ${details['expectancy']:,.2f}"
                         
-                        logger.info(f"[StrategyHealth] Retiring {strat_orm.name}: {retirement_reason}")
-                        strat_orm.status = StrategyStatus.RETIRED
-                        strat_orm.retired_at = datetime.now()
-                        meta['retirement_reason'] = retirement_reason
-                        meta['retired_by'] = 'health_score'
-                        strat_orm.strategy_metadata = meta
-                        flag_modified(strat_orm, 'strategy_metadata')
-                        result["retired"] += 1
-                        
-                        for pos in open_pos:
-                            pos.pending_closure = True
-                            pos.closure_reason = f"Strategy retired (health=0): {retirement_reason}"
+                        if n_open > 0:
+                            # Don't retire yet — let open positions close via SL/TP first
+                            logger.info(
+                                f"[StrategyHealth] {strat_orm.name} marked for pending retirement "
+                                f"({n_open} open positions must close first): {retirement_reason}"
+                            )
+                            meta['pending_retirement'] = True
+                            meta['pending_retirement_reason'] = retirement_reason
+                            meta['pending_retirement_at'] = datetime.now().isoformat()
+                            strat_orm.strategy_metadata = meta
+                            flag_modified(strat_orm, 'strategy_metadata')
+                            # Stop new signal generation by removing activation approval
+                            meta.pop('activation_approved', None)
+                        else:
+                            # No open positions — safe to retire immediately
+                            logger.info(f"[StrategyHealth] Retiring {strat_orm.name}: {retirement_reason}")
+                            strat_orm.status = StrategyStatus.RETIRED
+                            strat_orm.retired_at = datetime.now()
+                            meta['retirement_reason'] = retirement_reason
+                            meta['retired_by'] = 'health_score'
+                            strat_orm.strategy_metadata = meta
+                            flag_modified(strat_orm, 'strategy_metadata')
+                            result["retired"] += 1
                     else:
                         logger.debug(
                             f"[StrategyHealth] {strat_orm.name}: health={health_score} "
@@ -2874,23 +2911,33 @@ class MonitoringService:
                             reason_parts = [f"{k}(-{v:.0f})" for k, v in top_penalties]
                             retirement_reason = f"Edge expired (decay=0): {', '.join(reason_parts)}"
                             
-                            logger.info(f"[StrategyDecay] Retiring {strat_orm.name}: {retirement_reason}")
-                            strat_orm.status = StrategyStatus.RETIRED
-                            strat_orm.retired_at = datetime.now()
-                            meta['retirement_reason'] = retirement_reason
-                            meta['retired_by'] = 'decay_score'
-                            strat_orm.strategy_metadata = meta
-                            flag_modified(strat_orm, 'strategy_metadata')
-                            result["retired"] += 1
-                            
-                            # Flag open positions for closure
+                            # Check if strategy has open positions
                             open_positions = session.query(PositionORM).filter(
                                 PositionORM.strategy_id == strat_orm.id,
                                 PositionORM.closed_at.is_(None)
                             ).all()
-                            for pos in open_positions:
-                                pos.pending_closure = True
-                                pos.closure_reason = f"Strategy retired (decay=0): {retirement_reason}"
+                            
+                            if open_positions:
+                                # Don't retire yet — let positions close via SL/TP first
+                                logger.info(
+                                    f"[StrategyDecay] {strat_orm.name} marked for pending retirement "
+                                    f"({len(open_positions)} open positions must close first): {retirement_reason}"
+                                )
+                                meta['pending_retirement'] = True
+                                meta['pending_retirement_reason'] = retirement_reason
+                                meta['pending_retirement_at'] = datetime.now().isoformat()
+                                meta.pop('activation_approved', None)
+                                strat_orm.strategy_metadata = meta
+                                flag_modified(strat_orm, 'strategy_metadata')
+                            else:
+                                logger.info(f"[StrategyDecay] Retiring {strat_orm.name}: {retirement_reason}")
+                                strat_orm.status = StrategyStatus.RETIRED
+                                strat_orm.retired_at = datetime.now()
+                                meta['retirement_reason'] = retirement_reason
+                                meta['retired_by'] = 'decay_score'
+                                strat_orm.strategy_metadata = meta
+                                flag_modified(strat_orm, 'strategy_metadata')
+                                result["retired"] += 1
                         else:
                             logger.debug(
                                 f"[StrategyDecay] {strat_orm.name}: decay=0 but in probation "

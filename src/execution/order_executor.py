@@ -204,7 +204,7 @@ class OrderExecutor:
                                 ], axis=1).max(axis=1)
                                 _atr14 = float(_tr.rolling(14).mean().iloc[-1])
                                 _atr_pct = _atr14 / current_price
-                                _atr_floor = _atr_pct * 1.5  # SL must be at least 1.5x ATR
+                                _atr_floor = _atr_pct * 2.0  # SL must be at least 2x ATR
                                 
                                 if stop_loss_pct < _atr_floor:
                                     original_rr = (take_profit_pct / stop_loss_pct) if take_profit_pct and stop_loss_pct else 2.0
