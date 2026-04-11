@@ -1431,7 +1431,7 @@ class TradingScheduler:
         correlation_filtered_count = 0
         
         # Max strategies per symbol (from risk config)
-        MAX_STRATEGIES_PER_SYMBOL = 3
+        MAX_STRATEGIES_PER_SYMBOL = 5
         
         # Correlation analyzer disabled — same-symbol dedup handles concentration risk.
         # The pairwise correlation calculations were running hundreds of times per cycle
