@@ -4911,7 +4911,7 @@ class StrategyTemplateLibrary:
             name="Crypto 1H RSI Extreme Bounce",
             description="Buy when 1H RSI drops below 20 — extreme oversold that only happens during flash crashes or liquidation cascades. High win rate, rare signal.",
             strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING_HIGH_VOL, MarketRegime.HIGH_VOLATILITY, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "RSI(14) < 20 AND CLOSE > SMA(50) * 0.90"
             ],
@@ -4935,7 +4935,7 @@ class StrategyTemplateLibrary:
             name="Crypto 1H BB Extreme Dip",
             description="Buy when 1H price drops below BB lower band (2.5 std) — extreme dislocation. Only fires during sharp selloffs. Target middle band reversion.",
             strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.HIGH_VOLATILITY, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "CLOSE < BB_LOWER(20, 2.5) AND RSI(14) < 30"
             ],
