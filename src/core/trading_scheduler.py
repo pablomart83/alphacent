@@ -834,18 +834,29 @@ class TradingScheduler:
                                                     break
 
                                         if etoro_position_id:
-                                            # Check if position already exists
+                                            # Check if position already exists — match by eToro ID first,
+                                            # then by strategy+symbol+side. Never match across strategies.
                                             from src.models.enums import OrderSide as OrderSideEnum
                                             pos_side = PositionSide.LONG if order.side == OrderSideEnum.BUY else PositionSide.SHORT
+                                            
+                                            # First: exact match by eToro position ID
                                             existing = session.query(PositionORM).filter(
-                                                PositionORM.symbol == order.symbol,
-                                                PositionORM.side == pos_side,
-                                                PositionORM.closed_at.is_(None),
+                                                PositionORM.etoro_position_id == etoro_position_id,
                                             ).first()
+                                            
+                                            if not existing:
+                                                # Second: match by strategy + symbol + side (same strategy only)
+                                                existing = session.query(PositionORM).filter(
+                                                    PositionORM.strategy_id == order.strategy_id,
+                                                    PositionORM.symbol == order.symbol,
+                                                    PositionORM.side == pos_side,
+                                                    PositionORM.closed_at.is_(None),
+                                                    PositionORM.etoro_position_id.is_(None),
+                                                ).first()
 
                                             if existing:
                                                 existing.etoro_position_id = etoro_position_id
-                                                logger.info(f"Updated existing {order.symbol} position with eToro ID {etoro_position_id}")
+                                                logger.info(f"Updated existing {order.symbol} position (strategy {order.strategy_id[:8]}) with eToro ID {etoro_position_id}")
                                             else:
                                                 import uuid as _uuid
                                                 new_pos = PositionORM(
