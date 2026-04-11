@@ -123,10 +123,10 @@ class OrderExecutor:
         logger.info(f"Executing signal: {signal.action.value} {normalized_symbol} (size: {position_size})")
 
         try:
-            # Validate minimum order size (eToro requires minimum $10)
-            if position_size < 10.0:
+            # Validate minimum order size ($2000 for stocks/ETFs/crypto, $1000 for commodities/forex/indices)
+            if position_size < 1000.0:
                 raise OrderExecutionError(
-                    f"Order size must be at least $10.00 (eToro minimum). "
+                    f"Order size must be at least $1,000.00 (minimum position size). "
                     f"Requested: ${position_size:.2f} for {normalized_symbol}"
                 )
             

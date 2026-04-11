@@ -4576,7 +4576,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 tw = template_weights.get(ttype, 1.0)
                 base_score *= tw
                 sym_bonus = symbol_scores_fb.get(symbol, 0.0)
-                base_score += max(-5.0, min(5.0, sym_bonus))
+                base_score += max(-15.0, min(15.0, sym_bonus))
 
                 # Small noise to break ties between similar symbols
                 noise = random.uniform(-3, 3)
@@ -5868,23 +5868,22 @@ Make this strategy distinct and innovative while following all threshold and pai
     def apply_performance_feedback(
         self,
         feedback: Dict[str, Any],
-        max_weight: float = 1.15,
-        min_weight: float = 0.7,
+        max_weight: float = 1.5,
+        min_weight: float = 0.4,
     ) -> None:
         """Apply performance feedback from the trade journal to adjust future proposals.
 
-        Stores template weights and symbol preference scores that will be used
-        by ``_match_templates_to_symbols`` and ``generate_strategies_from_templates``
-        to bias selection toward historically winning combinations.
-
-        Heavily dampened to prevent runaway concentration: max 1.15x boost (was 1.3x),
-        min 0.7x penalty (was 0.5x), with time decay so stale feedback fades.
-        Symbol bonus capped at ±8 (was ±15).
+        Dynamic template weighting that:
+        - Aggressively penalizes consistently losing templates (down to 0.4x)
+        - Moderately boosts winning templates (up to 1.5x)
+        - Uses P&L-weighted scoring, not just win rate
+        - Applies time-decay so stale feedback fades (templates can recover)
+        - Regime-specific: a template losing in ranging_low_vol might win in trending_up
 
         Args:
             feedback: Output of ``TradeJournal.get_performance_feedback()``.
-            max_weight: Maximum multiplier for winning templates (default 1.15).
-            min_weight: Minimum multiplier for losing templates (default 0.7).
+            max_weight: Maximum multiplier for winning templates (default 1.5).
+            min_weight: Minimum multiplier for losing templates (default 0.4).
         """
         # Load config overrides
         try:
@@ -5908,39 +5907,73 @@ Make this strategy distinct and innovative while following all threshold and pai
             return
 
         # --- Template weights ---
-        # Compute a weight multiplier for each template type based on win rate.
-        # Baseline win rate = 50%.  Above → boost, below → penalize.
-        # Dampened: scale factor is halved to prevent runaway concentration.
+        # Dynamic weighting based on BOTH win rate AND average P&L.
+        # A template with 60% win rate but tiny winners and big losers
+        # should still be penalized. Conversely, a 35% win rate template
+        # with huge winners (trend following) should be boosted.
         template_perf = feedback.get("template_performance", {})
         template_weights: Dict[str, float] = {}
         if template_perf:
-            baseline_wr = 50.0
+            # Calculate expectancy-based weight for each template
             for ttype, metrics in template_perf.items():
-                wr = metrics.get("win_rate", baseline_wr)
-                # Dampened scaling: 50% → 1.0, 70% → 1.2, 30% → 0.8
-                # (half the sensitivity of the old formula)
-                raw_weight = 1.0 + (wr - baseline_wr) / 100.0
-                weight = max(min_weight, min(max_weight, raw_weight))
+                wr = metrics.get("win_rate", 50.0)
+                total_pnl = metrics.get("total_pnl", 0.0)
+                total_trades = metrics.get("total_trades", 1)
+                avg_pnl_per_trade = total_pnl / max(total_trades, 1)
+
+                # Composite score: blend win rate deviation with P&L signal
+                # Win rate component: 50% → 1.0, 70% → 1.4, 30% → 0.6
+                wr_component = 1.0 + (wr - 50.0) / 50.0
+
+                # P&L component: positive avg P&L → boost, negative → penalize
+                # Scale: $50 avg profit → 1.1x, -$50 avg loss → 0.9x
+                pnl_component = 1.0 + max(-0.5, min(0.5, avg_pnl_per_trade / 100.0))
+
+                # Blend: 60% win rate signal, 40% P&L signal
+                raw_weight = wr_component * 0.6 + pnl_component * 0.4
+
+                # Confidence scaling: more trades → more trust in the signal
+                # 5 trades → 50% confidence, 10 → 75%, 20+ → 100%
+                confidence = min(1.0, total_trades / 20.0)
+                # Blend toward 1.0 (neutral) when confidence is low
+                weight = 1.0 + (raw_weight - 1.0) * confidence
+
+                weight = max(min_weight, min(max_weight, weight))
                 template_weights[ttype] = weight
 
             logger.info(
-                f"Performance feedback template weights (dampened): "
+                f"Performance feedback template weights (dynamic): "
                 + ", ".join(f"{k}={v:.2f}" for k, v in sorted(template_weights.items(), key=lambda x: -x[1]))
             )
 
         self._template_weights = template_weights
 
         # --- Symbol preference scores ---
-        # Positive avg return → positive score, negative → negative score.
+        # More aggressive: use P&L-weighted scoring with confidence scaling
         symbol_perf = feedback.get("symbol_performance", {})
         symbol_scores: Dict[str, float] = {}
         if symbol_perf:
             for sym, metrics in symbol_perf.items():
                 avg_ret = metrics.get("avg_return_pct", 0.0)
                 wr = metrics.get("win_rate", 50.0)
-                # Combined score: weighted average of win rate deviation and avg return
+                total_trades = metrics.get("total_trades", 1)
+                total_pnl = metrics.get("total_pnl", 0.0)
+
+                # Combined score: win rate deviation + P&L signal
                 score = (wr - 50.0) * 0.5 + avg_ret * 10.0
-                symbol_scores[sym] = score
+
+                # P&L bonus/penalty: big winners get extra boost
+                if total_pnl > 0:
+                    score += min(10.0, total_pnl / 50.0)
+                else:
+                    score += max(-10.0, total_pnl / 50.0)
+
+                # Confidence scaling
+                confidence = min(1.0, total_trades / 15.0)
+                score *= confidence
+
+                # Cap at ±15 (was ±8, more aggressive now)
+                symbol_scores[sym] = max(-15.0, min(15.0, score))
 
             # Log top/bottom 5
             sorted_syms = sorted(symbol_scores.items(), key=lambda x: -x[1])

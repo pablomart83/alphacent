@@ -416,7 +416,7 @@ class RiskManager:
             # Post-adjustment minimum floor: if correlation or regime adjustments
             # pushed the size below eToro's minimum, bump back up to minimum.
             # The system decided to trade this signal — submit at minimum rather than failing.
-            MINIMUM_ORDER_SIZE_POST = 10.0
+            MINIMUM_ORDER_SIZE_POST = 2000.0
             try:
                 from src.core.tradeable_instruments import DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_FOREX, DEMO_ALLOWED_INDICES
                 sym_upper = signal.symbol.upper() if hasattr(signal, 'symbol') else ''
@@ -653,8 +653,9 @@ class RiskManager:
         position_size = min(position_size, available_capital)
 
         # Ensure minimum order size per asset class
-        # eToro has different minimums: stocks $10, commodities $1000, forex $1000, crypto $10
-        MINIMUM_ORDER_SIZE = 10.0
+        # $2000 minimum for stocks/ETFs/crypto to avoid noise positions
+        # $1000 minimum for commodities/forex/indices (eToro minimum)
+        MINIMUM_ORDER_SIZE = 2000.0
         try:
             from src.core.tradeable_instruments import DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_FOREX, DEMO_ALLOWED_INDICES
             sym_upper = signal.symbol.upper() if hasattr(signal, 'symbol') else ''
