@@ -10,7 +10,7 @@ This module provides comprehensive market analysis using multiple data sources:
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import pandas as pd
 import numpy as np
 import yaml
