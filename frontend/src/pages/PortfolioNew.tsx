@@ -1,4 +1,5 @@
 import { type FC, useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   DollarSign, TrendingUp, Activity, BarChart3, Search,
@@ -51,6 +52,7 @@ interface ClosedPosition {
 
 export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
   const { tradingMode, isLoading: tradingModeLoading } = useTradingMode();
+  const navigate = useNavigate();
   
   // State
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null);
@@ -222,11 +224,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
   }, [tradingMode]);
 
-  // Polling for data refresh (Task 4.2)
+  // Polling for data refresh (Task 4.2) — skip REST polling when WS connected
   const { refresh, isRefreshing: pollingRefreshing } = usePolling({
     fetchFn: fetchData,
     intervalMs: 15000,
     enabled: !!tradingMode && !tradingModeLoading,
+    skipWhenWsConnected: true,
   });
 
   // WebSocket subscriptions
@@ -672,7 +675,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'symbol',
       header: 'Symbol',
       cell: ({ row }) => (
-        <div className="font-mono font-semibold text-sm">{row.original.symbol}</div>
+        <div
+          className="font-mono font-semibold text-sm text-blue-400 hover:text-blue-300 cursor-pointer"
+          onClick={() => navigate(`/portfolio/${encodeURIComponent(row.original.symbol)}`)}
+        >
+          {row.original.symbol}
+        </div>
       ),
     },
     {

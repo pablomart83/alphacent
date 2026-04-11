@@ -20,3 +20,6 @@ export { useThrottle, useThrottledValue } from './useThrottle';
 export { useUpdateFlash, useFlashClasses } from './useUpdateFlash';
 export { usePolling } from './usePolling';
 export type { UsePollingOptions, UsePollingReturn } from './usePolling';
+export { useMediaQuery } from './useMediaQuery';
+export { useFuzzySearch } from './useFuzzySearch';
+export type { SearchableItem, FuzzySearchResult } from './useFuzzySearch';

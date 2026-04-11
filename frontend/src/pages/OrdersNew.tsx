@@ -26,6 +26,7 @@ import { toast } from 'sonner';
 import { format, subDays, startOfDay, endOfDay, formatDistanceToNow } from 'date-fns';
 import { utcToLocal } from '../lib/date-utils';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { OrderFlowTimeline } from '../components/charts/OrderFlowTimeline';
 import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
@@ -189,11 +190,12 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     }
   };
 
-  // usePolling replaces manual useEffect + setInterval
+  // usePolling replaces manual useEffect + setInterval — skip REST polling when WS connected
   const { isRefreshing: pollingRefreshing } = usePolling({
     fetchFn: fetchData,
     intervalMs: 15000,
     enabled: !!tradingMode && !tradingModeLoading,
+    skipWhenWsConnected: true,
   });
 
   // Sync orders with eToro
@@ -1117,8 +1119,9 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
         {/* Tabs */}
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid">
             <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="timeline">Timeline</TabsTrigger>
             <TabsTrigger value="queue" className={queuedOrders.length > 0 ? 'text-amber-400' : ''}>
               Order Queue {queuedOrders.length > 0 && `(${queuedOrders.length})`}
             </TabsTrigger>
@@ -1274,6 +1277,29 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+          </TabsContent>
+
+          {/* Order Flow Timeline Tab (Task 9.3) */}
+          <TabsContent value="timeline" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Order Flow Timeline</CardTitle>
+                <CardDescription>Order events over the last 7 days — placed, filled, cancelled</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <OrderFlowTimeline
+                  orders={orders.map((o) => ({
+                    id: o.id,
+                    symbol: o.symbol,
+                    status: o.status,
+                    side: o.side,
+                    created_at: o.created_at,
+                    quantity: o.quantity,
+                  }))}
+                  days={7}
+                />
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Order Queue Tab */}

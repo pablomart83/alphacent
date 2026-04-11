@@ -1,5 +1,6 @@
 import { type FC, type ReactNode, useEffect, useState, useCallback, useRef } from 'react';
 import { Sidebar } from './Sidebar';
+import { GlobalSummaryBar } from './GlobalSummaryBar';
 import { Notifications } from './Notifications';
 import { KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
 import { RefreshButton } from './ui/RefreshButton';
@@ -49,8 +50,8 @@ export const DashboardLayout: FC<DashboardLayoutProps> = ({ children, onLogout }
     }
   }, [tradingMode]);
 
-  // Poll P&L every 30s
-  usePolling({ fetchFn: fetchPnl, intervalMs: 30000, enabled: !!tradingMode });
+  // Poll P&L every 30s — skip when WS connected (position events trigger refresh)
+  usePolling({ fetchFn: fetchPnl, intervalMs: 30000, enabled: !!tradingMode, skipWhenWsConnected: true });
 
   // Update P&L on WS position events
   useEffect(() => {
@@ -74,7 +75,7 @@ export const DashboardLayout: FC<DashboardLayoutProps> = ({ children, onLogout }
     }
   }, [tradingMode]);
 
-  usePolling({ fetchFn: fetchBadgeCounts, intervalMs: 30000, enabled: !!tradingMode });
+  usePolling({ fetchFn: fetchBadgeCounts, intervalMs: 30000, enabled: !!tradingMode, skipWhenWsConnected: true });
 
   // WS events for immediate badge updates
   useEffect(() => {
@@ -120,7 +121,7 @@ export const DashboardLayout: FC<DashboardLayoutProps> = ({ children, onLogout }
     }
   }, [tradingMode]);
 
-  usePolling({ fetchFn: fetchRegime, intervalMs: 30000, enabled: !!tradingMode });
+  usePolling({ fetchFn: fetchRegime, intervalMs: 30000, enabled: !!tradingMode, skipWhenWsConnected: true });
 
   const handleGlobalSync = async () => {
     if (!tradingMode || globalSyncing) return;
@@ -211,6 +212,8 @@ export const DashboardLayout: FC<DashboardLayoutProps> = ({ children, onLogout }
             <Notifications />
           </div>
         </header>
+
+        <GlobalSummaryBar />
 
         <main className="flex-1 overflow-auto">
           {children}

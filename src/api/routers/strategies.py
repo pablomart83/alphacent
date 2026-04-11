@@ -3286,3 +3286,241 @@ async def reset_all_strategies(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset strategies: {str(e)}"
         )
+
+
+# ============================================================================
+# Template Rankings Endpoint (Task 9.6)
+# ============================================================================
+
+class TemplateRankingResponse(BaseModel):
+    """Template ranking entry with aggregate performance metrics."""
+    name: str
+    win_rate: Optional[float] = None
+    avg_sharpe: Optional[float] = None
+    total_trades: int = 0
+    active_count: int = 0
+    last_proposal_date: Optional[str] = None
+
+
+class TemplateRankingsListResponse(BaseModel):
+    """Template rankings list response."""
+    rankings: List[TemplateRankingResponse]
+    total: int
+
+
+@router.get("/template-rankings", response_model=TemplateRankingsListResponse)
+async def get_template_rankings(
+    mode: TradingMode,
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Get template performance rankings with aggregate metrics.
+
+    Returns an array of template performance data grouped by template name,
+    including win rate, average Sharpe, total trades, active count, and last
+    proposal date.
+
+    Validates: Requirement 18.1
+    """
+    logger.info(f"Fetching template rankings for {mode.value} mode, user {username}")
+
+    try:
+        all_strategies = session.query(StrategyORM).all()
+
+        # Count open positions per strategy for active_count
+        from sqlalchemy import func as _tf
+        pos_counts = session.query(
+            PositionORM.strategy_id,
+            _tf.count(PositionORM.id),
+        ).filter(
+            PositionORM.closed_at.is_(None),
+        ).group_by(PositionORM.strategy_id).all()
+        open_positions_by_strategy = {sid: cnt for sid, cnt in pos_counts}
+
+        # Aggregate per template
+        template_data: Dict[str, Dict[str, Any]] = {}
+
+        for s in all_strategies:
+            md = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
+            tname = md.get("template_name", "")
+            if not tname:
+                name = s.name or ""
+                tname = re.sub(r'\s+V\d+$', '', name).strip()
+            if not tname:
+                continue
+
+            if tname not in template_data:
+                template_data[tname] = {
+                    "win_rates": [],
+                    "sharpes": [],
+                    "total_trades": 0,
+                    "active_count": 0,
+                    "last_proposal_date": None,
+                }
+
+            td = template_data[tname]
+
+            # Active count = open positions for strategies using this template
+            td["active_count"] += open_positions_by_strategy.get(s.id, 0)
+
+            perf = s.performance if isinstance(s.performance, dict) else {}
+            wr = perf.get("win_rate", 0)
+            sharpe = perf.get("sharpe_ratio", 0)
+            trades = perf.get("total_trades", 0)
+
+            if s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE"):
+                if wr and not (math.isnan(wr) or math.isinf(wr)):
+                    td["win_rates"].append(wr)
+                if sharpe and not (math.isnan(sharpe) or math.isinf(sharpe)):
+                    td["sharpes"].append(sharpe)
+                td["total_trades"] += trades
+
+            created = str(s.created_at) if s.created_at else None
+            if created and (not td["last_proposal_date"] or created > td["last_proposal_date"]):
+                td["last_proposal_date"] = created
+
+        rankings = []
+        for tname, td in template_data.items():
+            win_rates = td["win_rates"]
+            sharpes = td["sharpes"]
+            rankings.append(TemplateRankingResponse(
+                name=tname,
+                win_rate=round(sum(win_rates) / len(win_rates), 4) if win_rates else None,
+                avg_sharpe=round(sum(sharpes) / len(sharpes), 2) if sharpes else None,
+                total_trades=td["total_trades"],
+                active_count=td["active_count"],
+                last_proposal_date=td["last_proposal_date"],
+            ))
+
+        # Sort by avg_sharpe descending (None values last)
+        rankings.sort(key=lambda r: r.avg_sharpe if r.avg_sharpe is not None else float('-inf'), reverse=True)
+
+        return TemplateRankingsListResponse(rankings=rankings, total=len(rankings))
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch template rankings: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch template rankings: {str(e)}",
+        )
+
+
+# ============================================================================
+# Walk-Forward Analytics Endpoint (Task 9.7)
+# ============================================================================
+
+class WalkForwardCycleStats(BaseModel):
+    """Per-cycle walk-forward statistics."""
+    cycle_id: str
+    started_at: Optional[str] = None
+    proposals_generated: int = 0
+    backtests_run: int = 0
+    pass_rate_pct: float = 0.0
+    avg_sharpe_passed: Optional[float] = None
+    avg_sharpe_failed: Optional[float] = None
+
+
+class PassRatePoint(BaseModel):
+    """Historical pass rate data point."""
+    date: str
+    pass_rate: float
+
+
+class WalkForwardAnalyticsResponse(BaseModel):
+    """Walk-forward analytics response."""
+    cycles: List[WalkForwardCycleStats]
+    pass_rate_history: List[PassRatePoint]
+
+
+@router.get("/autonomous/walk-forward-analytics", response_model=WalkForwardAnalyticsResponse)
+async def get_walk_forward_analytics(
+    mode: TradingMode,
+    period: str = Query("3M", description="Time period filter: 1M, 3M, 6M, 1Y, ALL"),
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Get walk-forward analytics with per-cycle stats and historical pass rate.
+
+    Returns per-cycle walk-forward statistics (proposals generated, backtests
+    run, pass rate, avg Sharpe passed/failed) and a historical pass rate time
+    series.
+
+    Validates: Requirements 18.3, 18.4
+    """
+    logger.info(f"Fetching walk-forward analytics for {mode.value} mode, period={period}, user {username}")
+
+    try:
+        from src.models.orm import AutonomousCycleRunORM
+        from datetime import timedelta
+
+        # Determine date cutoff from period
+        now = datetime.utcnow()
+        period_map = {
+            "1M": timedelta(days=30),
+            "3M": timedelta(days=90),
+            "6M": timedelta(days=180),
+            "1Y": timedelta(days=365),
+        }
+        cutoff = now - period_map.get(period, timedelta(days=90)) if period != "ALL" else None
+
+        query = session.query(AutonomousCycleRunORM).order_by(
+            AutonomousCycleRunORM.started_at.desc()
+        )
+        if cutoff:
+            query = query.filter(AutonomousCycleRunORM.started_at >= cutoff)
+
+        runs = query.all()
+
+        cycles: List[WalkForwardCycleStats] = []
+        pass_rate_history: List[PassRatePoint] = []
+
+        for run in runs:
+            backtests_run = (run.backtested or 0)
+            passed = (run.backtest_passed or 0)
+            failed = (run.backtest_failed or 0)
+            pass_rate = (passed / backtests_run * 100) if backtests_run > 0 else 0.0
+
+            # Avg Sharpe for passed/failed — we only have the overall avg_sharpe
+            # from the cycle. Use it for passed; failed gets None.
+            avg_sharpe_passed = None
+            avg_sharpe_failed = None
+            if run.avg_sharpe is not None and not (math.isnan(run.avg_sharpe) or math.isinf(run.avg_sharpe)):
+                if passed > 0:
+                    avg_sharpe_passed = round(run.avg_sharpe, 2)
+
+            cycles.append(WalkForwardCycleStats(
+                cycle_id=run.cycle_id,
+                started_at=run.started_at.isoformat() if run.started_at else None,
+                proposals_generated=run.proposals_generated or 0,
+                backtests_run=backtests_run,
+                pass_rate_pct=round(pass_rate, 1),
+                avg_sharpe_passed=avg_sharpe_passed,
+                avg_sharpe_failed=avg_sharpe_failed,
+            ))
+
+            if run.started_at:
+                pass_rate_history.append(PassRatePoint(
+                    date=run.started_at.strftime("%Y-%m-%d"),
+                    pass_rate=round(pass_rate, 1),
+                ))
+
+        # Reverse pass_rate_history to chronological order
+        pass_rate_history.reverse()
+
+        return WalkForwardAnalyticsResponse(
+            cycles=cycles,
+            pass_rate_history=pass_rate_history,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch walk-forward analytics: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch walk-forward analytics: {str(e)}",
+        )

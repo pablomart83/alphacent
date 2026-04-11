@@ -1346,6 +1346,156 @@ class ApiClient {
     const response = await this.client.get('/auth/roles');
     return response.data.roles;
   }
+
+  // ============================================================================
+  // Analytics Endpoints
+  // ============================================================================
+
+  // ============================================================================
+  // Advanced Analytics Endpoints (Rolling Stats, Attribution, Tear Sheet, TCA)
+  // ============================================================================
+
+  async getRollingStatistics(mode: TradingMode, period: string, window: number): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>(
+      `/analytics/rolling-statistics?mode=${mode}&period=${period}&window=${window}`
+    );
+    return this.handleResponse(response);
+  }
+
+  async getPerformanceAttribution(mode: TradingMode, period: string, groupBy: 'sector' | 'asset_class'): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>(
+      `/analytics/performance-attribution?mode=${mode}&period=${period}&group_by=${groupBy}`
+    );
+    return this.handleResponse(response);
+  }
+
+  async getTearSheetData(mode: TradingMode, period: string): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>(
+      `/analytics/tear-sheet?mode=${mode}&period=${period}`
+    );
+    return this.handleResponse(response);
+  }
+
+  async getTCAData(mode: TradingMode, period: string): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>(
+      `/analytics/tca?mode=${mode}&period=${period}`
+    );
+    return this.handleResponse(response);
+  }
+
+  async getSpyBenchmark(period?: string): Promise<Array<{ date: string; close: number }>> {
+    const params = period ? `?period=${period}` : '';
+    const response = await this.client.get<ApiResponse<Array<{ date: string; close: number }>>>(
+      `/analytics/spy-benchmark${params}`
+    );
+    return this.extractArrayFromResponse<{ date: string; close: number }>(response, 'data');
+  }
+
+  // ============================================================================
+  // Template Rankings (Task 9.1)
+  // ============================================================================
+
+  async getTemplateRankings(mode: TradingMode): Promise<any[]> {
+    const response = await this.client.get<ApiResponse<any[]>>(
+      `/strategies/template-rankings?mode=${mode}`
+    );
+    return this.extractArrayFromResponse<any>(response, 'rankings');
+  }
+
+  // ============================================================================
+  // Walk-Forward Analytics (Task 9.4)
+  // ============================================================================
+
+  async getWalkForwardAnalytics(mode: TradingMode, period: string): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>(
+      `/strategies/autonomous/walk-forward-analytics?mode=${mode}&period=${period}`
+    );
+    return this.handleResponse(response);
+  }
+
+  // ============================================================================
+  // Position Detail (Task 9.5)
+  // ============================================================================
+
+  async getPositionDetail(symbol: string, mode: TradingMode): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>(
+      `/account/positions/${encodeURIComponent(symbol)}/detail?mode=${mode}`
+    );
+    return this.handleResponse(response);
+  }
+
+  // ============================================================================
+  // Data Quality (Task 11.1)
+  // ============================================================================
+
+  async getDataQuality(): Promise<any[]> {
+    const response = await this.client.get<ApiResponse<any[]>>('/data/quality');
+    return this.extractArrayFromResponse<any>(response, 'data');
+  }
+
+  // ============================================================================
+  // System Health (Task 11.2)
+  // ============================================================================
+
+  async getSystemHealth(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>('/control/system-health');
+    return this.handleResponse(response);
+  }
+
+  // ============================================================================
+  // Audit Log (Task 11.3)
+  // ============================================================================
+
+  async getAuditLog(filters?: {
+    event_types?: string[];
+    symbol?: string;
+    strategy_name?: string;
+    severity?: string;
+    start_date?: string;
+    end_date?: string;
+    search?: string;
+    offset?: number;
+    limit?: number;
+  }): Promise<any> {
+    const params = new URLSearchParams();
+    if (filters?.event_types?.length) params.append('event_types', filters.event_types.join(','));
+    if (filters?.symbol) params.append('symbol', filters.symbol);
+    if (filters?.strategy_name) params.append('strategy_name', filters.strategy_name);
+    if (filters?.severity) params.append('severity', filters.severity);
+    if (filters?.start_date) params.append('start_date', filters.start_date);
+    if (filters?.end_date) params.append('end_date', filters.end_date);
+    if (filters?.search) params.append('search', filters.search);
+    if (filters?.offset !== undefined) params.append('offset', String(filters.offset));
+    if (filters?.limit !== undefined) params.append('limit', String(filters.limit));
+    const qs = params.toString();
+    const response = await this.client.get<ApiResponse<any>>(`/audit/log${qs ? `?${qs}` : ''}`);
+    return this.handleResponse(response);
+  }
+
+  async getTradeLifecycle(tradeId: string): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>(`/audit/trade-lifecycle/${encodeURIComponent(tradeId)}`);
+    return this.handleResponse(response);
+  }
+
+  async exportAuditLog(filters?: {
+    event_types?: string[];
+    symbol?: string;
+    severity?: string;
+    start_date?: string;
+    end_date?: string;
+    search?: string;
+  }): Promise<Blob> {
+    const params = new URLSearchParams();
+    if (filters?.event_types?.length) params.append('event_types', filters.event_types.join(','));
+    if (filters?.symbol) params.append('symbol', filters.symbol);
+    if (filters?.severity) params.append('severity', filters.severity);
+    if (filters?.start_date) params.append('start_date', filters.start_date);
+    if (filters?.end_date) params.append('end_date', filters.end_date);
+    if (filters?.search) params.append('search', filters.search);
+    const qs = params.toString();
+    const response = await this.client.get(`/audit/export${qs ? `?${qs}` : ''}`, { responseType: 'blob' });
+    return response.data;
+  }
 }
 
 // Export singleton instance

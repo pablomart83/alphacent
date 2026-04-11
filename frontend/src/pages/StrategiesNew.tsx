@@ -3,8 +3,9 @@ import { motion } from 'framer-motion';
 import { 
   TrendingUp, Target, Activity, BarChart3, Search,
   MoreVertical, Eye, Pause, Trash2, PlayCircle, RefreshCw,
-  Layers,
+  Layers, Ban, ArrowDownCircle, Trophy,
 } from 'lucide-react';
+import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
@@ -66,6 +67,16 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [retiredLoaded, setRetiredLoaded] = useState(false);
 
+  // Template Rankings, Blacklists, Idle Demotions state (Task 9.1)
+  const [templateRankings, setTemplateRankings] = useState<any[]>([]);
+  const [templateRankingsLoading, setTemplateRankingsLoading] = useState(false);
+  const [templateRankingFamilyFilter, setTemplateRankingFamilyFilter] = useState<string>('all');
+  const [templateRankingTimeframeFilter, setTemplateRankingTimeframeFilter] = useState<string>('all');
+  const [templateRankingSortKey, setTemplateRankingSortKey] = useState<string>('win_rate');
+  const [templateRankingSortDir, setTemplateRankingSortDir] = useState<'asc' | 'desc'>('desc');
+  const [blacklists, setBlacklists] = useState<any[]>([]);
+  const [idleDemotions, setIdleDemotions] = useState<any[]>([]);
+
   // Fetch strategies
   const fetchStrategies = useCallback(async () => {
     if (!tradingMode) return;
@@ -77,6 +88,36 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
       setStrategies(data);
       setLastFetchedAt(new Date());
       setLoading(false);
+
+      // Fetch template rankings, blacklists, idle demotions in background (Task 9.1)
+      setTemplateRankingsLoading(true);
+      apiClient.getTemplateRankings(tradingMode).then((rankings) => {
+        setTemplateRankings(rankings || []);
+      }).catch(() => setTemplateRankings([])).finally(() => setTemplateRankingsLoading(false));
+
+      // Extract blacklists and idle demotions from strategies data
+      const bl: any[] = [];
+      const demotions: any[] = [];
+      data.forEach((s: any) => {
+        if (s.metadata?.blacklisted) {
+          bl.push({
+            template: s.template_name || s.name,
+            symbol: s.symbols?.[0] || '—',
+            type: s.metadata.blacklist_type || 'zero_trade',
+            date: s.metadata.blacklisted_at || s.updated_at,
+            reason: s.metadata.blacklist_reason || 'Zero trades',
+          });
+        }
+        if (s.metadata?.demoted || (s.status === 'BACKTESTED' && s.metadata?.demotion_reason)) {
+          demotions.push({
+            name: s.name,
+            timestamp: s.metadata?.demoted_at || s.updated_at,
+            reason: s.metadata?.demotion_reason || 'Idle — no positions or orders',
+          });
+        }
+      });
+      setBlacklists(bl);
+      setIdleDemotions(demotions);
     } catch (error) {
       const classified = classifyError(error, 'strategies');
       console.error('Failed to fetch strategies:', error);
@@ -625,6 +666,30 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           <div className="text-xs text-gray-400">{row.original.description || 'No description available'}</div>
         </div>
       ),
+    },
+    {
+      id: 'sparkline',
+      header: 'Equity',
+      cell: ({ row }) => {
+        const curve = row.original.backtest_results?.equity_curve;
+        if (!curve || curve.length < 2) return <div className="text-gray-600 text-xs">—</div>;
+        // Sample up to 20 points for the sparkline
+        const step = Math.max(1, Math.floor(curve.length / 20));
+        const sampled = curve.filter((_: any, i: number) => i % step === 0 || i === curve.length - 1);
+        const lastVal = sampled[sampled.length - 1]?.equity ?? 0;
+        const firstVal = sampled[0]?.equity ?? 0;
+        const color = lastVal >= firstVal ? '#22c55e' : '#ef4444';
+        return (
+          <div className="w-[60px] h-[24px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={sampled}>
+                <Line type="monotone" dataKey="equity" stroke={color} strokeWidth={1.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      },
+      size: 80,
     },
     {
       accessorKey: 'metadata.strategy_category',
@@ -1308,6 +1373,18 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             <TabsTrigger value="symbols" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
               <Target className="h-4 w-4 mr-2" />
               Symbols
+            </TabsTrigger>
+            <TabsTrigger value="rankings" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
+              <Trophy className="h-4 w-4 mr-2" />
+              Rankings
+            </TabsTrigger>
+            <TabsTrigger value="blacklists" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
+              <Ban className="h-4 w-4 mr-2" />
+              Blacklists ({blacklists.length})
+            </TabsTrigger>
+            <TabsTrigger value="demotions" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
+              <ArrowDownCircle className="h-4 w-4 mr-2" />
+              Demotions ({idleDemotions.length})
             </TabsTrigger>
           </TabsList>
 
@@ -2019,6 +2096,184 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           {/* Symbols Tab */}
           <TabsContent value="symbols" className="space-y-6">
             <SymbolManager />
+          </TabsContent>
+
+          {/* Template Rankings Tab (Task 9.1) */}
+          <TabsContent value="rankings" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Template Rankings</CardTitle>
+                <CardDescription>Performance rankings across all strategy templates</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {templateRankingsLoading ? (
+                  <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Loading rankings...</div>
+                ) : templateRankings.length === 0 ? (
+                  <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No template ranking data available</div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3 mb-4">
+                      <Select value={templateRankingFamilyFilter} onValueChange={setTemplateRankingFamilyFilter}>
+                        <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue placeholder="Family" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Families</SelectItem>
+                          {Array.from(new Set(templateRankings.map((t: any) => t.family || t.template_type || 'unknown'))).sort().map((f) => (
+                            <SelectItem key={String(f)} value={String(f)}>{String(f)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Select value={templateRankingTimeframeFilter} onValueChange={setTemplateRankingTimeframeFilter}>
+                        <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue placeholder="Timeframe" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Timeframes</SelectItem>
+                          {Array.from(new Set(templateRankings.map((t: any) => t.timeframe).filter(Boolean))).sort().map((tf) => (
+                            <SelectItem key={String(tf)} value={String(tf)}>{String(tf)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs font-mono">
+                        <thead>
+                          <tr className="border-b border-dark-border text-muted-foreground">
+                            {[
+                              { key: 'name', label: 'Template' },
+                              { key: 'win_rate', label: 'Win Rate' },
+                              { key: 'avg_sharpe', label: 'Avg Sharpe' },
+                              { key: 'total_trades', label: 'Trades' },
+                              { key: 'active_count', label: 'Active' },
+                              { key: 'last_proposal_date', label: 'Last Proposal' },
+                            ].map((col) => (
+                              <th
+                                key={col.key}
+                                className={cn('py-2 px-2 text-left cursor-pointer hover:text-gray-200', col.key !== 'name' && 'text-right')}
+                                onClick={() => {
+                                  if (templateRankingSortKey === col.key) {
+                                    setTemplateRankingSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+                                  } else {
+                                    setTemplateRankingSortKey(col.key);
+                                    setTemplateRankingSortDir('desc');
+                                  }
+                                }}
+                              >
+                                {col.label} {templateRankingSortKey === col.key ? (templateRankingSortDir === 'desc' ? '↓' : '↑') : ''}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {templateRankings
+                            .filter((t: any) => {
+                              const matchFamily = templateRankingFamilyFilter === 'all' || (t.family || t.template_type || 'unknown') === templateRankingFamilyFilter;
+                              const matchTf = templateRankingTimeframeFilter === 'all' || t.timeframe === templateRankingTimeframeFilter;
+                              return matchFamily && matchTf;
+                            })
+                            .sort((a: any, b: any) => {
+                              const av = a[templateRankingSortKey] ?? 0;
+                              const bv = b[templateRankingSortKey] ?? 0;
+                              if (typeof av === 'string') return templateRankingSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+                              return templateRankingSortDir === 'asc' ? av - bv : bv - av;
+                            })
+                            .map((t: any, idx: number) => (
+                              <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
+                                <td className="py-2 px-2 text-gray-200 truncate max-w-[200px]">{t.name || t.template_name || '—'}</td>
+                                <td className={cn('py-2 px-2 text-right', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>{t.win_rate != null ? `${(t.win_rate).toFixed(1)}%` : '—'}</td>
+                                <td className="py-2 px-2 text-right">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
+                                <td className="py-2 px-2 text-right">{t.total_trades ?? '—'}</td>
+                                <td className="py-2 px-2 text-right">{t.active_count ?? '—'}</td>
+                                <td className="py-2 px-2 text-right text-muted-foreground">{t.last_proposal_date ? new Date(t.last_proposal_date).toLocaleDateString() : '—'}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Blacklists Tab (Task 9.1) */}
+          <TabsContent value="blacklists" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base">Blacklisted Combos</CardTitle>
+                    <CardDescription>Blocked template+symbol combinations</CardDescription>
+                  </div>
+                  <div className="text-sm font-mono text-muted-foreground">
+                    Total: <span className="text-gray-200 font-semibold">{blacklists.length}</span>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {blacklists.length === 0 ? (
+                  <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No blacklisted combinations</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs font-mono">
+                      <thead>
+                        <tr className="border-b border-dark-border text-muted-foreground">
+                          <th className="py-2 px-2 text-left">Template</th>
+                          <th className="py-2 px-2 text-left">Symbol</th>
+                          <th className="py-2 px-2 text-left">Type</th>
+                          <th className="py-2 px-2 text-left">Date</th>
+                          <th className="py-2 px-2 text-left">Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {blacklists.map((bl: any, idx: number) => (
+                          <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
+                            <td className="py-2 px-2 text-gray-200 truncate max-w-[180px]">{bl.template}</td>
+                            <td className="py-2 px-2 text-gray-300">{bl.symbol}</td>
+                            <td className="py-2 px-2"><Badge variant="secondary" className="text-xs">{bl.type}</Badge></td>
+                            <td className="py-2 px-2 text-muted-foreground">{bl.date ? new Date(bl.date).toLocaleDateString() : '—'}</td>
+                            <td className="py-2 px-2 text-muted-foreground truncate max-w-[200px]">{bl.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Idle Demotions Tab (Task 9.1) */}
+          <TabsContent value="demotions" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Idle Demotions</CardTitle>
+                <CardDescription>Recently demoted strategies due to inactivity</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {idleDemotions.length === 0 ? (
+                  <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No recent demotions</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs font-mono">
+                      <thead>
+                        <tr className="border-b border-dark-border text-muted-foreground">
+                          <th className="py-2 px-2 text-left">Strategy</th>
+                          <th className="py-2 px-2 text-left">Timestamp</th>
+                          <th className="py-2 px-2 text-left">Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {idleDemotions.map((d: any, idx: number) => (
+                          <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
+                            <td className="py-2 px-2 text-gray-200">{d.name}</td>
+                            <td className="py-2 px-2 text-muted-foreground">{d.timestamp ? formatTimestamp(d.timestamp) : '—'}</td>
+                            <td className="py-2 px-2 text-muted-foreground">{d.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
 

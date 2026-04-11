@@ -1,4 +1,4 @@
-import { type FC, useState, useCallback, useRef, useEffect } from 'react';
+import { type FC, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { RefreshButton } from '../components/ui/RefreshButton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
@@ -50,15 +50,24 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
+  // Data quality state
+  const [dataQuality, setDataQuality] = useState<any[]>([]);
+  const [dqSortKey, setDqSortKey] = useState<string>('quality_score');
+  const [dqSortAsc, setDqSortAsc] = useState(false);
+  const [dqFilterClass, setDqFilterClass] = useState<string>('all');
+  const [dqFilterScore, setDqFilterScore] = useState<string>('all');
+
   const fetchStatus = useCallback(async () => {
     try {
       setError(null);
-      const [data, monData] = await Promise.all([
+      const [data, monData, dqData] = await Promise.all([
         apiClient.getDataSyncStatus() as Promise<SyncStatus>,
         apiClient.getMonitoringStatus().catch(() => null),
+        apiClient.getDataQuality().catch(() => []),
       ]);
       setStatus(data);
       if (monData) setMonitoringStatus(monData);
+      if (dqData) setDataQuality(dqData);
       setLastFetchedAt(new Date());
       return data;
     } catch (err) {
@@ -154,6 +163,38 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
   const stats = status?.last_sync_stats as Record<string, number> | null;
   const logs = status?.sync_logs ?? [];
   const isRunning = syncing || (status?.sync_running ?? false);
+
+  // Data quality: sort + filter
+  const assetClasses = useMemo(() => {
+    const s = new Set(dataQuality.map((d: any) => d.asset_class).filter(Boolean));
+    return Array.from(s).sort();
+  }, [dataQuality]);
+
+  const filteredDq = useMemo(() => {
+    let items = [...dataQuality];
+    if (dqFilterClass !== 'all') items = items.filter((d: any) => d.asset_class === dqFilterClass);
+    if (dqFilterScore === 'green') items = items.filter((d: any) => d.quality_score > 80);
+    else if (dqFilterScore === 'yellow') items = items.filter((d: any) => d.quality_score >= 60 && d.quality_score <= 80);
+    else if (dqFilterScore === 'red') items = items.filter((d: any) => d.quality_score < 60);
+    items.sort((a: any, b: any) => {
+      const av = a[dqSortKey] ?? 0;
+      const bv = b[dqSortKey] ?? 0;
+      if (typeof av === 'string') return dqSortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return dqSortAsc ? av - bv : bv - av;
+    });
+    return items;
+  }, [dataQuality, dqFilterClass, dqFilterScore, dqSortKey, dqSortAsc]);
+
+  const handleDqSort = (key: string) => {
+    if (dqSortKey === key) setDqSortAsc(!dqSortAsc);
+    else { setDqSortKey(key); setDqSortAsc(true); }
+  };
+
+  const scoreColor = (score: number) => {
+    if (score > 80) return '#22c55e';
+    if (score >= 60) return '#eab308';
+    return '#ef4444';
+  };
 
   return (
     <DashboardLayout onLogout={onLogout}>
@@ -366,16 +407,243 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
           </p>
         </div>
 
-        {/* Data Quality Section */}
+        {/* Data Quality Table (Req 19.1, 19.2, 19.6, 19.10) */}
         <div className="rounded-lg border p-6" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>
-          <h3 className="text-lg font-mono mb-3" style={{ color: 'var(--color-text-primary)' }}>Data Quality</h3>
-          <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            Data quality report not available. No dedicated quality report endpoint is currently configured.
-          </p>
-          <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-            Note: Check the Symbol Coverage section below for stale data indicators.
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-mono" style={{ color: 'var(--color-text-primary)' }}>Data Quality</h3>
+            <div className="flex items-center gap-2">
+              <select
+                value={dqFilterClass}
+                onChange={(e) => setDqFilterClass(e.target.value)}
+                className="text-xs font-mono rounded px-2 py-1 border"
+                style={{ backgroundColor: 'var(--color-dark-bg)', borderColor: 'var(--color-dark-border)', color: 'var(--color-text-primary)' }}
+              >
+                <option value="all">All Classes</option>
+                {assetClasses.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select
+                value={dqFilterScore}
+                onChange={(e) => setDqFilterScore(e.target.value)}
+                className="text-xs font-mono rounded px-2 py-1 border"
+                style={{ backgroundColor: 'var(--color-dark-bg)', borderColor: 'var(--color-dark-border)', color: 'var(--color-text-primary)' }}
+              >
+                <option value="all">All Scores</option>
+                <option value="green">Good (&gt;80)</option>
+                <option value="yellow">Warning (60-80)</option>
+                <option value="red">Critical (&lt;60)</option>
+              </select>
+            </div>
+          </div>
+          {filteredDq.length > 0 ? (
+            <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                  <tr style={{ color: 'var(--color-text-secondary)' }}>
+                    {[
+                      { key: 'symbol', label: 'Symbol' },
+                      { key: 'asset_class', label: 'Class' },
+                      { key: 'quality_score', label: 'Score' },
+                      { key: 'last_price_update', label: 'Last Update' },
+                      { key: 'data_source', label: 'Source' },
+                      { key: 'active_issues', label: 'Issues' },
+                      { key: 'staleness_seconds', label: 'Staleness' },
+                    ].map((col) => (
+                      <th
+                        key={col.key}
+                        className="text-left py-2 px-3 cursor-pointer hover:text-gray-300 text-xs font-mono"
+                        onClick={() => handleDqSort(col.key)}
+                      >
+                        {col.label} {dqSortKey === col.key ? (dqSortAsc ? '↑' : '↓') : ''}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredDq.map((row: any) => (
+                    <tr key={row.symbol} style={{ borderTop: '1px solid var(--color-dark-border)' }}>
+                      <td className="py-2 px-3 font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                        {row.symbol}
+                        {row.quality_score < 60 && <span className="ml-1 text-red-400 text-xs" title="Low quality score">⚠</span>}
+                      </td>
+                      <td className="py-2 px-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{row.asset_class || '—'}</td>
+                      <td className="py-2 px-3 font-mono font-semibold" style={{ color: row.quality_score != null ? scoreColor(row.quality_score) : 'var(--color-text-secondary)' }}>
+                        {row.quality_score != null ? row.quality_score : <span className="text-gray-500">Pending</span>}
+                      </td>
+                      <td className="py-2 px-3 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>{row.last_price_update ? formatAge(row.last_price_update) : '—'}</td>
+                      <td className="py-2 px-3 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{row.data_source || '—'}</td>
+                      <td className="py-2 px-3 font-mono" style={{ color: (row.active_issues ?? 0) > 0 ? '#eab308' : 'var(--color-text-secondary)' }}>{row.active_issues ?? 0}</td>
+                      <td className="py-2 px-3 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        {row.staleness_seconds != null ? (row.staleness_seconds < 3600 ? `${Math.round(row.staleness_seconds / 60)}m` : `${(row.staleness_seconds / 3600).toFixed(1)}h`) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              {dataQuality.length === 0 ? 'Data quality report not available yet.' : 'No symbols match the current filters.'}
+            </p>
+          )}
         </div>
+
+        {/* FMP Cache Status (Req 19.3) */}
+        {monitoringStatus?.system?.fmp && (
+          <div className="rounded-lg border p-6" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>
+            <h3 className="text-lg font-mono mb-4" style={{ color: 'var(--color-text-primary)' }}>FMP Cache Status</h3>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                <p className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>Last Warm</p>
+                <p className="text-sm font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                  {monitoringStatus.system.fmp.last_warm_time ? formatAge(monitoringStatus.system.fmp.last_warm_time) : '—'}
+                </p>
+              </div>
+              <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                <p className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>Symbols Warmed</p>
+                <p className="text-xl font-mono text-blue-400">{monitoringStatus.system.fmp.cache_size ?? 0}</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                <p className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>API Calls Today</p>
+                <p className="text-xl font-mono" style={{ color: 'var(--color-text-primary)' }}>{monitoringStatus.system.fmp.calls_today ?? 0}</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                <p className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>Cache Hits</p>
+                <p className="text-xl font-mono text-green-400">{monitoringStatus.system.fmp.cache_hits ?? '—'}</p>
+              </div>
+              <div className="rounded-lg p-4" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                <p className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>Remaining Calls</p>
+                <p className="text-xl font-mono" style={{ color: (monitoringStatus.system.fmp.max_calls - monitoringStatus.system.fmp.calls_today) < 50 ? '#ef4444' : 'var(--color-text-primary)' }}>
+                  {((monitoringStatus.system.fmp.max_calls ?? 0) - (monitoringStatus.system.fmp.calls_today ?? 0)).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Data Source Health (Req 19.4) */}
+        <div className="rounded-lg border p-6" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>
+          <h3 className="text-lg font-mono mb-4" style={{ color: 'var(--color-text-primary)' }}>Data Source Health</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { name: 'eToro', data: monitoringStatus?.system?.etoro },
+              { name: 'Yahoo Finance', data: monitoringStatus?.system?.yahoo },
+              { name: 'FMP', data: monitoringStatus?.system?.fmp },
+              { name: 'FRED', data: monitoringStatus?.system?.fred },
+            ].map(({ name, data }) => (
+              <div key={name} className="rounded-lg p-4" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className={`w-2.5 h-2.5 rounded-full ${
+                    data?.status === 'healthy' ? 'bg-green-400' :
+                    data?.status === 'degraded' ? 'bg-amber-400' :
+                    data?.status === 'disabled' ? 'bg-gray-500' :
+                    data ? 'bg-red-400' : 'bg-gray-600'
+                  }`} />
+                  <p className="text-sm font-mono" style={{ color: 'var(--color-text-primary)' }}>{name}</p>
+                </div>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  Status: <span className={data?.status === 'healthy' ? 'text-green-400' : data?.status === 'degraded' ? 'text-amber-400' : 'text-gray-500'}>{data?.status ?? 'unknown'}</span>
+                </p>
+                {data?.last_fetch_age && <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Last fetch: {data.last_fetch_age}</p>}
+                {data?.error_count != null && <p className="text-xs mt-0.5" style={{ color: data.error_count > 0 ? '#ef4444' : 'var(--color-text-secondary)' }}>Errors (1h): {data.error_count}</p>}
+                {data?.avg_response_ms != null && <p className="text-xs mt-0.5 font-mono" style={{ color: 'var(--color-text-secondary)' }}>{data.avg_response_ms}ms avg</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Price Sync Timeline (Req 19.5) */}
+        <div className="rounded-lg border p-6" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>
+          <h3 className="text-lg font-mono mb-4" style={{ color: 'var(--color-text-primary)' }}>Price Sync Timeline</h3>
+          <div className="space-y-4">
+            {/* Quick Update (10min) */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-mono" style={{ color: 'var(--color-text-primary)' }}>Quick Price Update (10min)</span>
+                <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                  Last: {status?.quick_update?.timestamp ? formatAge(status.quick_update.timestamp) : '—'}
+                </span>
+              </div>
+              <div className="w-full h-3 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                <div
+                  className="h-full rounded-full transition-all duration-1000"
+                  style={{
+                    width: quickUpdating ? '60%' : '100%',
+                    backgroundColor: quickUpdating ? '#eab308' : '#22c55e',
+                    animation: quickUpdating ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                  }}
+                />
+              </div>
+              <div className="flex justify-between text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <span>{status?.quick_update?.updated ?? 0} symbols • {status?.quick_update?.elapsed_s ?? 0}s</span>
+                <span>Next: ~10min cycle</span>
+              </div>
+            </div>
+            {/* Full Sync (55min) */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-mono" style={{ color: 'var(--color-text-primary)' }}>Full Price Sync (55min)</span>
+                <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                  Last: {status?.last_sync_at ? formatAge(status.last_sync_at) : '—'}
+                </span>
+              </div>
+              <div className="w-full h-3 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                <div
+                  className="h-full rounded-full transition-all duration-1000"
+                  style={{
+                    width: isRunning ? `${Math.min(95, ((status?.sync_elapsed_s ?? 0) / (status?.last_sync_duration_s ?? 60)) * 100)}%` : '100%',
+                    backgroundColor: isRunning ? '#3b82f6' : '#22c55e',
+                    animation: isRunning ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                  }}
+                />
+              </div>
+              <div className="flex justify-between text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <span>{db?.unique_symbols ?? 0} symbols • {status?.last_sync_duration_s ?? 0}s</span>
+                <span>Interval: {status ? `${Math.round(status.sync_interval_s / 60)}min` : '—'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Historical Data Coverage Heatmap (Req 19.8, 19.9) */}
+        {db?.recent_1h_symbols && db.recent_1h_symbols.length > 0 && (
+          <div className="rounded-lg border p-6" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>
+            <h3 className="text-lg font-mono mb-4" style={{ color: 'var(--color-text-primary)' }}>Historical Data Coverage</h3>
+            <div className="overflow-x-auto">
+              <div className="grid gap-0.5" style={{ gridTemplateColumns: `80px repeat(${Math.min(12, db.recent_1h_symbols.length)}, 1fr)` }}>
+                {/* Header row */}
+                <div className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>Symbol</div>
+                {db.recent_1h_symbols.slice(0, 12).map((s: any) => (
+                  <div key={`h-${s.symbol}`} className="text-[9px] font-mono text-center truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                    {s.symbol.slice(0, 5)}
+                  </div>
+                ))}
+                {/* Data rows — show a simplified coverage view */}
+                {['1h', '1d'].map((interval) => (
+                  <>
+                    <div key={interval} className="text-xs font-mono py-1" style={{ color: 'var(--color-text-secondary)' }}>{interval}</div>
+                    {db.recent_1h_symbols.slice(0, 12).map((s: any) => {
+                      const ageMs = Date.now() - new Date(s.latest).getTime();
+                      const fresh = ageMs < 2 * 60 * 60 * 1000;
+                      return (
+                        <div
+                          key={`${interval}-${s.symbol}`}
+                          className="h-6 rounded-sm cursor-pointer"
+                          style={{ backgroundColor: fresh ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)' }}
+                          title={`${s.symbol} (${interval}): ${fresh ? 'Fresh' : 'Stale'} — Last: ${new Date(s.latest).toLocaleString()}`}
+                        />
+                      );
+                    })}
+                  </>
+                ))}
+              </div>
+              {db.recent_1h_symbols.length > 12 && (
+                <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+                  Showing 12 of {db.recent_1h_symbols.length} symbols. Green = fresh, Red = stale/gap.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Symbol Coverage — Stale Data */}
         <div className="rounded-lg border p-6" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>

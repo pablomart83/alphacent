@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { wsManager } from '../services/websocket';
 
+/** Default fallback polling interval when WS disconnects (30s) */
+const WS_FALLBACK_INTERVAL_MS = 30000;
+
 export interface UsePollingOptions {
   /** Fetch function to call on each interval */
   fetchFn: () => Promise<void>;
@@ -10,6 +13,12 @@ export interface UsePollingOptions {
   enabled?: boolean;
   /** Whether to fetch immediately on mount (default: true) */
   fetchOnMount?: boolean;
+  /**
+   * When true, skip REST polling while WebSocket is connected.
+   * On WS disconnect, fall back to 30s REST polling.
+   * On WS reconnect, trigger a full data refresh.
+   */
+  skipWhenWsConnected?: boolean;
 }
 
 export interface UsePollingReturn {
@@ -23,18 +32,31 @@ export interface UsePollingReturn {
  * Reusable polling hook with visibility-aware pausing and WebSocket reconnection triggers.
  * Pauses when the browser tab is hidden, resumes with an immediate fetch when visible.
  * Also fetches immediately on WebSocket reconnection.
+ *
+ * When `skipWhenWsConnected` is true:
+ * - Polling is suppressed while WebSocket is connected (data arrives via WS events)
+ * - On WS disconnect, falls back to 30s REST polling
+ * - On WS reconnect, performs a full data refresh then suppresses polling again
  */
 export function usePolling(options: UsePollingOptions): UsePollingReturn {
-  const { fetchFn, intervalMs, enabled = true, fetchOnMount = true } = options;
+  const {
+    fetchFn,
+    intervalMs,
+    enabled = true,
+    fetchOnMount = true,
+    skipWhenWsConnected = false,
+  } = options;
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const isFetchingRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fetchFnRef = useRef(fetchFn);
   const wasConnectedRef = useRef<boolean | null>(null);
+  const skipWhenWsConnectedRef = useRef(skipWhenWsConnected);
 
-  // Keep fetchFn ref current to avoid stale closures
+  // Keep refs current to avoid stale closures
   fetchFnRef.current = fetchFn;
+  skipWhenWsConnectedRef.current = skipWhenWsConnected;
 
   const doFetch = useCallback(async () => {
     if (isFetchingRef.current) return;
@@ -51,9 +73,9 @@ export function usePolling(options: UsePollingOptions): UsePollingReturn {
     }
   }, []);
 
-  const startInterval = useCallback(() => {
+  const startInterval = useCallback((overrideMs?: number) => {
     if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(doFetch, intervalMs);
+    intervalRef.current = setInterval(doFetch, overrideMs ?? intervalMs);
   }, [doFetch, intervalMs]);
 
   const stopInterval = useCallback(() => {
@@ -73,10 +95,19 @@ export function usePolling(options: UsePollingOptions): UsePollingReturn {
     if (fetchOnMount) {
       doFetch();
     }
-    startInterval();
+
+    // If skipWhenWsConnected and WS is currently connected, don't start polling
+    if (skipWhenWsConnected && wsManager.isConnected()) {
+      // No interval — data comes via WS events
+      return () => stopInterval();
+    }
+
+    // Start polling (use fallback interval if skipWhenWsConnected and WS is disconnected)
+    const effectiveInterval = skipWhenWsConnected ? WS_FALLBACK_INTERVAL_MS : intervalMs;
+    startInterval(effectiveInterval);
 
     return () => stopInterval();
-  }, [enabled, fetchOnMount, doFetch, startInterval, stopInterval]);
+  }, [enabled, fetchOnMount, doFetch, startInterval, stopInterval, intervalMs, skipWhenWsConnected]);
 
   // Visibility-aware pausing
   useEffect(() => {
@@ -87,15 +118,21 @@ export function usePolling(options: UsePollingOptions): UsePollingReturn {
         stopInterval();
       } else {
         doFetch();
-        startInterval();
+        // Respect skipWhenWsConnected when resuming
+        if (skipWhenWsConnectedRef.current && wsManager.isConnected()) {
+          // WS is connected — don't restart polling
+          return;
+        }
+        const effectiveInterval = skipWhenWsConnectedRef.current ? WS_FALLBACK_INTERVAL_MS : intervalMs;
+        startInterval(effectiveInterval);
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [enabled, doFetch, startInterval, stopInterval]);
+  }, [enabled, doFetch, startInterval, stopInterval, intervalMs]);
 
-  // WebSocket reconnection trigger
+  // WebSocket connection state change handler
   useEffect(() => {
     if (!enabled) return;
 
@@ -103,14 +140,26 @@ export function usePolling(options: UsePollingOptions): UsePollingReturn {
       const wasConnected = wasConnectedRef.current;
       wasConnectedRef.current = connected;
 
-      // Fetch immediately on reconnection (false → true), skip initial notification
-      if (wasConnected === false && connected) {
-        doFetch();
+      if (skipWhenWsConnectedRef.current) {
+        if (wasConnected === false && connected) {
+          // Reconnected: full data refresh, then stop polling (WS takes over)
+          doFetch();
+          stopInterval();
+        } else if (wasConnected !== null && !connected) {
+          // Disconnected: start fallback 30s polling
+          doFetch();
+          startInterval(WS_FALLBACK_INTERVAL_MS);
+        }
+      } else {
+        // Original behavior: fetch on reconnection only
+        if (wasConnected === false && connected) {
+          doFetch();
+        }
       }
     });
 
     return unsubscribe;
-  }, [enabled, doFetch]);
+  }, [enabled, doFetch, startInterval, stopInterval]);
 
   const refresh = useCallback(async () => {
     await doFetch();

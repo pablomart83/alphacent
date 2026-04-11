@@ -212,6 +212,9 @@ def create_app() -> FastAPI:
     from src.api.routers import data_management
     app.include_router(data_management.router)
     
+    from src.api.routers import audit
+    app.include_router(audit.router, prefix="/audit", tags=["audit"])
+    
     logger.info("FastAPI application configured")
     
     return app

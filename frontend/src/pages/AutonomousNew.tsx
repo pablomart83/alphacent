@@ -23,6 +23,8 @@ import { wsManager } from '../services/websocket';
 import { cn, formatCurrency, formatPercentage, formatTimestamp } from '../lib/utils';
 import { utcToLocal } from '../lib/date-utils';
 import { classifyError } from '../lib/errors';
+import { InteractiveChart } from '../components/charts/InteractiveChart';
+import { colors as designColors } from '../lib/design-tokens';
 import type { 
   AutonomousStatus, SystemStatus, Strategy, Order, SystemState 
 } from '../types';
@@ -129,6 +131,11 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   const [scheduleUpdating, setScheduleUpdating] = useState(false);
   const [signalRefreshing, setSignalRefreshing] = useState(false);
 
+  // Walk-Forward Analytics state (Task 9.4)
+  const [walkForwardData, setWalkForwardData] = useState<any>(null);
+  const [walkForwardLoading, setWalkForwardLoading] = useState(false);
+  const [walkForwardPeriod, setWalkForwardPeriod] = useState<string>('3M');
+
   // Schedule editing state
   const [editFrequency, setEditFrequency] = useState<string>('weekly');
   const [editDay, setEditDay] = useState<string>('saturday');
@@ -193,6 +200,12 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
       
       setLoading(false);
       setLastFetchedAt(new Date());
+
+      // Fetch walk-forward analytics in background (Task 9.4)
+      setWalkForwardLoading(true);
+      apiClient.getWalkForwardAnalytics(tradingMode, walkForwardPeriod).then((data) => {
+        setWalkForwardData(data);
+      }).catch(() => setWalkForwardData(null)).finally(() => setWalkForwardLoading(false));
     } catch (err) {
       console.error('Failed to fetch autonomous data:', err);
       setError(classifyError(err, 'autonomous data'));
@@ -822,7 +835,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
         {/* Tabs */}
         <Tabs defaultValue="control" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid">
             <TabsTrigger value="control">Control & Status</TabsTrigger>
             <TabsTrigger value="lifecycle">
               Strategy Lifecycle ({filteredStrategies.length})
@@ -832,6 +845,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsTrigger>
             <TabsTrigger value="signals">Signal Activity</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
+            <TabsTrigger value="walkforward">Walk-Forward</TabsTrigger>
+            <TabsTrigger value="conviction">Conviction</TabsTrigger>
           </TabsList>
 
           {/* Tab 1: Control & Status */}
@@ -1691,7 +1706,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 Refresh
               </Button>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <MetricCard
                 label="Signals Generated"
                 value={signalData?.summary.total ?? 0}
@@ -2049,6 +2064,182 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+          </TabsContent>
+
+          {/* Walk-Forward Analytics Tab (Task 9.4) */}
+          <TabsContent value="walkforward" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Per-Cycle Stats */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Walk-Forward Analytics</CardTitle>
+                  <CardDescription>Per-cycle stats: proposals, backtests, pass rate, avg Sharpe</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {walkForwardLoading ? (
+                    <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Loading walk-forward data...</div>
+                  ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs font-mono">
+                        <thead>
+                          <tr className="border-b border-dark-border text-muted-foreground">
+                            <th className="py-2 px-2 text-left">Cycle</th>
+                            <th className="py-2 px-2 text-right">Proposals</th>
+                            <th className="py-2 px-2 text-right">Backtests</th>
+                            <th className="py-2 px-2 text-right">Pass Rate</th>
+                            <th className="py-2 px-2 text-right">Avg Sharpe</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {walkForwardData.cycles.slice(0, 20).map((c: any, idx: number) => (
+                            <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
+                              <td className="py-2 px-2 text-muted-foreground">{c.date || c.cycle_id || `#${idx + 1}`}</td>
+                              <td className="py-2 px-2 text-right">{c.proposals ?? '—'}</td>
+                              <td className="py-2 px-2 text-right">{c.backtests ?? '—'}</td>
+                              <td className={cn('py-2 px-2 text-right', (c.pass_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
+                                {c.pass_rate != null ? `${c.pass_rate.toFixed(1)}%` : '—'}
+                              </td>
+                              <td className="py-2 px-2 text-right">{c.avg_sharpe != null ? c.avg_sharpe.toFixed(2) : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No walk-forward data available</div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Pass Rate Over Time Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Walk-Forward Pass Rate</CardTitle>
+                  <CardDescription>Pass rate trend over time</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
+                    <InteractiveChart
+                      data={walkForwardData.pass_rate_history}
+                      dataKeys={[{ key: 'pass_rate', color: designColors.green, type: 'line' }]}
+                      xAxisKey="date"
+                      height={250}
+                      periods={['1M', '3M', '6M', '1Y', 'ALL']}
+                      defaultPeriod={walkForwardPeriod}
+                      onPeriodChange={(p) => {
+                        setWalkForwardPeriod(p);
+                        if (tradingMode) {
+                          apiClient.getWalkForwardAnalytics(tradingMode, p).then(setWalkForwardData).catch(() => {});
+                        }
+                      }}
+                      tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">No pass rate history available</div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Similarity Rejections */}
+            {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Similarity Rejections</CardTitle>
+                  <CardDescription>Strategies rejected due to similarity with existing ones</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs font-mono">
+                      <thead>
+                        <tr className="border-b border-dark-border text-muted-foreground">
+                          <th className="py-2 px-2 text-left">Rejected Strategy</th>
+                          <th className="py-2 px-2 text-left">Existing Strategy</th>
+                          <th className="py-2 px-2 text-right">Similarity %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {walkForwardData.similarity_rejections.map((r: any, idx: number) => (
+                          <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
+                            <td className="py-2 px-2 text-gray-200 truncate max-w-[200px]">{r.rejected_name || '—'}</td>
+                            <td className="py-2 px-2 text-gray-300 truncate max-w-[200px]">{r.existing_name || '—'}</td>
+                            <td className="py-2 px-2 text-right text-accent-red">{r.similarity != null ? `${(r.similarity * 100).toFixed(1)}%` : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Conviction Score Tab (Task 9.4) */}
+          <TabsContent value="conviction" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Conviction Score Decomposition</CardTitle>
+                <CardDescription>Breakdown of conviction scores for active strategies</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const activeWithConviction = strategies.filter(
+                    (s) => (s.status === 'DEMO' || s.status === 'LIVE') && s.metadata?.conviction_score
+                  );
+                  if (activeWithConviction.length === 0) {
+                    return <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No conviction score data available</div>;
+                  }
+                  const factors = ['signal_strength', 'fundamental_quality', 'regime_fit', 'carry_bias', 'halving_cycle'];
+                  const factorColors: Record<string, string> = {
+                    signal_strength: '#3b82f6',
+                    fundamental_quality: '#22c55e',
+                    regime_fit: '#f59e0b',
+                    carry_bias: '#8b5cf6',
+                    halving_cycle: '#ec4899',
+                  };
+                  return (
+                    <div className="space-y-3">
+                      {activeWithConviction.slice(0, 15).map((s) => {
+                        const total = s.metadata?.conviction_score || 0;
+                        const confidence = s.metadata?.confidence_factors || s.reasoning?.confidence_factors || {};
+                        return (
+                          <div key={s.id} className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-mono text-gray-300 truncate max-w-[200px]">{s.name}</span>
+                              <span className="text-xs font-mono font-semibold">{typeof total === 'number' ? total.toFixed(2) : total}</span>
+                            </div>
+                            <div className="flex h-4 rounded overflow-hidden bg-dark-border/30">
+                              {factors.map((f) => {
+                                const val = Number(confidence[f] || 0);
+                                const pct = total > 0 ? (val / total) * 100 : 0;
+                                if (pct <= 0) return null;
+                                return (
+                                  <div
+                                    key={f}
+                                    className="h-full"
+                                    style={{ width: `${pct}%`, backgroundColor: factorColors[f] || '#6b7280' }}
+                                    title={`${f.replace(/_/g, ' ')}: ${val.toFixed(2)} (${pct.toFixed(0)}%)`}
+                                  />
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {/* Legend */}
+                      <div className="flex flex-wrap gap-3 mt-4 text-xs text-muted-foreground">
+                        {factors.map((f) => (
+                          <span key={f} className="flex items-center gap-1">
+                            <span className="w-3 h-3 rounded" style={{ backgroundColor: factorColors[f] }} />
+                            {f.replace(/_/g, ' ')}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </motion.div>

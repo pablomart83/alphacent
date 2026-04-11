@@ -3,11 +3,21 @@ import { cn } from '../../lib/utils';
 
 /**
  * Base Skeleton primitive — a shimmering placeholder block.
+ *
+ * Uses a CSS shimmer animation (gradient sweep) layered on top of the
+ * standard pulse for a polished loading indicator.
  */
 function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn('animate-pulse rounded-md bg-muted', className)}
+      className={cn(
+        'relative overflow-hidden rounded-md bg-muted animate-pulse',
+        // shimmer sweep overlay
+        'before:absolute before:inset-0 before:-translate-x-full',
+        'before:bg-gradient-to-r before:from-transparent before:via-white/5 before:to-transparent',
+        'before:animate-[shimmer_2s_ease-in-out_infinite]',
+        className,
+      )}
       {...props}
     />
   );
@@ -18,10 +28,14 @@ export { Skeleton };
 // Re-export higher-level skeleton components for convenience
 export {
   MetricCardSkeleton,
+  MetricGridSkeleton,
   TableSkeleton,
   ChartSkeleton,
+  HeatmapSkeleton,
+  SummaryBarSkeleton,
   PageSkeleton,
   DashboardSkeleton,
+  DataSection,
 } from './loading-skeletons';
 
 /**

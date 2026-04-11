@@ -29,6 +29,9 @@ import {
 import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
+import type { RollingStatsData, AttributionData, TearSheetData, TCAData } from '../types/analytics';
+import { RollingStatisticsTab, PerformanceAttributionTab, TearSheetTab, TCATab } from './analytics';
+import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 
 interface AnalyticsNewProps {
   onLogout: () => void;
@@ -162,6 +165,28 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   // Trade Journal state
   const [tradeJournalEntries, setTradeJournalEntries] = useState<TradeJournalEntry[]>([]);
   const [tradeJournalPatterns, setTradeJournalPatterns] = useState<TradeJournalPatterns | null>(null);
+
+  // Rolling Statistics state
+  const [rollingStats, setRollingStats] = useState<RollingStatsData | null>(null);
+  const [rollingStatsLoading, setRollingStatsLoading] = useState(false);
+  const [rollingStatsError, setRollingStatsError] = useState<string | null>(null);
+  const [rollingWindow, setRollingWindow] = useState<number>(30);
+
+  // Performance Attribution state
+  const [perfAttribution, setPerfAttribution] = useState<AttributionData | null>(null);
+  const [perfAttributionLoading, setPerfAttributionLoading] = useState(false);
+  const [perfAttributionError, setPerfAttributionError] = useState<string | null>(null);
+  const [attributionGroupBy, setAttributionGroupBy] = useState<'sector' | 'asset_class'>('sector');
+
+  // Tear Sheet state
+  const [tearSheet, setTearSheet] = useState<TearSheetData | null>(null);
+  const [tearSheetLoading, setTearSheetLoading] = useState(false);
+  const [tearSheetError, setTearSheetError] = useState<string | null>(null);
+
+  // TCA state
+  const [tcaData, setTcaData] = useState<TCAData | null>(null);
+  const [tcaLoading, setTcaLoading] = useState(false);
+  const [tcaError, setTcaError] = useState<string | null>(null);
   const [journalFilters, setJournalFilters] = useState({
     strategy_id: '',
     symbol: '',
@@ -359,6 +384,56 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           apiClient.getTransactionCostSavings(tradingMode, period).catch(() => null),
         ]);
       }
+
+      // New analytics tabs — fetch independently
+      if (currentTab === 'rolling-statistics') {
+        setRollingStatsLoading(true);
+        setRollingStatsError(null);
+        try {
+          const rs = await apiClient.getRollingStatistics(tradingMode, period, rollingWindow);
+          setRollingStats(rs);
+        } catch (e: any) {
+          setRollingStatsError(e?.message || 'Failed to load rolling statistics');
+        } finally {
+          setRollingStatsLoading(false);
+        }
+      }
+      if (currentTab === 'perf-attribution') {
+        setPerfAttributionLoading(true);
+        setPerfAttributionError(null);
+        try {
+          const pa = await apiClient.getPerformanceAttribution(tradingMode, period, attributionGroupBy);
+          setPerfAttribution(pa);
+        } catch (e: any) {
+          setPerfAttributionError(e?.message || 'Failed to load performance attribution');
+        } finally {
+          setPerfAttributionLoading(false);
+        }
+      }
+      if (currentTab === 'tear-sheet') {
+        setTearSheetLoading(true);
+        setTearSheetError(null);
+        try {
+          const ts = await apiClient.getTearSheetData(tradingMode, period);
+          setTearSheet(ts);
+        } catch (e: any) {
+          setTearSheetError(e?.message || 'Failed to load tear sheet data');
+        } finally {
+          setTearSheetLoading(false);
+        }
+      }
+      if (currentTab === 'tca') {
+        setTcaLoading(true);
+        setTcaError(null);
+        try {
+          const tca = await apiClient.getTCAData(tradingMode, period);
+          setTcaData(tca);
+        } catch (e: any) {
+          setTcaError(e?.message || 'Failed to load TCA data');
+        } finally {
+          setTcaLoading(false);
+        }
+      }
       
       // Set tab-specific data (Phase 2 results)
       // Set strategy attribution
@@ -445,7 +520,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, [tradingMode, period, activeTab]);
+  }, [tradingMode, period, activeTab, rollingWindow, attributionGroupBy]);
 
   const fetchTradeJournalData = async () => {
     try {
@@ -556,10 +631,6 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       console.error('Failed to export CSV:', error);
       toast.error('Failed to export CSV');
     }
-  };
-
-  const handleExportPDF = () => {
-    toast.success('Generating PDF report...');
   };
 
   const handleGenerateMonthlyReport = () => {
@@ -770,16 +841,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               <Download className="h-4 w-4 mr-2" />
               Export CSV
             </Button>
-            <Button variant="outline" size="sm" onClick={handleExportPDF}>
-              <FileText className="h-4 w-4 mr-2" />
-              Export PDF
-            </Button>
+            <TearSheetGenerator />
             <RefreshButton loading={refreshing} label="Refresh" onClick={handleRefresh} />
           </div>
         </div>
 
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full h-auto" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+          <TabsList className="grid w-full h-auto" style={{ gridTemplateColumns: 'repeat(10, 1fr)' }}>
             <TabsTrigger value="performance" className="gap-2">
               <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Performance</span>
@@ -803,6 +871,22 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <TabsTrigger value="trade-journal" className="gap-2">
               <FileText className="h-4 w-4" />
               <span className="hidden sm:inline">Trade Journal</span>
+            </TabsTrigger>
+            <TabsTrigger value="rolling-statistics" className="gap-2">
+              <TrendingUp className="h-4 w-4" />
+              <span className="hidden sm:inline">Rolling Statistics</span>
+            </TabsTrigger>
+            <TabsTrigger value="perf-attribution" className="gap-2">
+              <PieChart className="h-4 w-4" />
+              <span className="hidden sm:inline">Attribution</span>
+            </TabsTrigger>
+            <TabsTrigger value="tear-sheet" className="gap-2">
+              <FileText className="h-4 w-4" />
+              <span className="hidden sm:inline">Tear Sheet</span>
+            </TabsTrigger>
+            <TabsTrigger value="tca" className="gap-2">
+              <BarChart3 className="h-4 w-4" />
+              <span className="hidden sm:inline">TCA</span>
             </TabsTrigger>
           </TabsList>
 
@@ -1890,7 +1974,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 <CardContent>
                   {convictionDistribution ? (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-4 gap-4 mb-4">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                         <div>
                           <p className="text-xs text-muted-foreground mb-1">Average</p>
                           <p className="text-lg font-bold font-mono">{convictionDistribution.avg_score?.toFixed(1) || 0}</p>
@@ -2426,6 +2510,53 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+          </TabsContent>
+
+          {/* ── Rolling Statistics Tab ── */}
+          <TabsContent value="rolling-statistics" className="space-y-6">
+            <RollingStatisticsTab
+              data={rollingStats}
+              loading={rollingStatsLoading}
+              error={rollingStatsError}
+              window={rollingWindow}
+              onWindowChange={(w) => { setRollingWindow(w); }}
+              period={period}
+              onRetry={() => handleTabChange('rolling-statistics')}
+            />
+          </TabsContent>
+
+          {/* ── Performance Attribution Tab ── */}
+          <TabsContent value="perf-attribution" className="space-y-6">
+            <PerformanceAttributionTab
+              data={perfAttribution}
+              loading={perfAttributionLoading}
+              error={perfAttributionError}
+              groupBy={attributionGroupBy}
+              onGroupByChange={(g) => { setAttributionGroupBy(g); }}
+              period={period}
+              onRetry={() => handleTabChange('perf-attribution')}
+            />
+          </TabsContent>
+
+          {/* ── Tear Sheet Tab ── */}
+          <TabsContent value="tear-sheet" className="space-y-6">
+            <TearSheetTab
+              data={tearSheet}
+              loading={tearSheetLoading}
+              error={tearSheetError}
+              onRetry={() => handleTabChange('tear-sheet')}
+            />
+          </TabsContent>
+
+          {/* ── TCA Tab ── */}
+          <TabsContent value="tca" className="space-y-6">
+            <TCATab
+              data={tcaData}
+              loading={tcaLoading}
+              error={tcaError}
+              period={period}
+              onRetry={() => handleTabChange('tca')}
+            />
           </TabsContent>
         </Tabs>
       </motion.div>

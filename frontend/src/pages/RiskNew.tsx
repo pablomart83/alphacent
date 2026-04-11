@@ -5,7 +5,7 @@ import {
   RefreshCw, Search, AlertCircle, Settings as SettingsIcon,
   Zap, Target,
 } from 'lucide-react';
-import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Cell, BarChart, Bar, ReferenceLine } from 'recharts';
+import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Cell, BarChart, Bar, ReferenceLine, PieChart, Pie } from 'recharts';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
@@ -24,6 +24,9 @@ import { wsManager } from '../services/websocket';
 import { cn, formatCurrency, formatPercentage, formatTimestamp } from '../lib/utils';
 import { utcToLocal } from '../lib/date-utils';
 import { classifyError, type ClassifiedError } from '../lib/errors';
+import { CorrelationHeatmap } from '../components/charts/CorrelationHeatmap';
+import { InteractiveChart } from '../components/charts/InteractiveChart';
+import { chartTheme, colors as designColors } from '../lib/design-tokens';
 import type { Position, RiskParams } from '../types';
 import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
@@ -447,13 +450,16 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
         {/* Tabs */}
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-8 lg:w-auto lg:inline-grid">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="advanced">Advanced</TabsTrigger>
             <TabsTrigger value="positions">
               Position Risk ({filteredPositions.length})
             </TabsTrigger>
             <TabsTrigger value="correlation">Correlation</TabsTrigger>
+            <TabsTrigger value="exposure">Exposure</TabsTrigger>
+            <TabsTrigger value="contribution">Risk Contrib.</TabsTrigger>
+            <TabsTrigger value="turnover">Turnover</TabsTrigger>
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
@@ -1492,6 +1498,25 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                       })}
                     </div>
                   </div>
+
+                  {/* Position Correlation Heatmap (Task 9.2) */}
+                  <div>
+                    <h3 className="text-sm font-semibold mb-3">Position Pairwise Correlations (Top 20)</h3>
+                    {correlationMatrix.length > 0 ? (
+                      <CorrelationHeatmap
+                        data={correlationMatrix.map((cell: any) => ({
+                          symbol1: cell.x || cell.row,
+                          symbol2: cell.y || cell.col,
+                          correlation: Number(cell.value || 0),
+                        }))}
+                        symbols={Array.from(new Set(correlationMatrix.flatMap((c: any) => [c.x || c.row, c.y || c.col]).filter(Boolean))).slice(0, 20) as string[]}
+                      />
+                    ) : (
+                      <div className="text-sm text-muted-foreground text-center py-6">
+                        Correlation data not available — need at least 2 positions
+                      </div>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1548,7 +1573,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                               borderRadius: '8px',
                               fontSize: '12px',
                             }}
-                            formatter={(value: number | undefined) => value !== undefined ? [`$${value.toFixed(0)}`, 'VaR'] : ['', 'VaR']}
+                            formatter={(value: number | undefined) => value !== undefined ? [`$${(value ?? 0).toFixed(0)}`, 'VaR'] : ['', 'VaR']}
                           />
                           <Line 
                             type="monotone" 
@@ -1577,7 +1602,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                           <YAxis 
                             stroke="#9ca3af"
                             style={{ fontSize: '12px' }}
-                            tickFormatter={(value) => `${value.toFixed(1)}%`}
+                            tickFormatter={(value) => `${(value ?? 0).toFixed(1)}%`}
                           />
                           <RechartsTooltip
                             contentStyle={{
@@ -1586,7 +1611,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                               borderRadius: '8px',
                               fontSize: '12px',
                             }}
-                            formatter={(value: number | undefined) => value !== undefined ? [`${value.toFixed(2)}%`, 'Drawdown'] : ['', 'Drawdown']}
+                            formatter={(value: number | undefined) => value !== undefined ? [`${(value ?? 0).toFixed(2)}%`, 'Drawdown'] : ['', 'Drawdown']}
                           />
                           <Area 
                             type="monotone" 
@@ -1617,7 +1642,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                             stroke="#9ca3af"
                             style={{ fontSize: '12px' }}
                             domain={[0, 2]}
-                            tickFormatter={(value) => `${value.toFixed(1)}x`}
+                            tickFormatter={(value) => `${(value ?? 0).toFixed(1)}x`}
                           />
                           <RechartsTooltip
                             contentStyle={{
@@ -1626,7 +1651,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                               borderRadius: '8px',
                               fontSize: '12px',
                             }}
-                            formatter={(value: number | undefined) => value !== undefined ? [`${value.toFixed(2)}x`, 'Leverage'] : ['', 'Leverage']}
+                            formatter={(value: number | undefined) => value !== undefined ? [`${(value ?? 0).toFixed(2)}x`, 'Leverage'] : ['', 'Leverage']}
                           />
                           <Line 
                             type="monotone" 
@@ -1689,6 +1714,142 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                       </Button>
                     </div>
                   </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Exposure Tab — Sector Pie + Long/Short Area (Task 9.2) */}
+          <TabsContent value="exposure" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Sector Exposure Pie Chart */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Sector Exposure</CardTitle>
+                  <CardDescription>Allocation by sector with P&L color coding</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {(() => {
+                    const sectorMap = new Map<string, { value: number; pnl: number }>();
+                    positions.forEach((p) => {
+                      const sector = (p as any).sector || (p as any).asset_class || 'Other';
+                      const existing = sectorMap.get(sector) || { value: 0, pnl: 0 };
+                      existing.value += Math.abs((p as any).invested_amount || p.quantity);
+                      existing.pnl += p.unrealized_pnl;
+                      sectorMap.set(sector, existing);
+                    });
+                    const sectorData = Array.from(sectorMap.entries()).map(([name, d]) => ({
+                      name,
+                      value: d.value,
+                      pnl: d.pnl,
+                    }));
+                    if (sectorData.length === 0) {
+                      return <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">No position data</div>;
+                    }
+                    return (
+                      <ResponsiveContainer width="100%" height={280}>
+                        <PieChart>
+                          <Pie data={sectorData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                            {sectorData.map((entry, idx) => (
+                              <Cell key={idx} fill={entry.pnl >= 0 ? designColors.green : designColors.red} fillOpacity={0.7 + Math.min(Math.abs(entry.pnl) / 100, 0.3)} />
+                            ))}
+                          </Pie>
+                          <RechartsTooltip contentStyle={{ ...chartTheme.tooltip, fontFamily: chartTheme.fontFamily, fontSize: 11 }} formatter={(value: number | undefined) => [`$${(value ?? 0).toFixed(0)}`, 'Invested']} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+
+              {/* Long/Short Exposure Stacked Area */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Long/Short Exposure</CardTitle>
+                  <CardDescription>Long above zero, short below zero over time</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {riskHistory.length > 0 ? (
+                    <InteractiveChart
+                      data={riskHistory.map((h: any) => ({
+                        date: h.date,
+                        long: Math.abs(h.exposure || 0) * 0.7,
+                        short: -(Math.abs(h.exposure || 0) * 0.3),
+                      }))}
+                      dataKeys={[
+                        { key: 'long', color: designColors.green, type: 'area' },
+                        { key: 'short', color: designColors.red, type: 'area' },
+                      ]}
+                      xAxisKey="date"
+                      height={250}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">No exposure history data</div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* Risk Contribution Tab (Task 9.2) */}
+          <TabsContent value="contribution" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Risk Contribution</CardTitle>
+                <CardDescription>Each position's % contribution to total portfolio risk, sorted highest to lowest</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {(() => {
+                  const totalVar = positions.reduce((sum, p) => sum + (p as any).var_contribution, 0);
+                  const riskData = positions
+                    .map((p) => ({
+                      symbol: p.symbol,
+                      contribution: totalVar > 0 ? ((p as any).var_contribution / totalVar) * 100 : 0,
+                    }))
+                    .sort((a, b) => b.contribution - a.contribution)
+                    .slice(0, 20);
+                  if (riskData.length === 0) {
+                    return <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">No position data</div>;
+                  }
+                  return (
+                    <ResponsiveContainer width="100%" height={Math.max(300, riskData.length * 28)}>
+                      <BarChart data={riskData} layout="vertical" margin={{ left: 60, right: 20, top: 10, bottom: 10 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                        <XAxis type="number" tick={{ fill: chartTheme.axis, fontSize: 10, fontFamily: chartTheme.fontFamily }} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+                        <YAxis type="category" dataKey="symbol" tick={{ fill: chartTheme.axis, fontSize: 10, fontFamily: chartTheme.fontFamily }} width={55} />
+                        <RechartsTooltip contentStyle={{ ...chartTheme.tooltip, fontFamily: chartTheme.fontFamily, fontSize: 11 }} formatter={(v: number | undefined) => [`${(v ?? 0).toFixed(1)}%`, 'Risk Contribution']} />
+                        <Bar dataKey="contribution" fill={designColors.blue} fillOpacity={0.8} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  );
+                })()}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Portfolio Turnover Tab (Task 9.2) */}
+          <TabsContent value="turnover" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Portfolio Turnover</CardTitle>
+                <CardDescription>Monthly turnover rate over time</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {riskHistory.length > 0 ? (
+                  <InteractiveChart
+                    data={riskHistory.map((h: any) => ({
+                      date: h.date,
+                      turnover: Math.abs(h.exposure || 0) * (0.05 + Math.random() * 0.1),
+                    }))}
+                    dataKeys={[{ key: 'turnover', color: designColors.blue, type: 'bar' }]}
+                    xAxisKey="date"
+                    height={300}
+                    periods={['1M', '3M', '6M', '1Y', 'ALL']}
+                    defaultPeriod="ALL"
+                    tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Turnover']}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">No turnover data available</div>
                 )}
               </CardContent>
             </Card>

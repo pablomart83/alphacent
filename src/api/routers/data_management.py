@@ -795,3 +795,151 @@ async def get_monitoring_status():
         result["error"] = str(e)
     
     return result
+
+
+# ============================================================================
+# Data Quality Models (Req 19)
+# ============================================================================
+
+class DataQualityEntry(BaseModel):
+    """Single symbol data quality entry."""
+    symbol: str
+    asset_class: str = "stock"
+    quality_score: float = 0.0
+    last_price_update: Optional[str] = None
+    data_source: str = "yahoo"
+    active_issues: int = 0
+    staleness_seconds: float = 0.0
+
+
+class DataQualityResponse(BaseModel):
+    """Data quality response — array of entries."""
+    entries: List[DataQualityEntry] = []
+
+
+@router.get("/quality", response_model=DataQualityResponse)
+async def get_data_quality():
+    """
+    Get data quality scores for all tracked symbols.
+
+    Computes quality from DataQualityReportORM and historical_price_cache freshness.
+    Falls back to cache-based staleness when no quality report exists.
+
+    Validates: Requirements 19.1, 19.6, 19.10
+    """
+    from src.models.database import get_database
+    from src.models.orm import DataQualityReportORM, HistoricalPriceCacheORM
+    from sqlalchemy import func, text
+
+    entries: List[DataQualityEntry] = []
+
+    # Load symbol universe for asset class mapping
+    asset_class_map: dict[str, str] = {}
+    try:
+        import yaml
+        from pathlib import Path
+        symbols_path = Path("config/symbols.yaml")
+        if symbols_path.exists():
+            with open(symbols_path) as f:
+                sym_config = yaml.safe_load(f) or {}
+            for ac, items in sym_config.items():
+                if isinstance(items, list):
+                    # ac is like "stocks", "etfs", "forex", etc. — normalize
+                    normalized = ac.rstrip("s") if ac.endswith("s") else ac
+                    for item in items:
+                        if isinstance(item, dict) and "symbol" in item:
+                            asset_class_map[item["symbol"]] = normalized
+    except Exception as e:
+        logger.debug(f"Could not load symbols.yaml: {e}")
+
+    try:
+        db = get_database()
+        session = db.get_session()
+        try:
+            now = datetime.now()
+
+            # Get latest quality reports per symbol
+            quality_reports: dict[str, DataQualityReportORM] = {}
+            reports = session.query(DataQualityReportORM).all()
+            for r in reports:
+                existing = quality_reports.get(r.symbol)
+                if not existing or (r.validated_at and existing.validated_at and r.validated_at > existing.validated_at):
+                    quality_reports[r.symbol] = r
+
+            # Get latest price update per symbol from historical_price_cache
+            latest_prices: dict[str, datetime] = {}
+            source_map: dict[str, str] = {}
+            rows = session.execute(text(
+                "SELECT symbol, MAX(fetched_at) as latest, source "
+                "FROM historical_price_cache "
+                "GROUP BY symbol"
+            )).fetchall()
+            for row in rows:
+                sym = row[0]
+                latest_ts = row[1]
+                src = row[2] or "yahoo"
+                if latest_ts:
+                    if isinstance(latest_ts, str):
+                        try:
+                            latest_prices[sym] = datetime.fromisoformat(latest_ts)
+                        except (ValueError, TypeError):
+                            pass
+                    elif isinstance(latest_ts, datetime):
+                        latest_prices[sym] = latest_ts
+                source_map[sym] = src.lower() if src else "yahoo"
+
+            # Build entries — union of quality reports and price cache symbols
+            all_symbols = set(quality_reports.keys()) | set(latest_prices.keys()) | set(asset_class_map.keys())
+
+            for sym in sorted(all_symbols):
+                qr = quality_reports.get(sym)
+                last_update = latest_prices.get(sym)
+
+                quality_score = 50.0  # default
+                active_issues = 0
+                if qr:
+                    quality_score = qr.quality_score
+                    active_issues = qr.issue_count
+                elif last_update:
+                    # Estimate quality from staleness
+                    staleness = (now - last_update).total_seconds()
+                    if staleness < 3600:
+                        quality_score = 95.0
+                    elif staleness < 86400:
+                        quality_score = 80.0
+                    elif staleness < 604800:
+                        quality_score = 60.0
+                    else:
+                        quality_score = 30.0
+
+                staleness_seconds = 0.0
+                last_price_str = None
+                if last_update:
+                    staleness_seconds = max(0.0, (now - last_update).total_seconds())
+                    last_price_str = last_update.isoformat()
+
+                data_source = source_map.get(sym, "yahoo")
+                # Normalize source names
+                source_lower = data_source.lower()
+                if "fmp" in source_lower:
+                    data_source = "fmp"
+                elif "etoro" in source_lower:
+                    data_source = "etoro"
+                else:
+                    data_source = "yahoo"
+
+                entries.append(DataQualityEntry(
+                    symbol=sym,
+                    asset_class=asset_class_map.get(sym, "stock"),
+                    quality_score=round(quality_score, 1),
+                    last_price_update=last_price_str,
+                    data_source=data_source,
+                    active_issues=active_issues,
+                    staleness_seconds=round(staleness_seconds, 1),
+                ))
+        finally:
+            session.close()
+    except Exception as e:
+        logger.error(f"Error computing data quality: {e}")
+
+    return DataQualityResponse(entries=entries)

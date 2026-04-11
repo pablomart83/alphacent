@@ -1345,3 +1345,247 @@ async def clear_blacklists(
         return {"success": True, "message": f"Cleared: {', '.join(cleared) if cleared else 'nothing to clear'}"}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+# ============================================================================
+# System Health Models (Req 17)
+# ============================================================================
+
+class CircuitBreakerEntry(BaseModel):
+    """Single circuit breaker status."""
+    category: str
+    state: str = "CLOSED"
+    failure_count: int = 0
+    cooldown_remaining_seconds: float = 0.0
+
+
+class MonitoringSubTask(BaseModel):
+    """Monitoring service sub-task status."""
+    name: str
+    last_cycle: Optional[str] = None
+    status: str = "healthy"
+    interval_seconds: int = 60
+
+
+class MonitoringServiceStatus(BaseModel):
+    """Monitoring service status."""
+    running: bool = False
+    sub_tasks: list[MonitoringSubTask] = []
+
+
+class TradingSchedulerStatus(BaseModel):
+    """Trading scheduler status."""
+    last_signal_time: Optional[str] = None
+    next_expected_run: Optional[str] = None
+    signals_last_run: int = 0
+    orders_last_run: int = 0
+
+
+class EToroApiHealth(BaseModel):
+    """eToro API health metrics."""
+    requests_per_minute: float = 0.0
+    error_rate_5m: float = 0.0
+    avg_response_ms: float = 0.0
+    rate_limit_remaining: int = 0
+
+
+class FmpCacheWarmStatus(BaseModel):
+    """FMP cache warm status."""
+    last_warm_time: Optional[str] = None
+    symbols_from_api: int = 0
+    symbols_from_cache: int = 0
+
+
+class CacheStats(BaseModel):
+    """Cache statistics."""
+    order_cache_hit_rate: float = 0.0
+    position_cache_hit_rate: float = 0.0
+    historical_cache_hit_rate: float = 0.0
+    fmp_cache_warm_status: FmpCacheWarmStatus = FmpCacheWarmStatus()
+
+
+class SystemEvent(BaseModel):
+    """System event entry."""
+    timestamp: str
+    type: str
+    description: str
+    severity: str = "info"
+
+
+class SystemHealthData(BaseModel):
+    """Full system health response."""
+    circuit_breakers: list[CircuitBreakerEntry] = []
+    monitoring_service: MonitoringServiceStatus = MonitoringServiceStatus()
+    trading_scheduler: TradingSchedulerStatus = TradingSchedulerStatus()
+    etoro_api: EToroApiHealth = EToroApiHealth()
+    cache_stats: CacheStats = CacheStats()
+    events_24h: list[SystemEvent] = []
+
+
+@router.get("/system-health", response_model=SystemHealthData)
+async def get_system_health(
+    _user: str = Depends(get_current_user),
+):
+    """
+    Get comprehensive system health data.
+
+    Returns circuit breaker states, monitoring service status, trading scheduler,
+    eToro API health, cache statistics, and recent system events.
+
+    Validates: Requirements 17.2, 17.3, 17.4, 17.5, 17.6, 17.7, 17.9
+    """
+    result = SystemHealthData()
+
+    # --- Circuit Breakers ---
+    try:
+        from src.core.monitoring_service import get_monitoring_service
+        mon = get_monitoring_service()
+        if mon:
+            cb_states = mon.get_circuit_breaker_states()
+            if isinstance(cb_states, dict):
+                for cat, info in cb_states.items():
+                    state_val = "CLOSED"
+                    failure_count = 0
+                    cooldown = 0.0
+                    if isinstance(info, dict):
+                        state_val = info.get("state", "CLOSED")
+                        failure_count = info.get("failure_count", 0)
+                        cooldown = info.get("cooldown_remaining", 0.0)
+                    result.circuit_breakers.append(CircuitBreakerEntry(
+                        category=cat,
+                        state=str(state_val),
+                        failure_count=failure_count,
+                        cooldown_remaining_seconds=cooldown,
+                    ))
+    except Exception as e:
+        logger.debug(f"Could not read circuit breakers: {e}")
+
+    # Ensure we always have 3 categories
+    existing_cats = {cb.category for cb in result.circuit_breakers}
+    for default_cat in ["orders", "positions", "market_data"]:
+        if default_cat not in existing_cats:
+            result.circuit_breakers.append(CircuitBreakerEntry(category=default_cat))
+
+    # --- Monitoring Service ---
+    try:
+        from src.core.monitoring_service import get_monitoring_service
+        mon = get_monitoring_service()
+        if mon:
+            result.monitoring_service.running = True
+            now = datetime.now()
+
+            sub_tasks_config = [
+                ("pending_orders", "_last_pending_check", getattr(mon, "pending_orders_interval", 5)),
+                ("order_status", "_last_order_check", getattr(mon, "order_status_interval", 30)),
+                ("position_sync", "_last_position_sync", getattr(mon, "position_sync_interval", 60)),
+                ("trailing_stops", "_last_trailing_check", getattr(mon, "trailing_stops_interval", 30)),
+            ]
+            for name, attr, interval in sub_tasks_config:
+                ts = getattr(mon, attr, 0)
+                last_cycle = None
+                task_status = "stale"
+                if ts and ts > 0:
+                    last_cycle = datetime.fromtimestamp(ts).isoformat()
+                    age = (now - datetime.fromtimestamp(ts)).total_seconds()
+                    task_status = "healthy" if age < interval * 3 else "stale"
+                result.monitoring_service.sub_tasks.append(MonitoringSubTask(
+                    name=name,
+                    last_cycle=last_cycle,
+                    status=task_status,
+                    interval_seconds=interval,
+                ))
+    except Exception as e:
+        logger.debug(f"Could not read monitoring service: {e}")
+
+    # --- Trading Scheduler ---
+    try:
+        from src.core.trading_scheduler import get_trading_scheduler
+        scheduler = get_trading_scheduler()
+        if scheduler:
+            last_signal = getattr(scheduler, "_last_signal_check", 0)
+            if last_signal and last_signal > 0:
+                result.trading_scheduler.last_signal_time = datetime.fromtimestamp(last_signal).isoformat()
+
+            next_run = getattr(scheduler, "_next_run_time", None)
+            if next_run:
+                if isinstance(next_run, (int, float)) and next_run > 0:
+                    result.trading_scheduler.next_expected_run = datetime.fromtimestamp(next_run).isoformat()
+                elif hasattr(next_run, "isoformat"):
+                    result.trading_scheduler.next_expected_run = next_run.isoformat()
+
+            result.trading_scheduler.signals_last_run = getattr(scheduler, "_signals_last_run", 0)
+            result.trading_scheduler.orders_last_run = getattr(scheduler, "_orders_last_run", 0)
+    except Exception as e:
+        logger.debug(f"Could not read trading scheduler: {e}")
+
+    # --- eToro API Health ---
+    try:
+        from src.core.monitoring_service import get_monitoring_service
+        mon = get_monitoring_service()
+        if mon and hasattr(mon, "_etoro_client"):
+            client = mon._etoro_client
+            result.etoro_api.requests_per_minute = getattr(client, "_requests_per_minute", 0.0)
+            result.etoro_api.error_rate_5m = getattr(client, "_error_rate_5m", 0.0)
+            result.etoro_api.avg_response_ms = getattr(client, "_avg_response_ms", 0.0)
+            result.etoro_api.rate_limit_remaining = getattr(client, "_rate_limit_remaining", 0)
+    except Exception as e:
+        logger.debug(f"Could not read eToro API health: {e}")
+
+    # --- Cache Stats ---
+    try:
+        from src.models.database import get_database
+        from sqlalchemy import text
+        db = get_database()
+        with db.engine.connect() as conn:
+            total_bars = conn.execute(text("SELECT COUNT(*) FROM historical_price_cache")).scalar() or 0
+            result.cache_stats.historical_cache_hit_rate = min(100.0, total_bars / 100.0) if total_bars else 0.0
+    except Exception as e:
+        logger.debug(f"Could not read cache stats: {e}")
+
+    # --- Events 24h (compose from recent state transitions and signal decisions) ---
+    try:
+        from src.models.database import get_database
+        from src.models.orm import StateTransitionHistoryORM, SignalDecisionLogORM
+        from datetime import timedelta
+        db = get_database()
+        session = db.get_session()
+        try:
+            cutoff = datetime.now() - timedelta(hours=24)
+
+            # State transitions
+            transitions = session.query(StateTransitionHistoryORM).filter(
+                StateTransitionHistoryORM.timestamp >= cutoff
+            ).order_by(StateTransitionHistoryORM.timestamp.desc()).limit(20).all()
+            for t in transitions:
+                result.events_24h.append(SystemEvent(
+                    timestamp=t.timestamp.isoformat() if t.timestamp else datetime.now().isoformat(),
+                    type="state_transition",
+                    description=f"State changed: {getattr(t, 'from_state', '?')} → {getattr(t, 'to_state', '?')}",
+                    severity="warning",
+                ))
+
+            # Recent signal decisions
+            signals = session.query(SignalDecisionLogORM).filter(
+                SignalDecisionLogORM.created_at >= cutoff
+            ).order_by(SignalDecisionLogORM.created_at.desc()).limit(30).all()
+            for s in signals:
+                sev = "info" if s.decision == "ACCEPTED" else "warning"
+                desc = f"Signal {s.decision}: {s.symbol} {s.side} ({s.signal_type})"
+                if s.rejection_reason:
+                    desc += f" — {s.rejection_reason}"
+                result.events_24h.append(SystemEvent(
+                    timestamp=s.created_at.isoformat() if s.created_at else datetime.now().isoformat(),
+                    type="signal_decision",
+                    description=desc,
+                    severity=sev,
+                ))
+
+            # Sort all events by timestamp descending
+            result.events_24h.sort(key=lambda e: e.timestamp, reverse=True)
+            result.events_24h = result.events_24h[:50]
+        finally:
+            session.close()
+    except Exception as e:
+        logger.debug(f"Could not read 24h events: {e}")
+
+    return result

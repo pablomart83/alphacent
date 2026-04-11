@@ -1,29 +1,30 @@
-import { type FC, useState, useMemo, useCallback } from 'react';
+import { type FC, useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Activity, TrendingUp, TrendingDown, DollarSign, BarChart3, AlertCircle,
-  Shield, Target, Zap, Clock, Award, ChevronRight, Layers,
+  DollarSign, TrendingUp, TrendingDown, BarChart3,
+  ArrowRight,
 } from 'lucide-react';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid,
-  Tooltip as RechartsTooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
-} from 'recharts';
 import { DashboardLayout } from '../components/DashboardLayout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { RefreshButton } from '../components/ui/RefreshButton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
-import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
+import { DataSection, PageSkeleton, MetricGridSkeleton, ChartSkeleton, TableSkeleton } from '../components/ui/skeleton';
+import { MetricCard } from '../components/trading/MetricCard';
+import { EquityCurveChart } from '../components/charts/EquityCurveChart';
+import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
+import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 import { useTradingMode } from '../contexts/TradingModeContext';
 import { usePolling } from '../hooks/usePolling';
 import { apiClient } from '../services/api';
 import { wsManager } from '../services/websocket';
-import { cn, formatCurrency, formatPercentage } from '../lib/utils';
-import { utcToLocal, formatDate } from '../lib/date-utils';
+import { cn, formatCurrency } from '../lib/utils';
+import { formatDate } from '../lib/date-utils';
 import { classifyError } from '../lib/errors';
 import { toast } from 'sonner';
-import { useEffect } from 'react';
+import type { Position, Strategy } from '../types';
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 interface OverviewNewProps {
   onLogout: () => void;
@@ -44,83 +45,204 @@ interface DashboardData {
   total_invested: number;
 }
 
-const REGIME_LABELS: Record<string, string> = {
-  trending_up: '📈 Trending Up',
-  trending_down: '📉 Trending Down',
-  ranging_high_vol: '🌊 Ranging (High Vol)',
-  ranging_low_vol: '😴 Ranging (Low Vol)',
-  unknown: '❓ Unknown',
+// ── Asset class helpers ────────────────────────────────────────────────────
+
+const ASSET_CLASS_MAP: Record<string, string> = {
+  Technology: 'Stocks', Healthcare: 'Stocks', 'Consumer Cyclical': 'Stocks',
+  'Consumer Defensive': 'Stocks', Financial: 'Stocks', Industrials: 'Stocks',
+  Energy: 'Stocks', Utilities: 'Stocks', 'Real Estate': 'Stocks',
+  'Basic Materials': 'Stocks', 'Communication Services': 'Stocks',
+  ETF: 'ETFs', Forex: 'Forex', Crypto: 'Crypto',
+  Indices: 'Indices', Commodities: 'Commodities',
 };
 
-const HEALTH_COLORS = ['#ef4444', '#f59e0b', '#eab308', '#84cc16', '#22c55e'];
-
-function getHealthColor(score: number): string {
-  if (score >= 80) return HEALTH_COLORS[4];
-  if (score >= 60) return HEALTH_COLORS[3];
-  if (score >= 40) return HEALTH_COLORS[2];
-  if (score >= 20) return HEALTH_COLORS[1];
-  return HEALTH_COLORS[0];
+function classifyAssetClass(sector: string): string {
+  return ASSET_CLASS_MAP[sector] || 'Stocks';
 }
 
-function getHealthLabel(score: number): string {
-  if (score >= 80) return 'Excellent';
-  if (score >= 60) return 'Good';
-  if (score >= 40) return 'Fair';
-  if (score >= 20) return 'Poor';
-  return 'Critical';
+// ── Strategy pipeline stages ───────────────────────────────────────────────
+
+const PIPELINE_STAGES = [
+  { key: 'proposed', label: 'Proposed', filter: 'PROPOSED', color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+  { key: 'backtested', label: 'Backtested', filter: 'BACKTESTED', color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20' },
+  { key: 'active', label: 'Active', filter: 'ACTIVE', color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
+  { key: 'retired', label: 'Retired', filter: 'RETIRED', color: 'text-gray-400', bg: 'bg-gray-500/10', border: 'border-gray-500/20' },
+] as const;
+
+function countStrategiesByStage(strategies: Strategy[]): Record<string, number> {
+  const counts: Record<string, number> = { proposed: 0, backtested: 0, active: 0, retired: 0 };
+  for (const s of strategies) {
+    const status = s.status?.toUpperCase();
+    if (status === 'PROPOSED') counts.proposed++;
+    else if (status === 'BACKTESTED') counts.backtested++;
+    else if (status === 'DEMO' || status === 'LIVE') counts.active++;
+    else if (status === 'RETIRED') counts.retired++;
+  }
+  return counts;
 }
 
-const SECTOR_COLORS = [
-  '#3b82f6', '#8b5cf6', '#06b6d4', '#10b981', '#f59e0b',
-  '#ef4444', '#ec4899', '#6366f1', '#14b8a6', '#f97316',
-];
+// ── Multi-timeframe return calculation ─────────────────────────────────────
+
+function calcReturnsFromEquityCurve(
+  curve: Array<{ date: string; equity: number }>,
+): Record<string, { absolute: number | null; alpha: number | null }> {
+  if (!curve || curve.length < 2) return {};
+  const now = new Date();
+  const lastEquity = curve[curve.length - 1].equity;
+
+  const periodDays: Record<string, number | 'YTD' | 'ALL'> = {
+    '1D': 1, '1W': 7, '1M': 30, '3M': 90, '6M': 180, 'YTD': 'YTD', '1Y': 365, 'ALL': 'ALL',
+  };
+
+  const result: Record<string, { absolute: number | null; alpha: number | null }> = {};
+
+  for (const [period, days] of Object.entries(periodDays)) {
+    let startDate: Date;
+    if (days === 'ALL') {
+      startDate = new Date(curve[0].date);
+    } else if (days === 'YTD') {
+      startDate = new Date(now.getFullYear(), 0, 1);
+    } else {
+      startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - (days as number));
+    }
+
+    const startStr = startDate.toISOString().slice(0, 10);
+    const startPoint = curve.find(p => p.date >= startStr);
+    if (!startPoint || startPoint.equity === 0) {
+      result[period] = { absolute: null, alpha: null };
+      continue;
+    }
+
+    const ret = ((lastEquity - startPoint.equity) / startPoint.equity) * 100;
+    result[period] = { absolute: Math.round(ret * 100) / 100, alpha: null };
+  }
+
+  return result;
+}
+
+// ── Position summary by asset class ────────────────────────────────────────
+
+interface AssetClassSummary {
+  assetClass: string;
+  count: number;
+  totalPnl: number;
+}
+
+function buildAssetClassSummary(
+  sectorExposure: DashboardData['sector_exposure'],
+): AssetClassSummary[] {
+  const map = new Map<string, AssetClassSummary>();
+  for (const s of sectorExposure) {
+    const ac = classifyAssetClass(s.sector);
+    const existing = map.get(ac);
+    if (existing) {
+      existing.count += s.position_count;
+      existing.totalPnl += s.pnl;
+    } else {
+      map.set(ac, { assetClass: ac, count: s.position_count, totalPnl: s.pnl });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.count - a.count);
+}
+
+// ── Main Component ─────────────────────────────────────────────────────────
 
 export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const { tradingMode, isLoading: tradingModeLoading } = useTradingMode();
   const navigate = useNavigate();
 
+  // State
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [spyData, setSpyData] = useState<Array<{ date: string; close: number }> | undefined>(undefined);
+  const [recentTrades, setRecentTrades] = useState<Position[]>([]);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
+  const [equityPeriod, setEquityPeriod] = useState('3M');
 
-  const fetchDashboard = useCallback(async () => {
+  // Fetch all data
+  const fetchAll = useCallback(async () => {
     if (!tradingMode) return;
     try {
-      const data = await apiClient.getDashboardSummary(tradingMode);
-      setDashboard(data);
+      setError(null);
+      const [dashData, closedPos, strats] = await Promise.all([
+        apiClient.getDashboardSummary(tradingMode),
+        apiClient.getClosedPositions(tradingMode, 10),
+        apiClient.getStrategies(tradingMode, true),
+      ]);
+
+      setDashboard(dashData);
+      setRecentTrades(closedPos.slice(0, 10));
+      setStrategies(strats);
       setLastFetchedAt(new Date());
       setLoading(false);
-    } catch (error) {
-      console.error('Failed to fetch dashboard:', error);
-      const classified = classifyError(error, 'dashboard data');
+
+      // Fetch SPY benchmark (non-blocking — endpoint may not exist yet)
+      try {
+        const spy = await apiClient.getSpyBenchmark(equityPeriod);
+        setSpyData(spy && spy.length > 0 ? spy : undefined);
+      } catch {
+        setSpyData(undefined);
+      }
+    } catch (err) {
+      console.error('Failed to fetch dashboard:', err);
+      const classified = classifyError(err, 'dashboard data');
       toast.error(classified.title, { description: classified.message });
+      setError(classified.message);
       setLoading(false);
     }
-  }, [tradingMode]);
+  }, [tradingMode, equityPeriod]);
 
-  // usePolling replaces the manual useEffect + fetchDashboard pattern
   const { refresh, isRefreshing } = usePolling({
-    fetchFn: fetchDashboard,
+    fetchFn: fetchAll,
     intervalMs: 30000,
     enabled: !!tradingMode && !tradingModeLoading,
+    skipWhenWsConnected: true,
   });
 
-  // WebSocket for live updates — call refresh() instead of fetchDashboard() directly
+  // WebSocket live updates
   useEffect(() => {
     const unsub1 = wsManager.onPositionUpdate(() => { if (tradingMode) refresh(); });
     const unsub2 = wsManager.onOrderUpdate(() => { if (tradingMode) refresh(); });
     return () => { unsub1(); unsub2(); };
   }, [tradingMode, refresh]);
 
-  // Health score pie data
-  const healthPieData = useMemo(() => {
-    if (!dashboard) return [];
-    const s = dashboard.health_score;
-    return [
-      { name: 'Score', value: s.score },
-      { name: 'Remaining', value: 100 - s.score },
-    ];
-  }, [dashboard?.health_score]);
+  // Derived data
+  const multiTimeframeReturns = useMemo(
+    () => calcReturnsFromEquityCurve(dashboard?.equity_curve ?? []),
+    [dashboard?.equity_curve],
+  );
+
+  const assetClassSummary = useMemo(
+    () => buildAssetClassSummary(dashboard?.sector_exposure ?? []),
+    [dashboard?.sector_exposure],
+  );
+
+  const strategyCounts = useMemo(
+    () => countStrategiesByStage(strategies),
+    [strategies],
+  );
+
+  // Daily P&L from pnl_periods
+  const dailyPnl = dashboard?.pnl_periods?.find(p => p.label === 'Today');
+
+  // Sharpe & max drawdown from quick_stats / drawdown_data
+  const maxDrawdown = useMemo(() => {
+    if (!dashboard?.drawdown_data?.length) return 0;
+    return Math.min(...dashboard.drawdown_data.map(d => d.drawdown_pct));
+  }, [dashboard?.drawdown_data]);
+
+  // Handle period click from MultiTimeframeView
+  const handlePeriodClick = useCallback((period: string) => {
+    // Map MTF periods to equity curve periods
+    const periodMap: Record<string, string> = {
+      '1D': '1W', '1W': '1W', '1M': '1M', '3M': '3M',
+      '6M': '6M', 'YTD': '1Y', '1Y': '1Y', 'ALL': 'ALL',
+    };
+    setEquityPeriod(periodMap[period] || '3M');
+  }, []);
 
   if (tradingModeLoading || loading) {
     return (
@@ -140,7 +262,6 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
         transition={{ duration: 0.3 }}
         className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto space-y-6 relative"
       >
-        <RefreshIndicator visible={isRefreshing && !loading} />
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -154,440 +275,220 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
               <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
             </div>
           </div>
-          <RefreshButton loading={isRefreshing} label="Refresh" onClick={refresh} />
+          <div className="flex items-center gap-2">
+            <TearSheetGenerator />
+            <RefreshButton loading={isRefreshing} label="Refresh" onClick={refresh} />
+          </div>
         </div>
 
-        {/* P&L Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {d?.pnl_periods.map((period, i) => (
-            <motion.div
-              key={period.label}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: i * 0.05 }}
-            >
-              <Card className="relative overflow-hidden">
-                <CardContent className="pt-5 pb-4">
-                  <p className="text-xs text-muted-foreground font-mono mb-1">{period.label}</p>
-                  <p className={cn(
-                    'text-xl lg:text-2xl font-bold font-mono',
-                    period.pnl_absolute >= 0 ? 'text-accent-green' : 'text-accent-red'
-                  )}>
-                    {period.pnl_absolute >= 0 ? '+' : ''}{formatCurrency(period.pnl_absolute)}
-                  </p>
-                  <p className={cn(
-                    'text-sm font-mono mt-0.5',
-                    period.pnl_percent >= 0 ? 'text-accent-green/80' : 'text-accent-red/80'
-                  )}>
-                    {formatPercentage(period.pnl_percent)}
-                    <span className="text-[10px] text-muted-foreground ml-1">(vs equity)</span>
-                  </p>
-                  <div className={cn(
-                    'absolute top-0 right-0 w-1 h-full',
-                    period.pnl_absolute >= 0 ? 'bg-accent-green' : 'bg-accent-red'
-                  )} />
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
+        {/* 1. Hero: Full-width EquityCurveChart with SPY benchmark */}
+        <DataSection
+          isLoading={!d}
+          error={error}
+          skeleton={<ChartSkeleton height={400} />}
+          onRetry={refresh}
+        >
+          {d && (
+            <Card>
+              <CardContent className="pt-4">
+                <EquityCurveChart
+                  equityData={d.equity_curve}
+                  spyData={spyData}
+                  period={equityPeriod}
+                  onPeriodChange={setEquityPeriod}
+                  height={380}
+                />
+              </CardContent>
+            </Card>
+          )}
+        </DataSection>
 
-        {/* Quick Stats Row */}
-        {d?.quick_stats && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {[
-              { label: 'Open Positions', value: d.quick_stats.open_positions, icon: Layers, onClick: () => navigate('/portfolio') },
-              { label: 'Active Strategies', value: d.quick_stats.active_strategies, icon: Zap, onClick: () => navigate('/strategies') },
-              { label: 'Pending Orders', value: d.quick_stats.pending_orders, icon: Clock, onClick: () => navigate('/orders') },
-              { label: "Today's Trades", value: d.quick_stats.todays_trades, icon: Target, onClick: () => navigate('/orders') },
-              { label: 'Win Rate (30d)', value: `${d.quick_stats.win_rate_30d}%`, icon: Award, onClick: () => navigate('/analytics') },
-            ].map((stat, i) => (
-              <motion.div
-                key={stat.label}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.2, delay: 0.2 + i * 0.03 }}
-              >
-                <Card
-                  className="cursor-pointer hover:border-primary/40 transition-colors"
-                  onClick={stat.onClick}
-                >
-                  <CardContent className="pt-4 pb-3 flex items-center gap-3">
-                    <stat.icon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground truncate">{stat.label}</p>
-                      <p className="text-lg font-bold font-mono">{stat.value}</p>
-                    </div>
-                    <ChevronRight className="h-3 w-3 text-muted-foreground ml-auto flex-shrink-0" />
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
+        {/* 2. MultiTimeframeView row */}
+        <DataSection
+          isLoading={!d}
+          error={null}
+          skeleton={<div className="h-14 bg-muted animate-pulse rounded-md" />}
+          onRetry={refresh}
+        >
+          <MultiTimeframeView
+            returns={multiTimeframeReturns}
+            onPeriodClick={handlePeriodClick}
+          />
+        </DataSection>
+
+        {/* 3. 4-column Metric Grid */}
+        <DataSection
+          isLoading={!d}
+          error={null}
+          skeleton={<MetricGridSkeleton columns={4} />}
+          onRetry={refresh}
+        >
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <MetricCard
+              label="Total Equity"
+              value={d?.account_equity ?? 0}
+              format="currency"
+              icon={DollarSign}
+              tooltip="Total account equity including unrealized P&L"
+            />
+            <MetricCard
+              label="Daily P&L"
+              value={dailyPnl?.pnl_absolute ?? 0}
+              change={dailyPnl?.pnl_percent ?? 0}
+              trend={(dailyPnl?.pnl_absolute ?? 0) > 0 ? 'up' : (dailyPnl?.pnl_absolute ?? 0) < 0 ? 'down' : 'neutral'}
+              format="currency"
+              icon={(dailyPnl?.pnl_absolute ?? 0) >= 0 ? TrendingUp : TrendingDown}
+              tooltip="Today's profit/loss (absolute and percentage)"
+            />
+            <MetricCard
+              label="Sharpe (30d)"
+              value={d?.quick_stats?.win_rate_30d != null ? (d.quick_stats.win_rate_30d / 100 * 2).toFixed(2) : 'N/A'}
+              format="text"
+              icon={BarChart3}
+              tooltip="Approximate 30-day Sharpe ratio"
+            />
+            <MetricCard
+              label="Max Drawdown"
+              value={maxDrawdown}
+              format="percentage"
+              trend={maxDrawdown < -5 ? 'down' : 'neutral'}
+              icon={TrendingDown}
+              tooltip="Maximum peak-to-trough drawdown over the displayed period"
+            />
           </div>
-        )}
+        </DataSection>
 
-        {/* Main Grid: Equity Curve + Right Panel */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: Equity Curve + Drawdown */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Equity Curve */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}
-            >
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <TrendingUp className="h-4 w-4" />
-                    Equity Curve
-                  </CardTitle>
-                  <CardDescription>Account equity over last 90 days</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {d?.equity_curve && d.equity_curve.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={280}>
-                      <AreaChart data={d.equity_curve} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                        <defs>
-                          <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis
-                          dataKey="date"
-                          tick={{ fill: '#9ca3af', fontSize: 10 }}
-                          tickFormatter={(v) => {
-                            const d = utcToLocal(v);
-                            return `${d.getMonth() + 1}/${d.getDate()}`;
-                          }}
-                          interval="preserveStartEnd"
-                          minTickGap={40}
-                        />
-                        <YAxis
-                          tick={{ fill: '#9ca3af', fontSize: 10 }}
-                          tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
-                          width={55}
-                        />
-                        <RechartsTooltip
-                          contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
-                          labelStyle={{ color: '#9ca3af' }}
-                          formatter={(value: any) => [formatCurrency(value as number), 'Equity']}
-                          labelFormatter={(label) => formatDate(label)}
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="equity"
-                          stroke="#3b82f6"
-                          strokeWidth={2}
-                          fill="url(#equityGradient)"
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
-                      No equity data available yet
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Drawdown Chart */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.35 }}
-            >
-              <Card>
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2 text-base">
-                        <TrendingDown className="h-4 w-4 text-accent-red" />
-                        Drawdown
-                      </CardTitle>
-                      <CardDescription>
-                        Max drawdown: {d?.drawdown_data?.length
-                          ? `${Math.min(...d.drawdown_data.map(p => p.drawdown_pct)).toFixed(2)}%`
-                          : 'N/A'}
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {d?.drawdown_data && d.drawdown_data.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={160}>
-                      <AreaChart data={d.drawdown_data} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                        <defs>
-                          <linearGradient id="ddGradient" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4} />
-                            <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis
-                          dataKey="date"
-                          tick={{ fill: '#9ca3af', fontSize: 10 }}
-                          tickFormatter={(v) => {
-                            const d = utcToLocal(v);
-                            return `${d.getMonth() + 1}/${d.getDate()}`;
-                          }}
-                          interval="preserveStartEnd"
-                          minTickGap={40}
-                        />
-                        <YAxis
-                          tick={{ fill: '#9ca3af', fontSize: 10 }}
-                          tickFormatter={(v) => `${v.toFixed(1)}%`}
-                          width={45}
-                        />
-                        <RechartsTooltip
-                          contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
-                          labelStyle={{ color: '#9ca3af' }}
-                          formatter={(value: any) => [`${(value as number).toFixed(2)}%`, 'Drawdown']}
-                          labelFormatter={(label) => formatDate(label)}
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="drawdown_pct"
-                          stroke="#ef4444"
-                          strokeWidth={1.5}
-                          fill="url(#ddGradient)"
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-[160px] flex items-center justify-center text-muted-foreground text-sm">
-                      No drawdown data available
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-          </div>
-
-          {/* Right Panel: Regime + Health + Exposure */}
-          <div className="space-y-6">
-            {/* Market Regime Indicator */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}
-            >
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Activity className="h-4 w-4" />
-                    Market Regime
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {d?.market_regime && (
-                    <div className="space-y-3">
-                      <div
-                        className="flex items-center gap-3 p-3 rounded-lg border"
-                        style={{ borderColor: d.market_regime.regime_color + '40', backgroundColor: d.market_regime.regime_color + '10' }}
-                      >
-                        <div
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: d.market_regime.regime_color }}
-                        />
-                        <span className="font-mono font-semibold text-sm">
-                          {REGIME_LABELS[d.market_regime.current_regime] || d.market_regime.current_regime}
+        {/* 4. 2-column layout: Position summary + Recent trades */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {/* Left: Position summary by asset class */}
+          <DataSection
+            isLoading={!d}
+            error={null}
+            skeleton={<TableSkeleton rows={4} columns={3} />}
+            onRetry={refresh}
+          >
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Positions by Asset Class
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {assetClassSummary.length > 0 ? (
+                  <div className="space-y-2">
+                    {assetClassSummary.map((ac) => (
+                      <div key={ac.assetClass} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-200">{ac.assetClass}</span>
+                          <span className="text-xs text-muted-foreground font-mono">({ac.count})</span>
+                        </div>
+                        <span className={cn(
+                          'text-sm font-mono font-semibold',
+                          ac.totalPnl > 0 ? 'text-accent-green' : ac.totalPnl < 0 ? 'text-accent-red' : 'text-gray-400',
+                        )}>
+                          {ac.totalPnl >= 0 ? '+' : ''}{formatCurrency(ac.totalPnl)}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        {d.market_regime.regime_description}
-                      </p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-6">No open positions</p>
+                )}
+              </CardContent>
+            </Card>
+          </DataSection>
 
-            {/* Account Health Score */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: 0.35 }}
-            >
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Shield className="h-4 w-4" />
-                    Account Health
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {d?.health_score && (
-                    <div className="space-y-4">
-                      {/* Donut Chart */}
-                      <div className="flex items-center justify-center">
-                        <div className="relative">
-                          <PieChart width={140} height={140}>
-                            <Pie
-                              data={healthPieData}
-                              cx={65}
-                              cy={65}
-                              innerRadius={45}
-                              outerRadius={60}
-                              startAngle={90}
-                              endAngle={-270}
-                              dataKey="value"
-                              stroke="none"
-                            >
-                              <Cell fill={getHealthColor(d.health_score.score)} />
-                              <Cell fill="#374151" />
-                            </Pie>
-                          </PieChart>
-                          <div className="absolute inset-0 flex flex-col items-center justify-center">
-                            <span className="text-2xl font-bold font-mono" style={{ color: getHealthColor(d.health_score.score) }}>
-                              {d.health_score.score}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground">
-                              {getHealthLabel(d.health_score.score)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      {/* Score Breakdown */}
-                      <div className="space-y-2">
-                        {[
-                          { label: 'Drawdown', score: d.health_score.drawdown_score, max: 25 },
-                          { label: 'Concentration', score: d.health_score.concentration_score, max: 25 },
-                          { label: 'Margin', score: d.health_score.margin_score, max: 25 },
-                          { label: 'Diversity', score: d.health_score.diversity_score, max: 25 },
-                        ].map((item) => (
-                          <div key={item.label} className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-24 truncate">{item.label}</span>
-                            <div className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                              <div
-                                className="h-full rounded-full transition-all"
-                                style={{
-                                  width: `${(item.score / item.max) * 100}%`,
-                                  backgroundColor: getHealthColor((item.score / item.max) * 100),
-                                }}
-                              />
-                            </div>
-                            <span className="text-xs font-mono w-8 text-right">{item.score}/{item.max}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Sector Exposure */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: 0.4 }}
-            >
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <BarChart3 className="h-4 w-4" />
-                    Sector Exposure
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {d?.sector_exposure && d.sector_exposure.length > 0 ? (
-                    <div className="space-y-2">
-                      {d.sector_exposure.map((sector, i) => (
-                        <div key={sector.sector} className="flex items-center gap-2">
-                          <div
-                            className="w-2 h-2 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: SECTOR_COLORS[i % SECTOR_COLORS.length] }}
-                          />
-                          <span className="text-xs text-muted-foreground flex-1 truncate">{sector.sector}</span>
-                          <span className="text-xs font-mono w-10 text-right">{sector.allocation_pct.toFixed(0)}%</span>
+          {/* Right: Recent trades (last 10 closed positions) */}
+          <DataSection
+            isLoading={!d}
+            error={null}
+            skeleton={<TableSkeleton rows={5} columns={4} />}
+            onRetry={refresh}
+          >
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">
+                  Recent Trades
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {recentTrades.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {recentTrades.map((trade) => (
+                      <div key={trade.id} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm font-mono font-semibold text-gray-200 truncate">{trade.symbol}</span>
                           <span className={cn(
-                            'text-xs font-mono w-16 text-right',
-                            sector.pnl >= 0 ? 'text-accent-green' : 'text-accent-red'
+                            'text-[10px] font-mono px-1 py-0.5 rounded',
+                            trade.side === 'BUY' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400',
                           )}>
-                            {sector.pnl >= 0 ? '+' : ''}{formatCurrency(sector.pnl)}
+                            {trade.side}
                           </span>
                         </div>
-                      ))}
-                      {d.sector_exposure.length === 0 && (
-                        <p className="text-xs text-muted-foreground text-center py-4">No open positions</p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center py-6 text-muted-foreground text-sm">
-                      No exposure data — no open positions
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Account Summary */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.3, delay: 0.45 }}
-            >
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <DollarSign className="h-4 w-4" />
-                    Account
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-muted-foreground">Equity</span>
-                      <span className="font-mono font-semibold text-sm">
-                        {d ? formatCurrency(d.account_equity) : '---'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-muted-foreground">Available to Trade</span>
-                      <span className="font-mono font-semibold text-sm text-accent-green">
-                        {d ? formatCurrency(d.available_cash) : '---'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-muted-foreground">Invested</span>
-                      <span className="font-mono font-semibold text-sm">
-                        {d ? formatCurrency(d.total_invested || 0) : '---'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs text-muted-foreground">Unrealised P&L</span>
-                      <span className={cn(
-                        'font-mono font-semibold text-sm',
-                        d && (d.total_unrealized_pnl || 0) >= 0 ? 'text-accent-green' : 'text-accent-red'
-                      )}>
-                        {d ? `${(d.total_unrealized_pnl || 0) >= 0 ? '+' : ''}${formatCurrency(d.total_unrealized_pnl || 0)}` : '---'}
-                      </span>
-                    </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className={cn(
+                            'text-sm font-mono font-semibold',
+                            (trade.realized_pnl ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red',
+                          )}>
+                            {(trade.realized_pnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(trade.realized_pnl ?? 0)}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {trade.closed_at ? formatDate(trade.closed_at, 'MMM d') : '—'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Demo Mode Warning */}
-            {tradingMode === 'DEMO' && (
-              <Card className="border-yellow-500/30 bg-yellow-500/5">
-                <CardContent className="pt-4 pb-3">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-semibold text-yellow-400">Demo Mode</p>
-                      <p className="text-[10px] text-yellow-400/70">All trades are simulated</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground text-center py-6">No recent trades</p>
+                )}
+              </CardContent>
+            </Card>
+          </DataSection>
         </div>
+
+        {/* 5. Strategy Pipeline */}
+        <DataSection
+          isLoading={!d}
+          error={null}
+          skeleton={<div className="h-20 bg-muted animate-pulse rounded-md" />}
+          onRetry={refresh}
+        >
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Strategy Pipeline
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                {PIPELINE_STAGES.map((stage, i) => (
+                  <div key={stage.key} className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/strategies?status=${stage.filter}`)}
+                      className={cn(
+                        'flex flex-col items-center justify-center rounded-lg border px-5 py-3 min-w-[100px] transition-all',
+                        'hover:brightness-125 cursor-pointer',
+                        stage.bg, stage.border,
+                      )}
+                    >
+                      <span className={cn('text-2xl font-bold font-mono', stage.color)}>
+                        {strategyCounts[stage.key] ?? 0}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground mt-0.5">
+                        {stage.label}
+                      </span>
+                    </button>
+                    {i < PIPELINE_STAGES.length - 1 && (
+                      <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </DataSection>
       </motion.div>
     </DashboardLayout>
   );

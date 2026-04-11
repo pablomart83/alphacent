@@ -1888,3 +1888,174 @@ async def delete_closed_positions(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+# ============================================================================
+# Position Detail Endpoint (Task 9.8)
+# ============================================================================
+
+class OHLCVPoint(BaseModel):
+    """OHLCV price data point."""
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+
+
+class OrderAnnotation(BaseModel):
+    """Buy/sell order annotation for asset plot."""
+    date: str
+    side: str  # "BUY" or "SELL"
+    price: float
+    order_id: Optional[str] = None
+
+
+class PnLPoint(BaseModel):
+    """P&L data point over time."""
+    date: str
+    pnl: float
+
+
+class PositionDetailResponse(BaseModel):
+    """Position detail response with price history, order annotations, and P&L series."""
+    symbol: str
+    entry_price: float
+    current_price: float
+    side: str
+    opened_at: Optional[str] = None
+    price_history: List[OHLCVPoint]
+    order_annotations: List[OrderAnnotation]
+    pnl_series: List[PnLPoint]
+
+
+@router.get("/positions/{symbol}/detail", response_model=PositionDetailResponse)
+async def get_position_detail(
+    symbol: str,
+    mode: TradingMode,
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Get detailed position data for a symbol including price history,
+    order annotations, and P&L time series.
+
+    Args:
+        symbol: Trading symbol (e.g., AAPL, BTCUSD)
+        mode: Trading mode (DEMO or LIVE)
+        username: Current authenticated user
+        db: Database session
+
+    Returns:
+        PositionDetailResponse with price history, order annotations, and P&L series
+
+    Validates: Requirements 13.1, 13.2, 13.4
+    """
+    logger.info(f"Fetching position detail for {symbol} in {mode.value} mode, user {username}")
+
+    # Find the most recent open position for this symbol (or most recent closed)
+    position = db.query(PositionORM).filter(
+        PositionORM.symbol == symbol,
+        PositionORM.closed_at.is_(None),
+    ).order_by(PositionORM.opened_at.desc()).first()
+
+    if not position:
+        # Fall back to most recent closed position
+        position = db.query(PositionORM).filter(
+            PositionORM.symbol == symbol,
+        ).order_by(PositionORM.opened_at.desc()).first()
+
+    if not position:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No position found for symbol {symbol}",
+        )
+
+    opened_at = position.opened_at
+    side_str = "BUY" if position.side == PositionSide.LONG else "SELL"
+
+    # --- Price history from historical_price_cache ---
+    price_history: List[OHLCVPoint] = []
+    try:
+        from src.models.orm import HistoricalPriceCacheORM
+
+        price_query = db.query(HistoricalPriceCacheORM).filter(
+            HistoricalPriceCacheORM.symbol == symbol,
+            HistoricalPriceCacheORM.interval == "1d",
+        )
+        if opened_at:
+            price_query = price_query.filter(HistoricalPriceCacheORM.date >= opened_at)
+
+        price_rows = price_query.order_by(HistoricalPriceCacheORM.date.asc()).all()
+
+        for row in price_rows:
+            price_history.append(OHLCVPoint(
+                date=row.date.strftime("%Y-%m-%d") if row.date else "",
+                open=row.open,
+                high=row.high,
+                low=row.low,
+                close=row.close,
+                volume=row.volume,
+            ))
+    except Exception as e:
+        logger.warning(f"Could not load price history for {symbol}: {e}")
+
+    # --- Order annotations from orders table ---
+    order_annotations: List[OrderAnnotation] = []
+    try:
+        from src.models.orm import OrderORM
+        from src.models.enums import OrderStatus
+
+        orders = db.query(OrderORM).filter(
+            OrderORM.symbol == symbol,
+            OrderORM.status.in_([OrderStatus.FILLED.value, "FILLED"]),
+        ).order_by(OrderORM.filled_at.asc()).all()
+
+        for order in orders:
+            if order.filled_at and order.filled_price:
+                order_side = "BUY" if str(order.side).upper() in ("BUY", "LONG") else "SELL"
+                # Handle _EnumValue wrapper
+                side_val = order.side.value if hasattr(order.side, 'value') else str(order.side)
+                if side_val.upper() in ("BUY", "LONG"):
+                    order_side = "BUY"
+                else:
+                    order_side = "SELL"
+
+                order_annotations.append(OrderAnnotation(
+                    date=order.filled_at.strftime("%Y-%m-%d") if order.filled_at else "",
+                    side=order_side,
+                    price=order.filled_price,
+                    order_id=order.id,
+                ))
+    except Exception as e:
+        logger.warning(f"Could not load order annotations for {symbol}: {e}")
+
+    # --- P&L series ---
+    # Compute daily P&L from price history relative to entry price
+    pnl_series: List[PnLPoint] = []
+    entry_price = position.entry_price
+    invested = position.invested_amount or abs(position.quantity) or 0
+    is_short = position.side == PositionSide.SHORT
+
+    for ph in price_history:
+        if entry_price and entry_price > 0 and invested > 0:
+            if is_short:
+                pct_move = (entry_price - ph.close) / entry_price
+            else:
+                pct_move = (ph.close - entry_price) / entry_price
+            pnl = invested * pct_move
+        else:
+            pnl = 0.0
+        pnl_series.append(PnLPoint(date=ph.date, pnl=round(pnl, 2)))
+
+    return PositionDetailResponse(
+        symbol=symbol,
+        entry_price=position.entry_price,
+        current_price=position.current_price,
+        side=side_str,
+        opened_at=position.opened_at.isoformat() if position.opened_at else None,
+        price_history=price_history,
+        order_annotations=order_annotations,
+        pnl_series=pnl_series,
+    )

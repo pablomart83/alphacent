@@ -1,6 +1,5 @@
 import { useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
 
 /** Route map for number key navigation (1-8) */
 const PAGE_ROUTES: Record<string, string> = {
@@ -26,7 +25,7 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcutDef[] = [
   { key: '1-8', label: '1–8', description: 'Navigate to sidebar pages', category: 'navigation' },
   { key: 'r', label: 'R', description: 'Refresh current page data', category: 'actions' },
   { key: 'Escape', label: 'Esc', description: 'Close open modal / dialog', category: 'general' },
-  { key: 'mod+k', label: '⌘/Ctrl + K', description: 'Command palette (coming soon)', category: 'actions' },
+  { key: 'mod+k', label: '⌘/Ctrl + K', description: 'Command palette', category: 'actions' },
   { key: '?', label: '?', description: 'Show keyboard shortcuts help', category: 'general' },
 ];
 
@@ -56,10 +55,8 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions = {}) 
 
       const isMod = e.metaKey || e.ctrlKey;
 
-      // Ctrl/Cmd + K — command palette placeholder
+      // Ctrl/Cmd + K — handled by CommandPalette component directly
       if (isMod && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        toast.info('Command palette coming soon');
         return;
       }
 

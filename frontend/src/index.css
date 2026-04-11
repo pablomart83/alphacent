@@ -76,6 +76,23 @@
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
   --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1);
   
+  /* Semantic chart / data colors (design-system tokens — Req 4.2) */
+  --color-positive: #22c55e;
+  --color-negative: #ef4444;
+  --color-info: #3b82f6;
+  --color-warning: #eab308;
+
+  /* Chart theme (Req 4.3) */
+  --color-chart-bg: #111827;
+  --color-chart-grid: #374151;
+  --color-chart-axis: #9ca3af;
+
+  /* Table tokens (Req 4.4) */
+  --color-table-alt-row: rgba(31, 41, 55, 0.5);
+
+  /* Layout (Req 4.5) */
+  --layout-section-gap: 24px;
+
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -94,6 +111,15 @@
 
 /* ===== Light Theme Overrides ===== */
 [data-theme="light"] {
+  --color-positive: #16a34a;
+  --color-negative: #dc2626;
+  --color-info: #2563eb;
+  --color-warning: #ca8a04;
+  --color-chart-bg: #f8fafc;
+  --color-chart-grid: #e2e8f0;
+  --color-chart-axis: #64748b;
+  --color-table-alt-row: rgba(241, 245, 249, 0.7);
+
   --color-dark-bg: #f8fafc;
   --color-dark-surface: #ffffff;
   --color-dark-border: #e2e8f0;
@@ -521,6 +547,15 @@ h4 {
 
 .animate-pulse {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 /* Focus Visible Styles for Keyboard Navigation */

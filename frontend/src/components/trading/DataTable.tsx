@@ -116,7 +116,7 @@ function DataTableComponent<TData, TValue>({
               table.getRowModel().rows.map((row) => (
                 <tr
                   key={row.id}
-                  className="border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors"
+                  className="border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors even:bg-[rgba(31,41,55,0.5)]"
                 >
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} className="px-3 py-2">

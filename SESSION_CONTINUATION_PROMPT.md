@@ -638,3 +638,219 @@ curl https://alphacent.co.uk/health
 - WebSocket-driven real-time updates for equity, positions, P&L
 - Lazy load heavy charts only when scrolled into view
 - Cache API responses client-side with SWR or React Query
+
+### Session Improvements (April 11, 2026 — Session 3: Institutional-Grade UI/UX Overhaul)
+
+#### 75. Design System Foundation ✅
+- Created `frontend/src/lib/design-tokens.ts` — centralized color constants, chart theme, card/table/layout tokens, spacing scale, typography rules
+- Added CSS custom properties: `--color-positive`, `--color-negative`, `--color-chart-bg`, `--color-table-alt-row`, `--layout-section-gap`
+- Updated Card.tsx and Table.tsx to use design tokens consistently
+- Pre-built Recharts helpers: `chartAxisProps`, `chartGridProps`, `chartTooltipStyle`
+- **Files**: `frontend/src/lib/design-tokens.ts`, `frontend/src/index.css`, `frontend/src/components/ui/Card.tsx`, `frontend/src/components/ui/Table.tsx`
+
+#### 76. InteractiveChart Component ✅
+- Reusable chart wrapper with mouse-wheel zoom, click-and-drag pan, crosshair tooltip, PeriodSelector (1W/1M/3M/6M/1Y/ALL)
+- Dynamic Line/Area/Bar rendering from `dataKeys` prop, `children` prop for custom reference elements
+- Used by ~15 charts across the platform
+- **Files**: `frontend/src/components/charts/InteractiveChart.tsx`, `frontend/src/components/charts/PeriodSelector.tsx`, `frontend/src/components/charts/index.ts`
+
+#### 77. GlobalSummaryBar ✅
+- Persistent 48px bar below header on every page: Total Equity, Daily P&L ($+%), Open Positions, Active Strategies, Market Regime, System Health
+- Green/red P&L coloring, yellow warning when WebSocket disconnected
+- Real-time WebSocket updates, 30s polling fallback
+- Condensed Multi-Timeframe returns (1D/1W/1M/YTD) at viewport > 1440px
+- **Files**: `frontend/src/components/GlobalSummaryBar.tsx`, `frontend/src/components/DashboardLayout.tsx`
+
+#### 78. Sidebar Responsive Collapse ✅
+- Icon-only mode (64px) below 1024px, chevron toggle, Radix tooltips on hover
+- localStorage persistence, smooth 300ms transitions, "A" branding when collapsed
+- **Files**: `frontend/src/components/Sidebar.tsx`, `frontend/src/hooks/useMediaQuery.ts`
+
+#### 79. Enhanced Skeleton Loaders ✅
+- Shape-matching skeletons: ChartSkeleton, MetricGridSkeleton, TableSkeleton, HeatmapSkeleton, SummaryBarSkeleton, PageSkeleton
+- `DataSection` wrapper: loading → skeleton, loaded → 200ms fade-in, error → retry button, 10s timeout
+- Shimmer animation via CSS `@keyframes shimmer`
+- **Files**: `frontend/src/components/ui/loading-skeletons.tsx`, `frontend/src/components/ui/skeleton.tsx`
+
+#### 80. WebSocket Polling Optimization ✅
+- `usePolling` hook: `skipWhenWsConnected` option — suppresses REST polling when WS connected, 30s fallback on disconnect, full refresh on reconnect
+- Applied to GlobalSummaryBar, DashboardLayout, OverviewNew, PortfolioNew, OrdersNew
+- **Files**: `frontend/src/hooks/usePolling.ts`, all consumer pages
+
+#### 81. EquityCurveChart with SPY Benchmark ✅
+- Portfolio (blue) + SPY (gray dashed) normalized to 100, alpha shading (green/red between lines)
+- Crosshair tooltip with portfolio value, SPY value, alpha %
+- Synchronized drawdown sub-chart (1/3 height), "Benchmark unavailable" badge
+- Backend: `GET /analytics/spy-benchmark?period=3M` — queries historical_price_cache, falls back to Yahoo Finance
+- **Files**: `frontend/src/components/charts/EquityCurveChart.tsx`, `src/api/routers/analytics.py`
+
+#### 82. MultiTimeframeView ✅
+- Compact horizontal row: 1D/1W/1M/3M/6M/YTD/1Y/ALL with absolute return + alpha
+- Green/red background tint, clickable to update equity curve period, "N/A" for unavailable periods
+- **Files**: `frontend/src/components/charts/MultiTimeframeView.tsx`
+
+#### 83. Overview Page Redesign ✅
+- Hero: full-width EquityCurveChart with SPY benchmark
+- MultiTimeframeView row, 4-column Metric Grid (Equity, Daily P&L, Sharpe 30d, Max Drawdown)
+- 2-column: position summary by asset class + recent trades (last 10)
+- Strategy Pipeline: proposed → backtested → active → retired with clickable navigation
+- **Files**: `frontend/src/pages/OverviewNew.tsx`, `frontend/src/services/api.ts`
+
+#### 84. Rolling Statistics & Advanced Metrics Tab ✅
+- Analytics tab: Rolling Sharpe, Beta, Alpha, Volatility charts with 30d/60d/90d window toggle
+- Metric cards: PSR, Information Ratio, Treynor Ratio, Tracking Error
+- Backend: `GET /analytics/rolling-statistics` — computes from equity snapshots + SPY benchmark
+- **Files**: `frontend/src/pages/analytics/RollingStatisticsTab.tsx`, `src/api/routers/analytics.py`
+
+#### 85. Performance Attribution Tab ✅
+- Brinson model: allocation, selection, interaction effects per sector/asset class
+- Stacked bar chart, attribution summary table, cumulative effects time-series
+- Backend: `GET /analytics/performance-attribution` — Brinson decomposition from closed trades
+- **Files**: `frontend/src/pages/analytics/PerformanceAttributionTab.tsx`, `src/api/routers/analytics.py`
+
+#### 86. Tear Sheet Tab ✅
+- Underwater plot (red filled area), worst drawdowns table (top 5), return distribution histogram with normal overlay
+- Cumulative returns by year (green/red bars), monthly returns heatmap (year×month grid)
+- Backend: `GET /analytics/tear-sheet` — drawdown, distribution, skew/kurtosis, annual/monthly returns
+- **Files**: `frontend/src/pages/analytics/TearSheetTab.tsx`, `frontend/src/components/charts/UnderwaterPlot.tsx`, `frontend/src/components/charts/ReturnDistribution.tsx`, `frontend/src/components/charts/MonthlyReturnsHeatmap.tsx`
+
+#### 87. TCA (Transaction Cost Analysis) Tab ✅
+- "Cost as % of Alpha" headline metric, slippage by symbol/time/size, implementation shortfall table
+- Fill rate analysis, execution quality trend, per-asset-class breakdown, worst executions (top 10)
+- Backend: `GET /analytics/tca` — full TCA from filled orders
+- **Files**: `frontend/src/pages/analytics/TCATab.tsx`, `src/api/routers/analytics.py`
+
+#### 88. Strategies Page Enhancements ✅
+- Inline sparkline equity curves per strategy, template rankings table (175+ templates), blacklists section, idle demotions log
+- Backend: `GET /strategies/template-rankings` — aggregate metrics per template
+- **Files**: `frontend/src/pages/StrategiesNew.tsx`, `src/api/routers/strategies.py`
+
+#### 89. Risk Page Enhancements ✅
+- Correlation heatmap (top 20 positions), sector exposure pie with P&L coloring
+- Risk contribution bar chart, portfolio turnover chart, long/short exposure stacked area
+- **Files**: `frontend/src/pages/RiskNew.tsx`, `frontend/src/components/charts/CorrelationHeatmap.tsx`
+
+#### 90. Orders Page Timeline ✅
+- Order flow timeline: scatter chart showing placed/filled/cancelled events on horizontal time axis (last 7 days)
+- **Files**: `frontend/src/pages/OrdersNew.tsx`, `frontend/src/components/charts/OrderFlowTimeline.tsx`
+
+#### 91. Autonomous Page Enhancements ✅
+- Walk-forward analytics: per-cycle stats, pass rate chart over time
+- Conviction score decomposition (horizontal stacked bars), similarity rejection display
+- Backend: `GET /strategies/autonomous/walk-forward-analytics`
+- **Files**: `frontend/src/pages/AutonomousNew.tsx`, `src/api/routers/strategies.py`
+
+#### 92. Position Detail Drill-Down ✅
+- New page at `/portfolio/:symbol` with asset plot (price chart + buy/sell order annotations)
+- P&L time-series chart, order history table, "Order history unavailable" badge
+- Backend: `GET /account/positions/{symbol}/detail`
+- **Files**: `frontend/src/pages/PositionDetailView.tsx`, `frontend/src/components/charts/AssetPlot.tsx`, `src/api/routers/account.py`
+
+#### 93. Data Management Enhancements ✅
+- Data quality table: 297 symbols with quality score (color-coded), sortable/filterable
+- FMP cache status, data source health (eToro/Yahoo/FMP/FRED), price sync timeline with progress bars
+- Historical data coverage heatmap
+- Backend: `GET /data/quality`
+- **Files**: `frontend/src/pages/DataManagementNew.tsx`, `src/api/routers/data_management.py`
+
+#### 94. System Health Page ✅
+- New page at `/system-health`: circuit breaker states (green/yellow/red), monitoring service sub-tasks
+- Trading scheduler status, eToro API health, background thread status, cache statistics
+- 24-hour event timeline, WebSocket-driven updates, alert banner when circuit breaker OPEN
+- Backend: `GET /control/system-health`
+- **Files**: `frontend/src/pages/SystemHealthPage.tsx`, `frontend/src/lib/stores/system-health-store.ts`, `src/api/routers/control.py`
+
+#### 95. Audit Log Page ✅
+- New page at `/audit-log`: chronological log with virtual scrolling (@tanstack/react-virtual)
+- Multi-filter (event type, symbol, strategy, severity, date range), full-text search (200ms debounce)
+- Trade lifecycle detail view (signal → risk → order → fill → position → close)
+- Signal rejections, strategy lifecycle events, risk limit events tabs
+- CSV export: `AlphaCent_AuditLog_{start}_{end}.csv`
+- Backend: `GET /audit/log`, `GET /audit/trade-lifecycle/{trade_id}`, `GET /audit/export`
+- **Files**: `frontend/src/pages/AuditLogPage.tsx`, `frontend/src/lib/stores/audit-store.ts`, `src/api/routers/audit.py`
+
+#### 96. Command Palette ✅
+- Ctrl+K (Cmd+K on Mac) opens fuzzy search across symbols, strategies, pages, actions
+- Radix Dialog, fuse.js fuzzy search, keyboard navigation (↑↓ + Enter), recent items in localStorage
+- Rendered at App level, accessible from any page
+- **Files**: `frontend/src/components/CommandPalette.tsx`, `frontend/src/hooks/useFuzzySearch.ts`, `frontend/src/App.tsx`
+
+#### 97. PDF Tear Sheet Export ✅
+- "Download Tear Sheet" button on Overview and Analytics pages
+- Period selector (1M/3M/6M/1Y/ALL), html2canvas + jspdf for client-side PDF generation
+- Professional layout: AlphaCent header, key stats table, chart captures, sector exposure, top/bottom performers
+- Filename: `AlphaCent_TearSheet_{period}_{YYYY-MM-DD}.pdf`
+- **Files**: `frontend/src/components/pdf/TearSheetGenerator.tsx`, `frontend/src/pages/OverviewNew.tsx`, `frontend/src/pages/AnalyticsNew.tsx`
+
+#### 98. Mobile Responsive Layout ✅
+- GlobalSummaryBar: Equity + Daily P&L only below 768px, horizontal scroll for rest
+- Metric grids: 4 → 2 columns below 768px, charts: min 200px height, 2-column → single column below 640px
+- Sidebar: icon-only below 1024px
+- **Files**: All page components, `frontend/src/components/GlobalSummaryBar.tsx`, `frontend/src/components/charts/InteractiveChart.tsx`
+
+#### 99. Design System Audit ✅
+- Verified consistent card padding (16px), border radius (8px), border/bg colors across all pages
+- Consistent color coding (green/red/blue/yellow), chart theme (dark bg, grid, axis), table alternating rows
+- Font-mono for all numeric values, sans for labels
+- **Files**: All page components
+
+---
+
+## New Dependencies Added (Session 3)
+- `html2canvas` — DOM-to-canvas for PDF chart captures (~40KB)
+- `jspdf` — PDF document generation (~280KB)
+- `@tanstack/react-virtual` — Virtual scrolling for audit log (~10KB)
+- `fuse.js` — Fuzzy search for command palette (~15KB)
+
+## New Routes Added (Session 3)
+- `/system-health` — System Health page (circuit breakers, monitoring, API health)
+- `/audit-log` — Audit Log page (decision trail, trade lifecycle)
+- `/portfolio/:symbol` — Position Detail view (asset plot, P&L chart)
+
+## New Sidebar Nav Items (Session 3)
+- System (◍) — System Health page
+- Audit (◔) — Audit Log page
+
+## New Backend Endpoints (Session 3)
+- `GET /analytics/spy-benchmark` — SPY price data for benchmark overlay
+- `GET /analytics/rolling-statistics` — Rolling Sharpe/Beta/Alpha/Volatility + PSR/IR/Treynor
+- `GET /analytics/performance-attribution` — Brinson model decomposition
+- `GET /analytics/tear-sheet` — Underwater plot, drawdowns, return distribution, monthly returns
+- `GET /analytics/tca` — Full transaction cost analysis
+- `GET /strategies/template-rankings` — Template performance rankings
+- `GET /strategies/autonomous/walk-forward-analytics` — Walk-forward pass rates
+- `GET /account/positions/{symbol}/detail` — Position drill-down with price history + order annotations
+- `GET /control/system-health` — Circuit breakers, monitoring, scheduler, API health, cache stats
+- `GET /data/quality` — Per-symbol data quality scores
+- `GET /audit/log` — Filterable, paginated audit log
+- `GET /audit/trade-lifecycle/{trade_id}` — Full trade lifecycle chain
+- `GET /audit/export` — CSV export of audit log
+
+## New Frontend Components (Session 3)
+- `InteractiveChart` — Reusable chart with zoom/pan/crosshair/period selector
+- `PeriodSelector` — 1W/1M/3M/6M/1Y/ALL button row
+- `EquityCurveChart` — Portfolio + SPY benchmark with alpha shading + drawdown sub-chart
+- `MultiTimeframeView` — Compact return cells across 8 timeframes
+- `GlobalSummaryBar` — Persistent metrics bar on every page
+- `CommandPalette` — Ctrl+K fuzzy search navigation
+- `TearSheetGenerator` — PDF export with period selection
+- `UnderwaterPlot` — Drawdown area chart
+- `ReturnDistribution` — Histogram with normal overlay
+- `MonthlyReturnsHeatmap` — Year×month color-coded grid
+- `CorrelationHeatmap` — Pairwise correlation matrix
+- `OrderFlowTimeline` — Scatter chart of order events
+- `AssetPlot` — Price chart with buy/sell annotations
+- `DataSection` — Loading/error/timeout state wrapper
+
+## New Zustand Stores (Session 3)
+- `system-health-store.ts` — Circuit breakers, monitoring, scheduler state
+- `audit-store.ts` — Audit log entries, filters, pagination, CSV export
+
+## New Analytics Tab Components (Session 3)
+- `RollingStatisticsTab` — Rolling metrics + PSR/IR/Treynor/Tracking Error
+- `PerformanceAttributionTab` — Brinson model with sector/asset class toggle
+- `TearSheetTab` — Underwater plot, drawdowns, distribution, heatmap
+- `TCATab` — Slippage analysis, implementation shortfall, fill rates
+
+## New TypeScript Types (Session 3)
+- `frontend/src/types/analytics.ts` — RollingStatsData, AttributionData, TearSheetData, TCAData

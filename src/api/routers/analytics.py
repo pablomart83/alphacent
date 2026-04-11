@@ -2761,3 +2761,1075 @@ async def get_performance_stats(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get performance stats: {str(e)}"
         )
+
+
+# --- SPY Benchmark Data Endpoint ---
+
+class SPYBenchmarkPoint(BaseModel):
+    """Single SPY benchmark data point."""
+    date: str
+    close: float
+
+
+class SPYBenchmarkResponse(BaseModel):
+    """Response for SPY benchmark data."""
+    data: List[SPYBenchmarkPoint] = Field(default_factory=list)
+
+
+@router.get("/spy-benchmark", response_model=SPYBenchmarkResponse)
+async def get_spy_benchmark(
+    period: str = "ALL",
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session)
+):
+    """
+    Get SPY benchmark daily close prices for the requested period.
+
+    Args:
+        period: Time period — one of 1W, 1M, 3M, 6M, 1Y, ALL (default ALL)
+        username: Current authenticated user
+        session: Database session
+
+    Returns:
+        SPYBenchmarkResponse with date-sorted array of {date, close} objects.
+        Returns empty array if SPY data is unavailable.
+    """
+    logger.info(f"Getting SPY benchmark data for period {period}, user {username}")
+
+    period_map = {
+        "1W": timedelta(days=7),
+        "1M": timedelta(days=30),
+        "3M": timedelta(days=90),
+        "6M": timedelta(days=180),
+        "1Y": timedelta(days=365),
+        "ALL": timedelta(days=3650),
+    }
+    time_delta = period_map.get(period, timedelta(days=3650))
+    start_date = datetime.now() - time_delta
+
+    try:
+        from src.models.orm import HistoricalPriceCacheORM
+
+        rows = (
+            session.query(HistoricalPriceCacheORM)
+            .filter(
+                HistoricalPriceCacheORM.symbol == "SPY",
+                HistoricalPriceCacheORM.date >= start_date,
+            )
+            .order_by(HistoricalPriceCacheORM.date.asc())
+            .all()
+        )
+
+        if rows:
+            data = [
+                SPYBenchmarkPoint(
+                    date=row.date.strftime("%Y-%m-%d"),
+                    close=round(row.close, 2),
+                )
+                for row in rows
+                if row.close and row.close > 0
+            ]
+            return SPYBenchmarkResponse(data=data)
+
+        # No cached data — try fetching from Yahoo Finance via MarketDataManager
+        logger.info("No SPY data in cache, attempting Yahoo Finance fetch")
+        try:
+            from src.data.market_data_manager import MarketDataManager
+
+            mdm = MarketDataManager()
+            market_data_list = mdm.get_historical_data(
+                symbol="SPY",
+                start=start_date,
+                end=datetime.now(),
+                interval="1d",
+            )
+            if market_data_list:
+                data = [
+                    SPYBenchmarkPoint(
+                        date=md.timestamp.strftime("%Y-%m-%d"),
+                        close=round(md.close, 2),
+                    )
+                    for md in sorted(market_data_list, key=lambda m: m.timestamp)
+                    if md.close and md.close > 0
+                ]
+                return SPYBenchmarkResponse(data=data)
+        except Exception as e:
+            logger.warning(f"Failed to fetch SPY data from Yahoo Finance: {e}")
+
+        # No data available — return empty array (not an error)
+        return SPYBenchmarkResponse(data=[])
+
+    except Exception as e:
+        logger.error(f"Failed to get SPY benchmark data: {e}", exc_info=True)
+        # Return empty array on error — don't break the frontend
+        return SPYBenchmarkResponse(data=[])
+
+
+# =============================================================================
+# Rolling Statistics Endpoint (Task 7.2)
+# =============================================================================
+
+class RollingStatsPoint(BaseModel):
+    """Single rolling statistic data point."""
+    date: str
+    value: float
+
+
+class RollingStatsResponse(BaseModel):
+    """Response for rolling statistics data."""
+    rolling_sharpe: List[RollingStatsPoint] = Field(default_factory=list)
+    rolling_beta: List[RollingStatsPoint] = Field(default_factory=list)
+    rolling_alpha: List[RollingStatsPoint] = Field(default_factory=list)
+    rolling_volatility: List[RollingStatsPoint] = Field(default_factory=list)
+    probabilistic_sharpe: float = 0.0
+    information_ratio: float = 0.0
+    treynor_ratio: float = 0.0
+    tracking_error: float = 0.0
+
+
+@router.get("/rolling-statistics", response_model=RollingStatsResponse)
+async def get_rolling_statistics(
+    mode: TradingMode,
+    period: str = "3M",
+    window: int = 30,
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Get rolling statistics: Sharpe, Beta, Alpha, Volatility over time,
+    plus scalar metrics (PSR, IR, Treynor, Tracking Error).
+
+    Args:
+        mode: Trading mode (DEMO / LIVE)
+        period: 1M, 3M, 6M, 1Y, ALL
+        window: Rolling window in days (30, 60, 90)
+        username: Current authenticated user
+        session: Database session
+    """
+    logger.info(f"Rolling statistics: mode={mode.value} period={period} window={window}")
+
+    period_map = {
+        "1M": timedelta(days=30),
+        "3M": timedelta(days=90),
+        "6M": timedelta(days=180),
+        "1Y": timedelta(days=365),
+        "ALL": timedelta(days=3650),
+    }
+    time_delta = period_map.get(period, timedelta(days=90))
+    # Fetch extra history so the first rolling window has enough data
+    start_date = datetime.now() - time_delta - timedelta(days=window + 10)
+
+    try:
+        from src.models.orm import EquitySnapshotORM, HistoricalPriceCacheORM
+
+        # --- Equity curve daily snapshots ---
+        snapshots = (
+            session.query(EquitySnapshotORM)
+            .filter(EquitySnapshotORM.date >= start_date.strftime("%Y-%m-%d"))
+            .order_by(EquitySnapshotORM.date.asc())
+            .all()
+        )
+
+        if len(snapshots) < window + 1:
+            return RollingStatsResponse()
+
+        eq_dates = [s.date for s in snapshots]
+        eq_values = np.array([s.equity for s in snapshots], dtype=float)
+        eq_returns = np.diff(eq_values) / eq_values[:-1]
+        eq_return_dates = eq_dates[1:]
+
+        # --- SPY benchmark returns aligned to same dates ---
+        spy_rows = (
+            session.query(HistoricalPriceCacheORM)
+            .filter(
+                HistoricalPriceCacheORM.symbol == "SPY",
+                HistoricalPriceCacheORM.date >= start_date,
+            )
+            .order_by(HistoricalPriceCacheORM.date.asc())
+            .all()
+        )
+
+        spy_map: Dict[str, float] = {}
+        for r in spy_rows:
+            if r.close and r.close > 0:
+                spy_map[r.date.strftime("%Y-%m-%d")] = r.close
+
+        # Build aligned arrays
+        aligned_dates: List[str] = []
+        port_rets: List[float] = []
+        spy_rets: List[float] = []
+        prev_spy: Optional[float] = None
+
+        for i, d in enumerate(eq_return_dates):
+            spy_close = spy_map.get(d)
+            if spy_close is None:
+                prev_spy = None
+                continue
+            if prev_spy is None:
+                prev_spy = spy_close
+                continue
+            spy_ret = (spy_close - prev_spy) / prev_spy
+            prev_spy = spy_close
+            aligned_dates.append(d)
+            port_rets.append(float(eq_returns[i]))
+            spy_rets.append(spy_ret)
+
+        port_arr = np.array(port_rets)
+        spy_arr = np.array(spy_rets)
+        n = len(aligned_dates)
+
+        if n < window:
+            return RollingStatsResponse()
+
+        # --- Period filter: only output points within the requested period ---
+        period_start = (datetime.now() - period_map.get(period, timedelta(days=90))).strftime("%Y-%m-%d")
+
+        rolling_sharpe: List[RollingStatsPoint] = []
+        rolling_beta: List[RollingStatsPoint] = []
+        rolling_alpha: List[RollingStatsPoint] = []
+        rolling_volatility: List[RollingStatsPoint] = []
+
+        annualize = np.sqrt(252)
+        risk_free_daily = 0.02 / 252
+
+        for i in range(window, n):
+            d = aligned_dates[i]
+            if d < period_start:
+                continue
+
+            p_slice = port_arr[i - window : i]
+            s_slice = spy_arr[i - window : i]
+
+            # Sharpe
+            excess = p_slice - risk_free_daily
+            std_p = float(np.std(excess, ddof=1)) if len(excess) > 1 else 1e-9
+            sharpe = float(np.mean(excess)) / max(std_p, 1e-9) * annualize
+            rolling_sharpe.append(RollingStatsPoint(date=d, value=round(sharpe, 4)))
+
+            # Beta
+            cov_matrix = np.cov(p_slice, s_slice)
+            var_spy = cov_matrix[1, 1] if cov_matrix[1, 1] > 1e-12 else 1e-12
+            beta = float(cov_matrix[0, 1] / var_spy)
+            rolling_beta.append(RollingStatsPoint(date=d, value=round(beta, 4)))
+
+            # Alpha (annualised Jensen's alpha)
+            alpha = (float(np.mean(p_slice)) - risk_free_daily - beta * (float(np.mean(s_slice)) - risk_free_daily)) * 252
+            rolling_alpha.append(RollingStatsPoint(date=d, value=round(alpha, 4)))
+
+            # Volatility (annualised)
+            vol = float(np.std(p_slice, ddof=1)) * annualize
+            rolling_volatility.append(RollingStatsPoint(date=d, value=round(vol, 4)))
+
+        # --- Scalar metrics over full period ---
+        period_port = port_arr[max(0, n - window) :]
+        period_spy = spy_arr[max(0, n - window) :]
+
+        # Tracking error
+        tracking_diff = period_port - period_spy
+        tracking_error = float(np.std(tracking_diff, ddof=1)) * annualize if len(tracking_diff) > 1 else 0.0
+
+        # Information ratio
+        mean_excess_bench = float(np.mean(tracking_diff)) * 252
+        information_ratio = mean_excess_bench / max(tracking_error, 1e-9)
+
+        # Treynor ratio
+        full_cov = np.cov(period_port, period_spy)
+        full_var_spy = full_cov[1, 1] if full_cov[1, 1] > 1e-12 else 1e-12
+        full_beta = float(full_cov[0, 1] / full_var_spy)
+        treynor_ratio = (float(np.mean(period_port)) * 252 - 0.02) / max(abs(full_beta), 1e-9)
+
+        # Probabilistic Sharpe Ratio (PSR)
+        # PSR = Φ( (SR_hat - SR*) / SE(SR) )  where SR* = 0
+        sr_hat = float(np.mean(period_port - risk_free_daily)) / max(float(np.std(period_port, ddof=1)), 1e-9)
+        sr_hat_ann = sr_hat * annualize
+        n_obs = len(period_port)
+        skew_val = float(np.mean(((period_port - np.mean(period_port)) / max(np.std(period_port, ddof=1), 1e-9)) ** 3)) if n_obs > 2 else 0.0
+        kurt_val = float(np.mean(((period_port - np.mean(period_port)) / max(np.std(period_port, ddof=1), 1e-9)) ** 4)) - 3.0 if n_obs > 3 else 0.0
+        se_sr = np.sqrt((1 + 0.5 * sr_hat ** 2 - skew_val * sr_hat + (kurt_val / 4) * sr_hat ** 2) / max(n_obs - 1, 1))
+        # Approximate normal CDF without scipy: use the error function from math
+        import math
+        z = sr_hat / max(float(se_sr), 1e-9)
+        psr = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+        return RollingStatsResponse(
+            rolling_sharpe=rolling_sharpe,
+            rolling_beta=rolling_beta,
+            rolling_alpha=rolling_alpha,
+            rolling_volatility=rolling_volatility,
+            probabilistic_sharpe=round(psr, 4),
+            information_ratio=round(information_ratio, 4),
+            treynor_ratio=round(treynor_ratio, 4),
+            tracking_error=round(tracking_error, 4),
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to compute rolling statistics: {e}", exc_info=True)
+        return RollingStatsResponse()
+
+
+# =============================================================================
+# Performance Attribution Endpoint (Task 7.4)
+# =============================================================================
+
+class SectorAttribution(BaseModel):
+    """Attribution data for a single sector / asset class."""
+    sector: str
+    portfolio_weight: float = 0.0
+    benchmark_weight: float = 0.0
+    portfolio_return: float = 0.0
+    benchmark_return: float = 0.0
+    allocation_effect: float = 0.0
+    selection_effect: float = 0.0
+    interaction_effect: float = 0.0
+    total_contribution: float = 0.0
+
+
+class CumulativeEffectPoint(BaseModel):
+    """Single point in cumulative attribution effects time series."""
+    date: str
+    allocation: float = 0.0
+    selection: float = 0.0
+    interaction: float = 0.0
+
+
+class PerformanceAttributionResponse(BaseModel):
+    """Response for Brinson performance attribution."""
+    sectors: List[SectorAttribution] = Field(default_factory=list)
+    cumulative_effects: List[CumulativeEffectPoint] = Field(default_factory=list)
+
+
+@router.get("/performance-attribution", response_model=PerformanceAttributionResponse)
+async def get_performance_attribution(
+    mode: TradingMode,
+    period: str = "3M",
+    group_by: str = "sector",
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Brinson-model performance attribution by sector or asset class.
+
+    Args:
+        mode: Trading mode
+        period: 1M, 3M, 6M, 1Y, ALL
+        group_by: 'sector' or 'asset_class'
+        username: Current authenticated user
+        session: Database session
+    """
+    logger.info(f"Performance attribution: mode={mode.value} period={period} group_by={group_by}")
+
+    period_map = {
+        "1M": timedelta(days=30),
+        "3M": timedelta(days=90),
+        "6M": timedelta(days=180),
+        "1Y": timedelta(days=365),
+        "ALL": timedelta(days=3650),
+    }
+    time_delta = period_map.get(period, timedelta(days=90))
+    start_date = datetime.now() - time_delta
+
+    try:
+        import yaml
+
+        # --- Load symbol → sector / asset_class mapping ---
+        symbol_meta: Dict[str, Dict[str, str]] = {}
+        try:
+            with open("config/symbols.yaml", "r") as f:
+                sym_cfg = yaml.safe_load(f)
+            for asset_class, symbols in sym_cfg.items():
+                if not isinstance(symbols, list):
+                    continue
+                for entry in symbols:
+                    sym = entry.get("symbol", "")
+                    sector = entry.get("sector", "Other")
+                    symbol_meta[sym] = {"sector": sector, "asset_class": asset_class}
+        except Exception as e:
+            logger.warning(f"Could not load symbols.yaml: {e}")
+
+        # --- Closed positions in period ---
+        closed_positions = (
+            session.query(PositionORM)
+            .filter(
+                PositionORM.closed_at.isnot(None),
+                PositionORM.closed_at >= start_date,
+            )
+            .all()
+        )
+
+        if not closed_positions:
+            return PerformanceAttributionResponse()
+
+        # --- Group positions by sector/asset_class ---
+        group_key = "sector" if group_by == "sector" else "asset_class"
+
+        # Portfolio weights and returns per group
+        total_invested = 0.0
+        group_data: Dict[str, Dict[str, float]] = defaultdict(lambda: {"invested": 0.0, "pnl": 0.0})
+
+        for pos in closed_positions:
+            meta = symbol_meta.get(pos.symbol, {"sector": "Other", "asset_class": "other"})
+            grp = meta.get(group_key, "Other")
+            invested = abs(pos.invested_amount or pos.quantity or 0)
+            pnl = pos.realized_pnl or 0.0
+            group_data[grp]["invested"] += invested
+            group_data[grp]["pnl"] += pnl
+            total_invested += invested
+
+        if total_invested <= 0:
+            return PerformanceAttributionResponse()
+
+        # --- Benchmark weights (equal-weight across sectors as simple proxy) ---
+        n_groups = len(group_data)
+        benchmark_weight = 1.0 / max(n_groups, 1)
+
+        # --- SPY total return for the period as benchmark return proxy ---
+        from src.models.orm import HistoricalPriceCacheORM
+
+        spy_rows = (
+            session.query(HistoricalPriceCacheORM)
+            .filter(
+                HistoricalPriceCacheORM.symbol == "SPY",
+                HistoricalPriceCacheORM.date >= start_date,
+            )
+            .order_by(HistoricalPriceCacheORM.date.asc())
+            .all()
+        )
+
+        spy_return = 0.0
+        if len(spy_rows) >= 2:
+            first_close = spy_rows[0].close or 1
+            last_close = spy_rows[-1].close or first_close
+            spy_return = (last_close - first_close) / first_close
+
+        # --- Brinson decomposition per group ---
+        sectors_out: List[SectorAttribution] = []
+        for grp, data in sorted(group_data.items()):
+            wp = data["invested"] / total_invested
+            wb = benchmark_weight
+            rp = data["pnl"] / max(data["invested"], 1e-9)
+            rb = spy_return  # Use SPY return as benchmark return for each sector
+
+            alloc = (wp - wb) * rb
+            select = wb * (rp - rb)
+            interact = (wp - wb) * (rp - rb)
+
+            sectors_out.append(SectorAttribution(
+                sector=grp,
+                portfolio_weight=round(wp, 4),
+                benchmark_weight=round(wb, 4),
+                portfolio_return=round(rp, 4),
+                benchmark_return=round(rb, 4),
+                allocation_effect=round(alloc, 6),
+                selection_effect=round(select, 6),
+                interaction_effect=round(interact, 6),
+                total_contribution=round(alloc + select + interact, 6),
+            ))
+
+        # --- Cumulative effects time series (monthly buckets) ---
+        monthly_buckets: Dict[str, Dict[str, float]] = defaultdict(lambda: {"allocation": 0.0, "selection": 0.0, "interaction": 0.0})
+
+        for pos in closed_positions:
+            if not pos.closed_at:
+                continue
+            month_key = pos.closed_at.strftime("%Y-%m-01")
+            meta = symbol_meta.get(pos.symbol, {"sector": "Other", "asset_class": "other"})
+            grp = meta.get(group_key, "Other")
+            invested = abs(pos.invested_amount or pos.quantity or 0)
+            pnl = pos.realized_pnl or 0.0
+            wp = invested / max(total_invested, 1e-9)
+            wb = benchmark_weight
+            rp = pnl / max(invested, 1e-9)
+            rb = spy_return
+
+            monthly_buckets[month_key]["allocation"] += (wp - wb) * rb
+            monthly_buckets[month_key]["selection"] += wb * (rp - rb)
+            monthly_buckets[month_key]["interaction"] += (wp - wb) * (rp - rb)
+
+        cum_alloc = 0.0
+        cum_select = 0.0
+        cum_interact = 0.0
+        cumulative_effects: List[CumulativeEffectPoint] = []
+        for month_key in sorted(monthly_buckets.keys()):
+            b = monthly_buckets[month_key]
+            cum_alloc += b["allocation"]
+            cum_select += b["selection"]
+            cum_interact += b["interaction"]
+            cumulative_effects.append(CumulativeEffectPoint(
+                date=month_key,
+                allocation=round(cum_alloc, 6),
+                selection=round(cum_select, 6),
+                interaction=round(cum_interact, 6),
+            ))
+
+        return PerformanceAttributionResponse(
+            sectors=sectors_out,
+            cumulative_effects=cumulative_effects,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to compute performance attribution: {e}", exc_info=True)
+        return PerformanceAttributionResponse()
+
+
+# =============================================================================
+# Tear Sheet Data Endpoint (Task 7.6)
+# =============================================================================
+
+class UnderwaterPoint(BaseModel):
+    """Single underwater / drawdown data point."""
+    date: str
+    drawdown_pct: float
+
+
+class WorstDrawdown(BaseModel):
+    """A single drawdown event."""
+    rank: int
+    start_date: str
+    trough_date: str
+    recovery_date: Optional[str] = None
+    depth_pct: float
+    duration_days: int
+    recovery_days: Optional[int] = None
+
+
+class ReturnBin(BaseModel):
+    """Single histogram bin for return distribution."""
+    bin: float
+    count: int
+
+
+class AnnualReturn(BaseModel):
+    """Annual return entry."""
+    year: int
+    return_pct: float
+
+
+class MonthlyReturn(BaseModel):
+    """Monthly return entry."""
+    year: int
+    month: int
+    return_pct: float
+
+
+class TearSheetResponse(BaseModel):
+    """Response for tear sheet data."""
+    underwater_plot: List[UnderwaterPoint] = Field(default_factory=list)
+    worst_drawdowns: List[WorstDrawdown] = Field(default_factory=list)
+    return_distribution: List[ReturnBin] = Field(default_factory=list)
+    skew: float = 0.0
+    kurtosis: float = 0.0
+    annual_returns: List[AnnualReturn] = Field(default_factory=list)
+    monthly_returns: List[MonthlyReturn] = Field(default_factory=list)
+
+
+@router.get("/tear-sheet", response_model=TearSheetResponse)
+async def get_tear_sheet(
+    mode: TradingMode,
+    period: str = "1Y",
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Get tear sheet data: underwater plot, worst drawdowns, return distribution,
+    skew, kurtosis, annual returns, monthly returns.
+
+    Args:
+        mode: Trading mode
+        period: 1M, 3M, 6M, 1Y, ALL
+        username: Current authenticated user
+        session: Database session
+    """
+    logger.info(f"Tear sheet: mode={mode.value} period={period}")
+
+    period_map = {
+        "1M": timedelta(days=30),
+        "3M": timedelta(days=90),
+        "6M": timedelta(days=180),
+        "1Y": timedelta(days=365),
+        "ALL": timedelta(days=3650),
+    }
+    time_delta = period_map.get(period, timedelta(days=365))
+    start_date = datetime.now() - time_delta
+
+    try:
+        from src.models.orm import EquitySnapshotORM
+
+        snapshots = (
+            session.query(EquitySnapshotORM)
+            .filter(EquitySnapshotORM.date >= start_date.strftime("%Y-%m-%d"))
+            .order_by(EquitySnapshotORM.date.asc())
+            .all()
+        )
+
+        if len(snapshots) < 2:
+            return TearSheetResponse()
+
+        dates = [s.date for s in snapshots]
+        equities = np.array([s.equity for s in snapshots], dtype=float)
+        daily_returns = np.diff(equities) / equities[:-1]
+        return_dates = dates[1:]
+
+        # --- Underwater plot (drawdown from running peak) ---
+        running_max = np.maximum.accumulate(equities)
+        drawdowns = (equities - running_max) / running_max
+        underwater_plot = [
+            UnderwaterPoint(date=dates[i], drawdown_pct=round(float(drawdowns[i]) * 100, 4))
+            for i in range(len(dates))
+        ]
+
+        # --- Worst drawdowns (top 5) ---
+        worst_drawdowns = _compute_worst_drawdowns(dates, equities, top_n=5)
+
+        # --- Return distribution histogram ---
+        if len(daily_returns) > 0:
+            n_bins = min(50, max(10, len(daily_returns) // 5))
+            counts, bin_edges = np.histogram(daily_returns, bins=n_bins)
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+            return_distribution = [
+                ReturnBin(bin=round(float(bin_centers[i]) * 100, 4), count=int(counts[i]))
+                for i in range(len(counts))
+            ]
+        else:
+            return_distribution = []
+
+        # --- Skew and kurtosis ---
+        if len(daily_returns) > 2:
+            mean_r = float(np.mean(daily_returns))
+            std_r = float(np.std(daily_returns, ddof=1))
+            if std_r > 1e-12:
+                standardized = (daily_returns - mean_r) / std_r
+                skew_val = float(np.mean(standardized ** 3))
+                kurt_val = float(np.mean(standardized ** 4)) - 3.0  # excess kurtosis
+            else:
+                skew_val = 0.0
+                kurt_val = 0.0
+        else:
+            skew_val = 0.0
+            kurt_val = 0.0
+
+        # --- Annual returns ---
+        year_pnl: Dict[int, List[float]] = defaultdict(list)
+        for i, d in enumerate(return_dates):
+            try:
+                yr = int(d[:4])
+            except (ValueError, TypeError):
+                continue
+            year_pnl[yr].append(float(daily_returns[i]))
+
+        annual_returns = []
+        for yr in sorted(year_pnl.keys()):
+            cum = float(np.prod(1 + np.array(year_pnl[yr])) - 1)
+            annual_returns.append(AnnualReturn(year=yr, return_pct=round(cum * 100, 2)))
+
+        # --- Monthly returns ---
+        month_pnl: Dict[str, List[float]] = defaultdict(list)
+        for i, d in enumerate(return_dates):
+            try:
+                key = d[:7]  # "YYYY-MM"
+            except (ValueError, TypeError):
+                continue
+            month_pnl[key].append(float(daily_returns[i]))
+
+        monthly_returns = []
+        for key in sorted(month_pnl.keys()):
+            yr, mo = key.split("-")
+            cum = float(np.prod(1 + np.array(month_pnl[key])) - 1)
+            monthly_returns.append(MonthlyReturn(year=int(yr), month=int(mo), return_pct=round(cum * 100, 2)))
+
+        return TearSheetResponse(
+            underwater_plot=underwater_plot,
+            worst_drawdowns=worst_drawdowns,
+            return_distribution=return_distribution,
+            skew=round(skew_val, 4),
+            kurtosis=round(kurt_val, 4),
+            annual_returns=annual_returns,
+            monthly_returns=monthly_returns,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to compute tear sheet: {e}", exc_info=True)
+        return TearSheetResponse()
+
+
+def _compute_worst_drawdowns(dates: List[str], equities: np.ndarray, top_n: int = 5) -> List[WorstDrawdown]:
+    """Identify the top-N worst drawdown events from an equity curve."""
+    running_max = np.maximum.accumulate(equities)
+    dd_pct = (equities - running_max) / running_max
+
+    drawdowns: List[WorstDrawdown] = []
+    in_drawdown = False
+    start_idx = 0
+    trough_idx = 0
+    trough_val = 0.0
+
+    for i in range(len(dd_pct)):
+        if dd_pct[i] < -1e-8:
+            if not in_drawdown:
+                in_drawdown = True
+                start_idx = max(0, i - 1)
+                trough_idx = i
+                trough_val = dd_pct[i]
+            elif dd_pct[i] < trough_val:
+                trough_idx = i
+                trough_val = dd_pct[i]
+        else:
+            if in_drawdown:
+                recovery_idx = i
+                duration = trough_idx - start_idx
+                recovery_days = recovery_idx - trough_idx
+                drawdowns.append(WorstDrawdown(
+                    rank=0,
+                    start_date=dates[start_idx],
+                    trough_date=dates[trough_idx],
+                    recovery_date=dates[recovery_idx],
+                    depth_pct=round(float(trough_val) * 100, 4),
+                    duration_days=duration,
+                    recovery_days=recovery_days,
+                ))
+                in_drawdown = False
+
+    # Handle ongoing drawdown at end of series
+    if in_drawdown:
+        duration = trough_idx - start_idx
+        drawdowns.append(WorstDrawdown(
+            rank=0,
+            start_date=dates[start_idx],
+            trough_date=dates[trough_idx],
+            recovery_date=None,
+            depth_pct=round(float(trough_val) * 100, 4),
+            duration_days=duration,
+            recovery_days=None,
+        ))
+
+    # Sort by depth (most negative first) and take top N
+    drawdowns.sort(key=lambda d: d.depth_pct)
+    result = drawdowns[:top_n]
+    for i, dd in enumerate(result):
+        dd.rank = i + 1
+    return result
+
+
+# =============================================================================
+# TCA (Transaction Cost Analysis) Endpoint (Task 7.8)
+# =============================================================================
+
+class SlippageBySymbol(BaseModel):
+    """Slippage data for a single symbol."""
+    symbol: str
+    avg_slippage_pct: float = 0.0
+    trade_count: int = 0
+
+
+class SlippageByHour(BaseModel):
+    """Slippage data for a specific hour/day combination."""
+    hour: int
+    day: str
+    avg_slippage: float = 0.0
+
+
+class SlippageBySize(BaseModel):
+    """Slippage data for an order size bucket."""
+    bucket: str
+    avg_slippage: float = 0.0
+    trade_count: int = 0
+
+
+class ImplementationShortfall(BaseModel):
+    """Single implementation shortfall record."""
+    symbol: str
+    expected_price: float = 0.0
+    fill_price: float = 0.0
+    market_close_price: float = 0.0
+    shortfall_dollars: float = 0.0
+    shortfall_bps: float = 0.0
+    trade_date: str = ""
+
+
+class FillRateBucket(BaseModel):
+    """Fill rate within a time bucket."""
+    within_seconds: int
+    percentage: float = 0.0
+
+
+class ExecutionQualityPoint(BaseModel):
+    """Single point in execution quality trend."""
+    date: str
+    avg_slippage: float = 0.0
+
+
+class PerAssetClass(BaseModel):
+    """TCA breakdown per asset class."""
+    asset_class: str
+    avg_slippage: float = 0.0
+    avg_shortfall_bps: float = 0.0
+    trade_count: int = 0
+
+
+class WorstExecution(BaseModel):
+    """A single worst-execution record."""
+    symbol: str
+    expected_price: float = 0.0
+    fill_price: float = 0.0
+    slippage_pct: float = 0.0
+    timestamp: str = ""
+    order_size_dollars: float = 0.0
+    asset_class: str = ""
+
+
+class TCAResponse(BaseModel):
+    """Response for Transaction Cost Analysis."""
+    slippage_by_symbol: List[SlippageBySymbol] = Field(default_factory=list)
+    slippage_by_hour: List[SlippageByHour] = Field(default_factory=list)
+    slippage_by_size: List[SlippageBySize] = Field(default_factory=list)
+    implementation_shortfall: List[ImplementationShortfall] = Field(default_factory=list)
+    total_shortfall_dollars: float = 0.0
+    total_shortfall_bps: float = 0.0
+    fill_rate_buckets: List[FillRateBucket] = Field(default_factory=list)
+    cost_as_pct_of_alpha: float = 0.0
+    execution_quality_trend: List[ExecutionQualityPoint] = Field(default_factory=list)
+    per_asset_class: List[PerAssetClass] = Field(default_factory=list)
+    worst_executions: List[WorstExecution] = Field(default_factory=list)
+
+
+@router.get("/tca", response_model=TCAResponse)
+async def get_tca(
+    mode: TradingMode,
+    period: str = "3M",
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Transaction Cost Analysis: slippage breakdowns, implementation shortfall,
+    fill rates, execution quality trend, and worst executions.
+
+    Args:
+        mode: Trading mode
+        period: 1M, 3M, 6M, 1Y, ALL
+        username: Current authenticated user
+        session: Database session
+    """
+    logger.info(f"TCA: mode={mode.value} period={period}")
+
+    period_map = {
+        "1M": timedelta(days=30),
+        "3M": timedelta(days=90),
+        "6M": timedelta(days=180),
+        "1Y": timedelta(days=365),
+        "ALL": timedelta(days=3650),
+    }
+    time_delta = period_map.get(period, timedelta(days=90))
+    start_date = datetime.now() - time_delta
+
+    try:
+        import yaml
+
+        # --- Load symbol metadata ---
+        symbol_meta: Dict[str, Dict[str, str]] = {}
+        try:
+            with open("config/symbols.yaml", "r") as f:
+                sym_cfg = yaml.safe_load(f)
+            for asset_class, symbols in sym_cfg.items():
+                if not isinstance(symbols, list):
+                    continue
+                for entry in symbols:
+                    sym = entry.get("symbol", "")
+                    symbol_meta[sym] = {"sector": entry.get("sector", "Other"), "asset_class": asset_class}
+        except Exception as e:
+            logger.warning(f"Could not load symbols.yaml for TCA: {e}")
+
+        # --- Filled orders in period ---
+        filled_orders = (
+            session.query(OrderORM)
+            .filter(
+                OrderORM.filled_at.isnot(None),
+                OrderORM.filled_at >= start_date,
+                OrderORM.filled_price.isnot(None),
+            )
+            .order_by(OrderORM.filled_at.asc())
+            .all()
+        )
+
+        if not filled_orders:
+            return TCAResponse()
+
+        # --- Slippage by symbol ---
+        sym_slippage: Dict[str, List[float]] = defaultdict(list)
+        for o in filled_orders:
+            if o.expected_price and o.expected_price > 0 and o.filled_price:
+                slip_pct = abs(o.filled_price - o.expected_price) / o.expected_price * 100
+                sym_slippage[o.symbol].append(slip_pct)
+
+        slippage_by_symbol = [
+            SlippageBySymbol(
+                symbol=sym,
+                avg_slippage_pct=round(float(np.mean(slips)), 4),
+                trade_count=len(slips),
+            )
+            for sym, slips in sorted(sym_slippage.items())
+        ]
+
+        # --- Slippage by hour ---
+        hour_day_slippage: Dict[str, List[float]] = defaultdict(list)
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        for o in filled_orders:
+            if o.expected_price and o.expected_price > 0 and o.filled_price and o.filled_at:
+                slip_pct = abs(o.filled_price - o.expected_price) / o.expected_price * 100
+                hour = o.filled_at.hour
+                day = day_names[o.filled_at.weekday()]
+                hour_day_slippage[f"{hour}|{day}"].append(slip_pct)
+
+        slippage_by_hour = [
+            SlippageByHour(
+                hour=int(key.split("|")[0]),
+                day=key.split("|")[1],
+                avg_slippage=round(float(np.mean(slips)), 4),
+            )
+            for key, slips in sorted(hour_day_slippage.items())
+        ]
+
+        # --- Slippage by order size ---
+        size_buckets: Dict[str, List[float]] = {"small": [], "medium": [], "large": []}
+        for o in filled_orders:
+            if o.expected_price and o.expected_price > 0 and o.filled_price:
+                slip_pct = abs(o.filled_price - o.expected_price) / o.expected_price * 100
+                dollar_size = abs(o.quantity or 0)
+                if dollar_size < 500:
+                    size_buckets["small"].append(slip_pct)
+                elif dollar_size < 2000:
+                    size_buckets["medium"].append(slip_pct)
+                else:
+                    size_buckets["large"].append(slip_pct)
+
+        slippage_by_size = [
+            SlippageBySize(
+                bucket=bucket,
+                avg_slippage=round(float(np.mean(slips)), 4) if slips else 0.0,
+                trade_count=len(slips),
+            )
+            for bucket, slips in size_buckets.items()
+        ]
+
+        # --- Implementation shortfall ---
+        shortfall_records: List[ImplementationShortfall] = []
+        total_shortfall_dollars = 0.0
+        total_notional = 0.0
+
+        for o in filled_orders:
+            if not (o.expected_price and o.expected_price > 0 and o.filled_price):
+                continue
+            notional = abs(o.quantity or 0)
+            shortfall_dollars = (o.filled_price - o.expected_price) * (notional / max(o.filled_price, 1e-9))
+            shortfall_bps = (o.filled_price - o.expected_price) / o.expected_price * 10000
+            total_shortfall_dollars += shortfall_dollars
+            total_notional += notional
+
+            shortfall_records.append(ImplementationShortfall(
+                symbol=o.symbol,
+                expected_price=round(o.expected_price, 4),
+                fill_price=round(o.filled_price, 4),
+                market_close_price=round(o.filled_price, 4),  # Approximation
+                shortfall_dollars=round(shortfall_dollars, 2),
+                shortfall_bps=round(shortfall_bps, 2),
+                trade_date=o.filled_at.strftime("%Y-%m-%d") if o.filled_at else "",
+            ))
+
+        total_shortfall_bps = (total_shortfall_dollars / max(total_notional, 1e-9)) * 10000
+
+        # --- Fill rate buckets ---
+        fill_times = [o.fill_time_seconds for o in filled_orders if o.fill_time_seconds is not None]
+        thresholds = [5, 30, 60, 300]
+        fill_rate_buckets = []
+        n_fills = len(fill_times)
+        for t in thresholds:
+            count = sum(1 for ft in fill_times if ft <= t)
+            pct = (count / n_fills * 100) if n_fills > 0 else 0.0
+            fill_rate_buckets.append(FillRateBucket(within_seconds=t, percentage=round(pct, 1)))
+
+        # --- Cost as % of alpha ---
+        # Alpha = total realized P&L from closed positions in period
+        closed_positions = (
+            session.query(PositionORM)
+            .filter(
+                PositionORM.closed_at.isnot(None),
+                PositionORM.closed_at >= start_date,
+            )
+            .all()
+        )
+        total_alpha = sum(p.realized_pnl or 0 for p in closed_positions)
+        cost_as_pct = (abs(total_shortfall_dollars) / max(abs(total_alpha), 1e-9)) * 100
+
+        # --- Execution quality trend (daily average slippage) ---
+        daily_slippage: Dict[str, List[float]] = defaultdict(list)
+        for o in filled_orders:
+            if o.expected_price and o.expected_price > 0 and o.filled_price and o.filled_at:
+                slip_pct = abs(o.filled_price - o.expected_price) / o.expected_price * 100
+                day_key = o.filled_at.strftime("%Y-%m-%d")
+                daily_slippage[day_key].append(slip_pct)
+
+        execution_quality_trend = [
+            ExecutionQualityPoint(
+                date=day,
+                avg_slippage=round(float(np.mean(slips)), 4),
+            )
+            for day, slips in sorted(daily_slippage.items())
+        ]
+
+        # --- Per asset class ---
+        ac_data: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"slippages": [], "shortfalls_bps": []})
+        for o in filled_orders:
+            if not (o.expected_price and o.expected_price > 0 and o.filled_price):
+                continue
+            meta = symbol_meta.get(o.symbol, {"asset_class": "other"})
+            ac = meta.get("asset_class", "other")
+            slip_pct = abs(o.filled_price - o.expected_price) / o.expected_price * 100
+            shortfall_bps = (o.filled_price - o.expected_price) / o.expected_price * 10000
+            ac_data[ac]["slippages"].append(slip_pct)
+            ac_data[ac]["shortfalls_bps"].append(shortfall_bps)
+
+        per_asset_class = [
+            PerAssetClass(
+                asset_class=ac,
+                avg_slippage=round(float(np.mean(d["slippages"])), 4) if d["slippages"] else 0.0,
+                avg_shortfall_bps=round(float(np.mean(d["shortfalls_bps"])), 2) if d["shortfalls_bps"] else 0.0,
+                trade_count=len(d["slippages"]),
+            )
+            for ac, d in sorted(ac_data.items())
+        ]
+
+        # --- Worst executions (top 10 by slippage %) ---
+        execution_records = []
+        for o in filled_orders:
+            if not (o.expected_price and o.expected_price > 0 and o.filled_price):
+                continue
+            slip_pct = abs(o.filled_price - o.expected_price) / o.expected_price * 100
+            meta = symbol_meta.get(o.symbol, {"asset_class": "other"})
+            execution_records.append(WorstExecution(
+                symbol=o.symbol,
+                expected_price=round(o.expected_price, 4),
+                fill_price=round(o.filled_price, 4),
+                slippage_pct=round(slip_pct, 4),
+                timestamp=o.filled_at.isoformat() if o.filled_at else "",
+                order_size_dollars=round(abs(o.quantity or 0), 2),
+                asset_class=meta.get("asset_class", "other"),
+            ))
+
+        execution_records.sort(key=lambda x: x.slippage_pct, reverse=True)
+        worst_executions = execution_records[:10]
+
+        return TCAResponse(
+            slippage_by_symbol=slippage_by_symbol,
+            slippage_by_hour=slippage_by_hour,
+            slippage_by_size=slippage_by_size,
+            implementation_shortfall=shortfall_records,
+            total_shortfall_dollars=round(total_shortfall_dollars, 2),
+            total_shortfall_bps=round(total_shortfall_bps, 2),
+            fill_rate_buckets=fill_rate_buckets,
+            cost_as_pct_of_alpha=round(cost_as_pct, 2),
+            execution_quality_trend=execution_quality_trend,
+            per_asset_class=per_asset_class,
+            worst_executions=worst_executions,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to compute TCA: {e}", exc_info=True)
+        return TCAResponse()

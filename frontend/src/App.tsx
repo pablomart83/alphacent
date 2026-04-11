@@ -10,6 +10,7 @@ import { PageErrorBoundary } from './components/PageErrorBoundary';
 import { TradingModeProvider } from './contexts/TradingModeContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { CommandPalette } from './components/CommandPalette';
 import { Toaster, toast } from 'sonner';
 
 // Lazy load all pages for code splitting
@@ -23,6 +24,9 @@ const Analytics = lazy(() => import('./pages/AnalyticsNew').then(m => ({ default
 const DataManagement = lazy(() => import('./pages/DataManagementNew').then(m => ({ default: m.DataManagementNew })));
 const Settings = lazy(() => import('./pages/SettingsNew').then(m => ({ default: m.SettingsNew })));
 const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then(m => ({ default: m.WatchlistPage })));
+const PositionDetail = lazy(() => import('./pages/PositionDetailView').then(m => ({ default: m.PositionDetailView })));
+const SystemHealth = lazy(() => import('./pages/SystemHealthPage').then(m => ({ default: m.SystemHealthPage })));
+const AuditLog = lazy(() => import('./pages/AuditLogPage').then(m => ({ default: m.AuditLogPage })));
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -143,6 +147,7 @@ function App() {
           />
           <Router>
             {/* Toast notifications handled by Sonner <Toaster> above */}
+            {isAuthenticated && <CommandPalette />}
             
             <Routes>
             <Route 
@@ -174,6 +179,18 @@ function App() {
                   <Suspense fallback={<LoadingOverlay message="Loading portfolio..." />}>
                     <PageErrorBoundary pageName="Portfolio">
                       <Portfolio onLogout={handleLogout} />
+                    </PageErrorBoundary>
+                  </Suspense>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/portfolio/:symbol" 
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={<LoadingOverlay message="Loading position detail..." />}>
+                    <PageErrorBoundary pageName="Position Detail">
+                      <PositionDetail onLogout={handleLogout} />
                     </PageErrorBoundary>
                   </Suspense>
                 </ProtectedRoute>
@@ -270,6 +287,30 @@ function App() {
                   <Suspense fallback={<LoadingOverlay message="Loading settings..." />}>
                     <PageErrorBoundary pageName="Settings">
                       <Settings onLogout={handleLogout} />
+                    </PageErrorBoundary>
+                  </Suspense>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/system-health" 
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={<LoadingOverlay message="Loading system health..." />}>
+                    <PageErrorBoundary pageName="System Health">
+                      <SystemHealth onLogout={handleLogout} />
+                    </PageErrorBoundary>
+                  </Suspense>
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/audit-log" 
+              element={
+                <ProtectedRoute>
+                  <Suspense fallback={<LoadingOverlay message="Loading audit log..." />}>
+                    <PageErrorBoundary pageName="Audit Log">
+                      <AuditLog onLogout={handleLogout} />
                     </PageErrorBoundary>
                   </Suspense>
                 </ProtectedRoute>
