@@ -277,7 +277,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
               </div>
             </div>
             <div className="flex items-center gap-4 mt-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              <span>Status: <span className={monitoringStatus.system.fmp.status === 'healthy' ? 'text-green-400' : 'text-red-400'}>{monitoringStatus.system.fmp.status}</span></span>
+              <span>Status: <span className={monitoringStatus.system.fmp.status === 'healthy' ? 'text-green-400' : monitoringStatus.system.fmp.status === 'configured' ? 'text-blue-400' : 'text-red-400'}>{monitoringStatus.system.fmp.status}</span></span>
               <span>Cache: {monitoringStatus.system.fmp.cache_size ?? 0} entries</span>
             </div>
           </div>
@@ -534,14 +534,21 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                 <div className="flex items-center gap-2 mb-2">
                   <div className={`w-2.5 h-2.5 rounded-full ${
                     data?.status === 'healthy' ? 'bg-green-400' :
+                    data?.status === 'configured' ? 'bg-blue-400' :
                     data?.status === 'degraded' ? 'bg-amber-400' :
-                    data?.status === 'disabled' ? 'bg-gray-500' :
+                    data?.status === 'disabled' || data?.status === 'no_api_key' ? 'bg-gray-500' :
+                    data?.status === 'unknown' || !data ? 'bg-gray-600' :
                     data ? 'bg-red-400' : 'bg-gray-600'
                   }`} />
                   <p className="text-sm font-mono" style={{ color: 'var(--color-text-primary)' }}>{name}</p>
                 </div>
                 <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  Status: <span className={data?.status === 'healthy' ? 'text-green-400' : data?.status === 'degraded' ? 'text-amber-400' : 'text-gray-500'}>{data?.status ?? 'unknown'}</span>
+                  Status: <span className={
+                    data?.status === 'healthy' ? 'text-green-400' :
+                    data?.status === 'configured' ? 'text-blue-400' :
+                    data?.status === 'degraded' ? 'text-amber-400' :
+                    'text-gray-500'
+                  }>{data?.status ?? 'unknown'}</span>
                 </p>
                 {data?.last_fetch_age && <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>Last fetch: {data.last_fetch_age}</p>}
                 {data?.error_count != null && <p className="text-xs mt-0.5" style={{ color: data.error_count > 0 ? '#ef4444' : 'var(--color-text-secondary)' }}>Errors (1h): {data.error_count}</p>}

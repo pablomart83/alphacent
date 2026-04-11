@@ -742,7 +742,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}

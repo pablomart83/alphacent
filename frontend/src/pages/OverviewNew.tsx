@@ -70,15 +70,19 @@ const PIPELINE_STAGES = [
 ] as const;
 
 function countStrategiesByStage(strategies: Strategy[]): Record<string, number> {
-  const counts: Record<string, number> = { proposed: 0, backtested: 0, active: 0, retired: 0 };
+  // Cumulative counts: each stage includes strategies that have passed through it
+  // PROPOSED → BACKTESTED → ACTIVE (DEMO/LIVE) → RETIRED
+  let proposed = 0, backtested = 0, active = 0, retired = 0;
   for (const s of strategies) {
     const status = s.status?.toUpperCase();
-    if (status === 'PROPOSED') counts.proposed++;
-    else if (status === 'BACKTESTED') counts.backtested++;
-    else if (status === 'DEMO' || status === 'LIVE') counts.active++;
-    else if (status === 'RETIRED') counts.retired++;
+    if (status === 'PROPOSED') { proposed++; }
+    else if (status === 'BACKTESTED') { proposed++; backtested++; }
+    else if (status === 'DEMO' || status === 'LIVE') { proposed++; backtested++; active++; }
+    else if (status === 'RETIRED') { proposed++; backtested++; retired++; }
+    // PAUSED/INVALID strategies that were once active
+    else if (status === 'PAUSED') { proposed++; backtested++; active++; }
   }
-  return counts;
+  return { proposed, backtested, active, retired };
 }
 
 // ── Multi-timeframe return calculation ─────────────────────────────────────

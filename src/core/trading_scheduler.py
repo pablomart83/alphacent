@@ -1103,6 +1103,7 @@ class TradingScheduler:
                 _db_cycle_lock = None
             
             self._last_signal_check = now
+            self._next_run_time = datetime.fromtimestamp(now + self.signal_generation_interval)
             
             # Clear stale intraday (1h/4h) data cache before each hourly signal run.
             # The latest 1h candle just closed — strategies need fresh data to evaluate
@@ -1138,6 +1139,18 @@ class TradingScheduler:
                 pass
             
             result = self.run_signal_generation_sync()
+            
+            # Store last run metrics for system health dashboard
+            self._signals_last_run = result.get("signals_generated", 0)
+            self._orders_last_run = result.get("orders_submitted", 0)
+            
+            # Update system state with last signal time
+            if result.get("signals_generated", 0) > 0:
+                try:
+                    from src.core.system_state_manager import get_system_state_manager
+                    get_system_state_manager().record_signal_generated()
+                except Exception:
+                    pass
             
             # Release DB lock if we acquired it
             try:

@@ -1403,6 +1403,28 @@ class ApiClient {
   }
 
   // ============================================================================
+  // Blacklisted Combos
+  // ============================================================================
+
+  async getBlacklistedCombos(): Promise<any[]> {
+    const response = await this.client.get<ApiResponse<any[]>>(
+      `/strategies/blacklisted-combos`
+    );
+    return this.extractArrayFromResponse<any>(response, 'entries');
+  }
+
+  // ============================================================================
+  // Idle Demotions
+  // ============================================================================
+
+  async getIdleDemotions(): Promise<any[]> {
+    const response = await this.client.get<ApiResponse<any[]>>(
+      `/strategies/idle-demotions`
+    );
+    return this.extractArrayFromResponse<any>(response, 'entries');
+  }
+
+  // ============================================================================
   // Walk-Forward Analytics (Task 9.4)
   // ============================================================================
 
@@ -1430,7 +1452,7 @@ class ApiClient {
 
   async getDataQuality(): Promise<any[]> {
     const response = await this.client.get<ApiResponse<any[]>>('/data/quality');
-    return this.extractArrayFromResponse<any>(response, 'data');
+    return this.extractArrayFromResponse<any>(response, 'entries');
   }
 
   // ============================================================================

@@ -1522,8 +1522,8 @@ async def get_system_health(
     try:
         from src.core.monitoring_service import get_monitoring_service
         mon = get_monitoring_service()
-        if mon and hasattr(mon, "_etoro_client"):
-            client = mon._etoro_client
+        if mon and hasattr(mon, "etoro_client"):
+            client = mon.etoro_client
             result.etoro_api.requests_per_minute = getattr(client, "_requests_per_minute", 0.0)
             result.etoro_api.error_rate_5m = getattr(client, "_error_rate_5m", 0.0)
             result.etoro_api.avg_response_ms = getattr(client, "_avg_response_ms", 0.0)

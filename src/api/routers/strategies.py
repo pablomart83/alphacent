@@ -2247,24 +2247,24 @@ async def get_autonomous_status(
                 except Exception:
                     pass
 
-            # Cycle stats from last cycle
-            if last_cycle:
-                proposals_count = last_cycle.proposals_generated or 0
-                backtested_count = last_cycle.backtested or 0
-                activated_count = last_cycle.activated or 0
-                retired_count = last_cycle.strategies_retired or 0
-            else:
-                # Fallback: count from last 30 days
-                thirty_days_ago = datetime.now() - timedelta(days=30)
-                proposals_count = session.query(StrategyProposalORM).filter(
-                    StrategyProposalORM.proposed_at >= thirty_days_ago
-                ).count()
-                retirements = session.query(StrategyRetirementORM).filter(
-                    StrategyRetirementORM.retired_at >= thirty_days_ago
-                ).all()
-                backtested_count = 0
-                activated_count = 0
-                retired_count = len(retirements)
+            # Cycle stats — cumulative totals across ALL cycles
+            from sqlalchemy import func as _sqla_func
+            cumulative = session.query(
+                _sqla_func.coalesce(_sqla_func.sum(AutonomousCycleRunORM.proposals_generated), 0),
+                _sqla_func.coalesce(_sqla_func.sum(AutonomousCycleRunORM.backtested), 0),
+                _sqla_func.coalesce(_sqla_func.sum(AutonomousCycleRunORM.activated), 0),
+                _sqla_func.coalesce(_sqla_func.sum(AutonomousCycleRunORM.strategies_retired), 0),
+            ).first()
+            proposals_count = int(cumulative[0]) if cumulative else 0
+            backtested_count = int(cumulative[1]) if cumulative else 0
+            activated_count = int(cumulative[2]) if cumulative else 0
+            retired_count = int(cumulative[3]) if cumulative else 0
+
+            # Fallback: if no cycle data, count from DB tables
+            if proposals_count == 0:
+                proposals_count = session.query(StrategyProposalORM).count()
+            if retired_count == 0:
+                retired_count = session.query(StrategyRetirementORM).count()
 
             # Total allocation from active strategies
             total_allocation_result = session.query(
@@ -3524,3 +3524,144 @@ async def get_walk_forward_analytics(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch walk-forward analytics: {str(e)}",
         )
+
+
+# ============================================================================
+# Blacklisted Combos Endpoint
+# ============================================================================
+
+class BlacklistEntry(BaseModel):
+    """A blacklisted template+symbol combo."""
+    template: str
+    symbol: str
+    count: int
+    timestamp: str
+    type: str = "rejection"
+
+
+class BlacklistResponse(BaseModel):
+    """Blacklist response."""
+    entries: List[BlacklistEntry]
+    total: int
+
+
+@router.get("/blacklisted-combos", response_model=BlacklistResponse)
+async def get_blacklisted_combos(
+    username: str = Depends(get_current_user),
+):
+    """
+    Get all blacklisted template+symbol combinations from config files.
+    Merges rejection blacklist and zero-trade blacklist.
+    """
+    import json
+    from pathlib import Path
+
+    entries: List[BlacklistEntry] = []
+
+    # Load rejection blacklist
+    rej_path = Path("config/.rejection_blacklist.json")
+    if rej_path.exists():
+        try:
+            with open(rej_path) as f:
+                data = json.load(f)
+            for e in data.get("entries", []):
+                if e.get("count", 0) >= 3:  # Only show actually blacklisted (threshold reached)
+                    entries.append(BlacklistEntry(
+                        template=e.get("template", ""),
+                        symbol=e.get("symbol", ""),
+                        count=e.get("count", 0),
+                        timestamp=e.get("timestamp", ""),
+                        type="rejection",
+                    ))
+        except Exception as ex:
+            logger.warning(f"Failed to load rejection blacklist: {ex}")
+
+    # Load zero-trade blacklist
+    zt_path = Path("config/.zero_trade_blacklist.json")
+    if zt_path.exists():
+        try:
+            with open(zt_path) as f:
+                data = json.load(f)
+            for e in data.get("entries", []):
+                entries.append(BlacklistEntry(
+                    template=e.get("template", ""),
+                    symbol=e.get("symbol", ""),
+                    count=e.get("count", 0),
+                    timestamp=e.get("timestamp", ""),
+                    type="zero_trade",
+                ))
+        except Exception as ex:
+            logger.warning(f"Failed to load zero-trade blacklist: {ex}")
+
+    # Sort by timestamp descending
+    entries.sort(key=lambda e: e.timestamp, reverse=True)
+
+    return BlacklistResponse(entries=entries, total=len(entries))
+
+
+# ============================================================================
+# Idle Demotions Endpoint
+# ============================================================================
+
+class IdleDemotionEntry(BaseModel):
+    """An idle demotion record."""
+    name: str
+    strategy_id: str
+    timestamp: str
+    reason: str
+
+
+class IdleDemotionsResponse(BaseModel):
+    """Idle demotions response."""
+    entries: List[IdleDemotionEntry]
+    total: int
+
+
+@router.get("/idle-demotions", response_model=IdleDemotionsResponse)
+async def get_idle_demotions(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Get recently demoted strategies (BACKTESTED with demotion metadata or recently retired due to inactivity).
+    """
+    from src.models.orm import StrategyRetirementORM
+
+    entries: List[IdleDemotionEntry] = []
+
+    # Check strategies with demotion metadata
+    demoted = session.query(StrategyORM).filter(
+        StrategyORM.status == "BACKTESTED"
+    ).all()
+
+    for s in demoted:
+        md = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
+        if md.get("demoted") or md.get("demotion_reason"):
+            entries.append(IdleDemotionEntry(
+                name=s.name or "",
+                strategy_id=s.id,
+                timestamp=md.get("demoted_at", str(s.created_at) if s.created_at else ""),
+                reason=md.get("demotion_reason", "Idle — no positions or orders"),
+            ))
+
+    # Also check recent retirements with idle/inactivity reason
+    retirements = session.query(StrategyRetirementORM).order_by(
+        StrategyRetirementORM.retired_at.desc()
+    ).limit(50).all()
+
+    for r in retirements:
+        reason = r.reason if hasattr(r, 'reason') else ""
+        if reason and ("idle" in reason.lower() or "inactiv" in reason.lower() or "no trade" in reason.lower()):
+            # Try to get strategy name from the strategies table
+            strat = session.query(StrategyORM).filter(StrategyORM.id == r.strategy_id).first()
+            strat_name = strat.name if strat else r.strategy_id
+            entries.append(IdleDemotionEntry(
+                name=strat_name,
+                strategy_id=r.strategy_id,
+                timestamp=r.retired_at.isoformat() if r.retired_at else "",
+                reason=reason,
+            ))
+
+    entries.sort(key=lambda e: e.timestamp, reverse=True)
+
+    return IdleDemotionsResponse(entries=entries, total=len(entries))

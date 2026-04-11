@@ -96,7 +96,7 @@ export const useAuditStore = create<AuditState>((set, get) => ({
         limit: 100,
       });
       const entries = result?.entries ?? result?.data ?? [];
-      const total = result?.total_count ?? entries.length;
+      const total = result?.total ?? result?.total_count ?? entries.length;
       set({ entries, totalCount: total, loading: false, offset: entries.length, hasMore: entries.length < total });
     } catch (err: any) {
       set({ error: err?.message || 'Failed to load audit log', loading: false, entries: [] });
@@ -120,7 +120,7 @@ export const useAuditStore = create<AuditState>((set, get) => ({
         limit: 100,
       });
       const newEntries = result?.entries ?? result?.data ?? [];
-      const total = result?.total_count ?? 0;
+      const total = result?.total ?? result?.total_count ?? 0;
       set((s) => ({
         entries: [...s.entries, ...newEntries],
         offset: s.offset + newEntries.length,

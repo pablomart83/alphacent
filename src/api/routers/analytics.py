@@ -1688,10 +1688,15 @@ async def get_strategy_template_performance(
         })
         
         for strategy in strategies:
-            # Get template from strategy metadata
+            # Get template from strategy metadata or name
             template = 'Unknown'
-            if strategy.rules and isinstance(strategy.rules, dict):
-                template = strategy.rules.get('template', 'Unknown')
+            md = strategy.strategy_metadata if isinstance(strategy.strategy_metadata, dict) else {}
+            template = md.get('template_name', '')
+            if not template:
+                # Fallback: extract from strategy name (strip version suffix like " V81")
+                import re as _re
+                name = strategy.name or ''
+                template = _re.sub(r'\s+V\d+$', '', name).strip() or 'Unknown'
             
             # Get performance data
             if strategy.performance:

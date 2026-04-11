@@ -95,29 +95,15 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
         setTemplateRankings(rankings || []);
       }).catch(() => setTemplateRankings([])).finally(() => setTemplateRankingsLoading(false));
 
-      // Extract blacklists and idle demotions from strategies data
-      const bl: any[] = [];
-      const demotions: any[] = [];
-      data.forEach((s: any) => {
-        if (s.metadata?.blacklisted) {
-          bl.push({
-            template: s.template_name || s.name,
-            symbol: s.symbols?.[0] || '—',
-            type: s.metadata.blacklist_type || 'zero_trade',
-            date: s.metadata.blacklisted_at || s.updated_at,
-            reason: s.metadata.blacklist_reason || 'Zero trades',
-          });
-        }
-        if (s.metadata?.demoted || (s.status === 'BACKTESTED' && s.metadata?.demotion_reason)) {
-          demotions.push({
-            name: s.name,
-            timestamp: s.metadata?.demoted_at || s.updated_at,
-            reason: s.metadata?.demotion_reason || 'Idle — no positions or orders',
-          });
-        }
-      });
-      setBlacklists(bl);
-      setIdleDemotions(demotions);
+      // Fetch blacklists from dedicated endpoint
+      apiClient.getBlacklistedCombos().then((bl) => {
+        setBlacklists(bl || []);
+      }).catch(() => setBlacklists([]));
+
+      // Fetch idle demotions from dedicated endpoint
+      apiClient.getIdleDemotions().then((dem) => {
+        setIdleDemotions(dem || []);
+      }).catch(() => setIdleDemotions([]));
     } catch (error) {
       const classified = classifyError(error, 'strategies');
       console.error('Failed to fetch strategies:', error);
@@ -2218,8 +2204,8 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                           <th className="py-2 px-2 text-left">Template</th>
                           <th className="py-2 px-2 text-left">Symbol</th>
                           <th className="py-2 px-2 text-left">Type</th>
+                          <th className="py-2 px-2 text-right">Rejections</th>
                           <th className="py-2 px-2 text-left">Date</th>
-                          <th className="py-2 px-2 text-left">Reason</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -2227,9 +2213,9 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                           <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
                             <td className="py-2 px-2 text-gray-200 truncate max-w-[180px]">{bl.template}</td>
                             <td className="py-2 px-2 text-gray-300">{bl.symbol}</td>
-                            <td className="py-2 px-2"><Badge variant="secondary" className="text-xs">{bl.type}</Badge></td>
-                            <td className="py-2 px-2 text-muted-foreground">{bl.date ? new Date(bl.date).toLocaleDateString() : '—'}</td>
-                            <td className="py-2 px-2 text-muted-foreground truncate max-w-[200px]">{bl.reason}</td>
+                            <td className="py-2 px-2"><Badge variant="secondary" className="text-xs">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
+                            <td className="py-2 px-2 text-right text-gray-300">{bl.count}</td>
+                            <td className="py-2 px-2 text-muted-foreground">{bl.timestamp ? new Date(bl.timestamp).toLocaleDateString() : '—'}</td>
                           </tr>
                         ))}
                       </tbody>

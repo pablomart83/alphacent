@@ -26,7 +26,7 @@ import { classifyError, type ClassifiedError } from '../lib/errors';
 import type { AccountInfo, Position, FundamentalAlert } from '../types';
 import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 
 interface PortfolioNewProps {
   onLogout: () => void;
@@ -332,10 +332,15 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     return matchesSearch && matchesStrategy && matchesDate;
   });
 
-  // Prepare pie chart data
+  // Prepare allocation chart data
   const pieChartData = positions.reduce((acc, position) => {
-    const value = Math.abs((position as any).invested_amount || position.quantity * position.current_price);
-    // Use symbol for grouping - ensure it's the actual symbol not ID
+    // Try invested_amount first, then calculate from quantity * current_price, then entry_price
+    const value = Math.abs(
+      (position as any).invested_amount ||
+      (position.quantity * (position.current_price || position.entry_price || 0)) ||
+      0
+    );
+    if (value === 0) return acc; // Skip zero-value positions
     const symbolName = position.symbol || 'Unknown';
     const existing = acc.find(item => item.name === symbolName);
     if (existing) {
@@ -1270,51 +1275,42 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                 </CardHeader>
                 <CardContent>
                   {pieChartData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={pieChartData}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          label={false}
-                          outerRadius={100}
-                          fill="#8884d8"
-                          dataKey="value"
-                        >
-                          {pieChartData.map((_, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
+                    <ResponsiveContainer width="100%" height={Math.max(300, pieChartData.length * 36)}>
+                      <BarChart
+                        data={pieChartData.sort((a, b) => b.value - a.value)}
+                        layout="vertical"
+                        margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" horizontal={false} />
+                        <XAxis
+                          type="number"
+                          tickFormatter={(v: number) => `$${(v / 1000).toFixed(1)}k`}
+                          stroke="#9ca3af"
+                          fontSize={11}
+                        />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={80}
+                          stroke="#9ca3af"
+                          fontSize={11}
+                          tick={{ fill: '#d1d5db' }}
+                        />
                         <Tooltip
-                          formatter={(value: number | string | undefined) => {
-                            if (value === undefined) return '';
-                            if (typeof value === 'number') {
-                              return formatCurrency(value);
-                            }
-                            return value;
-                          }}
+                          formatter={(value: number | undefined) => [formatCurrency(value ?? 0), 'Invested']}
                           contentStyle={{
                             backgroundColor: '#1f2937',
                             border: '1px solid #374151',
                             borderRadius: '0.5rem',
                           }}
+                          labelStyle={{ color: '#d1d5db' }}
                         />
-                        <Legend
-                          verticalAlign="bottom"
-                          height={36}
-                          iconType="circle"
-                          formatter={(value) => {
-                            const item = pieChartData.find(d => d.name === value);
-                            if (item) {
-                              const total = pieChartData.reduce((sum, d) => sum + d.value, 0);
-                              const percent = ((item.value / total) * 100).toFixed(1);
-                              return `${value} (${percent}%)`;
-                            }
-                            return value;
-                          }}
-                        />
-                      </PieChart>
+                        <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                          {pieChartData.sort((a, b) => b.value - a.value).map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
                     </ResponsiveContainer>
                   ) : (
                     <div className="text-center py-12 text-muted-foreground">

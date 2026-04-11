@@ -757,6 +757,39 @@ async def get_monitoring_status():
         except Exception:
             pass
         
+        # eToro status — derive from monitoring service health
+        try:
+            etoro_status = {"name": "eToro", "status": "unknown"}
+            etoro_client = getattr(mon, 'etoro_client', None)
+            if etoro_client:
+                etoro_status["status"] = "healthy"
+                # Get rate limit info if available
+                rate_info = getattr(etoro_client, '_rate_limit_remaining', None)
+                if rate_info is not None:
+                    etoro_status["rate_limit_remaining"] = rate_info
+                avg_ms = getattr(etoro_client, '_avg_response_ms', None)
+                if avg_ms is not None:
+                    etoro_status["avg_response_ms"] = round(avg_ms, 0)
+            else:
+                etoro_status["status"] = "not_initialized"
+            result["system"]["etoro"] = etoro_status
+        except Exception:
+            result["system"]["etoro"] = {"name": "eToro", "status": "unknown"}
+        
+        # Yahoo Finance status — derive from background price sync
+        try:
+            yahoo_status = {"name": "Yahoo Finance", "status": "unknown"}
+            last_full_sync_ts = getattr(mon, '_last_price_sync', 0)
+            if last_full_sync_ts and last_full_sync_ts > 0:
+                yahoo_status["status"] = "healthy"
+                yahoo_status["last_fetch"] = _ts_iso(last_full_sync_ts)
+                yahoo_status["last_fetch_age"] = _age_str(last_full_sync_ts)
+            else:
+                yahoo_status["status"] = "idle"
+            result["system"]["yahoo"] = yahoo_status
+        except Exception:
+            result["system"]["yahoo"] = {"name": "Yahoo Finance", "status": "unknown"}
+        
         # Circuit breaker states
         try:
             cb_states = mon.get_circuit_breaker_states()
