@@ -854,3 +854,86 @@ curl https://alphacent.co.uk/health
 
 ## New TypeScript Types (Session 3)
 - `frontend/src/types/analytics.ts` — RollingStatsData, AttributionData, TearSheetData, TCAData
+
+
+### Session Improvements (April 11, 2026 — Session 4)
+
+#### 75. UI Data Fixes Across All Pages ✅
+- **Overview**: Strategy Pipeline now shows cumulative counts (Backtested includes all that passed through Proposed, etc.)
+- **Portfolio**: Position Allocation changed from pie chart to horizontal bar chart; value calculation falls back to entry_price when current_price is 0
+- **Settings**: Width fixed from `max-w-7xl` (1280px) to `max-w-[1800px]` to match all other pages
+- **Strategies**: Blacklisted Combos and Idle Demotions now fetch from dedicated backend endpoints (`/strategies/blacklisted-combos`, `/strategies/idle-demotions`) reading from config JSON files instead of strategy metadata
+- **Autonomous**: Lifecycle Metrics now show cumulative totals across ALL cycles (SUM of all AutonomousCycleRunORM records) instead of just last cycle
+- **Analytics**: Template Performance fixed — was reading template name from `strategy.rules.template` (wrong field), now reads from `strategy.strategy_metadata.template_name`
+- **Data Management**: Data Quality API call fixed wrong response key (`data` → `entries`); Data Source Health treats "configured" status as blue instead of red; added eToro and Yahoo Finance status to monitoring endpoint
+- **System**: Fixed eToro API health reading wrong attribute (`_etoro_client` → `etoro_client`); added `_signals_last_run`, `_orders_last_run`, `_next_run_time` tracking to trading scheduler
+- **Audit Log**: Fixed total count field name mismatch (`total_count` → `total`) in audit store
+- **Files**: `frontend/src/pages/OverviewNew.tsx`, `PortfolioNew.tsx`, `SettingsNew.tsx`, `StrategiesNew.tsx`, `DataManagementNew.tsx`, `frontend/src/services/api.ts`, `frontend/src/lib/stores/audit-store.ts`, `src/api/routers/strategies.py`, `analytics.py`, `control.py`, `data_management.py`, `src/core/trading_scheduler.py`
+
+#### 76. Position Sync UniqueViolation Fix ✅
+- `sync_positions()` only loaded open positions into lookup map — when eToro returned a position whose `etoro_position_id` existed on a closed DB record, it tried to INSERT a duplicate
+- Added check for closed positions with same `etoro_position_id` before INSERT — reopens closed record instead of creating duplicate
+- Added safety catch on commit for remaining edge cases (rollback + retry next cycle)
+- **Files**: `src/core/order_monitor.py`
+
+#### 77. Deferred Strategy Retirement ✅ (CRITICAL)
+- **Problem**: Strategies with health_score=0 or decay_score=0 were immediately retired AND force-closed all open positions via `pending_closure=True`. This crystallized paper losses — 7 of 11 stop-loss exits would have been profitable if held.
+- **Fix**: Strategies with open positions are now marked `pending_retirement` in metadata instead of immediately retired. No positions get force-closed. The strategy stops generating new signals (excluded from signal generation loop), but existing positions run to their SL/TP naturally via trailing stops. Once all positions close, the next health check finalizes the retirement to RETIRED status.
+- Signal generation in `trading_scheduler.py` now skips strategies with `pending_retirement=True`
+- Pending retirement finalization runs at the top of `_check_strategy_health()` — checks if all positions for pending-retirement strategies have closed
+- **Files**: `src/core/monitoring_service.py`, `src/core/trading_scheduler.py`
+
+#### 78. SL/TP and Risk Parameter Overhaul ✅ (CRITICAL)
+- **Problem**: 4% stop losses on stocks were too tight for multi-day holds — getting whipsawed on normal volatility. 34% win rate on closed trades. Average loser held 45h vs winner 77h.
+- **Asset class parameters widened**:
+  - Stocks: SL 4%→6%, TP 10%→15% (2.5:1 R:R)
+  - ETFs: SL 4.5%→6%, TP 10%→15%
+  - Forex: SL 1.5%→2%, TP 3%→5%
+  - Crypto: SL 6%→8%, TP 12%→20%
+  - Index: SL 4%→5%, TP 10%→12%
+  - Commodity: SL 3%→4%, TP 8%→10%
+- **ATR floor raised**: 1.5x → 2x ATR (both at proposal time and order execution time)
+- **Strategy type baselines widened**: Mean reversion SL 2%→3%, trend following SL 4%→5%/TP 10%→15%
+- **SL clamp ceiling raised**: 8% → 12% (high-beta stocks need room)
+- **Minimum R:R ratio**: 1.5:1 → 2:1 (enforced at proposal and asset class override)
+- **Trailing stops**: Activation 5%→8% profit, distance 3%→4% trail
+- **Partial exits**: First level at 10% profit taking 33% (was 5% profit taking 50%)
+- **Note**: These changes affect NEW strategies only. Existing positions keep their current SL/TP on eToro.
+- **Files**: `config/autonomous_trading.yaml`, `src/strategy/strategy_proposer.py`, `src/execution/order_executor.py`
+
+---
+
+## Current System State (April 11, 2026 — Updated Session 4)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$162K, equity ~$464K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~98 (some now in pending_retirement state)
+- **Open positions:** ~123 (82 profitable, 32 losing, +$5,517 unrealized)
+- **Closed positions (April):** 95 trades, -$674 realized, 34% win rate
+- **Total P&L (April):** +$4,781 ($5,517 unrealized - $736 realized)
+- **Top templates:** RSI Dip Buy (+$3,010), BB Middle Band Bounce (+$1,760)
+- **Monitoring:** 24/7 + CloudWatch alerting
+- **Market regime:** Equity: ranging_low_vol
+- **Key change:** Retirement no longer force-closes positions; wider SL/TP for new strategies
+
+---
+
+## Open Items (Updated Session 4)
+
+### Performance
+- Monitor win rate on closed trades after SL/TP changes (target: >45% from current 34%)
+- Track whipsaw rate: how many stopped-out positions would have been profitable if held
+- Consider ATR-based dynamic SL per position instead of fixed percentage per asset class
+- Evaluate if trailing stop activation at 8% is optimal (was 5%)
+
+### From Previous Sessions
+1. Signal generation — Are conviction scores using meaningful inputs? *(partially addressed)*
+2. Template-symbol matching — Should template weights decay over time?
+3. Risk controls — Portfolio-level VaR check before new positions
+4. Order execution — Is signal coordination too aggressive?
+5. Performance feedback loop — Is it chasing past winners?
+
+### Infrastructure
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+- FMP API rate limit (300/min) — monitor with corrected per-call counting
