@@ -7348,7 +7348,7 @@ class StrategyTemplateLibrary:
             name="Crypto Trend Breakout",
             description="Buy on 50-day high breakout with volume confirmation. Exit on 20-day low. Low frequency, high conviction.",
             strategy_type=StrategyType.BREAKOUT,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL],
             entry_conditions=[
                 "CLOSE > RESISTANCE AND RSI(14) > 50 AND RSI(14) < 75"
             ],
@@ -7376,7 +7376,7 @@ class StrategyTemplateLibrary:
             name="Crypto Weekly Trend Follow",
             description="Buy when price crosses above SMA(50) with ADX > 20 confirming trend. Hold until SMA(50) breakdown. Quarterly frequency.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL],
             entry_conditions=[
                 "CLOSE > SMA(50) AND ADX(14) > 20 AND RSI(14) > 45 AND RSI(14) < 70"
             ],
@@ -7406,7 +7406,7 @@ class StrategyTemplateLibrary:
             name="Crypto Deep Dip Accumulation",
             description="Buy when price drops 25%+ below SMA(50) with daily RSI < 30. Extreme oversold accumulation. Hold for recovery.",
             strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[MarketRegime.TRENDING_DOWN, MarketRegime.TRENDING_DOWN_STRONG, MarketRegime.TRENDING_DOWN_WEAK],
+            market_regimes=[MarketRegime.TRENDING_DOWN, MarketRegime.TRENDING_DOWN_STRONG, MarketRegime.TRENDING_DOWN_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING_HIGH_VOL],
             entry_conditions=[
                 "CLOSE < SMA(50) * 0.75 AND RSI(14) < 30"
             ],
@@ -7436,7 +7436,7 @@ class StrategyTemplateLibrary:
             name="Crypto Golden Cross",
             description="Buy on SMA(50) crossing above SMA(200) — classic bull market signal. Exit on death cross.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING_HIGH_VOL],
             entry_conditions=[
                 "SMA(50) CROSSES_ABOVE SMA(200) AND CLOSE > SMA(50)"
             ],
