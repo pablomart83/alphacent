@@ -1331,10 +1331,37 @@ class OrderMonitor:
                         updated_count += 1
                         continue
 
+                    # Final safety: check if a CLOSED position with this etoro_position_id exists
+                    # (the main lookup only checks open positions — a closed one causes UniqueViolation)
+                    closed_dup = session.query(PositionORM).filter(
+                        PositionORM.etoro_position_id == pos.etoro_position_id,
+                        PositionORM.closed_at.isnot(None),
+                    ).first()
+                    if closed_dup:
+                        # Reopen the closed position instead of creating a duplicate
+                        logger.info(
+                            f"Reopening closed position {closed_dup.id} ({normalized_symbol}) — "
+                            f"eToro ID {pos.etoro_position_id} exists on eToro but was closed in DB"
+                        )
+                        closed_dup.closed_at = None
+                        closed_dup.current_price = pos.current_price
+                        closed_dup.unrealized_pnl = pos.unrealized_pnl
+                        closed_dup.entry_price = pos.entry_price
+                        if pos.stop_loss is not None:
+                            closed_dup.stop_loss = pos.stop_loss
+                        if pos.take_profit is not None:
+                            closed_dup.take_profit = pos.take_profit
+                        if pos.invested_amount:
+                            closed_dup.invested_amount = pos.invested_amount
+                        if matched_strategy_id and matched_strategy_id != 'etoro_position':
+                            closed_dup.strategy_id = matched_strategy_id
+                        updated_count += 1
+                        continue
+
                     new_pos = PositionORM(
                         id=pos.id,
                         strategy_id=matched_strategy_id,
-                        symbol=normalized_symbol,  # Use normalized symbol
+                        symbol=normalized_symbol,
                         side=pos.side,
                         quantity=pos.quantity,
                         entry_price=pos.entry_price,
@@ -1517,7 +1544,14 @@ class OrderMonitor:
                 for k in stale:
                     del self._position_miss_count[k]
             
-            session.commit()
+            try:
+                session.commit()
+            except Exception as commit_err:
+                session.rollback()
+                if 'unique' in str(commit_err).lower():
+                    logger.warning(f"UniqueViolation during position sync — will retry next cycle: {commit_err}")
+                else:
+                    raise
             
             # Update last sync time
             self._last_full_sync = time.time()
