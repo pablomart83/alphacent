@@ -1030,6 +1030,13 @@ class ApiClient {
     return this.extractArrayFromResponse<any>(response, 'regimes');
   }
 
+  async getComprehensiveRegimeAnalysis(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>(
+      `/analytics/regime-comprehensive`
+    );
+    return this.handleResponse(response);
+  }
+
   async getPerformanceAnalytics(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(

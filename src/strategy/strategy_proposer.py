@@ -5669,6 +5669,38 @@ Make this strategy distinct and innovative while following all threshold and pai
             logger.warning(f"Crypto regime detection failed, using equity regime: {e}")
             return None
 
+    def _detect_forex_regime(self) -> 'MarketRegime':
+        """Detect market regime using major forex pairs (independent of equity regime)."""
+        try:
+            sub_regime, confidence, _, metrics = self.market_analyzer.detect_sub_regime(
+                symbols=['EURUSD', 'GBPUSD', 'USDJPY']
+            )
+            logger.info(
+                f"Forex regime: {sub_regime.value} (confidence: {confidence:.2f}, "
+                f"20d={metrics.get('avg_change_20d', 0):.2%}, "
+                f"50d={metrics.get('avg_change_50d', 0):.2%})"
+            )
+            return sub_regime
+        except Exception as e:
+            logger.warning(f"Forex regime detection failed, using equity regime: {e}")
+            return None
+
+    def _detect_commodity_regime(self) -> 'MarketRegime':
+        """Detect market regime using major commodities (independent of equity regime)."""
+        try:
+            sub_regime, confidence, _, metrics = self.market_analyzer.detect_sub_regime(
+                symbols=['GOLD', 'OIL', 'SILVER']
+            )
+            logger.info(
+                f"Commodity regime: {sub_regime.value} (confidence: {confidence:.2f}, "
+                f"20d={metrics.get('avg_change_20d', 0):.2%}, "
+                f"50d={metrics.get('avg_change_50d', 0):.2%})"
+            )
+            return sub_regime
+        except Exception as e:
+            logger.warning(f"Commodity regime detection failed, using equity regime: {e}")
+            return None
+
     def _filter_templates_by_macro_regime(
         self, market_regime: MarketRegime, market_context: Dict
     ) -> List:
@@ -5696,8 +5728,19 @@ Make this strategy distinct and innovative while following all threshold and pai
         if crypto_regime is None:
             crypto_regime = market_regime  # Fallback to equity regime
 
+        # Forex and commodities also have independent dynamics
+        forex_regime = self._detect_forex_regime()
+        if forex_regime is None:
+            forex_regime = market_regime
+
+        commodity_regime = self._detect_commodity_regime()
+        if commodity_regime is None:
+            commodity_regime = market_regime
+
         # Store for use by _match_templates_to_symbols (directional quotas per asset class)
         self._crypto_regime = crypto_regime
+        self._forex_regime = forex_regime
+        self._commodity_regime = commodity_regime
         self._equity_regime = market_regime
 
         def _get_templates_for_regime_with_parent(regime):

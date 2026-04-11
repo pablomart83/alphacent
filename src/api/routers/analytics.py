@@ -460,6 +460,196 @@ async def get_regime_analysis(
     return regime_performances
 
 
+@router.get("/regime-comprehensive")
+async def get_comprehensive_regime_analysis(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session)
+):
+    """
+    Comprehensive regime analysis with per-asset-class detection and market insights.
+    
+    Returns:
+        - current_regimes: per-asset-class regime detection (equity, crypto, forex, commodity)
+        - performance_by_regime: strategy performance grouped by regime
+        - regime_transitions: historical regime changes
+        - strategy_regime_performance: per-strategy performance across regimes
+        - market_context: FRED macro data (VIX, rates, yield curve, etc.)
+        - crypto_cycle: halving cycle phase and recommendation
+        - carry_rates: forex carry differentials
+    """
+    logger.info(f"Getting comprehensive regime analysis for user {username}")
+
+    result: Dict[str, Any] = {}
+
+    # --- 1. Per-asset-class regime detection ---
+    try:
+        from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+        from src.data.market_data_manager import MarketDataManager
+        from src.models.database import get_database
+
+        db = get_database()
+        market_data = MarketDataManager(db)
+        analyzer = MarketStatisticsAnalyzer(market_data)
+
+        regimes = {}
+        for label, symbols in [
+            ('equity', ['SPY', 'QQQ', 'DIA']),
+            ('crypto', ['BTC', 'ETH']),
+            ('forex', ['EURUSD', 'GBPUSD', 'USDJPY']),
+            ('commodity', ['GOLD', 'OIL', 'SILVER']),
+        ]:
+            try:
+                sub_regime, confidence, data_quality, metrics = analyzer.detect_sub_regime(symbols=symbols)
+                regimes[label] = {
+                    'regime': sub_regime.value if hasattr(sub_regime, 'value') else str(sub_regime),
+                    'confidence': round(confidence, 3),
+                    'data_quality': data_quality,
+                    'change_20d': round(metrics.get('avg_change_20d', 0) * 100, 2),
+                    'change_50d': round(metrics.get('avg_change_50d', 0) * 100, 2),
+                    'atr_ratio': round(metrics.get('avg_atr_ratio', 0) * 100, 2),
+                    'symbols': symbols,
+                }
+            except Exception as e:
+                regimes[label] = {'regime': 'unknown', 'error': str(e)}
+
+        result['current_regimes'] = regimes
+    except Exception as e:
+        logger.error(f"Regime detection failed: {e}")
+        result['current_regimes'] = {}
+
+    # --- 2. Market context from FRED ---
+    try:
+        market_context = analyzer.get_market_context()
+        result['market_context'] = market_context
+    except Exception as e:
+        result['market_context'] = {}
+
+    # --- 3. Crypto cycle phase ---
+    try:
+        crypto_cycle = analyzer.get_crypto_cycle_phase()
+        result['crypto_cycle'] = crypto_cycle
+    except Exception as e:
+        result['crypto_cycle'] = {}
+
+    # --- 4. Forex carry rates ---
+    try:
+        carry_rates = analyzer.get_carry_rates()
+        result['carry_rates'] = carry_rates
+    except Exception as e:
+        result['carry_rates'] = {}
+
+    # --- 5. Performance by regime (from DB) ---
+    try:
+        strategies = session.query(StrategyORM).filter(
+            StrategyORM.status.in_(['DEMO', 'LIVE', 'RETIRED'])
+        ).all()
+
+        all_positions = session.query(PositionORM).all()
+        positions_by_strategy = {}
+        for p in all_positions:
+            positions_by_strategy.setdefault(p.strategy_id, []).append(p)
+
+        regime_perf = defaultdict(lambda: {'returns': [], 'trades': 0, 'wins': 0})
+
+        for strategy in strategies:
+            meta = strategy.strategy_metadata if isinstance(strategy.strategy_metadata, dict) else {}
+            regime = meta.get('macro_regime', meta.get('market_regime', 'unknown'))
+            regime = regime.replace('_', ' ').title() if regime != 'unknown' else regime
+
+            strat_positions = positions_by_strategy.get(strategy.id, [])
+            if not strat_positions:
+                continue
+
+            strat_pnl = sum(_position_pnl(p) for p in strat_positions)
+            strat_wins = sum(1 for p in strat_positions if _position_pnl(p) > 0)
+
+            regime_perf[regime]['returns'].append(strat_pnl)
+            regime_perf[regime]['trades'] += len(strat_positions)
+            regime_perf[regime]['wins'] += strat_wins
+
+        perf_list = []
+        for regime, data in sorted(regime_perf.items(), key=lambda x: sum(x[1]['returns']), reverse=True):
+            total_trades = data['trades']
+            wins = data['wins']
+            total_return = sum(data['returns'])
+            perf_list.append({
+                'regime': regime,
+                'total_return': round(total_return, 2),
+                'sharpe': round(calculate_sharpe_ratio(data['returns']), 2) if len(data['returns']) > 1 else 0.0,
+                'trades': total_trades,
+                'win_rate': round(wins / total_trades * 100, 1) if total_trades > 0 else 0.0,
+            })
+
+        result['performance_by_regime'] = perf_list
+    except Exception as e:
+        logger.error(f"Regime performance calc failed: {e}")
+        result['performance_by_regime'] = []
+
+    # --- 6. Regime transitions (from config history) ---
+    try:
+        import yaml
+        from pathlib import Path
+        config_path = Path("config/autonomous_trading.yaml")
+        transitions = []
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+                mr = config.get('market_regime', {})
+                if mr:
+                    transitions.append({
+                        'date': mr.get('updated_at', ''),
+                        'from_regime': '',
+                        'to_regime': mr.get('current', 'unknown').replace('_', ' ').title(),
+                    })
+        result['regime_transitions'] = transitions
+    except Exception:
+        result['regime_transitions'] = []
+
+    # --- 7. Strategy performance by regime (heatmap data) ---
+    try:
+        strat_regime_perf = []
+        # Group strategies by template name, then by regime
+        template_regimes = defaultdict(lambda: defaultdict(list))
+
+        for strategy in strategies:
+            meta = strategy.strategy_metadata if isinstance(strategy.strategy_metadata, dict) else {}
+            regime = meta.get('macro_regime', 'unknown')
+            template = meta.get('template_name', strategy.name.rsplit(' V', 1)[0] if ' V' in strategy.name else strategy.name)
+
+            strat_positions = positions_by_strategy.get(strategy.id, [])
+            if not strat_positions:
+                continue
+
+            strat_pnl = sum(_position_pnl(p) for p in strat_positions)
+            # Map regime to bucket
+            if 'trending_up' in regime:
+                bucket = 'trending_up'
+            elif 'trending_down' in regime:
+                bucket = 'trending_down'
+            elif 'ranging' in regime:
+                bucket = 'ranging'
+            elif 'high_vol' in regime or 'volatile' in regime:
+                bucket = 'volatile'
+            else:
+                bucket = 'ranging'
+
+            template_regimes[template][bucket].append(strat_pnl)
+
+        for template, buckets in sorted(template_regimes.items()):
+            row = {'strategy': template}
+            for bucket in ['trending_up', 'trending_down', 'ranging', 'volatile']:
+                returns = buckets.get(bucket, [])
+                row[bucket] = round(sum(returns), 2) if returns else 0.0
+            strat_regime_perf.append(row)
+
+        result['strategy_regime_performance'] = strat_regime_perf
+    except Exception as e:
+        logger.error(f"Strategy regime heatmap failed: {e}")
+        result['strategy_regime_performance'] = []
+
+    return result
+
+
 @router.get("/performance", response_model=PerformanceAnalyticsResponse)
 async def get_performance_analytics(
     mode: TradingMode,

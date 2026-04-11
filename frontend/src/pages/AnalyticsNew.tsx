@@ -95,6 +95,18 @@ interface RegimeAnalysis {
     ranging: number;
     volatile: number;
   }>;
+  current_regimes: Record<string, {
+    regime: string;
+    confidence: number;
+    data_quality: string;
+    change_20d: number;
+    change_50d: number;
+    atr_ratio: number;
+    symbols: string[];
+  }>;
+  market_context: Record<string, any>;
+  crypto_cycle: Record<string, any>;
+  carry_rates: Record<string, any>;
 }
 
 interface TradeJournalEntry {
@@ -303,7 +315,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       // Phase 2: Tab-specific data — fetch in background, don't block the page
       let attribution: any[] = [];
       let tradeData: any = null;
-      let regimeData: any[] = [];
+      let regimeData: any = null;
       let fundStats: any = null;
       let mlFilterStats: any = null;
       let convictionDist: any = null;
@@ -317,7 +329,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
         tradeData = await apiClient.getTradeAnalytics(tradingMode, period).catch(() => null);
       }
       if (activeTab === 'regime') {
-        regimeData = await apiClient.getRegimeAnalysis(tradingMode).catch(() => []);
+        regimeData = await apiClient.getComprehensiveRegimeAnalysis().catch(() => null);
       }
       if (activeTab === 'alpha-edge') {
         [fundStats, mlFilterStats, convictionDist, templatePerf, txCostSavings] = await Promise.all([
@@ -387,17 +399,21 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       }
       
       // Set regime analysis
-      if (regimeData && Array.isArray(regimeData)) {
+      if (regimeData && typeof regimeData === 'object') {
         setRegimeAnalysis({
-          performance_by_regime: regimeData.map((item: any) => ({
+          performance_by_regime: (regimeData.performance_by_regime || []).map((item: any) => ({
             regime: item.regime || 'Unknown',
             return: item.total_return || 0,
-            sharpe: item.sharpe_ratio || 0,
-            trades: item.total_trades || 0,
+            sharpe: item.sharpe || 0,
+            trades: item.trades || 0,
             win_rate: item.win_rate || 0,
           })),
-          regime_transitions: [],
-          strategy_regime_performance: [],
+          regime_transitions: regimeData.regime_transitions || [],
+          strategy_regime_performance: regimeData.strategy_regime_performance || [],
+          current_regimes: regimeData.current_regimes || {},
+          market_context: regimeData.market_context || {},
+          crypto_cycle: regimeData.crypto_cycle || {},
+          carry_rates: regimeData.carry_rates || {},
         });
       }
       
@@ -1521,6 +1537,125 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           </TabsContent>
 
           <TabsContent value="regime" className="space-y-6">
+            {/* Current Regimes by Asset Class */}
+            {regimeAnalysis?.current_regimes && Object.keys(regimeAnalysis.current_regimes).length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Current Market Regimes</CardTitle>
+                  <CardDescription>Per-asset-class regime detection using representative benchmarks</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {Object.entries(regimeAnalysis.current_regimes).map(([assetClass, data]) => (
+                      <div key={assetClass} className="p-4 bg-muted rounded-lg space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold capitalize">{assetClass}</span>
+                          <Badge variant="outline" className="text-xs">{(data as any).confidence ? `${((data as any).confidence * 100).toFixed(0)}%` : ''}</Badge>
+                        </div>
+                        <p className="text-lg font-bold font-mono">{((data as any).regime || 'unknown').replace(/_/g, ' ')}</p>
+                        <div className="text-xs text-muted-foreground space-y-0.5">
+                          <p>20d: <span className={((data as any).change_20d || 0) >= 0 ? 'text-accent-green' : 'text-accent-red'}>{((data as any).change_20d || 0).toFixed(1)}%</span></p>
+                          <p>50d: <span className={((data as any).change_50d || 0) >= 0 ? 'text-accent-green' : 'text-accent-red'}>{((data as any).change_50d || 0).toFixed(1)}%</span></p>
+                          <p>ATR: {((data as any).atr_ratio || 0).toFixed(2)}%</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Market Context (FRED Macro Data) */}
+            {regimeAnalysis?.market_context && regimeAnalysis.market_context.vix && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Macro Market Context</CardTitle>
+                  <CardDescription>FRED economic data driving regime and risk decisions</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                    {[
+                      { label: 'VIX', value: regimeAnalysis.market_context.vix?.toFixed(1), color: regimeAnalysis.market_context.vix > 25 ? 'text-accent-red' : regimeAnalysis.market_context.vix < 15 ? 'text-accent-green' : '' },
+                      { label: 'Fed Funds', value: `${regimeAnalysis.market_context.fed_funds_rate?.toFixed(2)}%` },
+                      { label: '10Y Treasury', value: `${regimeAnalysis.market_context.treasury_10y?.toFixed(2)}%` },
+                      { label: 'Yield Curve', value: `${regimeAnalysis.market_context.yield_curve_slope?.toFixed(2)}%`, color: regimeAnalysis.market_context.yield_curve_slope < 0 ? 'text-accent-red' : 'text-accent-green' },
+                      { label: 'Inflation', value: `${regimeAnalysis.market_context.inflation_rate?.toFixed(1)}%` },
+                      { label: 'ISM PMI', value: regimeAnalysis.market_context.ism_pmi?.toFixed(1), color: regimeAnalysis.market_context.ism_pmi < 50 ? 'text-accent-red' : 'text-accent-green' },
+                      { label: 'HY Spread', value: `${regimeAnalysis.market_context.hy_spread?.toFixed(2)}%` },
+                      { label: 'Risk Regime', value: regimeAnalysis.market_context.risk_regime?.replace(/_/g, ' ') },
+                      { label: 'Unemployment', value: `${regimeAnalysis.market_context.unemployment_rate?.toFixed(1)}%` },
+                      { label: 'Fed Stance', value: regimeAnalysis.market_context.fed_stance },
+                      { label: 'USD Index', value: regimeAnalysis.market_context.trade_weighted_dollar?.toFixed(1) },
+                      { label: 'Macro Regime', value: regimeAnalysis.market_context.macro_regime?.replace(/_/g, ' ') },
+                    ].map((item, idx) => (
+                      <div key={idx} className="p-3 bg-muted rounded-lg">
+                        <p className="text-xs text-muted-foreground">{item.label}</p>
+                        <p className={cn('text-sm font-bold font-mono', item.color || '')}>{item.value || 'N/A'}</p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Crypto Cycle + Forex Carry */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {regimeAnalysis?.crypto_cycle && regimeAnalysis.crypto_cycle.phase && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Bitcoin Halving Cycle</CardTitle>
+                    <CardDescription>Position in the 4-year halving cycle</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">Phase</span>
+                        <Badge variant="outline" className="font-mono">{regimeAnalysis.crypto_cycle.phase?.replace(/_/g, ' ')}</Badge>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">Months Since Halving</span>
+                        <span className="font-mono text-sm">{regimeAnalysis.crypto_cycle.months_since_halving}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">Cycle Score</span>
+                        <span className="font-mono text-sm">{regimeAnalysis.crypto_cycle.cycle_score}/100</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm">Recommendation</span>
+                        <Badge className={cn('text-xs',
+                          regimeAnalysis.crypto_cycle.recommendation === 'accumulate' ? 'bg-green-500/20 text-green-400' :
+                          regimeAnalysis.crypto_cycle.recommendation === 'hold' ? 'bg-blue-500/20 text-blue-400' :
+                          regimeAnalysis.crypto_cycle.recommendation === 'reduce' ? 'bg-yellow-500/20 text-yellow-400' :
+                          'bg-red-500/20 text-red-400'
+                        )}>{regimeAnalysis.crypto_cycle.recommendation}</Badge>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {regimeAnalysis?.carry_rates && regimeAnalysis.carry_rates.carry && Object.keys(regimeAnalysis.carry_rates.carry).length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Forex Carry Rates</CardTitle>
+                    <CardDescription>Interest rate differentials from FRED central bank data</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {Object.entries(regimeAnalysis.carry_rates.carry).map(([pair, diff]) => (
+                        <div key={pair} className="flex items-center justify-between p-2 bg-muted rounded">
+                          <span className="font-mono text-sm">{pair}</span>
+                          <span className={cn('font-mono text-sm font-bold',
+                            (diff as number) > 0 ? 'text-accent-green' : (diff as number) < 0 ? 'text-accent-red' : ''
+                          )}>{(diff as number) > 0 ? '+' : ''}{(diff as number).toFixed(2)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
             <Card>
               <CardHeader>
                 <CardTitle>Performance by Market Regime</CardTitle>
