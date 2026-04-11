@@ -946,6 +946,91 @@ class MarketStatisticsAnalyzer:
             'last_updated': datetime.now().isoformat()
         }
     
+    # FRED series IDs for central bank policy rates
+    # Used for forex carry bias calculation
+    # Using OECD immediate rates series (IRSTCB01xxM156N) for consistency,
+    # with FEDFUNDS and ECBDFR as primary for USD/EUR (more timely updates)
+    CENTRAL_BANK_RATES = {
+        'USD': 'FEDFUNDS',          # Federal Reserve effective rate (monthly)
+        'EUR': 'ECBDFR',            # ECB deposit facility rate
+        'GBP': 'IRSTCB01GBM156N',  # BOE rate via OECD (monthly)
+        'JPY': 'IRSTCB01JPM156N',  # BOJ policy rate via OECD (monthly)
+        'AUD': 'IRSTCB01AUM156N',  # RBA cash rate via OECD (monthly)
+        'CAD': 'IRSTCB01CAM156N',  # BOC overnight rate via OECD (monthly)
+        'CHF': 'IRSTCB01CHM156N',  # SNB target rate via OECD (monthly)
+    }
+
+    # Map forex pair symbols to (base_currency, quote_currency)
+    FOREX_PAIR_CURRENCIES = {
+        'EURUSD': ('EUR', 'USD'),
+        'GBPUSD': ('GBP', 'USD'),
+        'USDJPY': ('USD', 'JPY'),
+        'AUDUSD': ('AUD', 'USD'),
+        'USDCAD': ('USD', 'CAD'),
+        'USDCHF': ('USD', 'CHF'),
+    }
+
+    def get_carry_rates(self) -> Dict[str, Any]:
+        """
+        Fetch central bank rates from FRED and compute carry differentials
+        for each forex pair.
+
+        Returns:
+            Dict with:
+            - rates: {currency: rate} for each central bank
+            - carry: {pair: differential} positive = long carry, negative = short carry
+            - last_updated: timestamp
+        """
+        cache_key = "carry_rates"
+        cached = self._get_cached(cache_key, self.fred_cache_duration if hasattr(self, 'fred_cache_duration') else 86400)
+        if cached is not None:
+            return cached
+
+        if not self.fred_enabled:
+            logger.debug("FRED disabled — returning empty carry rates")
+            return {'rates': {}, 'carry': {}, 'last_updated': None}
+
+        rates = {}
+        for currency, series_id in self.CENTRAL_BANK_RATES.items():
+            try:
+                series = self.fred_client.get_series(
+                    series_id,
+                    observation_start=datetime.now() - timedelta(days=90)
+                )
+                if not series.empty:
+                    val = series.dropna().iloc[-1]
+                    rates[currency] = float(val)
+                else:
+                    logger.debug(f"No FRED data for {currency} ({series_id})")
+            except Exception as e:
+                logger.debug(f"Could not fetch {currency} rate from FRED ({series_id}): {e}")
+
+        # Compute carry differentials for each forex pair
+        # Carry = base_rate - quote_rate
+        # Positive carry means going long the pair earns interest
+        carry = {}
+        for pair, (base_ccy, quote_ccy) in self.FOREX_PAIR_CURRENCIES.items():
+            base_rate = rates.get(base_ccy)
+            quote_rate = rates.get(quote_ccy)
+            if base_rate is not None and quote_rate is not None:
+                carry[pair] = base_rate - quote_rate
+
+        result = {
+            'rates': rates,
+            'carry': carry,
+            'last_updated': datetime.now().isoformat()
+        }
+
+        self._set_cached(cache_key, result)
+
+        if rates:
+            rate_str = ", ".join(f"{c}={r:.2f}%" for c, r in sorted(rates.items()))
+            carry_str = ", ".join(f"{p}={d:+.2f}%" for p, d in sorted(carry.items()))
+            logger.info(f"Carry rates: {rate_str}")
+            logger.info(f"Carry differentials: {carry_str}")
+
+        return result
+    
     def clear_cache(self):
         """Clear all cached data. Useful for testing or forcing fresh data fetch."""
         MarketStatisticsAnalyzer._shared_cache.clear()

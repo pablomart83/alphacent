@@ -86,6 +86,11 @@ class ConvictionScorer:
 
         total_score = wf_score + signal_score + regime_score + asset_score
 
+        # Carry bias adjustment for forex pairs (±5 points)
+        # Positive carry = bonus for longs, penalty for shorts (and vice versa)
+        carry_adjustment = self._score_carry_bias(signal)
+        total_score += carry_adjustment
+
         breakdown = {
             'walkforward_edge': {
                 'score': wf_score,
@@ -106,6 +111,11 @@ class ConvictionScorer:
                 'score': asset_score,
                 'max': 15,
                 'details': self._get_asset_details(signal.symbol)
+            },
+            'carry_bias': {
+                'score': carry_adjustment,
+                'max': 5,
+                'details': self._get_carry_details(signal)
             },
             # Legacy keys for backward compatibility with frontend/analytics
             'signal_strength': {
@@ -133,7 +143,8 @@ class ConvictionScorer:
         logger.info(
             f"Conviction score for {signal.symbol}: {total_score:.1f}/100 "
             f"(wf_edge: {wf_score:.1f}, signal: {signal_score:.1f}, "
-            f"regime: {regime_score:.1f}, asset: {asset_score:.1f})"
+            f"regime: {regime_score:.1f}, asset: {asset_score:.1f}"
+            f"{f', carry: {carry_adjustment:+.1f}' if carry_adjustment != 0 else ''})"
         )
 
         self._log_conviction_score(signal, strategy, conviction)
@@ -422,6 +433,106 @@ class ConvictionScorer:
                     score += 1.0
 
         return min(15.0, score)
+
+    # ─── FOREX CARRY BIAS ───────────────────────────────────────────────
+    def _score_carry_bias(self, signal: TradingSignal) -> float:
+        """
+        Apply carry bias adjustment for forex pairs.
+
+        If the signal direction aligns with positive carry (long the higher-yielding
+        currency), add up to +5 points. If it fights carry, subtract up to -5 points.
+        Non-forex signals return 0.
+
+        The magnitude scales with the rate differential:
+        - |diff| >= 3%: full ±5 points
+        - |diff| >= 1%: ±3 points
+        - |diff| < 1%: ±1 point
+        """
+        if not self.market_analyzer:
+            return 0.0
+
+        sym = signal.symbol.upper().split(':')[0]
+
+        # Only applies to forex pairs
+        from src.core.tradeable_instruments import DEMO_ALLOWED_FOREX
+        if sym not in set(DEMO_ALLOWED_FOREX):
+            return 0.0
+
+        try:
+            carry_data = self.market_analyzer.get_carry_rates()
+            carry_diff = carry_data.get('carry', {}).get(sym)
+
+            if carry_diff is None:
+                return 0.0
+
+            # Determine signal direction
+            direction = getattr(signal, 'direction', None)
+            if direction is None:
+                direction = getattr(signal, 'side', None)
+            if direction is None:
+                return 0.0
+
+            is_long = str(direction).lower() in ('long', 'buy')
+
+            # Scale adjustment by magnitude of rate differential
+            abs_diff = abs(carry_diff)
+            if abs_diff >= 3.0:
+                magnitude = 5.0
+            elif abs_diff >= 1.0:
+                magnitude = 3.0
+            else:
+                magnitude = 1.0
+
+            # Positive carry_diff means base currency has higher rate
+            # Long = buying base currency = earning carry if diff > 0
+            if is_long and carry_diff > 0:
+                return magnitude   # With carry
+            elif is_long and carry_diff < 0:
+                return -magnitude  # Against carry
+            elif not is_long and carry_diff < 0:
+                return magnitude   # Short + negative carry = with carry
+            elif not is_long and carry_diff > 0:
+                return -magnitude  # Short + positive carry = against carry
+
+            return 0.0
+
+        except Exception as e:
+            logger.debug(f"Could not compute carry bias for {sym}: {e}")
+            return 0.0
+
+    def _get_carry_details(self, signal: TradingSignal) -> Dict[str, Any]:
+        """Get carry bias details for breakdown logging."""
+        sym = signal.symbol.upper().split(':')[0]
+        from src.core.tradeable_instruments import DEMO_ALLOWED_FOREX
+        if sym not in set(DEMO_ALLOWED_FOREX):
+            return {'applicable': False}
+
+        if not self.market_analyzer:
+            return {'applicable': True, 'status': 'no_analyzer'}
+
+        try:
+            carry_data = self.market_analyzer.get_carry_rates()
+            carry_diff = carry_data.get('carry', {}).get(sym)
+            rates = carry_data.get('rates', {})
+
+            # Get currencies for this pair
+            pair_map = {
+                'EURUSD': ('EUR', 'USD'), 'GBPUSD': ('GBP', 'USD'),
+                'USDJPY': ('USD', 'JPY'), 'AUDUSD': ('AUD', 'USD'),
+                'USDCAD': ('USD', 'CAD'), 'USDCHF': ('USD', 'CHF'),
+            }
+            base_ccy, quote_ccy = pair_map.get(sym, (None, None))
+
+            return {
+                'applicable': True,
+                'pair': sym,
+                'carry_differential': carry_diff,
+                'base_rate': rates.get(base_ccy) if base_ccy else None,
+                'quote_rate': rates.get(quote_ccy) if quote_ccy else None,
+                'direction': str(getattr(signal, 'direction', getattr(signal, 'side', None))),
+            }
+        except Exception as e:
+            return {'applicable': True, 'error': str(e)}
 
     # ─── STRATEGY TYPE DETECTION ────────────────────────────────────────
     def _detect_strategy_type(self, strategy: Strategy) -> str:

@@ -532,14 +532,20 @@ class FundamentalDataProvider:
             logger.error(f"Error fetching from FMP for {symbol}: {e}")
             return None
     
-    def _fmp_request(self, endpoint: str, **params) -> Optional[Any]:
-            """Make a request to FMP stable API."""
+    def _fmp_request(self, endpoint: str, base_url: Optional[str] = None, **params) -> Optional[Any]:
+            """Make a request to FMP API.
+            
+            Args:
+                endpoint: API endpoint path (e.g., "/income-statement")
+                base_url: Override base URL (for v4 endpoints not on stable API)
+                **params: Query parameters
+            """
             # Check rate limit before each individual request
             if not self.fmp_rate_limiter.can_make_call():
                 logger.warning(f"FMP rate limit reached — skipping {endpoint}")
                 return None
 
-            url = f"{self.fmp_base_url}{endpoint}"
+            url = f"{base_url or self.fmp_base_url}{endpoint}"
             params['apikey'] = self.fmp_api_key
 
             # Record the call BEFORE making it (conservative counting)
@@ -1709,13 +1715,16 @@ class FundamentalDataProvider:
 
         try:
             limit = max(months * 20, 100)  # Rough estimate: ~20 transactions per month
-            raw = self._fmp_request("/insider-trading", symbol=symbol, limit=limit)
+            raw = self._fmp_request(
+                "/insider-trading",
+                base_url="https://financialmodelingprep.com/api/v4",
+                symbol=symbol, limit=limit
+            )
             if raw is None:
                 # API error — cache empty result to avoid retrying
                 self._insider_cache[cache_key] = []
                 self._insider_cache_timestamps[cache_key] = datetime.now()
                 return []
-            self.fmp_rate_limiter.record_call()
 
             if not raw or not isinstance(raw, list):
                 logger.debug(f"No insider trading data from FMP for {symbol}")
@@ -1961,7 +1970,6 @@ class FundamentalDataProvider:
 
         try:
             data = self._fmp_request("/institutional-ownership/symbol-ownership", symbol=symbol)
-            self.fmp_rate_limiter.record_call()
 
             if not data or not isinstance(data, list) or len(data) == 0:
                 result = {"ownership_pct": None, "change_pct": None, "top_holders_count": 0}
@@ -2006,7 +2014,6 @@ class FundamentalDataProvider:
 
         try:
             data = self._fmp_request("/price-target-consensus", symbol=symbol)
-            self.fmp_rate_limiter.record_call()
 
             if not data or not isinstance(data, list) or len(data) == 0:
                 self._pt_cache[cache_key] = {'data': None, 'ts': datetime.now()}
@@ -2065,7 +2072,6 @@ class FundamentalDataProvider:
 
         try:
             data = self._fmp_request("/upgrades-downgrades-consensus", symbol=symbol)
-            self.fmp_rate_limiter.record_call()
 
             if not data or not isinstance(data, list):
                 self._upgrades_cache[cache_key] = {'data': [], 'ts': datetime.now()}
