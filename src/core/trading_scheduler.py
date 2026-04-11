@@ -1430,8 +1430,11 @@ class TradingScheduler:
         symbol_limit_count = 0
         correlation_filtered_count = 0
         
-        # Max strategies per symbol (from risk config)
-        MAX_STRATEGIES_PER_SYMBOL = 5
+        # Max strategies per symbol PER TIMEFRAME BUCKET (from risk config)
+        # 1d BTC LONG, 4h BTC LONG, and 1h BTC LONG are different trades —
+        # they capture different market dynamics and shouldn't compete for slots.
+        # Buckets: "1d" (daily), "4h" (4-hour), "1h" (hourly/intraday)
+        MAX_PER_SYMBOL_PER_TIMEFRAME = 5
         
         # Correlation analyzer disabled — same-symbol dedup handles concentration risk.
         # The pairwise correlation calculations were running hundreds of times per cycle
@@ -1448,110 +1451,131 @@ class TradingScheduler:
         for (normalized_symbol, direction), signal_list in signals_by_symbol_direction.items():
             # Check if we already have a position in this normalized symbol/direction
             existing_key = (normalized_symbol, direction)
-            existing_count = len(existing_positions_map.get(existing_key, []))
+            existing_positions_for_key = existing_positions_map.get(existing_key, [])
             
-            # How many more positions can we open for this symbol/direction?
-            current_pending_count = pending_orders_per_symbol.get((normalized_symbol, direction), 0)
-            total_active = existing_count + current_pending_count
-            remaining_slots = MAX_STRATEGIES_PER_SYMBOL - total_active
+            # Build timeframe buckets for existing positions
+            # Positions from strategies with interval_4h or intraday metadata go in their bucket
+            existing_by_tf = {"1d": 0, "4h": 0, "1h": 0}
+            for pos in existing_positions_for_key:
+                tf = "1d"  # default
+                if hasattr(pos, 'strategy_id') and pos.strategy_id:
+                    strat_orm = strategy_map.get(pos.strategy_id, (None, None))
+                    if strat_orm:
+                        s, _ = strat_orm
+                        if s and s.metadata:
+                            if s.metadata.get('intraday') and not s.metadata.get('interval_4h'):
+                                tf = "1h"
+                            elif s.metadata.get('interval_4h'):
+                                tf = "4h"
+                existing_by_tf[tf] += 1
             
-            if remaining_slots <= 0:
-                # Already at max positions for this symbol/direction
-                for strategy_id, signal, strategy_name in signal_list:
-                    self._log_coordination_rejection(
-                        signal=signal,
-                        strategy_name=strategy_name,
-                        rejection_reason=f"Symbol limit: {total_active} existing {direction} position(s)/orders in {normalized_symbol} (max: {MAX_STRATEGIES_PER_SYMBOL})",
-                    )
-                position_duplicate_count += len(signal_list)
-                continue
+            # Group incoming signals by timeframe
+            signals_by_tf = {"1d": [], "4h": [], "1h": []}
+            for strategy_id, signal, strategy_name in signal_list:
+                tf = "1d"
+                strategy, _ = strategy_map.get(strategy_id, (None, None))
+                if strategy and strategy.metadata:
+                    if strategy.metadata.get('intraday') and not strategy.metadata.get('interval_4h'):
+                        tf = "1h"
+                    elif strategy.metadata.get('interval_4h'):
+                        tf = "4h"
+                signals_by_tf[tf].append((strategy_id, signal, strategy_name))
             
-            if existing_count > 0:
-                # We have positions but haven't hit the limit yet.
-                # Filter out signals from strategies that ALREADY have a position
-                # in this symbol/direction (same-strategy dedup), but allow
-                # signals from OTHER strategies (multi-strategy confluence).
-                existing_strategy_ids = set()
-                for pos in existing_positions_map.get(existing_key, []):
-                    if hasattr(pos, 'strategy_id') and pos.strategy_id:
-                        existing_strategy_ids.add(pos.strategy_id)
+            # Process each timeframe bucket independently
+            for tf, tf_signals in signals_by_tf.items():
+                if not tf_signals:
+                    continue
                 
-                new_strategy_signals = []
-                for strategy_id, signal, strategy_name in signal_list:
-                    if strategy_id in existing_strategy_ids:
-                        # This specific strategy already has a position — block
+                existing_count = existing_by_tf.get(tf, 0)
+                current_pending_count = pending_orders_per_symbol.get((normalized_symbol, direction), 0)
+                # Approximate: split pending count proportionally (not perfect but avoids over-blocking)
+                total_active = existing_count
+                remaining_slots = MAX_PER_SYMBOL_PER_TIMEFRAME - total_active
+                
+                if remaining_slots <= 0:
+                    for strategy_id, signal, strategy_name in tf_signals:
                         self._log_coordination_rejection(
                             signal=signal,
                             strategy_name=strategy_name,
-                            rejection_reason=f"Same-strategy duplicate: already has {direction} position in {normalized_symbol}",
+                            rejection_reason=f"Symbol limit: {total_active} existing {direction} {tf} position(s) in {normalized_symbol} (max: {MAX_PER_SYMBOL_PER_TIMEFRAME})",
                         )
-                        position_duplicate_count += 1
-                    else:
-                        new_strategy_signals.append((strategy_id, signal, strategy_name))
-                
-                if not new_strategy_signals:
+                    position_duplicate_count += len(tf_signals)
                     continue
-                signal_list = new_strategy_signals
-            
-            # Filter signals that already have pending orders
-            # Same-strategy dedup only: a strategy can't double-order the same symbol/direction
-            # Cross-strategy is allowed — multiple strategies trading same symbol is confluence
-            filtered_signals = []
-            for strategy_id, signal, strategy_name in signal_list:
-                # Same-strategy dedup: this strategy already has a pending order
-                pending_key = (strategy_id, normalized_symbol, direction)
-                if pending_key in pending_orders_map:
-                    pending_count = len(pending_orders_map[pending_key])
-                    logger.info(
-                        f"Pending order check: {strategy_name} already has {pending_count} pending "
-                        f"{direction} order(s) for {normalized_symbol}, filtering signal"
-                    )
-                    pending_order_duplicate_count += 1
-                    continue  # Skip this strategy's signal
                 
-                filtered_signals.append((strategy_id, signal, strategy_name))
-            
-            # If all signals were filtered due to pending orders, continue to next symbol/direction
-            if not filtered_signals:
-                continue
-            
-            if len(filtered_signals) == 1:
-                # Only one strategy trading this symbol/direction - no coordination needed
-                strategy_id, signal, _ = filtered_signals[0]
-                if strategy_id not in coordinated_results:
-                    coordinated_results[strategy_id] = []
-                coordinated_results[strategy_id].append(signal)
-            else:
-                # Multiple strategies want to trade this symbol/direction
-                # Allow up to remaining_slots signals through, sorted by confidence
-                logger.info(
-                    f"Signal coordination: {len(filtered_signals)} strategies want to trade {normalized_symbol} {direction} "
-                    f"({remaining_slots} slot(s) available)"
-                )
-
-                # Sort by confidence (highest first)
-                filtered_signals.sort(key=lambda x: x[1].confidence, reverse=True)
-
-                # Keep top N signals based on remaining slots
-                slots_to_fill = min(remaining_slots, len(filtered_signals))
-                kept_signals = filtered_signals[:slots_to_fill]
-                dropped_signals = filtered_signals[slots_to_fill:]
-
-                for strategy_id, signal, strategy_name in kept_signals:
+                # Same-strategy dedup within this timeframe bucket
+                if existing_count > 0:
+                    existing_strategy_ids = set()
+                    for pos in existing_positions_for_key:
+                        if hasattr(pos, 'strategy_id') and pos.strategy_id:
+                            existing_strategy_ids.add(pos.strategy_id)
+                    
+                    new_signals = []
+                    for strategy_id, signal, strategy_name in tf_signals:
+                        if strategy_id in existing_strategy_ids:
+                            self._log_coordination_rejection(
+                                signal=signal,
+                                strategy_name=strategy_name,
+                                rejection_reason=f"Same-strategy duplicate: already has {direction} position in {normalized_symbol}",
+                            )
+                            position_duplicate_count += 1
+                        else:
+                            new_signals.append((strategy_id, signal, strategy_name))
+                    
+                    if not new_signals:
+                        continue
+                    tf_signals = new_signals
+                
+                # Filter signals that already have pending orders
+                # Same-strategy dedup only: a strategy can't double-order the same symbol/direction
+                filtered_signals = []
+                for strategy_id, signal, strategy_name in tf_signals:
+                    pending_key = (strategy_id, normalized_symbol, direction)
+                    if pending_key in pending_orders_map:
+                        pending_count = len(pending_orders_map[pending_key])
+                        logger.info(
+                            f"Pending order check: {strategy_name} already has {pending_count} pending "
+                            f"{direction} order(s) for {normalized_symbol}, filtering signal"
+                        )
+                        pending_order_duplicate_count += 1
+                        continue
+                    filtered_signals.append((strategy_id, signal, strategy_name))
+                
+                if not filtered_signals:
+                    continue
+                
+                if len(filtered_signals) == 1:
+                    strategy_id, signal, _ = filtered_signals[0]
                     if strategy_id not in coordinated_results:
                         coordinated_results[strategy_id] = []
                     coordinated_results[strategy_id].append(signal)
+                else:
                     logger.info(
-                        f"  ✅ Kept: {strategy_name} (confidence={signal.confidence:.2f})"
+                        f"Signal coordination: {len(filtered_signals)} strategies want to trade {normalized_symbol} {direction} {tf} "
+                        f"({remaining_slots} slot(s) available)"
                     )
 
-                # Log filtered signals
-                for strategy_id, signal, strategy_name in dropped_signals:
-                    logger.info(
-                        f"  ❌ Filtered: {strategy_name} (confidence={signal.confidence:.2f}) "
-                        f"- max {MAX_STRATEGIES_PER_SYMBOL} positions per symbol reached"
-                    )
-                    filtered_count += 1
+                    # Sort by confidence (highest first)
+                    filtered_signals.sort(key=lambda x: x[1].confidence, reverse=True)
+
+                    # Keep top N signals based on remaining slots
+                    slots_to_fill = min(remaining_slots, len(filtered_signals))
+                    kept_signals = filtered_signals[:slots_to_fill]
+                    dropped_signals = filtered_signals[slots_to_fill:]
+
+                    for strategy_id, signal, strategy_name in kept_signals:
+                        if strategy_id not in coordinated_results:
+                            coordinated_results[strategy_id] = []
+                        coordinated_results[strategy_id].append(signal)
+                        logger.info(
+                            f"  ✅ Kept: {strategy_name} (confidence={signal.confidence:.2f})"
+                        )
+
+                    for strategy_id, signal, strategy_name in dropped_signals:
+                        logger.info(
+                            f"  ❌ Filtered: {strategy_name} (confidence={signal.confidence:.2f}) "
+                            f"- max {MAX_PER_SYMBOL_PER_TIMEFRAME} positions per symbol/{tf} reached"
+                        )
+                        filtered_count += 1
 
         if position_duplicate_count > 0:
             logger.info(
@@ -1574,7 +1598,7 @@ class TradingScheduler:
         if symbol_limit_count > 0:
             logger.warning(
                 f"Symbol limit filtering: {symbol_limit_count} signals filtered "
-                f"(would exceed max {MAX_STRATEGIES_PER_SYMBOL} strategies per symbol)"
+                f"(would exceed max {MAX_PER_SYMBOL_PER_TIMEFRAME} strategies per symbol/timeframe)"
             )
         
         if filtered_count > 0:
