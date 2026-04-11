@@ -125,7 +125,7 @@ echo "  CloudWatch Agent configured and started"
 echo ""
 echo "[3/5] Setting up app heartbeat..."
 
-sudo tee /home/ubuntu/alphacent/deploy/heartbeat.sh > /dev/null << 'HBEOF'
+cat > /home/ubuntu/alphacent/deploy/heartbeat.sh << 'HBEOF'
 #!/bin/bash
 # AlphaCent heartbeat — pushes 1 if healthy, 0 if not
 REGION="eu-west-1"
