@@ -4426,6 +4426,31 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 if is_ranging_template:
                     base_score = min(100.0, base_score + 10)
         
+        # --- Forex carry bias at proposal time --------------------------------
+        # Boost forex template-symbol combos where the template direction aligns
+        # with the carry direction. Mean-reversion templates on pairs with strong
+        # carry get an extra boost since carry trades tend to mean-revert to fair value.
+        asset_class = self._get_asset_class(symbol)
+        if asset_class == 'forex' and self.market_analyzer:
+            try:
+                carry_data = self.market_analyzer.get_carry_rates()
+                carry_diff = carry_data.get('carry', {}).get(symbol.upper())
+                if carry_diff is not None and abs(carry_diff) >= 0.5:
+                    is_long_template = template_direction != 'short'
+                    carry_favors_long = carry_diff > 0
+
+                    # Direction alignment: +10 if template direction matches carry
+                    if (is_long_template and carry_favors_long) or (not is_long_template and not carry_favors_long):
+                        base_score = min(100.0, base_score + 10)
+                        # Extra boost for mean-reversion on high-carry pairs
+                        if template.strategy_type == StrategyType.MEAN_REVERSION and abs(carry_diff) >= 2.0:
+                            base_score = min(100.0, base_score + 5)
+                    else:
+                        # Fighting carry: penalize
+                        base_score = max(0.0, base_score - 8)
+            except Exception:
+                pass  # Carry data unavailable — no adjustment
+        
         return base_score
 
     def _match_templates_to_symbols(
