@@ -258,8 +258,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
     closure_reasons: Record<string, number>;
   } | null>(null);
 
-  const fetchAnalyticsData = useCallback(async () => {
+  const fetchAnalyticsData = useCallback(async (tabOverride?: string) => {
     if (!tradingMode) return;
+    const currentTab = tabOverride || activeTab;
     
     try {
       if (!performanceMetrics) setLoading(true);  // Only show skeleton on first load
@@ -322,16 +323,16 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       let templatePerf: any[] = [];
       let txCostSavings: any = null;
       
-      if (activeTab === 'performance' || activeTab === 'attribution') {
+      if (currentTab === 'performance' || currentTab === 'attribution') {
         attribution = await apiClient.getStrategyAttribution(tradingMode, period).catch(() => []);
       }
-      if (activeTab === 'performance' || activeTab === 'trades') {
+      if (currentTab === 'performance' || currentTab === 'trades') {
         tradeData = await apiClient.getTradeAnalytics(tradingMode, period).catch(() => null);
       }
-      if (activeTab === 'regime') {
+      if (currentTab === 'regime') {
         regimeData = await apiClient.getComprehensiveRegimeAnalysis().catch(() => null);
       }
-      if (activeTab === 'alpha-edge') {
+      if (currentTab === 'alpha-edge') {
         [fundStats, mlFilterStats, convictionDist, templatePerf, txCostSavings] = await Promise.all([
           apiClient.getFundamentalFilterStats(tradingMode, period).catch(() => null),
           apiClient.getMLFilterStats(tradingMode, period).catch(() => null),
@@ -525,7 +526,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   // but Phase 1 will skip the network calls when data is fresh (see fetchAnalyticsData).
   const handleTabChange = useCallback((tab: string) => {
     setActiveTab(tab);
-    fetchAnalyticsData();
+    fetchAnalyticsData(tab);
   }, [fetchAnalyticsData]);
 
   useEffect(() => {
