@@ -23,8 +23,8 @@ jobs:
 
       - name: Deploy code to EC2
         run: |
-          # Sync code (exclude secrets, local files, heavy dirs)
-          rsync -avz --delete \
+          # Sync code with checksum-based comparison (avoids clock skew issues)
+          rsync -avz --delete --checksum \
             -e "ssh -i ~/.ssh/ec2_key" \
             --exclude '.git/' \
             --exclude 'venv/' \
@@ -32,6 +32,7 @@ jobs:
             --exclude 'frontend/node_modules/' \
             --exclude '.hypothesis/' \
             --exclude '__pycache__/' \
+            --exclude '*.pyc' \
             --exclude '*.db' \
             --exclude '*.db-journal' \
             --exclude 'logs/' \
@@ -43,7 +44,7 @@ jobs:
             --exclude 'config/demo_credentials.json' \
             --exclude 'config/live_credentials.json' \
             --exclude '.env' \
-            --exclude '.env.*' \
+            --exclude '.env.production' \
             --exclude 'frontend/dist/' \
             ./ ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/home/ubuntu/alphacent/
 
@@ -132,7 +133,9 @@ jobs:
           cd /home/ubuntu/alphacent/frontend
 
           npm install --production=false
-          VITE_API_BASE_URL=http://${{ secrets.EC2_HOST }} npm run build
+          VITE_API_BASE_URL=https://alphacent.co.uk \
+          VITE_WS_BASE_URL=wss://alphacent.co.uk \
+          npm run build
 
           echo "Frontend built"
           EOF
@@ -149,7 +152,7 @@ jobs:
       - name: Verify deployment
         run: |
           sleep 5
-          HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" http://${{ secrets.EC2_HOST }}/health || echo "000")
+          HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" https://alphacent.co.uk/health || echo "000")
           if [ "$HTTP_CODE" = "200" ]; then
             echo "Deployment successful - health check passed"
           else

@@ -469,9 +469,6 @@ class FundamentalDataProvider:
                 logger.warning(f"Stopping FMP requests for {symbol} - rate limit hit")
                 return None
             
-            # Record API calls (4 calls made)
-            self.fmp_rate_limiter.record_call()
-            
             # Parse data
             data = FundamentalData(
                 symbol=symbol,
@@ -537,8 +534,16 @@ class FundamentalDataProvider:
     
     def _fmp_request(self, endpoint: str, **params) -> Optional[Any]:
             """Make a request to FMP stable API."""
+            # Check rate limit before each individual request
+            if not self.fmp_rate_limiter.can_make_call():
+                logger.warning(f"FMP rate limit reached — skipping {endpoint}")
+                return None
+
             url = f"{self.fmp_base_url}{endpoint}"
             params['apikey'] = self.fmp_api_key
+
+            # Record the call BEFORE making it (conservative counting)
+            self.fmp_rate_limiter.record_call()
 
             try:
                 response = requests.get(url, params=params, timeout=10)
@@ -546,7 +551,7 @@ class FundamentalDataProvider:
                 # Handle rate limit errors specifically
                 if response.status_code == 429:
                     logger.error(f"FMP API rate limit exceeded (429) for {endpoint}")
-                    # Activate circuit breaker to prevent further calls until midnight UTC
+                    # Activate circuit breaker to prevent further calls
                     self.fmp_rate_limiter.activate_circuit_breaker()
                     return None
 
@@ -562,7 +567,6 @@ class FundamentalDataProvider:
             except requests.exceptions.HTTPError as e:
                 if e.response.status_code == 429:
                     logger.error(f"FMP API rate limit exceeded (429) for {endpoint}")
-                    # Activate circuit breaker to prevent further calls until midnight UTC
                     self.fmp_rate_limiter.activate_circuit_breaker()
                 else:
                     logger.error(f"FMP API HTTP error for {endpoint}: {e}")
