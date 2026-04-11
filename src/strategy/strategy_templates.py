@@ -54,19 +54,35 @@ class StrategyTemplate:
             self.metadata = {}
         
         # Default direction to 'long' — SHORT templates must set this explicitly.
-        # This ensures the directional quota system correctly classifies all templates.
         if 'direction' not in self.metadata:
             self.metadata['direction'] = 'long'
         
+        # Auto-set interval from intraday/interval_4h flags if not explicitly set.
+        if 'interval' not in self.metadata:
+            if self.metadata.get('intraday') and not self.metadata.get('interval_4h'):
+                self.metadata['interval'] = '1h'
+            elif self.metadata.get('interval_4h'):
+                self.metadata['interval'] = '4h'
+            else:
+                self.metadata['interval'] = '1d'
+        
+        # Enforce minimum SL/TP for crypto to clear eToro's 2% round-trip cost.
+        # Templates should define proper values, but this catches any that slip through.
+        if self.metadata.get('crypto_optimized'):
+            if self.default_parameters.get('stop_loss_pct', 1) < 0.04:
+                self.default_parameters['stop_loss_pct'] = 0.04
+            if self.default_parameters.get('take_profit_pct', 1) < 0.08:
+                self.default_parameters['take_profit_pct'] = 0.08
+        
         # Add position sizing parameters to default_parameters if not present
         if 'risk_per_trade_pct' not in self.default_parameters:
-            self.default_parameters['risk_per_trade_pct'] = 0.01  # 1% risk per trade
+            self.default_parameters['risk_per_trade_pct'] = 0.01
         
         if 'sizing_method' not in self.default_parameters:
-            self.default_parameters['sizing_method'] = 'volatility'  # Default to volatility-based
+            self.default_parameters['sizing_method'] = 'volatility'
         
         if 'position_size_atr_multiplier' not in self.default_parameters:
-            self.default_parameters['position_size_atr_multiplier'] = 1.0  # ATR multiplier for sizing
+            self.default_parameters['position_size_atr_multiplier'] = 1.0
 
 
 class StrategyTemplateLibrary:
@@ -5463,12 +5479,12 @@ class StrategyTemplateLibrary:
             ],
             required_indicators=["EMA:10", "EMA:30", "RSI"],
             default_parameters={
-                "stop_loss_pct": 0.035,
-                "take_profit_pct": 0.07,
+                "stop_loss_pct": 0.06,
+                "take_profit_pct": 0.15,
             },
             expected_trade_frequency="2-4 trades/month",
             expected_holding_period="1-5 days",
-            risk_reward_ratio=2.0,
+            risk_reward_ratio=2.5,
             metadata={"direction": "long", "interval_4h": True, "interval": "4h", "skip_param_override": True, "crypto_optimized": True}
         ))
         
@@ -5487,12 +5503,12 @@ class StrategyTemplateLibrary:
             ],
             required_indicators=["Rolling High", "Volume MA", "SMA"],
             default_parameters={
-                "stop_loss_pct": 0.04,
-                "take_profit_pct": 0.08,
+                "stop_loss_pct": 0.06,
+                "take_profit_pct": 0.15,
             },
             expected_trade_frequency="1-3 trades/month",
             expected_holding_period="1-5 days",
-            risk_reward_ratio=2.0,
+            risk_reward_ratio=2.5,
             metadata={"direction": "long", "interval_4h": True, "interval": "4h", "skip_param_override": True, "crypto_optimized": True}
         ))
         
@@ -5510,12 +5526,12 @@ class StrategyTemplateLibrary:
             ],
             required_indicators=["Bollinger Bands", "MACD", "RSI"],
             default_parameters={
-                "stop_loss_pct": 0.03,
-                "take_profit_pct": 0.06,
+                "stop_loss_pct": 0.05,
+                "take_profit_pct": 0.12,
             },
             expected_trade_frequency="2-4 trades/month",
             expected_holding_period="1-4 days",
-            risk_reward_ratio=2.0,
+            risk_reward_ratio=2.4,
             metadata={"direction": "long", "interval_4h": True, "interval": "4h", "skip_param_override": True, "crypto_optimized": True}
         ))
         
@@ -5540,12 +5556,12 @@ class StrategyTemplateLibrary:
             ],
             required_indicators=["EMA:10", "ATR", "RSI"],
             default_parameters={
-                "stop_loss_pct": 0.025,
-                "take_profit_pct": 0.035,
+                "stop_loss_pct": 0.05,
+                "take_profit_pct": 0.08,
             },
             expected_trade_frequency="4-8 trades/month",
             expected_holding_period="2-12 hours",
-            risk_reward_ratio=1.4,
+            risk_reward_ratio=1.6,
             metadata={"direction": "long", "crypto_optimized": True, "skip_param_override": True, "intraday": True}
         ))
         
