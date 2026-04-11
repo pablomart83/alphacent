@@ -273,10 +273,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
         && performanceMetrics && cioDashboard;
       
       if (!dataIsFresh) {
-        const [perfAnalytics, perfStatsData, cioDashboardData] = await Promise.all([
+        const [perfAnalytics, perfStatsData, cioDashboardData, regimeDataPhase1] = await Promise.all([
           apiClient.getPerformanceAnalytics(tradingMode, period),
           apiClient.getPerformanceStats(tradingMode, period).catch(() => null),
           apiClient.getCIODashboard(tradingMode, period).catch(() => null),
+          apiClient.getComprehensiveRegimeAnalysis().catch(() => null),
         ]);
         
         // Set core data and show the page immediately
@@ -307,6 +308,24 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
         if (perfStatsData) setPerfStats(perfStatsData);
         if (cioDashboardData) setCIODashboard(cioDashboardData);
         
+        if (regimeDataPhase1 && typeof regimeDataPhase1 === 'object') {
+          setRegimeAnalysis({
+            performance_by_regime: (regimeDataPhase1.performance_by_regime || []).map((item: any) => ({
+              regime: item.regime || 'Unknown',
+              return: item.total_return || 0,
+              sharpe: item.sharpe || 0,
+              trades: item.trades || 0,
+              win_rate: item.win_rate || 0,
+            })),
+            regime_transitions: regimeDataPhase1.regime_transitions || [],
+            strategy_regime_performance: regimeDataPhase1.strategy_regime_performance || [],
+            current_regimes: regimeDataPhase1.current_regimes || {},
+            market_context: regimeDataPhase1.market_context || {},
+            crypto_cycle: regimeDataPhase1.crypto_cycle || {},
+            carry_rates: regimeDataPhase1.carry_rates || {},
+          });
+        }
+        
         setLastFetchedAt(new Date());
       }
       
@@ -316,7 +335,6 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       // Phase 2: Tab-specific data — fetch in background, don't block the page
       let attribution: any[] = [];
       let tradeData: any = null;
-      let regimeData: any = null;
       let fundStats: any = null;
       let mlFilterStats: any = null;
       let convictionDist: any = null;
@@ -330,7 +348,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
         tradeData = await apiClient.getTradeAnalytics(tradingMode, period).catch(() => null);
       }
       if (currentTab === 'regime') {
-        regimeData = await apiClient.getComprehensiveRegimeAnalysis().catch(() => null);
+        // Regime data is fetched in Phase 1 — no additional fetch needed
       }
       if (currentTab === 'alpha-edge') {
         [fundStats, mlFilterStats, convictionDist, templatePerf, txCostSavings] = await Promise.all([
@@ -396,25 +414,6 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             best_trade: tradeData.largest_win || 0,
             worst_trade: tradeData.largest_loss || 0,
           },
-        });
-      }
-      
-      // Set regime analysis
-      if (regimeData && typeof regimeData === 'object') {
-        setRegimeAnalysis({
-          performance_by_regime: (regimeData.performance_by_regime || []).map((item: any) => ({
-            regime: item.regime || 'Unknown',
-            return: item.total_return || 0,
-            sharpe: item.sharpe || 0,
-            trades: item.trades || 0,
-            win_rate: item.win_rate || 0,
-          })),
-          regime_transitions: regimeData.regime_transitions || [],
-          strategy_regime_performance: regimeData.strategy_regime_performance || [],
-          current_regimes: regimeData.current_regimes || {},
-          market_context: regimeData.market_context || {},
-          crypto_cycle: regimeData.crypto_cycle || {},
-          carry_rates: regimeData.carry_rates || {},
         });
       }
       
