@@ -73,6 +73,25 @@ class StrategyTemplate:
                 self.default_parameters['stop_loss_pct'] = 0.04
             if self.default_parameters.get('take_profit_pct', 1) < 0.08:
                 self.default_parameters['take_profit_pct'] = 0.08
+            # Ensure R:R >= 1.5 after floor adjustments
+            sl = self.default_parameters.get('stop_loss_pct', 0.04)
+            tp = self.default_parameters.get('take_profit_pct', 0.08)
+            if sl > 0 and tp / sl < 1.5:
+                self.default_parameters['take_profit_pct'] = round(sl * 1.5, 4)
+        
+        # Enforce minimum SL/TP for non-crypto 1d stock templates.
+        if not self.metadata.get('crypto_optimized'):
+            interval = self.metadata.get('interval', '1d')
+            if interval == '1d':
+                if self.default_parameters.get('stop_loss_pct', 1) < 0.03:
+                    self.default_parameters['stop_loss_pct'] = 0.03
+                if self.default_parameters.get('take_profit_pct', 1) < 0.05:
+                    self.default_parameters['take_profit_pct'] = 0.05
+            # Enforce minimum R:R >= 1.5 for all non-crypto templates (except Alpha Edge with TP=0)
+            sl = self.default_parameters.get('stop_loss_pct', 0)
+            tp = self.default_parameters.get('take_profit_pct', 0)
+            if sl > 0 and tp > 0 and tp / sl < 1.5:
+                self.default_parameters['take_profit_pct'] = round(sl * 1.5, 4)
         
         # Add position sizing parameters to default_parameters if not present
         if 'risk_per_trade_pct' not in self.default_parameters:
@@ -90,7 +109,25 @@ class StrategyTemplateLibrary:
     
     def __init__(self):
         """Initialize the template library with proven strategies."""
-        self.templates = self._create_templates()
+        all_templates = self._create_templates()
+        
+        # Remove known duplicates identified in audit (Session 5, April 11 2026).
+        # Keep the better version of each pair.
+        REMOVE_TEMPLATES = {
+            "RSI Overbought Short",          # Keep RSI Overbought Short Ranging (better exit)
+            "Stochastic Overbought Short",   # Keep Stochastic Overbought Short Ranging (better exit)
+            "Bollinger Band Short",          # Keep BB Upper Band Short Ranging (stricter entry)
+            "Bollinger Volatility Breakout", # Keep Bollinger Squeeze Breakout (has squeeze filter)
+            "Low Vol RSI Mean Reversion",    # Keep Tight RSI Mean Reversion (has SMA filter)
+            "Volume Dry-Up Reversal Long",   # Keep RSI Higher Low Recovery (better entry filter)
+            "Keltner Midline Bounce Long",   # Keep RSI Higher Low Recovery (same signal space)
+            "Stochastic Midrange Long",      # Keep Stochastic Momentum (better R:R)
+            "MACD Momentum",                 # Keep MACD Rising Momentum (quality filter)
+            "4H Downtrend Oversold Bounce",  # R:R = 1.1, dead cat bounce — negative expectancy
+            "BB Midband Reversion Tight",    # Entry ≈ exit, SL=1.2% — guaranteed stop-out
+        }
+        
+        self.templates = [t for t in all_templates if t.name not in REMOVE_TEMPLATES]
     
     def _create_templates(self) -> List[StrategyTemplate]:
         """Create all strategy templates."""
