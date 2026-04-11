@@ -19,6 +19,7 @@ import math
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from src.models.dataclasses import Strategy, TradingSignal
+from src.models.enums import SignalAction
 from src.strategy.fundamental_filter import FundamentalFilter, FundamentalFilterReport
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,12 @@ class ConvictionScorer:
 
         total_score = wf_score + signal_score + regime_score + asset_score
 
+        # 5. Fundamental quality — direction-aware (±15 points)
+        # LONG: strong fundamentals → bonus, weak → penalty
+        # SHORT: weak fundamentals → bonus, strong → penalty (short the garbage)
+        fundamental_quality_adj = self._score_fundamental_quality(signal, fundamental_report)
+        total_score += fundamental_quality_adj
+
         # Carry bias adjustment for forex pairs (±5 points)
         # Positive carry = bonus for longs, penalty for shorts (and vice versa)
         carry_adjustment = self._score_carry_bias(signal)
@@ -122,6 +129,11 @@ class ConvictionScorer:
                 'max': 5,
                 'details': self._get_carry_details(signal)
             },
+            'fundamental_quality_direction': {
+                'score': fundamental_quality_adj,
+                'max': 15,
+                'details': self._get_fundamental_quality_details(signal, fundamental_report)
+            },
             # Legacy keys for backward compatibility with frontend/analytics
             'signal_strength': {
                 'score': signal_score,
@@ -149,6 +161,7 @@ class ConvictionScorer:
             f"Conviction score for {signal.symbol}: {total_score:.1f}/100 "
             f"(wf_edge: {wf_score:.1f}, signal: {signal_score:.1f}, "
             f"regime: {regime_score:.1f}, asset: {asset_score:.1f}"
+            f"{f', fundamental: {fundamental_quality_adj:+.1f}' if fundamental_quality_adj != 0 else ''}"
             f"{f', carry: {carry_adjustment:+.1f}' if carry_adjustment != 0 else ''})"
         )
 
@@ -438,6 +451,158 @@ class ConvictionScorer:
                     score += 1.0
 
         return min(15.0, score)
+
+    # ─── 5. FUNDAMENTAL QUALITY — DIRECTION-AWARE (±15 points) ──────────
+    def _score_fundamental_quality(
+        self,
+        signal: TradingSignal,
+        fundamental_report: Optional[FundamentalFilterReport] = None
+    ) -> float:
+        """
+        Direction-aware fundamental quality scoring.
+
+        LONG signals: strong fundamentals → up to +15, weak → down to -15
+        SHORT signals: weak fundamentals → up to +15, strong → down to -15
+
+        This is the key insight: don't short quality companies, don't buy garbage.
+        A stock with earnings beats + revenue growth + insider buying is a great
+        long but a terrible short. Conversely, earnings misses + revenue decline +
+        insider selling = great short candidate.
+
+        Only applies to stocks. Forex/crypto/commodities/indices/ETFs return 0.
+
+        Signals used (each contributes ±3 points):
+        - Earnings surprise (beat vs miss)
+        - Revenue growth (growing vs declining)
+        - Insider net buying (buying vs selling)
+        - ROE quality (high vs low)
+        - Share dilution (buyback vs dilution)
+        """
+        # Only applies to stocks
+        sym = signal.symbol.upper().split(':')[0]
+        try:
+            from src.core.tradeable_instruments import (
+                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+                DEMO_ALLOWED_ETFS,
+            )
+            non_stock = (
+                set(DEMO_ALLOWED_CRYPTO) | set(DEMO_ALLOWED_FOREX) |
+                set(DEMO_ALLOWED_INDICES) | set(DEMO_ALLOWED_COMMODITIES) |
+                set(DEMO_ALLOWED_ETFS)
+            )
+            if sym in non_stock:
+                return 0.0
+        except ImportError:
+            pass
+
+        if not fundamental_report or not fundamental_report.fundamental_data:
+            return 0.0
+
+        fd = fundamental_report.fundamental_data
+        is_long = signal.action in (SignalAction.ENTER_LONG,)
+
+        # Raw fundamental quality score: positive = strong, negative = weak
+        raw_score = 0.0
+
+        # 1. Earnings surprise (±3)
+        if fd.earnings_surprise is not None:
+            if fd.earnings_surprise >= 0.05:
+                raw_score += 3.0   # Beat by 5%+
+            elif fd.earnings_surprise >= 0.01:
+                raw_score += 1.5   # Slight beat
+            elif fd.earnings_surprise <= -0.05:
+                raw_score -= 3.0   # Missed by 5%+
+            elif fd.earnings_surprise <= -0.01:
+                raw_score -= 1.5   # Slight miss
+
+        # 2. Revenue growth (±3)
+        if fd.revenue_growth is not None:
+            if fd.revenue_growth >= 0.10:
+                raw_score += 3.0   # 10%+ growth
+            elif fd.revenue_growth >= 0.03:
+                raw_score += 1.5   # Moderate growth
+            elif fd.revenue_growth <= -0.05:
+                raw_score -= 3.0   # Revenue declining
+            elif fd.revenue_growth <= -0.01:
+                raw_score -= 1.5   # Slight decline
+
+        # 3. Insider net buying (±3)
+        if fd.insider_net_buying is not None:
+            if fd.insider_net_buying >= 3:
+                raw_score += 3.0   # Strong insider buying
+            elif fd.insider_net_buying >= 1:
+                raw_score += 1.5   # Some insider buying
+            elif fd.insider_net_buying <= -3:
+                raw_score -= 3.0   # Heavy insider selling
+            elif fd.insider_net_buying <= -1:
+                raw_score -= 1.5   # Some insider selling
+
+        # 4. ROE quality (±3)
+        if fd.roe is not None:
+            if fd.roe >= 0.20:
+                raw_score += 3.0   # Excellent ROE
+            elif fd.roe >= 0.12:
+                raw_score += 1.5   # Good ROE
+            elif fd.roe <= 0.0:
+                raw_score -= 3.0   # Negative ROE (losing money)
+            elif fd.roe <= 0.05:
+                raw_score -= 1.5   # Poor ROE
+
+        # 5. Share dilution vs buyback (±3)
+        if fd.shares_change_percent is not None:
+            if fd.shares_change_percent <= -0.02:
+                raw_score += 3.0   # Active buyback (2%+ reduction)
+            elif fd.shares_change_percent <= -0.005:
+                raw_score += 1.5   # Slight buyback
+            elif fd.shares_change_percent >= 0.05:
+                raw_score -= 3.0   # Heavy dilution (5%+)
+            elif fd.shares_change_percent >= 0.02:
+                raw_score -= 1.5   # Moderate dilution
+
+        # Direction-aware: flip the sign for shorts
+        # LONG + strong fundamentals (raw_score > 0) → positive conviction
+        # SHORT + weak fundamentals (raw_score < 0) → positive conviction (good short)
+        # LONG + weak fundamentals (raw_score < 0) → negative conviction (don't buy garbage)
+        # SHORT + strong fundamentals (raw_score > 0) → negative conviction (don't short quality)
+        if is_long:
+            direction_score = raw_score
+        else:
+            direction_score = -raw_score
+
+        # Clamp to ±15
+        direction_score = max(-15.0, min(15.0, direction_score))
+
+        if direction_score != 0:
+            direction_label = "LONG" if is_long else "SHORT"
+            quality_label = "strong" if raw_score > 0 else "weak" if raw_score < 0 else "neutral"
+            logger.info(
+                f"Fundamental quality for {sym} ({direction_label}): "
+                f"raw={raw_score:+.1f} ({quality_label}), "
+                f"direction_adjusted={direction_score:+.1f}"
+            )
+
+        return direction_score
+
+    def _get_fundamental_quality_details(
+        self,
+        signal: TradingSignal,
+        fundamental_report: Optional[FundamentalFilterReport] = None
+    ) -> Dict[str, Any]:
+        """Get fundamental quality details for breakdown logging."""
+        if not fundamental_report or not fundamental_report.fundamental_data:
+            return {'applicable': False, 'reason': 'no_data'}
+
+        fd = fundamental_report.fundamental_data
+        return {
+            'applicable': True,
+            'direction': signal.action.value,
+            'earnings_surprise': fd.earnings_surprise,
+            'revenue_growth': fd.revenue_growth,
+            'insider_net_buying': fd.insider_net_buying,
+            'roe': fd.roe,
+            'shares_change_pct': fd.shares_change_percent,
+        }
 
     # ─── FOREX CARRY BIAS ───────────────────────────────────────────────
     def _score_carry_bias(self, signal: TradingSignal) -> float:
