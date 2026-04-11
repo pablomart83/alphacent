@@ -1039,17 +1039,16 @@ class PortfolioManager:
             except Exception:
                 pass
 
-            # Round-trip cost = commission (entry+exit) + spread (entry) + slippage (entry+exit)
-            round_trip_cost = (commission_pct * 2) + spread_pct + (slippage_pct * 2)
-
-            total_cost_pct = round_trip_cost * backtest_results.total_trades
-            net_return = backtest_results.total_return - total_cost_pct
+            # The backtest engine (_run_vectorbt_backtest) already deducts transaction
+            # costs from total_return using actual position sizes. The total_return in
+            # BacktestResults is NET of costs. Do NOT deduct costs again here.
+            # Just check if the net return is positive.
+            net_return = backtest_results.total_return
 
             if net_return < 0:
                 reason = (
-                    f"Net return {net_return:.1%} < 0 after costs "
-                    f"(gross {backtest_results.total_return:.1%} - "
-                    f"{total_cost_pct:.1%} costs from {backtest_results.total_trades} trades, "
+                    f"Net return {net_return:.1%} < 0 "
+                    f"(after costs, {backtest_results.total_trades} trades, "
                     f"asset_class={asset_class})"
                 )
                 logger.info(f"Strategy {strategy.name} failed activation: {reason}")
