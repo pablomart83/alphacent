@@ -1407,3 +1407,158 @@ The font normalization from Session 8 was partial — many inconsistencies remai
 - `frontend/src/pages/analytics/TCATab.tsx`
 - `frontend/src/pages/analytics/TearSheetTab.tsx`
 - `frontend/src/pages/analytics/PerformanceAttributionTab.tsx`
+
+
+### Session Improvements (April 12, 2026 — Session 9: Typography Audit, Phase 3 Charting, UI Polish)
+
+#### 110. Font Size & Typography Audit ✅
+- **Full frontend-wide pass** establishing consistent font scale:
+  - Minimum readable size: `text-xs` (12px) — no more `text-[9px]`, `text-[10px]`, or `text-[11px]` anywhere
+  - MetricGrid labels: 12px, values: `text-base` (16px)
+  - CompactMetricRow labels: 12px, values: `text-sm` (14px)
+  - PanelHeader titles: 13px, font-medium, gray-400
+  - SectionLabel: 12px (text-xs), font-medium, gray-500
+  - Tab buttons: `text-[13px]` with `px-3` padding
+  - Table cells (DenseTable): `text-xs` (12px) matching DSL Templates reference
+  - MetricsBar labels: 12px, PositionTickerStrip: 12px
+  - Side panel key-value labels: 12px, values: `text-sm` (14px)
+- Removed all uppercase from PanelHeader titles, SectionLabels, and inline section labels — didn't match platform aesthetic
+- **Files**: All page components, all shared UI components
+
+#### 111. Tab Presentation Standardization ✅
+- All 6 tabbed pages now use identical Strategies-style custom button tabs:
+  - 32px header bar, `text-[13px]` font, `bg-gray-700/60` active state, rounded corners
+  - Portfolio: converted from green underline tabs
+  - Autonomous: converted from Radix TabsList/TabsTrigger
+  - Risk: converted from Radix tabs, moved tabs ABOVE correlation heatmap
+  - Orders: converted from Radix tabs, tabs in 32px header above timeline
+  - Analytics: converted from Radix TabsList with icons to plain text buttons
+- Removed duplicate titles: "Positions" from Portfolio, "Strategies" from Strategies main panels
+- **Files**: `PortfolioNew.tsx`, `StrategiesNew.tsx`, `AutonomousNew.tsx`, `RiskNew.tsx`, `OrdersNew.tsx`, `AnalyticsNew.tsx`
+
+#### 112. Table Format Standardization ✅
+- DataTable base font changed from `text-sm` (14px) to `text-xs` (12px) matching DSL Templates
+- DenseTable variant: `px-3 py-2` cells, `px-3 py-2` headers, `text-xs` — matches DSL Templates exactly
+- Active/Backtested/Retired strategy tables now match DSL Templates format
+- **Files**: `frontend/src/components/trading/DataTable.tsx`, `frontend/src/components/ui/Table.tsx`
+
+#### 113. Portfolio Invested Amount Bug Fix ✅ (CRITICAL)
+- **Problem**: BTC showing $176M, ETH showing $5.2M invested — was multiplying eToro dollar-quantity by unit price
+- **Root cause**: `PositionResponse` Pydantic model was missing `invested_amount` field — DB had it, ORM serialized it, but API response stripped it
+- **Fix**: Added `invested_amount` and `pending_closure` to `PositionResponse` model
+- Frontend: `getInvested()` helper prefers `invested_amount`, falls back to `quantity * entry_price`
+- Applied to: Invested column, %Port column, pie chart, sector exposure, closed positions, confirm dialog
+- **Files**: `src/api/routers/account.py`, `frontend/src/pages/PortfolioNew.tsx`
+
+#### 114. Orders Side Panel Overlap Fix ✅
+- Status Breakdown was overlapping Recent Fills in the Orders side panel
+- Removed `flex-1` from Recent Fills, made parent scrollable
+- **Files**: `frontend/src/pages/OrdersNew.tsx`
+
+#### 115. Phase 3: TradingView Lightweight Charts Migration ✅
+- **Installed** `lightweight-charts` v5.1.0
+- **TvChart wrapper** (`frontend/src/components/charts/TvChart.tsx`): reusable component supporting area, line, candlestick, histogram, baseline series. AlphaCent dark theme, auto-resize via ResizeObserver, crosshair, zoom/pan.
+- **TvPeriodSelector** (`frontend/src/components/charts/TvPeriodSelector.tsx`): period buttons for TvChart
+- **EquityCurveChart migrated**: portfolio as blue area, SPY as gray dashed line, alpha baseline (green/red), drawdown sub-chart, legend showing what each line represents
+- **AssetPlot migrated**: line series with buy/sell order markers (green ↑ / red ↓)
+- **UnderwaterPlot migrated**: red area series via TvChart
+- **OrderFlowTimeline**: rewritten as custom inline SVG (not a standard time-series)
+- **Strategy sparklines**: inline SVG polyline (60x24px)
+- **All inline time-series charts** across Analytics, Risk, Orders, TCA, PerformanceAttribution migrated to TvChart
+- **Non-time-series charts** replaced with custom SVG components:
+  - `SVGBarChart.tsx` — vertical + horizontal bar charts
+  - `SVGPieChart.tsx` — pie/donut charts with arc paths
+  - `SVGStackedBarChart.tsx` — stacked bar charts
+  - `ReturnDistribution.tsx` — histogram with normal curve overlay (custom SVG)
+- **InteractiveChart.tsx** rewritten as pure SVG (no Recharts)
+- **chart-utils.ts** extracted: `filterDataByPeriod`, `periodStartDate` utilities
+- **Recharts fully removed** from `package.json` — zero imports remaining
+- **TradingView watermark removed** via `attributionLogo: false`
+- **Files**: All chart components, all page files, `package.json`
+
+#### 116. Phase 3: Real-Time Price Streaming ✅
+- **Backend**: Monitoring service broadcasts price ticks via WebSocket after `_quick_price_update` (every 10min) and position sync (every 60s)
+- Added `_sync_broadcast_market_data()` helper for fire-and-forget async broadcasting from sync context
+- **Frontend**: PositionDetailView subscribes to `market_data` WebSocket events for viewed symbol, appends live ticks to AssetPlot chart
+- Live/Paused indicator badge on price chart (green pulsing "Live" when WS connected, gray "Paused" when disconnected)
+- **Files**: `src/core/monitoring_service.py`, `src/core/order_monitor.py`, `frontend/src/pages/PositionDetailView.tsx`
+
+#### 117. Phase 3: Workspace Presets ✅
+- **workspace-presets.ts**: manages saving/loading/switching presets in localStorage
+  - Snapshots: `react-resizable-panels` layout sizes, `PanelHeader` collapsed states, `BottomWidgetZone` widget visibility
+  - 3 default presets: Trading (chart-dominant, Top Movers + Recent Signals), Monitoring (Strategy Alerts + Market Regime), Analysis (Macro Pulse + Market Regime)
+  - Up to 5 user presets, stored under `alphacent_workspace_presets`
+- **WorkspaceSwitcher** dropdown in TopNavBar: current preset name, grouped defaults + user presets, save/delete/reset
+- Switching presets applies snapshot and reloads page
+- **Files**: `frontend/src/lib/workspace-presets.ts`, `frontend/src/components/TopNavBar.tsx`
+
+#### 118. UI Polish Fixes ✅
+- **Chart overflow**: TvChart containers get `overflow: hidden`, fixed height constraints in side panels
+- **SVG chart stretching**: Changed `preserveAspectRatio` to `"none"` for data charts — grid lines now align edge-to-edge
+- **Side panel spacing**: Reduced `gap-2 p-2` to `gap-1 p-1.5` across all side panels, PanelHeader padding reduced to `px-2 py-1`
+- **Analytics Performance tab**: Reduced spacing from `space-y-3` to `space-y-2`
+- **Analytics page flash**: Added `compact={true}` to loading/error states — no more old layout flash
+- **Equity curve legend**: Added legend showing Portfolio (blue), SPY (gray dashed), Drawdown (red)
+- **Files**: All page components, chart components, PanelHeader
+
+---
+
+## Current System State (April 12, 2026 — Updated Session 9)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$162K, equity ~$463K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~97 DEMO + backtested
+- **Open positions:** ~127
+- **Monitoring:** 24/7 + CloudWatch alerting + EXIT signal processing + WebSocket price streaming
+- **Market regime:** Equity: ranging_low_vol
+- **UI:** Phase 3 complete — TradingView Lightweight Charts (Recharts removed), real-time price streaming, workspace presets, full typography audit, standardized tabs and tables
+- **Charting:** lightweight-charts v5.1.0 for all time-series, custom SVG for bar/pie/histogram
+- **Bundle:** Recharts chunk (417KB gzipped) eliminated
+
+---
+
+## New Dependencies (Session 9)
+- `lightweight-charts` ^5.1.0 — TradingView charting library (~50KB)
+- Removed: `recharts`, `@types/recharts`
+
+## New Files (Session 9)
+- `frontend/src/components/charts/TvChart.tsx` — TradingView wrapper
+- `frontend/src/components/charts/TvPeriodSelector.tsx` — Period selector for TvChart
+- `frontend/src/components/charts/SVGBarChart.tsx` — Custom SVG bar chart
+- `frontend/src/components/charts/SVGPieChart.tsx` — Custom SVG pie/donut chart
+- `frontend/src/components/charts/SVGStackedBarChart.tsx` — Custom SVG stacked bar chart
+- `frontend/src/lib/chart-utils.ts` — Chart utility functions (filterDataByPeriod, periodStartDate)
+- `frontend/src/lib/workspace-presets.ts` — Workspace preset management
+
+## Modified Backend Files (Session 9)
+- `src/api/routers/account.py` — Added `invested_amount`, `pending_closure` to PositionResponse
+- `src/core/monitoring_service.py` — WebSocket price tick broadcasting
+- `src/core/order_monitor.py` — WebSocket price tick broadcasting on position sync
+
+---
+
+## Open Items (Updated Session 9)
+
+### UI/UX — Remaining Polish
+- Some charts may still overlap in narrow viewports — monitor at different screen sizes
+- Analytics Trade Analytics tab: Win/Loss Distribution and Holding Periods charts may need height tuning
+- Bottom widget zone widgets could use more data density
+- Settings page still has old-style form layout
+
+### Performance Monitoring
+- Monitor win rate impact of wider SL/TP and EXIT signal processing (target: >45%)
+- Track EXIT signal vs SL/TP vs trailing stop close ratios
+- Monitor multi-strategy confluence correlation
+- Check $2K minimum rejection frequency
+
+### Infrastructure
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+- FMP API rate limit (300/min) — monitor with corrected per-call counting
+- Deploy workflow: SCP'ing `autonomous_trading.yaml` overwrites API keys — need automated Secrets Manager patch
+
+### From Previous Sessions
+- Risk controls — Portfolio-level VaR check before new positions (still open)
+- `/strategies/blacklisted-combos` returns 422 — endpoint may need `mode` query parameter
+- `/strategies/template-rankings` returns 404 — endpoint may not be deployed
+- `/strategies/idle-demotions` returns 422 — same mode parameter issue

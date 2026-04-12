@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useCallback, useMemo } from 'react';
+import { type FC, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, Activity, Download, FileText,
@@ -139,6 +139,52 @@ interface TradeJournalPatterns {
   worst_patterns: Array<TradeJournalPattern>;
   recommendations: Array<any>;
 }
+
+/** Small inline scatter plot with ResizeObserver — used for MAE vs MFE */
+const MaeMfeScatter: FC<{
+  scatterData: Array<{ max_adverse_excursion?: number; max_favorable_excursion?: number; pnl?: number }>;
+}> = ({ scatterData }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [svgW, setSvgW] = useState(500);
+  const svgH = 350;
+  const m = { top: 20, right: 20, bottom: 40, left: 50 };
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const w = Math.round(e.contentRect.width);
+        if (w > 0) setSvgW(w);
+      }
+    });
+    ro.observe(el);
+    setSvgW(el.clientWidth || 500);
+    return () => ro.disconnect();
+  }, []);
+
+  const maxMAE = Math.max(...scatterData.map(t => Math.abs(t.max_adverse_excursion || 0)), 1);
+  const maxMFE = Math.max(...scatterData.map(t => Math.abs(t.max_favorable_excursion || 0)), 1);
+  const cW = svgW - m.left - m.right;
+  const cH = svgH - m.top - m.bottom;
+
+  return (
+    <div ref={ref} className="relative w-full" style={{ height: svgH }}>
+      <svg width={svgW} height={svgH}>
+        <line x1={m.left} y1={m.top} x2={m.left} y2={svgH - m.bottom} stroke="#374151" />
+        <line x1={m.left} y1={svgH - m.bottom} x2={svgW - m.right} y2={svgH - m.bottom} stroke="#374151" />
+        <text x={svgW / 2} y={svgH - 5} textAnchor="middle" fill="#9ca3af" fontSize={11} fontFamily="'JetBrains Mono', monospace">MAE (%)</text>
+        <text x={12} y={svgH / 2} textAnchor="middle" fill="#9ca3af" fontSize={11} fontFamily="'JetBrains Mono', monospace" transform={`rotate(-90, 12, ${svgH / 2})`}>MFE (%)</text>
+        {scatterData.map((t, i) => {
+          const x = m.left + (Math.abs(t.max_adverse_excursion || 0) / maxMAE) * cW;
+          const y = m.top + cH - (Math.abs(t.max_favorable_excursion || 0) / maxMFE) * cH;
+          const isWin = t.pnl && t.pnl > 0;
+          return <circle key={i} cx={x} cy={y} r={4} fill={isWin ? '#10b981' : '#ef4444'} fillOpacity={0.6} />;
+        })}
+      </svg>
+    </div>
+  );
+};
 
 export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   const { tradingMode, isLoading: tradingModeLoading } = useTradingMode();
@@ -2065,29 +2111,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 if (scatterData.length === 0) {
                   return <div className="text-center py-12 text-gray-500 text-xs font-mono">No MAE/MFE data available</div>;
                 }
-                const maxMAE = Math.max(...scatterData.map(t => Math.abs(t.max_adverse_excursion || 0)), 1);
-                const maxMFE = Math.max(...scatterData.map(t => Math.abs(t.max_favorable_excursion || 0)), 1);
-                const svgW = 500;
-                const svgH = 350;
-                const m = { top: 20, right: 20, bottom: 40, left: 50 };
-                const cW = svgW - m.left - m.right;
-                const cH = svgH - m.top - m.bottom;
-                return (
-                  <div className="relative w-full" style={{ height: svgH }}>
-                    <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${svgH}`} preserveAspectRatio="none">
-                      <line x1={m.left} y1={m.top} x2={m.left} y2={svgH - m.bottom} stroke="#374151" />
-                      <line x1={m.left} y1={svgH - m.bottom} x2={svgW - m.right} y2={svgH - m.bottom} stroke="#374151" />
-                      <text x={svgW / 2} y={svgH - 5} textAnchor="middle" fill="#9ca3af" fontSize={10} fontFamily="monospace">MAE (%)</text>
-                      <text x={12} y={svgH / 2} textAnchor="middle" fill="#9ca3af" fontSize={10} fontFamily="monospace" transform={`rotate(-90, 12, ${svgH / 2})`}>MFE (%)</text>
-                      {scatterData.map((t, i) => {
-                        const x = m.left + (Math.abs(t.max_adverse_excursion || 0) / maxMAE) * cW;
-                        const y = m.top + cH - (Math.abs(t.max_favorable_excursion || 0) / maxMFE) * cH;
-                        const isWin = t.pnl && t.pnl > 0;
-                        return <circle key={i} cx={x} cy={y} r={4} fill={isWin ? '#10b981' : '#ef4444'} fillOpacity={0.6} />;
-                      })}
-                    </svg>
-                  </div>
-                );
+                return <MaeMfeScatter scatterData={scatterData} />;
               })()}
               <div className="flex items-center justify-center gap-6 mt-2">
                 <div className="flex items-center gap-2">

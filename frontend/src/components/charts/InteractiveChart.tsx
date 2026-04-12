@@ -5,6 +5,7 @@ import {
   useCallback,
   useMemo,
   useRef,
+  useEffect,
 } from 'react';
 import { PeriodSelector } from './PeriodSelector';
 
@@ -68,6 +69,22 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [activePeriod, setActivePeriod] = useState(defaultPeriod);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [svgW, setSvgW] = useState(600);
+
+  // Track container width
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const w = Math.round(e.contentRect.width);
+        if (w > 0) setSvgW(w);
+      }
+    });
+    ro.observe(el);
+    setSvgW(el.clientWidth || 600);
+    return () => ro.disconnect();
+  }, []);
 
   const handlePeriodChange = useCallback(
     (period: string) => {
@@ -105,7 +122,6 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
 
   const numH = typeof height === 'number' ? height : 300;
   const margin = { top: 10, right: 10, bottom: 30, left: 50 };
-  const svgW = 600;
   const chartW = svgW - margin.left - margin.right;
   const chartH = numH - margin.top - margin.bottom;
   const yRange = yMax - yMin || 1;
@@ -118,7 +134,7 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
       const container = containerRef.current;
       if (!container || displayData.length === 0) return;
       const svgRect = e.currentTarget.getBoundingClientRect();
-      const mouseX = ((e.clientX - svgRect.left) / svgRect.width) * svgW;
+      const mouseX = e.clientX - svgRect.left;
       const idx = Math.round(((mouseX - margin.left) / chartW) * (displayData.length - 1));
       const clampedIdx = Math.max(0, Math.min(displayData.length - 1, idx));
       const d = displayData[clampedIdx];
@@ -164,10 +180,8 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
 
       <div ref={containerRef} className="relative min-h-[200px] w-full" style={{ height: numH }}>
         <svg
-          width="100%"
-          height="100%"
-          viewBox={`0 0 ${svgW} ${numH}`}
-          preserveAspectRatio="none"
+          width={svgW}
+          height={numH}
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
         >
@@ -179,7 +193,7 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
               return (
                 <g key={frac}>
                   <line x1={margin.left} y1={y} x2={svgW - margin.right} y2={y} stroke="#1f2937" strokeDasharray="3 3" />
-                  <text x={margin.left - 4} y={y + 3} textAnchor="end" fill="#9ca3af" fontSize={9} fontFamily="monospace">
+                  <text x={margin.left - 4} y={y + 3} textAnchor="end" fill="#9ca3af" fontSize={11} fontFamily="'JetBrains Mono', monospace">
                     {yAxisFormatter ? yAxisFormatter(val) : val.toFixed(2)}
                   </text>
                 </g>
@@ -269,8 +283,8 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
                     y={numH - margin.bottom + 14}
                     textAnchor="middle"
                     fill="#9ca3af"
-                    fontSize={8}
-                    fontFamily="monospace"
+                    fontSize={11}
+                    fontFamily="'JetBrains Mono', monospace"
                   >
                     {label.length > 10 ? label.slice(5, 10) : label}
                   </text>

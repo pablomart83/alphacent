@@ -1,4 +1,4 @@
-import { type FC, useMemo, useState, useRef, useCallback } from 'react';
+import { type FC, useMemo, useState, useRef, useCallback, useEffect } from 'react';
 
 interface StackedBarSeries {
   key: string;
@@ -31,6 +31,22 @@ export const SVGStackedBarChart: FC<SVGStackedBarChartProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [svgW, setSvgW] = useState(500);
+
+  // Track container width
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const w = Math.round(e.contentRect.width);
+        if (w > 0) setSvgW(w);
+      }
+    });
+    ro.observe(el);
+    setSvgW(el.clientWidth || 500);
+    return () => ro.disconnect();
+  }, []);
 
   const { maxVal, minVal } = useMemo(() => {
     let max = 0;
@@ -79,15 +95,15 @@ export const SVGStackedBarChart: FC<SVGStackedBarChartProps> = ({
 
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: height + legendH }}>
-      <svg width="100%" height={height} viewBox={`0 0 500 ${height}`} preserveAspectRatio="none">
+      <svg width={svgW} height={height}>
         {/* Grid */}
         {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
           const y = margin.top + (1 - frac) * chartH;
           const val = minVal + frac * range;
           return (
             <g key={frac}>
-              <line x1={margin.left} y1={y} x2={500 - margin.right} y2={y} stroke="#1f2937" strokeDasharray="3 3" />
-              <text x={margin.left - 4} y={y + 3} textAnchor="end" fill="#9ca3af" fontSize={9} fontFamily="monospace">
+              <line x1={margin.left} y1={y} x2={svgW - margin.right} y2={y} stroke="#1f2937" strokeDasharray="3 3" />
+              <text x={margin.left - 4} y={y + 3} textAnchor="end" fill="#9ca3af" fontSize={11} fontFamily="'JetBrains Mono', monospace">
                 {formatValue(val)}
               </text>
             </g>
@@ -96,7 +112,7 @@ export const SVGStackedBarChart: FC<SVGStackedBarChartProps> = ({
 
         {/* Stacked bars */}
         {data.map((d, i) => {
-          const chartW = 500 - margin.left - margin.right;
+          const chartW = svgW - margin.left - margin.right;
           const barW = Math.max(4, chartW / data.length - 4);
           const x = margin.left + (i / data.length) * chartW + 2;
           const zeroY = margin.top + (1 - (0 - minVal) / range) * chartH;
@@ -141,8 +157,8 @@ export const SVGStackedBarChart: FC<SVGStackedBarChartProps> = ({
                 y={height - margin.bottom + 14}
                 textAnchor="middle"
                 fill="#9ca3af"
-                fontSize={Math.min(9, 400 / data.length / 4)}
-                fontFamily="monospace"
+                fontSize={Math.min(11, (svgW - margin.left - margin.right) / data.length / 4)}
+                fontFamily="'JetBrains Mono', monospace"
                 transform={data.length > 6 ? `rotate(-45, ${x + barW / 2}, ${height - margin.bottom + 14})` : undefined}
               >
                 {String(d[categoryKey])}

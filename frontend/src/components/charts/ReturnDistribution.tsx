@@ -1,4 +1,4 @@
-import { type FC, useMemo, useState, useRef, useCallback } from 'react';
+import { type FC, useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { Badge } from '../ui/Badge';
 
 interface ReturnDistributionProps {
@@ -52,6 +52,22 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
   const chartData = useMemo(() => computeNormalOverlay(data), [data]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [svgW, setSvgW] = useState(500);
+
+  // Track container width
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const w = Math.round(e.contentRect.width);
+        if (w > 0) setSvgW(w);
+      }
+    });
+    ro.observe(el);
+    setSvgW(el.clientWidth || 500);
+    return () => ro.disconnect();
+  }, []);
 
   const maxCount = useMemo(
     () => Math.max(...chartData.map((d) => Math.max(d.count, d.normal)), 1),
@@ -84,7 +100,6 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
   }
 
   const margin = { top: 10, right: 10, bottom: 30, left: 40 };
-  const svgW = 500;
   const chartW = svgW - margin.left - margin.right;
   const chartH = height - margin.top - margin.bottom;
 
@@ -108,7 +123,7 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
         </Badge>
       </div>
       <div ref={containerRef} className="relative min-h-[200px] w-full" style={{ height }}>
-        <svg width="100%" height={height} viewBox={`0 0 ${svgW} ${height}`} preserveAspectRatio="none">
+        <svg width={svgW} height={height}>
           {/* Grid lines */}
           {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
             const y = margin.top + (1 - frac) * chartH;
@@ -116,7 +131,7 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
             return (
               <g key={frac}>
                 <line x1={margin.left} y1={y} x2={svgW - margin.right} y2={y} stroke="#1f2937" strokeDasharray="3 3" />
-                <text x={margin.left - 4} y={y + 3} textAnchor="end" fill="#9ca3af" fontSize={9} fontFamily="monospace">
+                <text x={margin.left - 4} y={y + 3} textAnchor="end" fill="#9ca3af" fontSize={11} fontFamily="'JetBrains Mono', monospace">
                   {val.toFixed(0)}
                 </text>
               </g>
@@ -149,8 +164,8 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
                   y={height - margin.bottom + 14}
                   textAnchor="middle"
                   fill="#9ca3af"
-                  fontSize={Math.min(9, svgW / chartData.length / 5)}
-                  fontFamily="monospace"
+                  fontSize={Math.min(11, svgW / chartData.length / 5)}
+                  fontFamily="'JetBrains Mono', monospace"
                 >
                   {d.bin.toFixed(1)}%
                 </text>
