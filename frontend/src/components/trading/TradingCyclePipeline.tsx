@@ -1,12 +1,11 @@
 import React, { type FC, useEffect, useState, useCallback } from 'react';
-import { motion } from 'framer-motion';
 import {
   CheckCircle2, XCircle, Loader2, Clock, Trash2, BarChart3,
-  Lightbulb, Database, TrendingUp, Zap, Send, History, HardDrive,
+  Lightbulb, Database, TrendingUp, Zap, Send, HardDrive,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
+import { SectionLabel } from '../ui/SectionLabel';
 import { cn } from '../../lib/utils';
 import { wsManager } from '../../services/websocket';
 import { apiClient } from '../../services/api';
@@ -72,7 +71,6 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
       const saved = localStorage.getItem(LIVE_STAGES_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // Only restore if there's at least one non-complete stage (cycle still running)
         const hasRunning = Object.values(parsed).some((s: any) => s.status === 'running');
         const allComplete = Object.values(parsed).every((s: any) => s.status === 'complete' || s.status === 'error');
         if (hasRunning || !allComplete) {
@@ -108,7 +106,6 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
       try {
         localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(stages));
         setPersistedStages(stages);
-        // Clear live stages — cycle is done
         localStorage.removeItem(LIVE_STAGES_KEY);
       } catch {
         // Ignore storage errors
@@ -141,7 +138,6 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
             error: progress.error,
           },
         };
-        // Persist live stages so navigating away and back restores them
         try {
           localStorage.setItem(LIVE_STAGES_KEY, JSON.stringify(next));
         } catch {
@@ -150,19 +146,15 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
         return next;
       });
 
-      // Check if order_submission is complete (last stage)
       if (progress.stage === 'order_submission' && progress.status === 'complete') {
         setCycleComplete(true);
-        // Refresh history after cycle completes
         fetchHistory();
       }
     });
 
-    // Also listen for cycle_completed as fallback
     const unsubCycle = wsManager.onAutonomousCycle((data: any) => {
       if (data?.event === 'cycle_completed' || data?.data?.event === 'cycle_completed') {
         setCycleComplete(true);
-        // Force all stages to complete — individual stage events may have been missed
         setStages(prev => {
           const updated = { ...prev };
           for (const key of Object.keys(updated)) {
@@ -198,8 +190,6 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
   }, [fetchHistory]);
 
   const hasAnyStageData = Object.keys(stages).length > 0;
-
-  // Use live stages if available, otherwise fall back to persisted
   const displayStages = hasAnyStageData ? stages : (persistedStages || {});
   const hasDisplayData = Object.keys(displayStages).length > 0;
   const isShowingPersisted = !hasAnyStageData && !cycleRunning && persistedStages !== null && Object.keys(persistedStages).length > 0;
@@ -208,7 +198,6 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
     return displayStages[stageKey]?.status || 'pending';
   };
 
-  // Build compact metrics summary from display stages
   const buildMetricsSummary = (): { label: string; value: string; color: string }[] => {
     const items: { label: string; value: string; color: string }[] = [];
     const cleanup = displayStages.cleanup_retirement?.metrics;
@@ -233,124 +222,107 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Horizontal Pipeline */}
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingUp className="h-5 w-5 text-accent-green" />
-              Trading Cycle Pipeline
-              {isShowingPersisted && (
-                <span className="text-xs text-muted-foreground font-normal ml-2">(Last run)</span>
-              )}
-            </CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {/* Horizontal pipeline stepper */}
-          <div className="flex items-center justify-between px-2">
-            {STAGES.map((stage, idx) => {
-              const status = getStageStatus(stage.key);
-              const isLast = idx === STAGES.length - 1;
-              return (
-                <React.Fragment key={stage.key}>
-                  {/* Stage circle + label */}
-                  <div className="flex flex-col items-center gap-1 min-w-0" title={formatStageTooltip(stage.key, displayStages[stage.key])}>
-                    <div className={cn(
-                      'w-9 h-9 rounded-full flex items-center justify-center border transition-all',
-                      statusConfig[status].bg, statusConfig[status].border
-                    )}>
-                      {status === 'pending' && <Clock className="h-4 w-4 text-gray-500" />}
-                      {status === 'running' && <Loader2 className="h-4 w-4 text-blue-400 animate-spin" />}
-                      {status === 'complete' && <CheckCircle2 className="h-4 w-4 text-accent-green" />}
-                      {status === 'error' && <XCircle className="h-4 w-4 text-accent-red" />}
-                    </div>
-                    <span className={cn(
-                      'text-[10px] font-mono text-center leading-tight',
-                      status === 'pending' ? 'text-gray-600' : 'text-gray-300'
-                    )}>
-                      {stage.label}
-                    </span>
-                  </div>
-                  {/* Connector line */}
-                  {!isLast && (
-                    <div className={cn(
-                      'flex-1 h-0.5 mx-1',
-                      status === 'complete' ? 'bg-accent-green/40' : 'bg-gray-700'
-                    )} />
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </div>
+      <div>
+        <SectionLabel>
+          Trading Cycle Pipeline{isShowingPersisted && ' (last run)'}
+        </SectionLabel>
 
-          {/* Current activity text */}
-          {cycleRunning && (() => {
-            // Find the currently running stage
-            const runningStage = STAGES.find(s => displayStages[s.key]?.status === 'running');
-            const phase = runningStage ? displayStages[runningStage.key]?.metrics?.phase : null;
-            const progressPct = runningStage ? displayStages[runningStage.key]?.progress_pct : null;
-            
-            if (!runningStage) return null;
-            
+        {/* Horizontal pipeline stepper */}
+        <div className="flex items-center justify-between px-2">
+          {STAGES.map((stage, idx) => {
+            const status = getStageStatus(stage.key);
+            const isLast = idx === STAGES.length - 1;
             return (
-              <div className="mt-2 px-2">
-                <div className="flex items-center gap-2 text-xs">
-                  <Loader2 className="h-3 w-3 text-blue-400 animate-spin flex-shrink-0" />
-                  <span className="text-blue-400 font-medium">{runningStage.label}</span>
-                  {progressPct != null && (
-                    <span className="text-muted-foreground">{progressPct}%</span>
-                  )}
-                </div>
-                {phase && (
-                  <div className="mt-1 text-xs text-muted-foreground font-mono truncate pl-5">
-                    {phase}
+              <React.Fragment key={stage.key}>
+                <div className="flex flex-col items-center gap-1 min-w-0" title={formatStageTooltip(stage.key, displayStages[stage.key])}>
+                  <div className={cn(
+                    'w-9 h-9 rounded-full flex items-center justify-center border transition-all',
+                    statusConfig[status].bg, statusConfig[status].border
+                  )}>
+                    {status === 'pending' && <Clock className="h-4 w-4 text-gray-500" />}
+                    {status === 'running' && <Loader2 className="h-4 w-4 text-blue-400 animate-spin" />}
+                    {status === 'complete' && <CheckCircle2 className="h-4 w-4 text-accent-green" />}
+                    {status === 'error' && <XCircle className="h-4 w-4 text-accent-red" />}
                   </div>
-                )}
-                {/* Progress bar */}
-                {progressPct != null && (
-                  <div className="mt-1.5 h-1 bg-gray-800 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                      style={{ width: `${Math.min(100, progressPct)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Compact metrics summary below pipeline */}
-          {hasDisplayData && (() => {
-            const metrics = buildMetricsSummary();
-            return metrics.length > 0 ? (
-              <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono">
-                {metrics.map((m) => (
-                  <span key={m.label} className="text-muted-foreground">
-                    {m.label}: <span className={m.color}>{m.value}</span>
+                  <span className={cn(
+                    'text-[10px] font-mono text-center leading-tight',
+                    status === 'pending' ? 'text-gray-600' : 'text-gray-300'
+                  )}>
+                    {stage.label}
                   </span>
-                ))}
-              </div>
-            ) : null;
-          })()}
-        </CardContent>
-      </Card>
+                </div>
+                {!isLast && (
+                  <div className={cn(
+                    'flex-1 h-0.5 mx-1',
+                    status === 'complete' ? 'bg-accent-green/40' : 'bg-gray-700'
+                  )} />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
 
-      {/* Cycle Summary Card */}
+        {/* Current activity text */}
+        {cycleRunning && (() => {
+          const runningStage = STAGES.find(s => displayStages[s.key]?.status === 'running');
+          const phase = runningStage ? displayStages[runningStage.key]?.metrics?.phase : null;
+          const progressPct = runningStage ? displayStages[runningStage.key]?.progress_pct : null;
+
+          if (!runningStage) return null;
+
+          return (
+            <div className="mt-2 px-2">
+              <div className="flex items-center gap-2 text-[10px]">
+                <Loader2 className="h-3 w-3 text-blue-400 animate-spin flex-shrink-0" />
+                <span className="text-blue-400 font-medium">{runningStage.label}</span>
+                {progressPct != null && (
+                  <span className="text-muted-foreground">{progressPct}%</span>
+                )}
+              </div>
+              {phase && (
+                <div className="mt-1 text-[10px] text-muted-foreground font-mono truncate pl-5">
+                  {phase}
+                </div>
+              )}
+              {progressPct != null && (
+                <div className="mt-1.5 h-1 bg-gray-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min(100, progressPct)}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Compact metrics summary below pipeline */}
+        {hasDisplayData && (() => {
+          const metrics = buildMetricsSummary();
+          return metrics.length > 0 ? (
+            <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono">
+              {metrics.map((m) => (
+                <span key={m.label} className="text-muted-foreground">
+                  {m.label}: <span className={m.color}>{m.value}</span>
+                </span>
+              ))}
+            </div>
+          ) : null;
+        })()}
+      </div>
+
+      {/* Cycle Summary */}
       {cycleComplete && hasAnyStageData && (
         <CycleSummaryCard stages={stages} />
       )}
 
       {/* Cycle History */}
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <History className="h-5 w-5 text-blue-400" />
-              Cycle History ({cycleHistory.length})
-            </CardTitle>
-            {selectedCycles.size > 0 && (
+      <div>
+        <SectionLabel
+          actions={
+            selectedCycles.size > 0 ? (
               <Button
                 variant="destructive"
                 size="sm"
@@ -368,59 +340,60 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
                   }
                 }}
                 disabled={deletingCycles}
-                className="gap-1 text-xs"
+                className="gap-1 text-[10px]"
               >
                 <Trash2 className="h-3 w-3" />
-                {deletingCycles ? 'Deleting...' : `Delete Selected (${selectedCycles.size})`}
+                {deletingCycles ? 'Deleting...' : `Delete (${selectedCycles.size})`}
               </Button>
-            )}
+            ) : undefined
+          }
+        >
+          Cycle History ({cycleHistory.length})
+        </SectionLabel>
+
+        {cycleHistory.length === 0 ? (
+          <div className="text-center py-4 text-muted-foreground text-[10px]">
+            No cycle history yet
           </div>
-        </CardHeader>
-        <CardContent>
-          {cycleHistory.length === 0 ? (
-            <div className="text-center py-4 text-muted-foreground text-sm">
-              No cycle history yet
+        ) : (
+          <div className="max-h-[400px] overflow-y-auto space-y-2">
+            {/* Select All */}
+            <div className="flex items-center gap-2 pb-2 border-b border-border">
+              <input
+                type="checkbox"
+                checked={cycleHistory.length > 0 && selectedCycles.size === cycleHistory.length}
+                onChange={() => {
+                  if (selectedCycles.size === cycleHistory.length) {
+                    setSelectedCycles(new Set());
+                  } else {
+                    setSelectedCycles(new Set(cycleHistory.map(r => r.cycle_id)));
+                  }
+                }}
+                className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+              />
+              <span className="text-[10px] text-muted-foreground">Select All</span>
             </div>
-          ) : (
-            <div className="max-h-[400px] overflow-y-auto space-y-2">
-              {/* Select All */}
-              <div className="flex items-center gap-2 pb-2 border-b border-border">
-                <input
-                  type="checkbox"
-                  checked={cycleHistory.length > 0 && selectedCycles.size === cycleHistory.length}
-                  onChange={() => {
-                    if (selectedCycles.size === cycleHistory.length) {
-                      setSelectedCycles(new Set());
+            {cycleHistory.map((run) => (
+              <CycleHistoryRow
+                key={run.cycle_id}
+                run={run}
+                selected={selectedCycles.has(run.cycle_id)}
+                onToggle={() => {
+                  setSelectedCycles(prev => {
+                    const next = new Set(prev);
+                    if (next.has(run.cycle_id)) {
+                      next.delete(run.cycle_id);
                     } else {
-                      setSelectedCycles(new Set(cycleHistory.map(r => r.cycle_id)));
+                      next.add(run.cycle_id);
                     }
-                  }}
-                  className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
-                />
-                <span className="text-xs text-muted-foreground">Select All</span>
-              </div>
-              {cycleHistory.map((run) => (
-                <CycleHistoryRow
-                  key={run.cycle_id}
-                  run={run}
-                  selected={selectedCycles.has(run.cycle_id)}
-                  onToggle={() => {
-                    setSelectedCycles(prev => {
-                      const next = new Set(prev);
-                      if (next.has(run.cycle_id)) {
-                        next.delete(run.cycle_id);
-                      } else {
-                        next.add(run.cycle_id);
-                      }
-                      return next;
-                    });
-                  }}
-                />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                    return next;
+                  });
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -446,7 +419,7 @@ function formatStageTooltip(stageKey: string, state?: StageState): string {
   return parts.join('\n');
 }
 
-// Cycle summary card shown after completion
+// Cycle summary card shown after completion — flat bordered div
 const CycleSummaryCard: FC<{ stages: Record<string, StageState> }> = ({ stages }) => {
   const cleanup = stages.cleanup_retirement?.metrics || {};
   const proposals = stages.strategy_proposals?.metrics || {};
@@ -471,31 +444,22 @@ const CycleSummaryCard: FC<{ stages: Record<string, StageState> }> = ({ stages }
   ];
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-    >
-      <Card className="border-accent-green/30 bg-accent-green/5">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base text-accent-green">
-            <CheckCircle2 className="h-5 w-5" />
-            Cycle Complete
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {summaryItems.map((item) => (
-              <div key={item.label} className="bg-muted/30 rounded-lg p-2.5">
-                <div className="text-xs text-muted-foreground mb-0.5">{item.label}</div>
-                <div className={cn('text-lg font-mono font-bold', item.color)}>
-                  {item.value}
-                </div>
-              </div>
-            ))}
+    <div className="rounded-lg border border-accent-green/30 bg-accent-green/5 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <CheckCircle2 className="h-4 w-4 text-accent-green" />
+        <span className="text-[11px] font-semibold text-accent-green uppercase tracking-wide">Cycle Complete</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {summaryItems.map((item) => (
+          <div key={item.label} className="bg-muted/30 rounded-lg p-2">
+            <div className="text-[10px] text-muted-foreground mb-0.5">{item.label}</div>
+            <div className={cn('text-[12px] font-mono font-bold', item.color)}>
+              {item.value}
+            </div>
           </div>
-        </CardContent>
-      </Card>
-    </motion.div>
+        ))}
+      </div>
+    </div>
   );
 };
 
@@ -505,8 +469,7 @@ const CycleHistoryRow: FC<{ run: CycleRun; selected: boolean; onToggle: () => vo
   const isError = run.status === 'error';
   const startDate = new Date(run.started_at);
   const timeAgo = getTimeAgo(startDate);
-  
-  // Format duration nicely
+
   const formatDuration = (seconds: number | null): string => {
     if (!seconds) return '—';
     if (seconds < 60) return `${seconds.toFixed(0)}s`;
@@ -522,7 +485,6 @@ const CycleHistoryRow: FC<{ run: CycleRun; selected: boolean; onToggle: () => vo
       isError ? 'border-accent-red/20 bg-accent-red/5' :
       'border-gray-700 bg-muted/20'
     )}>
-      {/* Top row: status, time, duration */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <input
@@ -538,9 +500,9 @@ const CycleHistoryRow: FC<{ run: CycleRun; selected: boolean; onToggle: () => vo
           ) : (
             <Loader2 className="h-4 w-4 text-blue-400 animate-spin" />
           )}
-          <span className="text-xs text-muted-foreground font-mono">{timeAgo}</span>
-          <span className="text-xs text-gray-600">·</span>
-          <span className="text-xs text-muted-foreground font-mono">
+          <span className="text-[10px] text-muted-foreground font-mono">{timeAgo}</span>
+          <span className="text-[10px] text-gray-600">·</span>
+          <span className="text-[10px] text-muted-foreground font-mono">
             ⏱ {formatDuration(run.duration_seconds)}
           </span>
         </div>
@@ -553,8 +515,7 @@ const CycleHistoryRow: FC<{ run: CycleRun; selected: boolean; onToggle: () => vo
           {run.status.toUpperCase()}
         </span>
       </div>
-      {/* Bottom row: metrics */}
-      <div className="flex items-center gap-4 text-xs font-mono">
+      <div className="flex items-center gap-4 text-[10px] font-mono">
         <span className="text-blue-400" title="Proposed">
           {run.proposals_generated} proposed
         </span>

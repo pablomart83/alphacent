@@ -1,7 +1,7 @@
 import { type FC, useEffect, useState, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  Target, Activity, Search,
+  Target, Activity,
   MoreVertical, Eye, Pause, Trash2, PlayCircle, RefreshCw,
 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
@@ -15,8 +15,10 @@ import { TemplateManager } from '../components/trading/TemplateManager';
 import { SymbolManager } from '../components/trading/SymbolManager';
 import { Button } from '../components/ui/Button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Input } from '../components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { SectionLabel } from '../components/ui/SectionLabel';
+import { MetricGrid } from '../components/ui/MetricGrid';
+import { FilterBar } from '../components/ui/FilterBar';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -1446,24 +1448,16 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
           {/* Overview Tab */}
           <TabsContent value="overview" className="p-2 space-y-2">
-            {/* Summary Metrics — simple inline grid, no Card wrappers */}
-            <div className="grid grid-cols-4 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
-              {[
-                { label: 'Active', value: summaryMetrics.active, color: summaryMetrics.active > 0 ? 'text-accent-green' : 'text-gray-300' },
-                { label: 'Backtested', value: summaryMetrics.backtested, color: 'text-gray-300' },
-                { label: 'Avg Perf', value: formatPercentage(summaryMetrics.avgPerformance * 100), color: summaryMetrics.avgPerformance >= 0 ? 'text-accent-green' : 'text-accent-red' },
-                { label: 'Success Rate', value: formatPercentage(summaryMetrics.successRate), color: summaryMetrics.successRate >= 50 ? 'text-accent-green' : 'text-accent-red' },
-              ].map((m, i) => (
-                <div key={i} className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[9px] text-gray-500 uppercase tracking-wide">{m.label}</div>
-                  <div className={cn('text-sm font-mono font-bold', m.color)}>{m.value}</div>
-                </div>
-              ))}
-            </div>
+            <MetricGrid items={[
+              { label: 'Active', value: summaryMetrics.active, color: summaryMetrics.active > 0 ? 'text-[#22c55e]' : undefined },
+              { label: 'Backtested', value: summaryMetrics.backtested },
+              { label: 'Avg Perf', value: formatPercentage(summaryMetrics.avgPerformance * 100), color: summaryMetrics.avgPerformance >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]' },
+              { label: 'Success Rate', value: formatPercentage(summaryMetrics.successRate), color: summaryMetrics.successRate >= 50 ? 'text-[#22c55e]' : 'text-[#ef4444]' },
+            ]} cols={4} />
 
             {/* Template Distribution — simple bars, no Card */}
             <div className="border-t border-[var(--color-dark-border)] pt-2">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">Template Distribution</div>
+              <SectionLabel>Template Distribution</SectionLabel>
               <div className="space-y-1">
                 {templateDistribution.map(({ name, count }) => (
                   <div key={name} className="flex items-center gap-2 px-1">
@@ -1480,7 +1474,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {/* Category + Type Distribution — side by side, no Card */}
             <div className="grid grid-cols-2 gap-2 border-t border-[var(--color-dark-border)] pt-2">
               <div>
-                <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">By Category</div>
+                <SectionLabel>By Category</SectionLabel>
                 <div className="space-y-1">
                   {categoryDistribution.map(({ name, count }) => (
                     <div key={name} className="flex items-center gap-2 px-1">
@@ -1496,7 +1490,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 </div>
               </div>
               <div>
-                <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">By Type</div>
+                <SectionLabel>By Type</SectionLabel>
                 <div className="space-y-1">
                   {typeDistribution.map(({ name, count }) => (
                     <div key={name} className="flex items-center gap-2 px-1">
@@ -1514,7 +1508,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
             {/* Top Performing — simple list, no Card */}
             <div className="border-t border-[var(--color-dark-border)] pt-2">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">Top 5 by Return</div>
+              <SectionLabel>Top 5 by Return</SectionLabel>
               <div className="space-y-0.5">
                 {topPerformingStrategies.map((strategy, index) => (
                   <div key={strategy.id} className="flex items-center justify-between px-2 py-1.5 hover:bg-gray-800/40 rounded">
@@ -1542,13 +1536,12 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
           {/* Active Strategies Tab */}
           <TabsContent value="active" className="p-2 space-y-2">
-            {/* Inline filters row */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative flex-1 min-w-[180px]">
-                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
-                <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-7 h-7 text-xs" />
-              </div>
+            <FilterBar
+              info={`${filteredActiveStrategies.length} of ${activeStrategies.length}`}
+              searchValue={searchQuery}
+              onSearchChange={setSearchQuery}
+              searchPlaceholder="Search..."
+            >
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Status" /></SelectTrigger>
                 <SelectContent>
@@ -1602,7 +1595,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                   <SelectItem value="USER">Manual</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </FilterBar>
 
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
@@ -1626,10 +1619,6 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
               </div>
             )}
 
-            {/* Table count + edge-to-edge DataTable */}
-            <div className="text-[10px] font-mono text-gray-500 px-1">
-              {selectedStrategies.size > 0 ? `${selectedStrategies.size} selected of ${filteredActiveStrategies.length}` : `${filteredActiveStrategies.length} of ${activeStrategies.length}`}
-            </div>
             <DataTable
               columns={activeStrategyColumns}
               data={filteredActiveStrategies}
@@ -1646,12 +1635,12 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
           {/* Backtested Strategies Tab */}
           <TabsContent value="backtested" className="p-2 space-y-2">
-            {/* Inline filters */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative flex-1 min-w-[180px]">
-                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
-                <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-7 h-7 text-xs" />
-              </div>
+            <FilterBar
+              info={`${filteredBacktestedStrategies.length} of ${backtestedStrategies.length}`}
+              searchValue={searchQuery}
+              onSearchChange={setSearchQuery}
+              searchPlaceholder="Search..."
+            >
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Category" /></SelectTrigger>
                 <SelectContent>
@@ -1692,7 +1681,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                   <SelectItem value="USER">Manual</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </FilterBar>
 
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
@@ -1705,7 +1694,6 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
               </div>
             )}
 
-            <div className="text-[10px] font-mono text-gray-500 px-1">{filteredBacktestedStrategies.length} of {backtestedStrategies.length}</div>
             <DataTable
               columns={backtestedStrategyColumns}
               data={filteredBacktestedStrategies}
@@ -1722,12 +1710,12 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
           {/* Retired Strategies Tab */}
           <TabsContent value="retired" className="p-2 space-y-2">
-            {/* Inline filters */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative flex-1 min-w-[180px]">
-                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
-                <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-7 h-7 text-xs" />
-              </div>
+            <FilterBar
+              info={`${filteredRetiredStrategies.length} of ${retiredStrategies.length}`}
+              searchValue={searchQuery}
+              onSearchChange={setSearchQuery}
+              searchPlaceholder="Search..."
+            >
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Category" /></SelectTrigger>
                 <SelectContent>
@@ -1768,7 +1756,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                   <SelectItem value="USER">Manual</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
+            </FilterBar>
 
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
@@ -1779,7 +1767,6 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
               </div>
             )}
 
-            <div className="text-[10px] font-mono text-gray-500 px-1">{filteredRetiredStrategies.length} of {retiredStrategies.length}</div>
             <DataTable
               columns={retiredStrategyColumns}
               data={filteredRetiredStrategies}
@@ -1817,7 +1804,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">No template ranking data available</div>
               ) : (
                 <>
-                  <div className="flex items-center gap-2 mb-2">
+                  <FilterBar>
                     <Select value={templateRankingFamilyFilter} onValueChange={setTemplateRankingFamilyFilter}>
                       <SelectTrigger className="w-[140px] h-7 text-xs"><SelectValue placeholder="Family" /></SelectTrigger>
                       <SelectContent>
@@ -1836,7 +1823,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
+                  </FilterBar>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs font-mono table-dense">
                       <thead>
@@ -1965,7 +1952,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
           {/* Top 5 Rankings — direct table, no nested PanelHeader */}
           <div className="border-t border-[var(--color-dark-border)] pt-1.5">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">Top 5 Rankings</div>
+            <SectionLabel>Top 5 Rankings</SectionLabel>
             {templateRankingsLoading ? (
               <div className="text-center py-3 text-[10px] text-gray-500">Loading...</div>
             ) : top5Rankings.length === 0 ? (
@@ -1996,7 +1983,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
           {/* Recent Lifecycle Events — direct list, no nested PanelHeader */}
           <div className="border-t border-[var(--color-dark-border)] pt-1.5">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">Recent Events</div>
+            <SectionLabel>Recent Events</SectionLabel>
             {recentLifecycleEvents.length === 0 ? (
               <div className="text-center py-3 text-[10px] text-gray-500">No recent events</div>
             ) : (
