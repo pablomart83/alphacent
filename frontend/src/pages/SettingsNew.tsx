@@ -754,14 +754,14 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
       <PageTemplate
         title="◆ Settings"
         description="Configure trading mode, API credentials, risk parameters, and preferences"
-        actions={headerActions}
         compact={true}
       >
       <div className="p-2 sm:p-3 lg:p-4 max-w-[1800px] mx-auto">
 
         {/* Tabs */}
         <Tabs defaultValue="trading-mode" className="space-y-2">
-          <TabsList className="w-full overflow-x-auto">
+          <div className="flex items-center gap-2">
+            <TabsList className="flex-1 overflow-x-auto">
             <TabsTrigger value="trading-mode" className="flex items-center gap-2">
               <Activity className="h-4 w-4" />
               <span className="hidden sm:inline">Trading Mode</span>
@@ -799,6 +799,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
               <span className="hidden sm:inline">Shortcuts</span>
             </TabsTrigger>
           </TabsList>
+            {headerActions}
+          </div>
 
           {/* Trading Mode Tab */}
           <TabsContent value="trading-mode" className="space-y-6">

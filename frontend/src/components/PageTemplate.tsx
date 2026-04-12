@@ -21,38 +21,25 @@ interface PageTemplateProps {
 export const PageTemplate: FC<PageTemplateProps> = ({
   title,
   description,
-  actions,
+  actions: _actions,
   children,
   showWidgets = true,
   compact = false,
   className,
 }) => {
-  const showHeader = !compact || !!actions;
+  // Compact mode: never show the header row — actions belong in PanelHeaders
+  const showHeader = !compact;
 
   return (
     <div className={cn('flex flex-col h-full overflow-hidden', className)}>
-      {/* Header zone — 64px normal, 36px compact (actions only), 0px compact no actions */}
       {showHeader && (
-        <div className={cn(
-          'flex items-center justify-between shrink-0 border-b border-[var(--color-dark-border)]',
-          compact
-            ? 'px-3 h-9 min-h-[36px] max-h-[36px]'
-            : 'px-4 md:px-6 h-16 min-h-[64px] max-h-[64px]'
-        )}>
-          {!compact && (
-            <div className="min-w-0">
-              <h1 className="text-xl font-bold text-gray-100 truncate">{title}</h1>
-              {description && (
-                <p className="text-xs text-gray-500 truncate mt-0.5">{description}</p>
-              )}
-            </div>
-          )}
-          {compact && <div />}
-          {actions && (
-            <div className="flex items-center gap-2 shrink-0 ml-auto">
-              {actions}
-            </div>
-          )}
+        <div className="flex items-center justify-between shrink-0 border-b border-[var(--color-dark-border)] px-4 md:px-6 h-16 min-h-[64px] max-h-[64px]">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-gray-100 truncate">{title}</h1>
+            {description && (
+              <p className="text-xs text-gray-500 truncate mt-0.5">{description}</p>
+            )}
+          </div>
         </div>
       )}
 
