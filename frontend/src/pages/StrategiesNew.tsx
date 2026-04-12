@@ -1412,7 +1412,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 if (tab.value === 'retired') fetchRetiredStrategies();
               }}
               className={cn(
-                'px-2.5 py-1 text-[12px] font-medium rounded whitespace-nowrap transition-colors shrink-0',
+                'px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap transition-colors shrink-0',
                 strategiesTab === tab.value
                   ? 'bg-gray-700/60 text-gray-100'
                   : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/40'

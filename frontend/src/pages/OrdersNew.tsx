@@ -11,7 +11,7 @@ import { PanelHeader } from '../components/layout/PanelHeader';
 import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataTable } from '../components/trading/DataTable';
 import { Button } from '../components/ui/Button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Tabs, TabsContent } from '../components/ui/tabs';
 import { Input } from '../components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
@@ -113,6 +113,9 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
   
   // Filter states for All Orders tab
   const [orderSearch, setOrderSearch] = useState('');
+
+  // Active tab state for main panel
+  const [ordersTab, setOrdersTab] = useState<string>('all');
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>('all');
   const [orderSideFilter, setOrderSideFilter] = useState<string>('all');
   const [orderSourceFilter, setOrderSourceFilter] = useState<string>('all');
@@ -1061,13 +1064,48 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     </div>
   );
 
-  // ── Main Panel (65%) ─────────────────────────────────────────────────
+  const ordersTabButtons = [
+    { value: 'all', label: `All (${filteredOrders.length})` },
+    { value: 'queue', label: `Queue${queuedOrders.length > 0 ? ` (${queuedOrders.length})` : ''}`, highlight: queuedOrders.length > 0 },
+    { value: 'pending-closures', label: `Closures (${pendingClosures.length})` },
+    { value: 'analytics', label: 'Analytics' },
+  ];
+
   const mainPanel = (
     <div className="flex flex-col h-full">
+      {/* Single 32px header row: inline tabs + actions */}
+      <div className="flex items-center px-3 min-h-[32px] max-h-[32px] shrink-0 bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]">
+        <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+          {ordersTabButtons.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => { setOrdersTab(tab.value); if (tab.value === 'analytics') fetchExecutionQuality(); }}
+              className={cn(
+                'px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap transition-colors shrink-0',
+                ordersTab === tab.value
+                  ? 'bg-gray-700/60 text-gray-100'
+                  : cn('text-gray-500 hover:text-gray-300 hover:bg-gray-800/40', tab.highlight && 'text-amber-400')
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 shrink-0 ml-2">
+          <button
+            onClick={fetchData}
+            className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={12} />
+          </button>
+        </div>
+      </div>
+
       {/* OrderFlowTimeline hero — top ~40% */}
       <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
         <div className="p-2 h-full">
-          <div className="text-[11px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Order Flow — Last 7 Days</div>
+          <div className="text-[11px] text-gray-500 mb-1 font-medium tracking-wide">Order Flow — Last 7 Days</div>
               <OrderFlowTimeline
                 orders={orders.map((o) => ({
                   id: o.id,
@@ -1084,23 +1122,8 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
           {/* Orders DenseTable with tabs — bottom ~60% */}
           <div className="flex-1 min-h-0 border-t border-[var(--color-dark-border)]">
-            <Tabs defaultValue="all" className="flex flex-col h-full">
-              <div className="shrink-0 px-2 pt-1">
-                <TabsList className="w-full overflow-x-auto">
-                  <TabsTrigger value="all">
-                    All ({filteredOrders.length})
-                  </TabsTrigger>
-                  <TabsTrigger value="queue" className={queuedOrders.length > 0 ? 'text-amber-400' : ''}>
-                    Queue {queuedOrders.length > 0 && `(${queuedOrders.length})`}
-                  </TabsTrigger>
-                  <TabsTrigger value="pending-closures">
-                    Closures ({pendingClosures.length})
-                  </TabsTrigger>
-                  <TabsTrigger value="analytics" onClick={fetchExecutionQuality}>
-                    Analytics
-                  </TabsTrigger>
-                </TabsList>
-              </div>
+            <Tabs value={ordersTab} onValueChange={(v) => { setOrdersTab(v); if (v === 'analytics') fetchExecutionQuality(); }} className="flex flex-col h-full">
+              {/* Hidden TabsList — we use custom buttons above */}
 
               {/* All Orders Tab */}
               <TabsContent value="all" className="flex-1 min-h-0 overflow-hidden px-2 pb-2">
@@ -1563,7 +1586,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
           {/* Execution Quality Mini-Chart (fill rate sparkline) */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Execution Quality</div>
+            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">Execution Quality</div>
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div className="text-center">
                 <div className={cn('text-lg font-bold font-mono', avgSlippage >= 0 ? 'text-accent-red' : 'text-accent-green')}>
@@ -1606,7 +1629,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
           {/* Recent Fills List */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3 flex-1 min-h-0">
-            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">
+            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">
               Recent Fills ({recentFills.length})
             </div>
             {recentFills.length === 0 ? (
@@ -1645,7 +1668,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
           {/* Order Status Breakdown */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Status Breakdown</div>
+            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">Status Breakdown</div>
             <div className="space-y-1.5">
               {[
                 { label: 'Executed', count: filledOrders, color: 'text-accent-green', bg: 'bg-accent-green' },

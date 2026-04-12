@@ -897,7 +897,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 { label: 'Win Rate', value: formatPercentage(performanceMetrics?.win_rate || 0), color: (performanceMetrics?.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red' },
               ].map((m, i) => (
                 <div key={i} className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider">{m.label}</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide">{m.label}</div>
                   <div className={cn('text-sm font-mono font-bold', m.color)}>{m.value}</div>
                 </div>
               ))}
@@ -907,25 +907,25 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             {cioDashboard && (
               <div className="grid grid-cols-4 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider">CAGR</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide">CAGR</div>
                   <div className={cn('text-sm font-mono font-bold', cioDashboard.cagr >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                     {cioDashboard.cagr >= 0 ? '+' : ''}{cioDashboard.cagr.toFixed(1)}%
                   </div>
                 </div>
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider">Calmar</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide">Calmar</div>
                   <div className={cn('text-sm font-mono font-bold', cioDashboard.calmar_ratio >= 1 ? 'text-accent-green' : cioDashboard.calmar_ratio >= 0.5 ? 'text-yellow-400' : 'text-accent-red')}>
                     {cioDashboard.calmar_ratio.toFixed(2)}
                   </div>
                 </div>
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider">Info Ratio</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide">Info Ratio</div>
                   <div className={cn('text-sm font-mono font-bold', cioDashboard.information_ratio >= 0.5 ? 'text-accent-green' : cioDashboard.information_ratio >= 0 ? 'text-yellow-400' : 'text-accent-red')}>
                     {cioDashboard.information_ratio.toFixed(2)}
                   </div>
                 </div>
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider">DD Duration</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide">DD Duration</div>
                   <div className={cn('text-sm font-mono font-bold', cioDashboard.drawdown_duration_days <= 7 ? 'text-accent-green' : cioDashboard.drawdown_duration_days <= 30 ? 'text-yellow-400' : 'text-accent-red')}>
                     {cioDashboard.drawdown_duration_days}d
                   </div>
@@ -937,7 +937,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             {cioDashboard && (
               <div className="grid grid-cols-3 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">P&L Breakdown</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide mb-1.5">P&L Breakdown</div>
                   <div className="space-y-1 text-[11px] font-mono">
                     <div className="flex justify-between"><span className="text-gray-500">Realized</span><span className={cioDashboard.total_realized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(cioDashboard.total_realized_pnl)}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Unrealized</span><span className={cioDashboard.total_unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(cioDashboard.total_unrealized_pnl)}</span></div>
@@ -945,7 +945,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">Streaks</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide mb-1.5">Streaks</div>
                   <div className="space-y-1 text-[11px] font-mono">
                     <div className="flex justify-between"><span className="text-gray-500">Current</span><span className={cioDashboard.current_streak >= 0 ? 'text-accent-green' : 'text-accent-red'}>{cioDashboard.current_streak > 0 ? `+${cioDashboard.current_streak}W` : cioDashboard.current_streak < 0 ? `${cioDashboard.current_streak}L` : '—'}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Best</span><span className="text-accent-green">{cioDashboard.longest_win_streak}W</span></div>
@@ -953,7 +953,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-1.5">Execution</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide mb-1.5">Execution</div>
                   <div className="space-y-1 text-[11px] font-mono">
                     <div className="flex justify-between"><span className="text-gray-500">Entry Slip</span><span>{cioDashboard.avg_entry_slippage_pct.toFixed(3)}%</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Exit Slip</span><span>{cioDashboard.avg_exit_slippage_pct.toFixed(3)}%</span></div>
@@ -971,7 +971,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   transition={{ duration: 0.3, delay: 0.045 }} className="space-y-3">
                   
                   {/* Pipeline Health */}
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">Strategy Pipeline (30 days)</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide mb-1">Strategy Pipeline (30 days)</div>
                   <MetricGrid items={[
                     { label: 'Proposed', value: cioDashboard.strategies_proposed_30d, color: 'text-blue-400' },
                     { label: 'Activated', value: cioDashboard.strategies_activated_30d, color: 'text-[#22c55e]' },
@@ -984,7 +984,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   {/* Active Strategy Health + Retirement Analysis */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                      <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Active Strategies</div>
+                      <div className="text-[11px] text-gray-500 tracking-wide mb-2">Active Strategies</div>
                       <div className="space-y-2 text-[11px] font-mono">
                         <div className="flex justify-between"><span className="text-gray-500">Profitable</span><span className="text-accent-green">{cioDashboard.active_profitable || 0}</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Unprofitable</span><span className="text-accent-red">{cioDashboard.active_unprofitable || 0}</span></div>
@@ -994,7 +994,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     </div>
 
                     <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                      <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Retired Strategies (30d)</div>
+                      <div className="text-[11px] text-gray-500 tracking-wide mb-2">Retired Strategies (30d)</div>
                       <div className="space-y-2 text-[11px] font-mono">
                         <div className="flex justify-between"><span className="text-gray-500">Profitable</span><span className="text-accent-green">{cioDashboard.retired_profitable || 0}</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Unprofitable</span><span className="text-accent-red">{cioDashboard.retired_unprofitable || 0}</span></div>
@@ -1014,7 +1014,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   {/* Trade Quality + Closure Analysis */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                      <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Trade Quality</div>
+                      <div className="text-[11px] text-gray-500 tracking-wide mb-2">Trade Quality</div>
                       <div className="space-y-2 text-[11px] font-mono">
                         <div className="flex justify-between"><span className="text-gray-500">Closed Trades</span><span>{cioDashboard.total_trades_closed || 0}</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Win / Loss</span><span><span className="text-accent-green">{cioDashboard.winning_trades || 0}</span> / <span className="text-accent-red">{cioDashboard.losing_trades || 0}</span></span></div>
@@ -1030,7 +1030,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     </div>
 
                     <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                      <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Position Closures</div>
+                      <div className="text-[11px] text-gray-500 tracking-wide mb-2">Position Closures</div>
                       <div className="space-y-2 text-[11px] font-mono">
                         {cioDashboard.closure_reasons && Object.keys(cioDashboard.closure_reasons).length > 0 ? (
                           Object.entries(cioDashboard.closure_reasons)
@@ -1222,7 +1222,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.2 }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Win Rate by Day of Week</div>
+                <div className="text-[11px] text-gray-500 tracking-wide mb-2">Win Rate by Day of Week</div>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={Object.entries(perfStats?.win_rate_by_day || {}).map(([day, rate]) => ({ day: day.slice(0, 3), rate }))}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -1239,7 +1239,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </ResponsiveContainer>
               </div>
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Win Rate by Hour of Day</div>
+                <div className="text-[11px] text-gray-500 tracking-wide mb-2">Win Rate by Hour of Day</div>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={Object.entries(perfStats?.win_rate_by_hour || {}).map(([hour, rate]) => ({ hour: `${hour}:00`, rate }))}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -1298,7 +1298,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.3 }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Drawdown Chart</div>
+                <div className="text-[11px] text-gray-500 tracking-wide mb-2">Drawdown Chart</div>
                 <ResponsiveContainer width="100%" height={220}>
                   <AreaChart data={performanceMetrics?.drawdown_curve || []}>
                     <defs>
@@ -1316,7 +1316,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </ResponsiveContainer>
               </div>
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Returns Distribution</div>
+                <div className="text-[11px] text-gray-500 tracking-wide mb-2">Returns Distribution</div>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={performanceMetrics?.returns_distribution || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -1423,7 +1423,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Win/Loss Distribution</div>
+                <div className="text-[11px] text-gray-500 tracking-wide mb-2">Win/Loss Distribution</div>
                 <ResponsiveContainer width="100%" height={250}>
                   <BarChart data={tradeAnalytics?.win_loss_distribution || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -1438,7 +1438,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               </div>
 
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Holding Periods</div>
+                <div className="text-[11px] text-gray-500 tracking-wide mb-2">Holding Periods</div>
                 <ResponsiveContainer width="100%" height={250}>
                   <BarChart data={tradeAnalytics?.holding_periods || []}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -1536,7 +1536,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {regimeAnalysis?.crypto_cycle && regimeAnalysis.crypto_cycle.phase && (
                 <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Bitcoin Halving Cycle</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide mb-2">Bitcoin Halving Cycle</div>
                   <div className="space-y-3">
                     <div className="flex items-center justify-between text-[11px]">
                       <span>Phase</span>
@@ -1565,7 +1565,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
               {regimeAnalysis?.carry_rates && regimeAnalysis.carry_rates.carry && Object.keys(regimeAnalysis.carry_rates.carry).length > 0 && (
                 <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                  <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Forex Carry Rates</div>
+                  <div className="text-[11px] text-gray-500 tracking-wide mb-2">Forex Carry Rates</div>
                   <div className="space-y-2">
                     {Object.entries(regimeAnalysis.carry_rates.carry).map(([pair, diff]) => (
                       <div key={pair} className="flex items-center justify-between p-1.5 bg-[var(--color-dark-surface)] rounded text-[11px]">
@@ -2154,7 +2154,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               
               {/* Best Performing Patterns */}
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Best Performing Patterns</div>
+                <div className="text-[11px] text-gray-500 tracking-wide mb-2">Best Performing Patterns</div>
                 {tradeJournalPatterns?.best_patterns && tradeJournalPatterns.best_patterns.length > 0 ? (
                   <div className="space-y-2">
                     {tradeJournalPatterns.best_patterns.map((pattern, idx) => (
@@ -2183,7 +2183,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
               {/* Worst Performing Patterns */}
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] text-gray-500 uppercase tracking-wider mb-2">Worst Performing Patterns</div>
+                <div className="text-[11px] text-gray-500 tracking-wide mb-2">Worst Performing Patterns</div>
                 {tradeJournalPatterns?.worst_patterns && tradeJournalPatterns.worst_patterns.length > 0 ? (
                   <div className="space-y-2">
                     {tradeJournalPatterns.worst_patterns.map((pattern, idx) => (

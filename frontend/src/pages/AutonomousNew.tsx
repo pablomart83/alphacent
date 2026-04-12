@@ -14,7 +14,7 @@ import { DataTable } from '../components/trading/DataTable';
 import { TradingCyclePipeline } from '../components/trading/TradingCyclePipeline';
 // Card imports removed — using PanelHeader sections instead
 import { Button } from '../components/ui/Button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Tabs, TabsContent } from '../components/ui/tabs';
 import { Input } from '../components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
@@ -138,6 +138,9 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   const [walkForwardData, setWalkForwardData] = useState<any>(null);
   const [walkForwardLoading, setWalkForwardLoading] = useState(false);
   const [walkForwardPeriod, setWalkForwardPeriod] = useState<string>('3M');
+
+  // Active tab state for main panel
+  const [autoTab, setAutoTab] = useState<string>('control');
 
   // Schedule editing state
   const [editFrequency, setEditFrequency] = useState<string>('weekly');
@@ -837,27 +840,51 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
     </div>
   );
 
-  // ── Main Panel (65%) — All existing tabs ───────────────────────────────
+  const autoTabButtons = [
+    { value: 'control', label: 'Control' },
+    { value: 'lifecycle', label: `Lifecycle (${filteredStrategies.length})` },
+    { value: 'activity', label: `Activity (${filteredOrders.length})` },
+    { value: 'signals', label: 'Signals' },
+    { value: 'performance', label: 'Performance' },
+    { value: 'walkforward', label: 'Walk-Forward' },
+    { value: 'conviction', label: 'Conviction' },
+  ];
+
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-auto">
+    <div className="flex flex-col h-full">
       <RefreshIndicator visible={pollingRefreshing || refreshing} />
-      <Tabs defaultValue="control" className="flex flex-col h-full">
-        <div className="shrink-0 px-2 pt-1 border-b border-[var(--color-dark-border)]">
-          <TabsList className="w-full overflow-x-auto">
-            <TabsTrigger value="control">Control</TabsTrigger>
-            <TabsTrigger value="lifecycle">
-              Lifecycle ({filteredStrategies.length})
-            </TabsTrigger>
-            <TabsTrigger value="activity">
-              Activity ({filteredOrders.length})
-            </TabsTrigger>
-            <TabsTrigger value="signals">Signals</TabsTrigger>
-            <TabsTrigger value="performance">Performance</TabsTrigger>
-            <TabsTrigger value="walkforward">Walk-Forward</TabsTrigger>
-            <TabsTrigger value="conviction">Conviction</TabsTrigger>
-          </TabsList>
+      {/* Single 32px header row: inline tabs + actions */}
+      <div className="flex items-center px-3 min-h-[32px] max-h-[32px] shrink-0 bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]">
+        <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+          {autoTabButtons.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setAutoTab(tab.value)}
+              className={cn(
+                'px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap transition-colors shrink-0',
+                autoTab === tab.value
+                  ? 'bg-gray-700/60 text-gray-100'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/40'
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-        <div className="flex-1 min-h-0 overflow-auto px-2 pb-2">
+        <div className="flex items-center gap-1 shrink-0 ml-2">
+          <button
+            onClick={fetchData}
+            className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0 overflow-auto px-2 pb-2">
+      <Tabs value={autoTab} onValueChange={setAutoTab} className="flex flex-col h-full">
+        {/* Hidden TabsList — we use custom buttons above */}
+        <div className="flex-1 min-h-0 overflow-auto">
 
             {/* Tab 1: Control & Status */}
             <TabsContent value="control" className="space-y-3 p-2">
@@ -886,7 +913,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Research Filters — flat inline row */}
               <div className="flex flex-wrap items-center gap-3 py-2 border-b border-[var(--color-dark-border)]">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">Assets:</span>
+                  <span className="text-[11px] text-gray-500 tracking-wide">Assets:</span>
                   <div className="flex flex-wrap gap-1">
                     {['stock', 'etf', 'crypto', 'forex', 'index', 'commodity'].map(ac => (
                       <button key={ac} onClick={() => {
@@ -903,7 +930,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">TF:</span>
+                  <span className="text-[11px] text-gray-500 tracking-wide">TF:</span>
                   <div className="flex gap-1">
                     {[{ key: '1d', label: 'Daily' }, { key: '1h', label: '1H' }, { key: '4h', label: '4H' }].map(({ key, label }) => (
                       <button key={key} onClick={() => {
@@ -920,7 +947,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">Type:</span>
+                  <span className="text-[11px] text-gray-500 tracking-wide">Type:</span>
                   <div className="flex gap-1">
                     {[{ key: 'dsl', label: 'DSL' }, { key: 'alpha_edge', label: 'AE' }].map(({ key, label }) => (
                       <button key={key} onClick={() => {
@@ -1282,7 +1309,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     { label: 'Accept Rate', value: `${signalData?.summary.acceptance_rate ?? 0}%`, color: 'text-blue-400' },
                   ].map((m, i) => (
                     <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                      <div className="text-[11px] text-gray-500 uppercase tracking-wider">{m.label}</div>
+                      <div className="text-[11px] text-gray-500 tracking-wide">{m.label}</div>
                       <div className={cn('text-[13px] font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                     </div>
                   ))}
@@ -1394,7 +1421,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   { label: 'Ret. Rate', value: `${retirementRate.toFixed(1)}%`, color: 'text-[#ef4444]' },
                 ].map((m, i) => (
                   <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                    <div className="text-[11px] text-gray-500 uppercase tracking-wider">{m.label}</div>
+                    <div className="text-[11px] text-gray-500 tracking-wide">{m.label}</div>
                     <div className={cn('text-[13px] font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                   </div>
                 ))}
@@ -1610,6 +1637,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
         </div>
       </Tabs>
+      </div>
     </div>
   );
 

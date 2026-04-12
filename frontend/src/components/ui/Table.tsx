@@ -70,8 +70,8 @@ export const TableHead: FC<TableHeadProps> = ({ children, className = '' }) => {
     <th
       className={cn(
         'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] border-b border-[var(--color-dark-border)]',
-        // Dense variant: tighter padding
-        '[.table-dense_&]:px-2 [.table-dense_&]:py-1 [.table-dense_&]:text-[12px]',
+        // Dense variant: matches DSL Templates table format
+        '[.table-dense_&]:px-3 [.table-dense_&]:py-2 [.table-dense_&]:text-xs',
         className,
       )}
     >
@@ -90,8 +90,8 @@ export const TableCell: FC<TableCellProps> = ({ children, className = '' }) => {
     <td
       className={cn(
         'px-4 py-3 text-[13px] border-b border-[var(--color-dark-border)]',
-        // Dense variant: 32px rows, 13px font, 8px/4px padding
-        '[.table-dense_&]:px-2 [.table-dense_&]:py-1 [.table-dense_&]:text-[13px] [.table-dense_&]:leading-[32px]',
+        // Dense variant: matches DSL Templates table format (px-3 py-2, text-xs font-mono)
+        '[.table-dense_&]:px-3 [.table-dense_&]:py-2 [.table-dense_&]:text-xs',
         className,
       )}
     >

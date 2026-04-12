@@ -914,10 +914,10 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           key={tab.id}
           onClick={() => setActiveTab(tab.id)}
           className={cn(
-            'px-4 py-1.5 text-[13px] font-semibold transition-colors relative',
+            'px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap transition-colors shrink-0',
             activeTab === tab.id
-              ? 'text-[#10b981] after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-[#10b981]'
-              : cn('text-gray-500 hover:text-gray-200', tab.highlight)
+              ? 'bg-gray-700/60 text-gray-100'
+              : cn('text-gray-500 hover:text-gray-300 hover:bg-gray-800/40', tab.highlight)
           )}
         >
           {tab.label}
@@ -1291,7 +1291,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* By Asset Class — compact list, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">By Asset Class</div>
+            <div className="text-[10px] font-semibold text-gray-500 tracking-wide mb-1">By Asset Class</div>
             {assetClassSummary.length > 0 ? (
               <div className="space-y-0.5">
                 {assetClassSummary.map((ac) => (
@@ -1316,7 +1316,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* Sector Exposure Pie Chart — directly rendered, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Sector Exposure</div>
+            <div className="text-[10px] font-semibold text-gray-500 tracking-wide mb-1">Sector Exposure</div>
             {sectorExposure.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={150}>
@@ -1352,7 +1352,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* Allocation Breakdown — directly rendered, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Allocation</div>
+            <div className="text-[10px] font-semibold text-gray-500 tracking-wide mb-1">Allocation</div>
             {allocationData.length > 0 ? (
               <div className="space-y-1">
                 {allocationData.map((item, i) => (

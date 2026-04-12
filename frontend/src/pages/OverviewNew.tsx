@@ -362,7 +362,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
           {/* Multi-Timeframe View */}
           <div>
-            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <div className="text-[11px] font-medium text-gray-500 tracking-wide mb-1.5">
               Performance
             </div>
             <MultiTimeframeView
@@ -374,7 +374,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
           {/* Strategy Pipeline */}
           <div>
-            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <div className="text-[11px] font-medium text-gray-500 tracking-wide mb-1.5">
               Strategy Pipeline
             </div>
             <div className="flex flex-col gap-1.5">
@@ -430,7 +430,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
         <div className="flex flex-col gap-2 p-2">
           {/* Recent Trades */}
           <div>
-            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <div className="text-[11px] font-medium text-gray-500 tracking-wide mb-1.5">
               Recent Trades
             </div>
             {recentTrades.length > 0 ? (
@@ -467,7 +467,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
           {/* Position Summary by Asset Class */}
           <div>
-            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+            <div className="text-[11px] font-medium text-gray-500 tracking-wide mb-1.5">
               Positions by Asset Class
             </div>
             {assetClassSummary.length > 0 ? (

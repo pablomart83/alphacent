@@ -22,7 +22,7 @@ interface SectionLabelProps {
  */
 export const SectionLabel: FC<SectionLabelProps> = ({ children, actions, className }) => (
   <div className={cn('flex items-center justify-between mb-1.5', className)}>
-    <span className="text-[11px] font-medium text-gray-500 uppercase tracking-wider">
+    <span className="text-[11px] font-medium text-gray-500 tracking-wide">
       {children}
     </span>
     {actions && (

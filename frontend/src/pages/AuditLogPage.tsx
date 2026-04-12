@@ -328,7 +328,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
           {/* Signal Rejections Summary */}
           <div className="border border-[var(--color-dark-border)] rounded-lg">
             <div className="px-3 py-1.5 border-b" style={{ borderColor: 'var(--color-dark-border)', backgroundColor: 'var(--color-dark-bg)' }}>
-              <span className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Signal Rejections</span>
+              <span className="text-[11px] text-gray-500 tracking-wide font-medium">Signal Rejections</span>
               <span className="ml-2 text-[10px] font-mono" style={{ color: '#eab308' }}>({rejections.length})</span>
             </div>
             {rejections.length > 0 ? (
@@ -365,7 +365,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
           {/* Lifecycle Events Summary */}
           <div className="border border-[var(--color-dark-border)] rounded-lg">
             <div className="px-3 py-1.5 border-b" style={{ borderColor: 'var(--color-dark-border)', backgroundColor: 'var(--color-dark-bg)' }}>
-              <span className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Lifecycle Events</span>
+              <span className="text-[11px] text-gray-500 tracking-wide font-medium">Lifecycle Events</span>
               <span className="ml-2 text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>({lifecycleEvents.length})</span>
             </div>
             {lifecycleEvents.length > 0 ? (
@@ -403,7 +403,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
           {/* Risk Limit Events Summary */}
           <div className="border border-[var(--color-dark-border)] rounded-lg">
             <div className="px-3 py-1.5 border-b" style={{ borderColor: 'var(--color-dark-border)', backgroundColor: 'var(--color-dark-bg)' }}>
-              <span className="text-[11px] text-gray-500 uppercase tracking-wider font-medium">Risk Limit Events</span>
+              <span className="text-[11px] text-gray-500 tracking-wide font-medium">Risk Limit Events</span>
               <span className="ml-2 text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>({riskEvents.length})</span>
             </div>
             {riskEvents.length > 0 ? (
