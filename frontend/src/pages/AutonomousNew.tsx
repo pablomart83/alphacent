@@ -2,7 +2,7 @@ import { type FC, useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
-  Activity, PlayCircle, PauseCircle, Settings, RefreshCw, Search,
+  PlayCircle, PauseCircle, Settings, RefreshCw, Search,
   AlertCircle, TrendingUp, BarChart3, Zap, Clock, Trash2,
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
@@ -861,139 +861,120 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsList>
 
             {/* Tab 1: Control & Status */}
-            <TabsContent value="control" className="space-y-2">
-              {/* Status Badges */}
-              <div className="flex items-center justify-between">
-                <div className="flex gap-3 flex-wrap">
-                  {systemStatus && (
-                    <div className={cn(
-                      'px-3 py-1.5 rounded-lg text-xs font-mono border',
-                      getTradingStateColor(systemStatus.state)
-                    )}>
-                      {getTradingStateLabel(systemStatus.state)}
-                    </div>
-                  )}
-                  {autonomousStatus && (
-                    <div className={cn(
-                      'px-3 py-1.5 rounded-lg text-xs font-mono border',
-                      autonomousStatus.enabled
-                        ? 'bg-accent-green/20 text-accent-green border-accent-green/30'
-                        : 'bg-gray-500/20 text-gray-400 border-gray-500/30'
-                    )}>
-                      {autonomousStatus.enabled ? '● AUTO ENABLED' : '○ AUTO DISABLED'}
-                    </div>
-                  )}
-                </div>
+            <TabsContent value="control" className="space-y-3 p-2">
+              {/* Status Badges — inline */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {systemStatus && (
+                  <div className={cn(
+                    'px-3 py-1 rounded text-xs font-mono border',
+                    getTradingStateColor(systemStatus.state)
+                  )}>
+                    {getTradingStateLabel(systemStatus.state)}
+                  </div>
+                )}
+                {autonomousStatus && (
+                  <div className={cn(
+                    'px-3 py-1 rounded text-xs font-mono border',
+                    autonomousStatus.enabled
+                      ? 'bg-[#22c55e]/20 text-[#22c55e] border-[#22c55e]/30'
+                      : 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                  )}>
+                    {autonomousStatus.enabled ? '● AUTO ENABLED' : '○ AUTO DISABLED'}
+                  </div>
+                )}
               </div>
 
-              {/* Quick Controls Bar — Research Filters + Trigger Cycle */}
-              <PanelHeader title="Research Filters & Cycle" panelId="autonomous-research">
-                <div className="p-3">
-                  <div className="flex flex-col lg:flex-row lg:items-end gap-3">
-                    <div className="flex-1 space-y-2">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">Assets:</span>
-                          <div className="flex flex-wrap gap-1">
-                            {['stock', 'etf', 'crypto', 'forex', 'index', 'commodity'].map(ac => (
-                              <button key={ac} onClick={() => {
-                                const next = new Set(cycleAssetClasses);
-                                next.has(ac) ? next.delete(ac) : next.add(ac);
-                                setCycleAssetClasses(next);
-                              }} className={cn(
-                                'px-2 py-0.5 rounded text-xs font-medium border transition-colors',
-                                cycleAssetClasses.has(ac)
-                                  ? 'bg-accent-blue/20 border-accent-blue text-accent-blue'
-                                  : 'border-border text-muted-foreground hover:border-accent-blue/50'
-                              )}>{ac.charAt(0).toUpperCase() + ac.slice(1)}</button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">TF:</span>
-                          <div className="flex gap-1">
-                            {[{ key: '1d', label: 'Daily' }, { key: '1h', label: '1H' }, { key: '4h', label: '4H' }].map(({ key, label }) => (
-                              <button key={key} onClick={() => {
-                                const next = new Set(cycleIntervals);
-                                next.has(key) ? next.delete(key) : next.add(key);
-                                setCycleIntervals(next);
-                              }} className={cn(
-                                'px-2 py-0.5 rounded text-xs font-medium border transition-colors',
-                                cycleIntervals.has(key)
-                                  ? 'bg-accent-green/20 border-accent-green text-accent-green'
-                                  : 'border-border text-muted-foreground hover:border-accent-green/50'
-                              )}>{label}</button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">Type:</span>
-                          <div className="flex gap-1">
-                            {[{ key: 'dsl', label: 'DSL' }, { key: 'alpha_edge', label: 'AE' }].map(({ key, label }) => (
-                              <button key={key} onClick={() => {
-                                const next = new Set(cycleStrategyTypes);
-                                next.has(key) ? next.delete(key) : next.add(key);
-                                setCycleStrategyTypes(next);
-                              }} className={cn(
-                                'px-2 py-0.5 rounded text-xs font-medium border transition-colors',
-                                cycleStrategyTypes.has(key)
-                                  ? 'bg-accent-yellow/20 border-accent-yellow text-accent-yellow'
-                                  : 'border-border text-muted-foreground hover:border-accent-yellow/50'
-                              )}>{label}</button>
-                            ))}
-                          </div>
-                        </div>
-                        {(cycleAssetClasses.size > 0 || cycleIntervals.size > 0 || cycleStrategyTypes.size > 0) && (
-                          <button onClick={() => { setCycleAssetClasses(new Set()); setCycleIntervals(new Set()); setCycleStrategyTypes(new Set()); }}
-                            className="text-xs text-accent-red hover:underline whitespace-nowrap">Clear</button>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex gap-2 lg:flex-shrink-0">
-                      <Button
-                        onClick={handleTriggerCycle}
-                        disabled={triggering || !autonomousStatus?.enabled}
-                        size="sm"
-                        className="gap-2 bg-accent-green hover:bg-accent-green/80 text-black font-semibold"
-                      >
-                        <RefreshCw className={cn('h-3 w-3', triggering && 'animate-spin')} />
-                        {triggering ? 'Running...' : 'Run Cycle'}
-                      </Button>
-                    </div>
+              {/* Research Filters — flat inline row */}
+              <div className="flex flex-wrap items-center gap-3 py-2 border-b border-[var(--color-dark-border)]">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-gray-500 uppercase tracking-wide">Assets:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {['stock', 'etf', 'crypto', 'forex', 'index', 'commodity'].map(ac => (
+                      <button key={ac} onClick={() => {
+                        const next = new Set(cycleAssetClasses);
+                        next.has(ac) ? next.delete(ac) : next.add(ac);
+                        setCycleAssetClasses(next);
+                      }} className={cn(
+                        'px-2 py-0.5 rounded text-[10px] font-medium border transition-colors',
+                        cycleAssetClasses.has(ac)
+                          ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+                          : 'border-gray-700 text-gray-500 hover:border-blue-500/50'
+                      )}>{ac.charAt(0).toUpperCase() + ac.slice(1)}</button>
+                    ))}
                   </div>
                 </div>
-              </PanelHeader>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-gray-500 uppercase tracking-wide">TF:</span>
+                  <div className="flex gap-1">
+                    {[{ key: '1d', label: 'Daily' }, { key: '1h', label: '1H' }, { key: '4h', label: '4H' }].map(({ key, label }) => (
+                      <button key={key} onClick={() => {
+                        const next = new Set(cycleIntervals);
+                        next.has(key) ? next.delete(key) : next.add(key);
+                        setCycleIntervals(next);
+                      }} className={cn(
+                        'px-2 py-0.5 rounded text-[10px] font-medium border transition-colors',
+                        cycleIntervals.has(key)
+                          ? 'bg-[#22c55e]/20 border-[#22c55e] text-[#22c55e]'
+                          : 'border-gray-700 text-gray-500 hover:border-[#22c55e]/50'
+                      )}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-gray-500 uppercase tracking-wide">Type:</span>
+                  <div className="flex gap-1">
+                    {[{ key: 'dsl', label: 'DSL' }, { key: 'alpha_edge', label: 'AE' }].map(({ key, label }) => (
+                      <button key={key} onClick={() => {
+                        const next = new Set(cycleStrategyTypes);
+                        next.has(key) ? next.delete(key) : next.add(key);
+                        setCycleStrategyTypes(next);
+                      }} className={cn(
+                        'px-2 py-0.5 rounded text-[10px] font-medium border transition-colors',
+                        cycleStrategyTypes.has(key)
+                          ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
+                          : 'border-gray-700 text-gray-500 hover:border-yellow-500/50'
+                      )}>{label}</button>
+                    ))}
+                  </div>
+                </div>
+                {(cycleAssetClasses.size > 0 || cycleIntervals.size > 0 || cycleStrategyTypes.size > 0) && (
+                  <button onClick={() => { setCycleAssetClasses(new Set()); setCycleIntervals(new Set()); setCycleStrategyTypes(new Set()); }}
+                    className="text-[10px] text-[#ef4444] hover:underline">Clear</button>
+                )}
+                <Button
+                  onClick={handleTriggerCycle}
+                  disabled={triggering || !autonomousStatus?.enabled}
+                  size="sm"
+                  className="gap-1.5 ml-auto bg-[#22c55e] hover:bg-[#22c55e]/80 text-black font-semibold h-7 text-[11px]"
+                >
+                  <RefreshCw className={cn('h-3 w-3', triggering && 'animate-spin')} />
+                  {triggering ? 'Running...' : 'Run Cycle'}
+                </Button>
+              </div>
 
               {/* Trading Cycle Pipeline */}
               <TradingCyclePipeline cycleRunning={triggering || (cycleProgress > 0 && cycleProgress < 100)} />
 
-              {/* Controls + System — 2-column grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+              {/* Controls + Schedule — 2-column grid, flat sections */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {/* Left Column - Controls */}
-                <PanelHeader title="Controls" panelId="autonomous-controls">
-                  <div className="p-3 space-y-4">
+                <div className="space-y-3">
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Controls</div>
+
                     {/* Trading State Warning */}
                     {systemStatus && systemStatus.state !== 'ACTIVE' && lifecycleCounts.active > 0 && (
-                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2">
-                        <div className="flex items-start gap-2">
-                          <AlertCircle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-yellow-300 text-xs font-medium">Trading Not Active</p>
-                            <p className="text-yellow-400/80 text-[10px] mt-0.5">
-                              {lifecycleCounts.active} strategies ready but trading is {systemStatus.state}.
-                            </p>
-                          </div>
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
+                          <span className="text-[10px] text-yellow-400">{lifecycleCounts.active} strategies ready but trading is {systemStatus.state}.</span>
                         </div>
                       </div>
                     )}
 
-                    {/* Trading Controls */}
-                    <div>
-                      <h3 className="text-xs font-semibold mb-2">Signal Generation & Execution</h3>
-                      <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-1.5">
                         {(!systemStatus || systemStatus.state === 'STOPPED') && (
                           <Button onClick={handleStartTrading} disabled={tradingAction} variant="outline" size="sm"
-                            className="w-full justify-start gap-2 border-accent-green/30 text-accent-green hover:bg-accent-green/10">
+                            className="justify-start gap-1.5 h-7 text-[11px] border-[#22c55e]/30 text-[#22c55e] hover:bg-[#22c55e]/10">
                             <PlayCircle className="h-3 w-3" />
                             {tradingAction ? 'Starting...' : 'Start'}
                           </Button>
@@ -1001,39 +982,32 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         {systemStatus?.state === 'ACTIVE' && (
                           <>
                             <Button onClick={handlePauseTrading} disabled={tradingAction} variant="outline" size="sm"
-                              className="w-full justify-start gap-2 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10">
+                              className="justify-start gap-1.5 h-7 text-[11px] border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10">
                               <PauseCircle className="h-3 w-3" />
-                              {tradingAction ? 'Pausing...' : 'Pause'}
+                              Pause
                             </Button>
                             <Button onClick={handleStopTrading} disabled={tradingAction} variant="outline" size="sm"
-                              className="w-full justify-start gap-2 border-accent-red/30 text-accent-red hover:bg-accent-red/10">
+                              className="justify-start gap-1.5 h-7 text-[11px] border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
                               <AlertCircle className="h-3 w-3" />
-                              {tradingAction ? 'Stopping...' : 'Stop'}
+                              Stop
                             </Button>
                           </>
                         )}
                         {systemStatus?.state === 'PAUSED' && (
                           <>
                             <Button onClick={handleResumeTrading} disabled={tradingAction} variant="outline" size="sm"
-                              className="w-full justify-start gap-2 border-accent-green/30 text-accent-green hover:bg-accent-green/10">
+                              className="justify-start gap-1.5 h-7 text-[11px] border-[#22c55e]/30 text-[#22c55e] hover:bg-[#22c55e]/10">
                               <PlayCircle className="h-3 w-3" />
-                              {tradingAction ? 'Resuming...' : 'Resume'}
+                              Resume
                             </Button>
                             <Button onClick={handleStopTrading} disabled={tradingAction} variant="outline" size="sm"
-                              className="w-full justify-start gap-2 border-accent-red/30 text-accent-red hover:bg-accent-red/10">
+                              className="justify-start gap-1.5 h-7 text-[11px] border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
                               <AlertCircle className="h-3 w-3" />
-                              {tradingAction ? 'Stopping...' : 'Stop'}
+                              Stop
                             </Button>
                           </>
                         )}
-                      </div>
-                    </div>
-
-                    {/* Lifecycle Controls */}
-                    <div>
-                      <h3 className="text-xs font-semibold mb-2">Strategy Lifecycle</h3>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button onClick={() => navigate('/settings')} variant="outline" size="sm" className="w-full justify-start gap-2">
+                        <Button onClick={() => navigate('/settings')} variant="outline" size="sm" className="justify-start gap-1.5 h-7 text-[11px]">
                           <Settings className="h-3 w-3" />
                           Settings
                         </Button>
@@ -1047,32 +1021,26 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                             }
                           }}
                           variant="outline" size="sm"
-                          className="w-full justify-start gap-2 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
+                          className="justify-start gap-1.5 h-7 text-[11px] text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
                         >
                           <Trash2 className="h-3 w-3" />
                           Clear Caches
                         </Button>
-                      </div>
                     </div>
 
-                    {/* Auto-Management Warning */}
                     {autonomousStatus && !autonomousStatus.enabled && (
-                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2">
-                        <div className="flex items-start gap-2">
-                          <AlertCircle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
-                          <div>
-                            <p className="text-yellow-300 text-xs font-medium">Auto-Management Disabled</p>
-                            <p className="text-yellow-400/80 text-[10px] mt-0.5">Enable in settings.</p>
-                          </div>
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
+                          <span className="text-[10px] text-yellow-400">Auto-Management Disabled — enable in settings.</span>
                         </div>
                       </div>
                     )}
-                  </div>
-                </PanelHeader>
+                </div>
 
                 {/* Right Column - Schedule */}
-                <PanelHeader title="Scheduled Execution" panelId="autonomous-schedule">
-                  <div className="p-3 space-y-3">
+                <div className="space-y-3">
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Scheduled Execution</div>
                     {scheduleConfig ? (
                       <>
                         {/* Enable/Disable toggle */}
@@ -1185,8 +1153,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     ) : (
                       <div className="text-xs text-muted-foreground">Loading schedule...</div>
                     )}
-                  </div>
-                </PanelHeader>
+                </div>
               </div>
 
               {/* Demo Mode Warning */}
@@ -1448,121 +1415,83 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 5: Performance */}
-            <TabsContent value="performance" className="space-y-2">
-              <PanelHeader title="Performance Summary" panelId="autonomous-perf-summary">
-                <div className="p-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <MetricCard label="Avg Sharpe" value={avgSharpe.toFixed(2)} format="text" icon={BarChart3}
-                      tooltip="Average Sharpe ratio across active strategies" />
-                    <MetricCard label="Avg Return" value={avgReturn} format="percentage"
-                      trend={avgReturn >= 0 ? 'up' : 'down'} icon={TrendingUp} />
-                    <MetricCard label="Avg Win Rate" value={avgWinRate} format="percentage" icon={Activity} />
-                    <MetricCard label="Active" value={lifecycleCounts.active} format="number" icon={Zap} />
+            <TabsContent value="performance" className="space-y-3 p-2">
+              {/* Performance + Lifecycle metrics — single dense grid */}
+              <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+                {[
+                  { label: 'Avg Sharpe', value: avgSharpe.toFixed(2), color: avgSharpe >= 1 ? 'text-[#22c55e]' : 'text-gray-200' },
+                  { label: 'Avg Return', value: `${avgReturn >= 0 ? '+' : ''}${(avgReturn * 100).toFixed(2)}%`, color: avgReturn >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]' },
+                  { label: 'Avg Win Rate', value: `${(avgWinRate * 100).toFixed(1)}%`, color: avgWinRate >= 0.5 ? 'text-[#22c55e]' : 'text-[#ef4444]' },
+                  { label: 'Active', value: String(lifecycleCounts.active), color: 'text-[#22c55e]' },
+                  { label: 'Proposed', value: String(totalProposed), color: 'text-gray-200' },
+                  { label: 'Activated', value: String(totalActivated), color: 'text-[#22c55e]' },
+                  { label: 'Act. Rate', value: `${activationRate.toFixed(1)}%`, color: 'text-blue-400' },
+                  { label: 'Ret. Rate', value: `${retirementRate.toFixed(1)}%`, color: 'text-[#ef4444]' },
+                ].map((m, i) => (
+                  <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
+                    <div className="text-[9px] text-gray-500 uppercase tracking-wide">{m.label}</div>
+                    <div className={cn('text-sm font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                   </div>
-                </div>
-              </PanelHeader>
+                ))}
+              </div>
 
-              <PanelHeader title="Lifecycle Metrics" panelId="autonomous-lifecycle-metrics">
-                <div className="p-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-[10px] text-muted-foreground mb-1">Total Proposed</div>
-                      <div className="text-xl font-mono font-bold text-gray-200">{totalProposed}</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-[10px] text-muted-foreground mb-1">Total Activated</div>
-                      <div className="text-xl font-mono font-bold text-accent-green">{totalActivated}</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-[10px] text-muted-foreground mb-1">Activation Rate</div>
-                      <div className="text-xl font-mono font-bold text-blue-400">{activationRate.toFixed(1)}%</div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-3">
-                      <div className="text-[10px] text-muted-foreground mb-1">Retirement Rate</div>
-                      <div className="text-xl font-mono font-bold text-accent-red">{retirementRate.toFixed(1)}%</div>
-                    </div>
-                  </div>
-                </div>
-              </PanelHeader>
-
-              {/* Template Performance */}
+              {/* Template Performance — inline bars, no nested panel */}
               {autonomousStatus && autonomousStatus.template_stats.length > 0 && (
-                <PanelHeader title="Performance by Template" panelId="autonomous-template-perf">
-                  <div className="p-3 space-y-2">
+                <div>
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Template Success Rates</div>
+                  <div className="space-y-1">
                     {autonomousStatus.template_stats.map((template) => (
-                      <div key={template.name} className="bg-muted rounded-lg p-2">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="font-mono font-semibold text-xs">{template.name}</div>
-                          <div className="text-[10px] text-muted-foreground">{template.usage_count} uses</div>
+                      <div key={template.name} className="flex items-center gap-2 py-1 border-b border-[var(--color-dark-border)]/30 last:border-0">
+                        <span className="text-[11px] font-mono text-gray-300 truncate w-[180px] shrink-0">{template.name}</span>
+                        <div className="flex-1 bg-gray-800 rounded-full h-1.5 overflow-hidden">
+                          <div className={cn('h-full',
+                            template.success_rate >= 0.6 ? 'bg-[#22c55e]' :
+                            template.success_rate >= 0.4 ? 'bg-yellow-400' : 'bg-[#ef4444]'
+                          )} style={{ width: `${template.success_rate * 100}%` }} />
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-dark-bg rounded-full h-1.5 overflow-hidden">
-                            <div className={cn('h-full transition-all',
-                              template.success_rate >= 0.6 ? 'bg-accent-green' :
-                              template.success_rate >= 0.4 ? 'bg-yellow-400' : 'bg-accent-red'
-                            )} style={{ width: `${template.success_rate * 100}%` }} />
-                          </div>
-                          <div className="text-[10px] font-mono font-semibold min-w-[35px] text-right">
-                            {(template.success_rate * 100).toFixed(0)}%
-                          </div>
-                        </div>
+                        <span className="text-[10px] font-mono text-gray-400 w-[40px] text-right shrink-0">{(template.success_rate * 100).toFixed(0)}%</span>
+                        <span className="text-[9px] text-gray-600 w-[30px] text-right shrink-0">{template.usage_count}×</span>
                       </div>
                     ))}
                   </div>
-                </PanelHeader>
+                </div>
               )}
 
-              {/* Configuration Quick Access */}
-              <PanelHeader title="Configuration" panelId="autonomous-config">
-                <div className="p-3 space-y-3">
-                  <div>
-                    <h3 className="text-xs font-semibold mb-2">Activation Thresholds</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      <div className="bg-muted rounded-lg p-2">
-                        <div className="text-[10px] text-muted-foreground">Min Sharpe</div>
-                        <div className="text-xs font-mono font-semibold">1.5</div>
+              {/* Thresholds — compact inline grid, no nested panel */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Activation Thresholds</div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { label: 'Min Sharpe', value: '1.5' },
+                      { label: 'Max DD', value: '15%' },
+                      { label: 'Min WR', value: '50%' },
+                      { label: 'Min Trades', value: '20' },
+                    ].map((t, i) => (
+                      <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
+                        <span className="text-[9px] text-gray-500">{t.label}</span>
+                        <span className="text-[11px] font-mono font-semibold text-gray-200">{t.value}</span>
                       </div>
-                      <div className="bg-muted rounded-lg p-2">
-                        <div className="text-[10px] text-muted-foreground">Max DD</div>
-                        <div className="text-xs font-mono font-semibold">15%</div>
-                      </div>
-                      <div className="bg-muted rounded-lg p-2">
-                        <div className="text-[10px] text-muted-foreground">Min Win Rate</div>
-                        <div className="text-xs font-mono font-semibold">50%</div>
-                      </div>
-                      <div className="bg-muted rounded-lg p-2">
-                        <div className="text-[10px] text-muted-foreground">Min Trades</div>
-                        <div className="text-xs font-mono font-semibold">20</div>
-                      </div>
-                    </div>
+                    ))}
                   </div>
-                  <div>
-                    <h3 className="text-xs font-semibold mb-2">Retirement Triggers</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      <div className="bg-muted rounded-lg p-2">
-                        <div className="text-[10px] text-muted-foreground">Max Sharpe</div>
-                        <div className="text-xs font-mono font-semibold">0.5</div>
-                      </div>
-                      <div className="bg-muted rounded-lg p-2">
-                        <div className="text-[10px] text-muted-foreground">Max DD</div>
-                        <div className="text-xs font-mono font-semibold">15%</div>
-                      </div>
-                      <div className="bg-muted rounded-lg p-2">
-                        <div className="text-[10px] text-muted-foreground">Min Win Rate</div>
-                        <div className="text-xs font-mono font-semibold">40%</div>
-                      </div>
-                      <div className="bg-muted rounded-lg p-2">
-                        <div className="text-[10px] text-muted-foreground">Min Trades</div>
-                        <div className="text-xs font-mono font-semibold">30</div>
-                      </div>
-                    </div>
-                  </div>
-                  <Button onClick={() => navigate('/settings')} variant="outline" size="sm" className="gap-2">
-                    <Settings className="h-3 w-3" />
-                    Configure Thresholds
-                  </Button>
                 </div>
-              </PanelHeader>
+                <div>
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Retirement Triggers</div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[
+                      { label: 'Max Sharpe', value: '0.5' },
+                      { label: 'Max DD', value: '15%' },
+                      { label: 'Min WR', value: '40%' },
+                      { label: 'Min Trades', value: '30' },
+                    ].map((t, i) => (
+                      <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
+                        <span className="text-[9px] text-gray-500">{t.label}</span>
+                        <span className="text-[11px] font-mono font-semibold text-gray-200">{t.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </TabsContent>
 
             {/* Tab 6: Walk-Forward Analytics */}

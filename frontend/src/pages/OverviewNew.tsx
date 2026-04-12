@@ -406,14 +406,14 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const centerPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
-        <div className="flex-1 p-2 min-h-0 h-full">
+        <div className="p-2" style={{ height: 'calc(100% - 0px)' }}>
           {d ? (
             <EquityCurveChart
               equityData={d.equity_curve}
               spyData={effectiveSpyData}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
-              height="100%"
+              height={450}
             />
           ) : (
             <ChartSkeleton height={400} />
