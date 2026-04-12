@@ -1139,6 +1139,9 @@ class OrderMonitor:
             # Build set of eToro position IDs for quick lookup
             etoro_position_ids = {pos.etoro_position_id for pos in positions}
             
+            # Track price updates for WebSocket broadcasting after commit
+            _price_updates: Dict[str, float] = {}
+            
             # BATCH: Load ALL existing positions in ONE query instead of per-position lookups.
             # With 125 positions, this saves 124 round-trips to PostgreSQL.
             all_db_positions = session.query(PositionORM).filter(
@@ -1168,6 +1171,10 @@ class OrderMonitor:
                     existing_pos.symbol = normalized_symbol  # Use normalized symbol, not eToro's ID
                     existing_pos.current_price = pos.current_price
                     existing_pos.unrealized_pnl = pos.unrealized_pnl
+                    
+                    # Track for WebSocket broadcast
+                    if pos.current_price:
+                        _price_updates[normalized_symbol] = pos.current_price
                     
                     # Preserve trailing stop: eToro doesn't support modifying SL on
                     # open positions, so it always reports the original SL. Our trailing
@@ -1555,6 +1562,33 @@ class OrderMonitor:
             
             # Update last sync time
             self._last_full_sync = time.time()
+            
+            # Broadcast price updates via WebSocket (fire-and-forget)
+            if _price_updates:
+                try:
+                    import asyncio
+                    from src.api.websocket_manager import get_websocket_manager
+                    ws = get_websocket_manager()
+                    if ws:
+                        for sym, price in _price_updates.items():
+                            data = {
+                                "symbol": sym,
+                                "price": price,
+                                "timestamp": datetime.now().isoformat(),
+                            }
+                            try:
+                                loop = asyncio.get_running_loop()
+                                asyncio.ensure_future(
+                                    ws.broadcast_market_data_update(sym, data), loop=loop
+                                )
+                            except RuntimeError:
+                                loop = asyncio.new_event_loop()
+                                loop.run_until_complete(
+                                    ws.broadcast_market_data_update(sym, data)
+                                )
+                                loop.close()
+                except Exception:
+                    pass  # Fire-and-forget — never block position sync
             
             result = {
                 "total": len(positions),

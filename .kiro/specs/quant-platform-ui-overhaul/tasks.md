@@ -562,13 +562,13 @@ This phase replaces Recharts with TradingView Lightweight Charts for all time-se
   - Verify non-time-series charts (heatmaps, histograms, pies) still render correctly
   - Verify chart theme matches AlphaCent dark theme
 
-- [ ] 27. Real-Time Price Streaming
-  - [ ] 27.1 Backend: WebSocket price streaming for chart symbols
+- [-] 27. Real-Time Price Streaming
+  - [x] 27.1 Backend: WebSocket price streaming for chart symbols
     - Extend `src/services/websocket.py` (or equivalent) to emit `price_tick` events when the monitoring service's quick price update runs (every 10 min) or when position sync detects price changes. Event payload: `{ symbol, price, timestamp, open, high, low, close, volume }`.
     - Alternatively, if eToro API supports streaming: wire eToro price stream → WebSocket broadcast for symbols with open positions.
     - _Requirements: 32.1_
 
-  - [ ] 27.2 Frontend: Wire WebSocket price ticks to TradingView charts
+  - [x] 27.2 Frontend: Wire WebSocket price ticks to TradingView charts
     - Update TvChart wrapper to accept an `onNewTick` callback that appends a data point to the active series via `series.update()` (TradingView Lightweight Charts API).
     - Update PositionDetailView to subscribe to `price_tick` events for the viewed symbol and feed ticks to the AssetPlot TvChart.
     - Update EquityCurveChart to subscribe to portfolio equity updates and append to the area series.
@@ -581,8 +581,8 @@ This phase replaces Recharts with TradingView Lightweight Charts for all time-se
   - Verify no chart flicker or performance degradation during streaming
   - Verify "Live data paused" indicator shows on WS disconnect
 
-- [ ] 29. Saved Workspace Presets
-  - [ ] 29.1 Build workspace preset system
+- [x] 29. Saved Workspace Presets
+  - [x] 29.1 Build workspace preset system
     - Create `frontend/src/lib/workspace-presets.ts` — manages saving/loading/switching workspace presets in localStorage. Each preset stores: per-page panel sizes, collapsed panel states, widget visibility, active tab per page.
     - Up to 5 user presets + 3 default presets ("Trading", "Monitoring", "Analysis").
     - "Trading" default: chart-dominant panels, position ticker prominent, widgets showing Top Movers + Recent Signals.
@@ -590,7 +590,7 @@ This phase replaces Recharts with TradingView Lightweight Charts for all time-se
     - "Analysis" default: analytics tabs prominent, widgets showing Macro Pulse + Market Regime.
     - _Requirements: 33.1, 33.2, 33.5_
 
-  - [ ] 29.2 Build workspace switcher UI
+  - [x] 29.2 Build workspace switcher UI
     - Add workspace switcher dropdown to TopNavBar (right side, near account actions) or PageTemplate header.
     - Shows: current preset name, list of saved presets, "Save Current" button, "Reset to Default" button.
     - Switching presets transitions layout within 300ms.

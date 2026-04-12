@@ -1,11 +1,19 @@
-import { type FC, useState, useCallback } from 'react';
+import { type FC, useState, useCallback, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, LogOut, Sun, Moon, RefreshCw } from 'lucide-react';
+import { Menu, X, LogOut, Sun, Moon, RefreshCw, LayoutGrid, Check, Trash2, Save } from 'lucide-react';
 import { authService } from '../services/auth';
 import { useTheme } from '../contexts/ThemeContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Notifications } from './Notifications';
 import { cn } from '../lib/utils';
+import {
+  getPresets,
+  getActivePreset,
+  setActivePreset,
+  savePreset,
+  deletePreset,
+  resetToDefault,
+} from '../lib/workspace-presets';
 
 // Map route paths to permission page names
 const PAGE_PERMISSION_MAP: Record<string, string> = {
@@ -29,6 +37,161 @@ interface TopNavBarProps {
   pendingClosuresCount?: number;
   queuedOrdersCount?: number;
 }
+
+// ── Workspace Switcher Dropdown ──────────────────────────────────────────────
+
+const WorkspaceSwitcher: FC = () => {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const presets = getPresets();
+  const activeName = getActivePreset();
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSaving(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const handleSwitch = (name: string) => {
+    setOpen(false);
+    setActivePreset(name);
+  };
+
+  const handleSave = () => {
+    const trimmed = saveName.trim();
+    if (!trimmed) return;
+    const ok = savePreset(trimmed);
+    if (ok) {
+      setSaving(false);
+      setSaveName('');
+      setOpen(false);
+    }
+  };
+
+  const handleDelete = (e: React.MouseEvent, name: string) => {
+    e.stopPropagation();
+    deletePreset(name);
+    // Force re-render by toggling
+    setOpen(false);
+    setTimeout(() => setOpen(true), 0);
+  };
+
+  const defaults = presets.filter(p => p.isDefault);
+  const userPresets = presets.filter(p => !p.isDefault);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1 px-1.5 py-1 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors text-[11px] font-mono"
+        title="Workspace presets"
+      >
+        <LayoutGrid size={13} />
+        <span className="hidden lg:inline max-w-[80px] truncate">
+          {activeName ?? 'Custom'}
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-56 bg-[#161b22] border border-gray-700 rounded-lg shadow-xl z-50 py-1 text-xs">
+          {/* Default presets */}
+          <div className="px-2 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Defaults</div>
+          {defaults.map(p => (
+            <button
+              key={p.name}
+              onClick={() => handleSwitch(p.name)}
+              className={cn(
+                'w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-800 transition-colors',
+                activeName === p.name ? 'text-emerald-400' : 'text-gray-300'
+              )}
+            >
+              {activeName === p.name && <Check size={12} className="shrink-0" />}
+              <span className={activeName === p.name ? '' : 'ml-[20px]'}>{p.name}</span>
+            </button>
+          ))}
+
+          {/* User presets */}
+          {userPresets.length > 0 && (
+            <>
+              <div className="border-t border-gray-700 my-1" />
+              <div className="px-2 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Saved</div>
+              {userPresets.map(p => (
+                <button
+                  key={p.name}
+                  onClick={() => handleSwitch(p.name)}
+                  className={cn(
+                    'w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-gray-800 transition-colors group',
+                    activeName === p.name ? 'text-emerald-400' : 'text-gray-300'
+                  )}
+                >
+                  {activeName === p.name && <Check size={12} className="shrink-0" />}
+                  <span className={cn('flex-1 truncate', activeName === p.name ? '' : 'ml-[20px]')}>{p.name}</span>
+                  <span
+                    onClick={(e) => handleDelete(e, p.name)}
+                    className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/20 hover:text-red-400 transition-all shrink-0"
+                    title="Delete preset"
+                  >
+                    <Trash2 size={11} />
+                  </span>
+                </button>
+              ))}
+            </>
+          )}
+
+          {/* Actions */}
+          <div className="border-t border-gray-700 my-1" />
+
+          {saving ? (
+            <div className="px-3 py-1.5 flex items-center gap-1.5">
+              <input
+                autoFocus
+                value={saveName}
+                onChange={e => setSaveName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setSaving(false); }}
+                placeholder="Preset name…"
+                className="flex-1 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-emerald-500"
+                maxLength={20}
+              />
+              <button
+                onClick={handleSave}
+                className="p-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                title="Save"
+              >
+                <Check size={12} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setSaving(true)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+            >
+              <Save size={12} />
+              Save Current
+            </button>
+          )}
+
+          <button
+            onClick={() => { setOpen(false); resetToDefault(); }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
+          >
+            <RefreshCw size={12} />
+            Reset to Default
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const TopNavBar: FC<TopNavBarProps> = ({
   onLogout,
@@ -118,6 +281,8 @@ export const TopNavBar: FC<TopNavBarProps> = ({
 
         {/* Right actions */}
         <div className="flex items-center gap-1.5 shrink-0 ml-2">
+          <WorkspaceSwitcher />
+
           <button
             onClick={toggleTheme}
             className="p-1.5 rounded-md text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"

@@ -138,6 +138,10 @@ class MonitoringService:
         self._price_update_thread: Optional[_bg_threading.Thread] = None
         self._full_sync_thread: Optional[_bg_threading.Thread] = None
         
+        # WebSocket manager for real-time price broadcasting
+        from src.api.websocket_manager import get_websocket_manager
+        self._ws_manager = get_websocket_manager()
+        
         logger.info(
             f"MonitoringService initialized (pending: {pending_orders_interval}s, "
             f"orders: {order_status_interval}s, positions: {position_sync_interval}s, "
@@ -145,6 +149,32 @@ class MonitoringService:
             f"fundamental: {self._fundamental_check_interval}s)"
         )
     
+    def _sync_broadcast_market_data(self, symbol: str, price: float) -> None:
+        """Broadcast a market data price tick via WebSocket from sync context (fire-and-forget)."""
+        if not self._ws_manager:
+            return
+        try:
+            import asyncio
+            data = {
+                "symbol": symbol,
+                "price": price,
+                "timestamp": datetime.now().isoformat(),
+            }
+            try:
+                loop = asyncio.get_running_loop()
+                asyncio.ensure_future(
+                    self._ws_manager.broadcast_market_data_update(symbol, data),
+                    loop=loop,
+                )
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(
+                    self._ws_manager.broadcast_market_data_update(symbol, data)
+                )
+                loop.close()
+        except Exception:
+            pass  # Fire-and-forget — never block monitoring
+
     def _is_symbol_market_open(self, symbol: str) -> bool:
         """Check if the market is open for a given symbol.
         
@@ -735,6 +765,10 @@ class MonitoringService:
                                 except Exception:
                                     pass
                     updated += 1
+                    
+                    # Broadcast price tick via WebSocket (fire-and-forget)
+                    self._sync_broadcast_market_data(symbol, price)
+                    
                 except Exception as e:
                     logger.debug(f"Cache update failed for {symbol}: {e}")
                     errors += 1

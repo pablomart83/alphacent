@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useCallback } from 'react';
+import { type FC, useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, RefreshCw, AlertCircle } from 'lucide-react';
@@ -15,6 +15,7 @@ import { cn, formatCurrency, formatPercentage } from '../lib/utils';
 import { classifyError } from '../lib/errors';
 import { colors as designColors } from '../lib/design-tokens';
 import { PageSkeleton } from '../components/ui/skeleton';
+import { useMarketData, useWebSocketConnection } from '../hooks/useWebSocket';
 
 interface PositionDetailViewProps {
   onLogout: () => void;
@@ -29,6 +30,48 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null);
 
+  // Real-time price streaming via WebSocket
+  const wsConnected = useWebSocketConnection();
+  const marketTick = useMarketData(symbol);
+  const [livePriceData, setLivePriceData] = useState<Array<{ date: string; price: number }>>([]);
+  const lastTickRef = useRef<string | null>(null);
+
+  // Append live price ticks to chart data
+  useEffect(() => {
+    if (!marketTick || !symbol) return;
+    const tickData = marketTick as any;
+    const price = tickData.price ?? tickData.data?.price;
+    const ts = tickData.timestamp ?? tickData.data?.timestamp;
+    if (typeof price !== 'number' || !ts) return;
+
+    // Deduplicate by timestamp
+    const tsKey = String(ts);
+    if (tsKey === lastTickRef.current) return;
+    lastTickRef.current = tsKey;
+
+    const dateStr = new Date(ts).toISOString().slice(0, 10);
+
+    setLivePriceData((prev) => {
+      // Update existing date or append
+      const existing = prev.findIndex((p) => p.date === dateStr);
+      if (existing >= 0) {
+        const updated = [...prev];
+        updated[existing] = { date: dateStr, price };
+        return updated;
+      }
+      return [...prev, { date: dateStr, price }];
+    });
+
+    // Also update position current_price in detail state
+    setDetail((prev: any) => {
+      if (!prev?.position) return prev;
+      return {
+        ...prev,
+        position: { ...prev.position, current_price: price },
+      };
+    });
+  }, [marketTick, symbol]);
+
   const fetchDetail = useCallback(async () => {
     if (!tradingMode || !symbol) return;
     try {
@@ -36,6 +79,8 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
       setError(null);
       const data = await apiClient.getPositionDetail(symbol, tradingMode);
       setDetail(data);
+      setLivePriceData([]); // Reset live ticks on fresh fetch
+      lastTickRef.current = null;
     } catch (err) {
       const classified = classifyError(err, 'position detail');
       setError(classified.message);
@@ -58,11 +103,22 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
     );
   }
 
-  const priceData = detail?.price_history || [];
+  const priceData = (() => {
+    const base = detail?.price_history || [];
+    if (livePriceData.length === 0) return base;
+    // Merge live ticks: override matching dates, append new ones
+    const map = new Map<string, number>();
+    for (const p of base) map.set(p.date, p.price);
+    for (const p of livePriceData) map.set(p.date, p.price);
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, price]) => ({ date, price }));
+  })();
   const orders = detail?.orders || [];
   const pnlHistory = detail?.pnl_history || [];
   const position = detail?.position;
   const hasOrders = orders.length > 0;
+  const isLive = wsConnected && !!symbol;
 
   const headerActions = (
     <div className="flex items-center gap-2">
@@ -153,9 +209,25 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
                   <SectionLabel className="mb-0">Price Chart — {symbol}</SectionLabel>
                   <p className="text-[10px] text-muted-foreground">Price over holding period with buy/sell annotations</p>
                 </div>
-                {!hasOrders && (
-                  <Badge variant="secondary" className="text-xs font-mono">Order history unavailable</Badge>
-                )}
+                <div className="flex items-center gap-2">
+                  {isLive ? (
+                    <Badge className="text-[10px] font-mono bg-accent-green/20 text-accent-green border-accent-green/30 gap-1">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75" />
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-green" />
+                      </span>
+                      Live
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="text-[10px] font-mono gap-1">
+                      <span className="inline-flex rounded-full h-1.5 w-1.5 bg-gray-500" />
+                      Paused
+                    </Badge>
+                  )}
+                  {!hasOrders && (
+                    <Badge variant="secondary" className="text-xs font-mono">Order history unavailable</Badge>
+                  )}
+                </div>
               </div>
               {priceData.length > 0 ? (
                 <AssetPlot
