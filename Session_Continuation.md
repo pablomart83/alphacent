@@ -1259,3 +1259,151 @@ Phase 3 replaces Recharts with TradingView Lightweight Charts for all time-serie
 ## Nginx Config Reminder
 
 The Nginx config at `/etc/nginx/sites-available/alphacent` must include `/dashboard` in the API proxy regex (added in Session 7 for the widget endpoints). Current proxy regex includes: `/auth`, `/config`, `/account`, `/strategies`, `/orders`, `/market-data`, `/control`, `/ws`, `/performance`, `/risk`, `/analytics`, `/signals`, `/alerts`, `/data`, `/audit`, `/dashboard`.
+
+
+---
+
+### Session Improvements (April 12, 2026 — Session 8: Tab Interior Redesign + Font Normalization)
+
+#### 103. Cross-Cutting UI Polish ✅
+- **DataFreshnessIndicator**: Replaced verbose "Data as of: Apr 12, 2026, 15:40 GMT+1" with compact colored dot + relative time (e.g. "2m")
+- **TearSheetGenerator**: Icon-only download button instead of full text "Tear Sheet" button
+- **All pages**: Replaced verbose "Refresh" / "Export" buttons with compact icon-only buttons
+- **Tabs component**: Increased font size from `text-sm` (14px) to `text-[13px] font-semibold` for better visibility
+- **PageTemplate**: Compact mode now renders 0px header (was 36px wasted row with just dot + icon)
+- **Files**: `DataFreshnessIndicator.tsx`, `TearSheetGenerator.tsx`, `tabs.tsx`, `PageTemplate.tsx`, all page files
+
+#### 104. Overview Page Fixes ✅
+- Added more quant metrics: Unrealized P&L, Win Rate, Cash, Daily % (separate from Daily P&L)
+- Fixed Daily P&L display — no more compound string with floating point issues
+- Equity curve restored with `height={450}` (was broken by `height="100%"` causing 0px container)
+- **Files**: `OverviewNew.tsx`, `EquityCurveChart.tsx`, `InteractiveChart.tsx`
+
+#### 105. New Utility Components for Tab Interior Design ✅
+- **SectionLabel**: Flat uppercase label (11px gray-400) replacing nested PanelHeaders inside tabs
+- **MetricGrid**: Dense inline metric boxes (10px labels, 13px values) replacing MetricCard grids
+- **FilterBar**: Compact inline filter row replacing scattered filter patterns
+- **Files**: `frontend/src/components/ui/SectionLabel.tsx`, `MetricGrid.tsx`, `FilterBar.tsx`
+
+#### 106. Tab Interior Redesign — All 11 Pages ✅
+- **Autonomous** (7 tabs): All nested PanelHeaders flattened. Control tab: status badges + research filters + controls + schedule all flat. Lifecycle: stage buttons + filter bar + table. Activity: filter bar + table. Signals: metric grid + rejection bars + signal table. Performance: 8-metric grid + template bars + threshold grid. Walk-Forward: cycle table + pass rate chart + similarity table. Conviction: flat stacked bars.
+- **Risk** (5 tabs): Overview: SectionLabel for Risk Status/Limits/Alerts, MetricGrid for metrics. Positions: FilterBar + DataTable. Advanced: SectionLabel for VaR/Stress/CIO. History: SectionLabel + charts. Exposure: SectionLabel + charts.
+- **Strategies** (10 tabs): Overview: MetricGrid + SectionLabel for distributions + top performers. Active/Backtested/Retired: FilterBar + DataTable. Rankings: FilterBar + dense table. Blacklists/Demotions: flat tables.
+- **Analytics** (10+ tabs, 30+ nested PanelHeaders): Performance: CIO metrics, P&L breakdown, streaks, execution, pipeline health, trade quality. Attribution: strategy contribution table + chart. Trades: metric grid + distribution charts. Regime: current regimes, macro context, crypto cycle, carry rates. Alpha Edge: filter stats, conviction distribution, template performance, cost savings. Trade Journal: filters + table + MAE/MFE + patterns + recommendations.
+- **Settings** (9 tabs, 71 Card/CardHeader usages): All Card wrappers removed, replaced with flat SectionLabel sections. All form fields, switches, inputs, validation preserved.
+- **Orders**: Removed "Order Book" PanelHeader wrapper — timeline + tabs start immediately.
+- **WatchlistPage**: Card wrappers → flat bordered divs + SectionLabel.
+- **PositionDetailView**: Card wrappers → flat bordered divs + SectionLabel.
+- **Analytics sub-tabs** (4 files): RollingStatisticsTab, TCATab, TearSheetTab, PerformanceAttributionTab all flattened.
+- **Files**: All page files in `frontend/src/pages/`, all analytics sub-tab files, `TradingCyclePipeline.tsx`
+
+#### 107. Main Panel PanelHeader Removal (QuantFury Style) ✅
+- Autonomous: removed "Control & Activity" PanelHeader — tabs sit at panel top
+- Risk: removed "Analysis" PanelHeader — correlation heatmap + tabs start immediately
+- Orders: removed "Order Book" PanelHeader — timeline + tabs start immediately
+- Side panels keep their PanelHeaders (they don't have tabs)
+- Reclaims 32px per page on the main content area
+- **Files**: `AutonomousNew.tsx`, `RiskNew.tsx`, `OrdersNew.tsx`
+
+#### 108. TradingCyclePipeline Modernization ✅
+- Removed Card/CardHeader/CardTitle wrappers from pipeline and cycle history
+- Removed framer-motion animation from summary card
+- SectionLabel for section titles, flat bordered divs for content
+- Pipeline stepper circles preserved (w-9 h-9)
+- **Files**: `frontend/src/components/trading/TradingCyclePipeline.tsx`
+
+#### 109. Font Size Normalization (Partial) ✅
+- PanelHeader title: `text-xs` (12px) → `text-[13px]`, color `gray-300` → `gray-200`
+- SectionLabel: `text-[10px]` → `text-[11px]`, color `gray-500` → `gray-400`
+- MetricGrid labels: `text-[9px]` → `text-[10px]`, values: `text-sm` → `text-[13px]`
+- Autonomous page: all inline metric labels 9px→10px, section labels 10px→11px, metric values sm→13px, template names 11px→12px, threshold labels/values bumped
+- **Files**: `PanelHeader.tsx`, `SectionLabel.tsx`, `MetricGrid.tsx`, `AutonomousNew.tsx`
+
+---
+
+## Current System State (April 12, 2026 — Updated Session 8)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$162K, equity ~$463K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~97 DEMO + backtested
+- **Open positions:** ~127
+- **Monitoring:** 24/7 + CloudWatch alerting + EXIT signal processing
+- **Market regime:** Equity: ranging_low_vol
+- **UI:** Phase 2 QuantFury layout complete + Phase 2.5 tab interior redesign complete. All 11 pages flattened. Zero Card/CardHeader usage in any page file. New utility components: SectionLabel, MetricGrid, FilterBar. Consistent flat design across all tabs.
+
+---
+
+## Open Items for Next Session (Session 9)
+
+### Priority 1: Font Size & Typography Audit (CRITICAL)
+The font normalization from Session 8 was partial — many inconsistencies remain:
+- **Too small**: Some data values, numbers, and text are too small to read comfortably (especially in side panels and metric grids)
+- **Too large**: Some elements are oversized and don't match the platform aesthetic (e.g. PanelHeader titles like "Metrics", "Activity", "Equity Curve" on Overview page — see screenshot)
+- **Inconsistent**: Font sizes vary between pages and even between tabs on the same page
+- **Action needed**: Full frontend-wide typography audit. Establish a definitive font scale and apply it consistently:
+  - Define the scale: what size for panel titles, section labels, metric labels, metric values, table headers, table cells, badges, buttons, form labels, descriptions
+  - Audit every page against the scale
+  - Fix all deviations
+  - Reference: QuantFury uses clean, consistent sizing — no element feels out of place
+
+### Priority 2: Tab Presentation Consistency
+- **Autonomous page**: Tabs sit correctly at the top of the panel with no duplicate title — this is the reference pattern
+- **Portfolio page**: Still has "Positions" title above the tabs — unnecessary, should be removed like Autonomous
+- **Other pages**: Need to verify all pages follow the Autonomous pattern (tabs at top, no duplicate panel title)
+- **Action needed**: Audit all pages with tabs in the main panel, remove any remaining PanelHeader wrappers or duplicate titles
+
+### Priority 3: PanelHeader Title Font Mismatch
+- The side panel PanelHeader titles ("Metrics", "Activity", "Equity Curve", "Cycle Intelligence", "Intelligence", "Risk Summary", etc.) use a font style that doesn't match the rest of the platform
+- They look like they belong to a different design system — too bold, wrong weight, wrong color
+- **Action needed**: Update PanelHeader title styling to match the QuantFury aesthetic — lighter weight, consistent with tab text
+
+### Priority 4: Lazy Loading Flash
+- Some pages briefly show the old layout/fonts before the new styles load
+- This creates a jarring flash of unstyled content
+- **Action needed**: Investigate and fix — likely related to CSS loading order or component lazy loading
+
+### From Previous Sessions (Lower Priority)
+- `/strategies/blacklisted-combos` returns 422 — endpoint may need `mode` query parameter
+- `/strategies/template-rankings` returns 404 — endpoint may not be deployed
+- `/strategies/idle-demotions` returns 422 — same mode parameter issue
+- "Never synced" shows in MetricsBar — should show actual last sync time after first sync
+- Phase 3 (TradingView charts, real-time streaming, workspace presets) — ready to start after polish is complete
+
+---
+
+## Key Files Modified in Session 8
+
+### New Components
+- `frontend/src/components/ui/SectionLabel.tsx` — flat section label
+- `frontend/src/components/ui/MetricGrid.tsx` — dense metric grid
+- `frontend/src/components/ui/FilterBar.tsx` — inline filter bar
+
+### Modified Components
+- `frontend/src/components/layout/PanelHeader.tsx` — title font 13px gray-200
+- `frontend/src/components/ui/DataFreshnessIndicator.tsx` — compact dot + relative time
+- `frontend/src/components/ui/tabs.tsx` — 13px font-semibold
+- `frontend/src/components/pdf/TearSheetGenerator.tsx` — icon-only button
+- `frontend/src/components/PageTemplate.tsx` — compact mode = 0px header
+- `frontend/src/components/charts/EquityCurveChart.tsx` — height prop supports string
+- `frontend/src/components/charts/InteractiveChart.tsx` — height prop supports string
+- `frontend/src/components/trading/TradingCyclePipeline.tsx` — flat design, no Card wrappers
+
+### Modified Pages (ALL)
+- `frontend/src/pages/OverviewNew.tsx`
+- `frontend/src/pages/PortfolioNew.tsx`
+- `frontend/src/pages/OrdersNew.tsx`
+- `frontend/src/pages/StrategiesNew.tsx`
+- `frontend/src/pages/AutonomousNew.tsx`
+- `frontend/src/pages/RiskNew.tsx`
+- `frontend/src/pages/AnalyticsNew.tsx`
+- `frontend/src/pages/DataManagementNew.tsx`
+- `frontend/src/pages/SystemHealthPage.tsx`
+- `frontend/src/pages/SettingsNew.tsx`
+- `frontend/src/pages/AuditLogPage.tsx`
+- `frontend/src/pages/WatchlistPage.tsx`
+- `frontend/src/pages/PositionDetailView.tsx`
+- `frontend/src/pages/analytics/RollingStatisticsTab.tsx`
+- `frontend/src/pages/analytics/TCATab.tsx`
+- `frontend/src/pages/analytics/TearSheetTab.tsx`
+- `frontend/src/pages/analytics/PerformanceAttributionTab.tsx`
