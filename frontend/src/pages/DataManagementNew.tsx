@@ -354,7 +354,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
           {/* Data Source Health Cards */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">Data Source Health</div>
+            <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">Data Source Health</div>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { name: 'eToro', data: monitoringStatus?.system?.etoro },
@@ -397,7 +397,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
           {/* FMP Cache Status */}
           {monitoringStatus?.system?.fmp && (
             <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-              <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">FMP Cache</div>
+              <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">FMP Cache</div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>API Usage</span>
@@ -437,7 +437,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
           {/* Sync Progress */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">Sync Progress</div>
+            <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">Sync Progress</div>
             <div className="space-y-3">
               {/* Quick Update (10min) */}
               <div>
@@ -515,7 +515,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
           {/* DB Stats Summary */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">Database Cache</div>
+            <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">Database Cache</div>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { label: 'Total Bars', value: db?.total_bars?.toLocaleString() ?? '—' },
@@ -534,7 +534,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
           {/* Sync Log (compact) */}
           {logs.length > 0 && (
             <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-              <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">
+              <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">
                 Sync Log {isRunning && <span className="text-amber-400 animate-pulse ml-1">● live</span>}
               </div>
               <div
@@ -558,7 +558,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
           {/* Last sync stats */}
           {stats && typeof stats === 'object' && 'daily_fetched' in stats && (
             <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-              <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">Last Sync Stats</div>
+              <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">Last Sync Stats</div>
               <div className="grid grid-cols-3 gap-1.5">
                 {[
                   { label: '1d Fetch', value: stats.daily_fetched, color: 'text-green-400' },

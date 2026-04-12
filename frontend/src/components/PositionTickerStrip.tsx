@@ -71,7 +71,7 @@ export const PositionTickerStrip: FC = memo(() => {
             <button
               onClick={() => navigate(`/portfolio/${encodeURIComponent(pos.symbol)}`)}
               className={cn(
-                'flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-mono shrink-0 transition-all duration-150',
+                'flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono shrink-0 transition-all duration-150',
                 'hover:bg-gray-800 hover:scale-[1.02] cursor-pointer border border-transparent',
               )}
             >

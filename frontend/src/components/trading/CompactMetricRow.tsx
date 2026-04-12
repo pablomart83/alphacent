@@ -45,7 +45,7 @@ export const CompactMetricRow: FC<CompactMetricRowProps> = memo(({ metrics, clas
       {metrics.map((metric, idx) => {
         const parsed = parseNumericValue(metric.value);
         const valueClass = cn(
-          'text-[13px] font-mono font-semibold whitespace-nowrap',
+          'text-sm font-mono font-semibold whitespace-nowrap',
           metric.color
             ? undefined
             : metric.trend === 'up'
@@ -58,7 +58,7 @@ export const CompactMetricRow: FC<CompactMetricRowProps> = memo(({ metrics, clas
 
         return (
           <div key={idx} className="flex items-center gap-1.5 shrink-0">
-            <span className="text-[11px] text-gray-500 uppercase tracking-wide whitespace-nowrap">
+            <span className="text-[12px] text-gray-500 tracking-wide whitespace-nowrap">
               {metric.label}
             </span>
             {parsed.isNumeric ? (

@@ -913,7 +913,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Research Filters — flat inline row */}
               <div className="flex flex-wrap items-center gap-3 py-2 border-b border-[var(--color-dark-border)]">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-gray-500 tracking-wide">Assets:</span>
+                  <span className="text-xs text-gray-500 tracking-wide">Assets:</span>
                   <div className="flex flex-wrap gap-1">
                     {['stock', 'etf', 'crypto', 'forex', 'index', 'commodity'].map(ac => (
                       <button key={ac} onClick={() => {
@@ -930,7 +930,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-gray-500 tracking-wide">TF:</span>
+                  <span className="text-xs text-gray-500 tracking-wide">TF:</span>
                   <div className="flex gap-1">
                     {[{ key: '1d', label: 'Daily' }, { key: '1h', label: '1H' }, { key: '4h', label: '4H' }].map(({ key, label }) => (
                       <button key={key} onClick={() => {
@@ -947,7 +947,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-gray-500 tracking-wide">Type:</span>
+                  <span className="text-xs text-gray-500 tracking-wide">Type:</span>
                   <div className="flex gap-1">
                     {[{ key: 'dsl', label: 'DSL' }, { key: 'alpha_edge', label: 'AE' }].map(({ key, label }) => (
                       <button key={key} onClick={() => {
@@ -1309,8 +1309,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     { label: 'Accept Rate', value: `${signalData?.summary.acceptance_rate ?? 0}%`, color: 'text-blue-400' },
                   ].map((m, i) => (
                     <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                      <div className="text-[11px] text-gray-500 tracking-wide">{m.label}</div>
-                      <div className={cn('text-[13px] font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
+                      <div className="text-xs text-gray-500 tracking-wide">{m.label}</div>
+                      <div className={cn('text-sm font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                     </div>
                   ))}
                 </div>
@@ -1421,8 +1421,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   { label: 'Ret. Rate', value: `${retirementRate.toFixed(1)}%`, color: 'text-[#ef4444]' },
                 ].map((m, i) => (
                   <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                    <div className="text-[11px] text-gray-500 tracking-wide">{m.label}</div>
-                    <div className={cn('text-[13px] font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
+                    <div className="text-xs text-gray-500 tracking-wide">{m.label}</div>
+                    <div className={cn('text-sm font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                   </div>
                 ))}
               </div>

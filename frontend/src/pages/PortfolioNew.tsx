@@ -1255,34 +1255,34 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           {/* Key-value pairs — directly in panel, no Card wrapper */}
           <div className="px-2 py-2 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-gray-500">Equity</span>
-              <span className="text-[13px] font-mono font-semibold text-gray-100">{formatCurrency(totalPortfolioValue)}</span>
+              <span className="text-xs text-gray-500">Equity</span>
+              <span className="text-sm font-mono font-semibold text-gray-100">{formatCurrency(totalPortfolioValue)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-gray-500">Cash</span>
-              <span className="text-[13px] font-mono font-semibold text-gray-100">{accountInfo ? formatCurrency(accountInfo.buying_power) : '---'}</span>
+              <span className="text-xs text-gray-500">Cash</span>
+              <span className="text-sm font-mono font-semibold text-gray-100">{accountInfo ? formatCurrency(accountInfo.buying_power) : '---'}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-gray-500">Invested</span>
-              <span className="text-[13px] font-mono font-semibold text-gray-100">{formatCurrency(totalPositionValue)}</span>
+              <span className="text-xs text-gray-500">Invested</span>
+              <span className="text-sm font-mono font-semibold text-gray-100">{formatCurrency(totalPositionValue)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-gray-500">P&L</span>
-              <span className={cn('text-[13px] font-mono font-semibold', totalPnL >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+              <span className="text-xs text-gray-500">P&L</span>
+              <span className={cn('text-sm font-mono font-semibold', totalPnL >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
                 {totalPnL >= 0 ? '+' : ''}{formatCurrency(totalPnL)} ({formatPercentage(totalPnLPercent)})
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-gray-500">Positions</span>
-              <span className="text-[13px] font-mono font-semibold text-gray-100">{positions.length}</span>
+              <span className="text-xs text-gray-500">Positions</span>
+              <span className="text-sm font-mono font-semibold text-gray-100">{positions.length}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-gray-500">Win Rate</span>
-              <span className="text-[13px] font-mono font-semibold text-gray-100">{winRate.toFixed(1)}%</span>
+              <span className="text-xs text-gray-500">Win Rate</span>
+              <span className="text-sm font-mono font-semibold text-gray-100">{winRate.toFixed(1)}%</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-gray-500">Win Rate (Closed)</span>
-              <span className="text-[13px] font-mono font-semibold text-gray-100">{closedWinRate.toFixed(1)}%</span>
+              <span className="text-xs text-gray-500">Win Rate (Closed)</span>
+              <span className="text-sm font-mono font-semibold text-gray-100">{closedWinRate.toFixed(1)}%</span>
             </div>
           </div>
 

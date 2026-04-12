@@ -444,7 +444,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
       {/* Correlation Heatmap — below tabs, top ~40% */}
       <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
         <div className="p-2 h-full overflow-auto">
-          <div className="text-[11px] text-gray-500 mb-1 font-medium tracking-wide">Position Correlations</div>
+          <div className="text-xs text-gray-500 mb-1 font-medium tracking-wide">Position Correlations</div>
           {correlationMatrix.length > 0 ? (
             <CorrelationHeatmap
               data={correlationMatrix.map((cell: any) => ({
@@ -819,7 +819,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
           {/* Sector Exposure Pie */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">Sector Exposure</div>
+            <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">Sector Exposure</div>
             {sectorPieData.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={180}>
@@ -858,7 +858,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
           {/* Risk Contribution Top 5 Bar */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3 flex-1 min-h-0">
-            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">
+            <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">
               Risk Contribution — Top 5
             </div>
             {riskContribTop5.length > 0 ? (
@@ -881,7 +881,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
           {/* Portfolio Risk Summary */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[11px] text-gray-500 tracking-wide font-medium mb-2">Portfolio Summary</div>
+            <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">Portfolio Summary</div>
             <div className="space-y-1.5">
               {[
                 { label: 'Total Exposure', value: formatCurrency(riskMetrics?.total_exposure || 0), color: 'text-gray-200' },
