@@ -839,25 +839,25 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
   // ── Main Panel (65%) — All existing tabs ───────────────────────────────
   const mainPanel = (
-    <div className="flex flex-col h-full">
-      <PanelHeader title="Control & Activity" panelId="autonomous-main" onRefresh={fetchData}>
-        <div className="flex-1 p-2">
-          <RefreshIndicator visible={pollingRefreshing || refreshing} />
-
-          <Tabs defaultValue="control" className="space-y-2">
-            <TabsList className="w-full overflow-x-auto">
-              <TabsTrigger value="control">Control & Status</TabsTrigger>
-              <TabsTrigger value="lifecycle">
-                Lifecycle ({filteredStrategies.length})
-              </TabsTrigger>
-              <TabsTrigger value="activity">
-                Activity ({filteredOrders.length})
-              </TabsTrigger>
-              <TabsTrigger value="signals">Signals</TabsTrigger>
-              <TabsTrigger value="performance">Performance</TabsTrigger>
-              <TabsTrigger value="walkforward">Walk-Forward</TabsTrigger>
-              <TabsTrigger value="conviction">Conviction</TabsTrigger>
-            </TabsList>
+    <div className="flex flex-col h-full overflow-auto">
+      <RefreshIndicator visible={pollingRefreshing || refreshing} />
+      <Tabs defaultValue="control" className="flex flex-col h-full">
+        <div className="shrink-0 px-2 pt-1 border-b border-[var(--color-dark-border)]">
+          <TabsList className="w-full overflow-x-auto">
+            <TabsTrigger value="control">Control</TabsTrigger>
+            <TabsTrigger value="lifecycle">
+              Lifecycle ({filteredStrategies.length})
+            </TabsTrigger>
+            <TabsTrigger value="activity">
+              Activity ({filteredOrders.length})
+            </TabsTrigger>
+            <TabsTrigger value="signals">Signals</TabsTrigger>
+            <TabsTrigger value="performance">Performance</TabsTrigger>
+            <TabsTrigger value="walkforward">Walk-Forward</TabsTrigger>
+            <TabsTrigger value="conviction">Conviction</TabsTrigger>
+          </TabsList>
+        </div>
+        <div className="flex-1 min-h-0 overflow-auto px-2 pb-2">
 
             {/* Tab 1: Control & Status */}
             <TabsContent value="control" className="space-y-3 p-2">
@@ -1608,9 +1608,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     );
                   })()}
             </TabsContent>
-          </Tabs>
         </div>
-      </PanelHeader>
+      </Tabs>
     </div>
   );
 

@@ -402,47 +402,38 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
   // ── Main Panel (60%) ──────────────────────────────────────────────────
   const mainPanel = (
     <div className="flex flex-col h-full">
-      <PanelHeader
-        title="Analysis"
-        panelId="risk-main"
-        onRefresh={refresh}
-      >
-        <div className="flex flex-col h-full">
-          {/* CorrelationHeatmap hero — top ~50% */}
-          <div className="shrink-0" style={{ height: '50%', minHeight: '200px' }}>
-            <div className="p-2 h-full overflow-auto">
-              <div className="text-[10px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Position Correlations</div>
-              {correlationMatrix.length > 0 ? (
-                <CorrelationHeatmap
-                  data={correlationMatrix.map((cell: any) => ({
-                    symbol1: cell.x || cell.row,
-                    symbol2: cell.y || cell.col,
-                    correlation: Number(cell.value || 0),
-                  }))}
-                  symbols={Array.from(new Set(correlationMatrix.flatMap((c: any) => [c.x || c.row, c.y || c.col]).filter(Boolean))).slice(0, 20) as string[]}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                  <div className="text-center">
-                    <BarChart3 className="h-10 w-10 mx-auto mb-2 opacity-50" />
-                    <p>{positions.length >= 2 ? 'Correlation data loading...' : 'Need at least 2 positions'}</p>
-                  </div>
-                </div>
-              )}
+      {/* CorrelationHeatmap hero — top ~50% */}
+      <div className="shrink-0" style={{ height: '50%', minHeight: '200px' }}>
+        <div className="p-2 h-full overflow-auto">
+          <div className="text-[10px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Position Correlations</div>
+          {correlationMatrix.length > 0 ? (
+            <CorrelationHeatmap
+              data={correlationMatrix.map((cell: any) => ({
+                symbol1: cell.x || cell.row,
+                symbol2: cell.y || cell.col,
+                correlation: Number(cell.value || 0),
+              }))}
+              symbols={Array.from(new Set(correlationMatrix.flatMap((c: any) => [c.x || c.row, c.y || c.col].filter(Boolean)))).slice(0, 20) as string[]}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-[11px] text-gray-500">
+              {positions.length >= 2 ? 'Correlation data loading...' : 'Need at least 2 positions'}
             </div>
-          </div>
+          )}
+        </div>
+      </div>
 
-          {/* Tabs below — bottom ~50% */}
-          <div className="flex-1 min-h-0 border-t border-[var(--color-dark-border)]">
-            <Tabs defaultValue="overview" className="flex flex-col h-full">
-              <div className="shrink-0 px-2 pt-1">
-                <TabsList className="w-full overflow-x-auto">
-                  <TabsTrigger value="overview">Overview</TabsTrigger>
-                  <TabsTrigger value="positions">Positions ({filteredPositions.length})</TabsTrigger>
-                  <TabsTrigger value="advanced">Advanced</TabsTrigger>
-                  <TabsTrigger value="history">History</TabsTrigger>
-                  <TabsTrigger value="exposure">Exposure</TabsTrigger>
-                </TabsList>
+      {/* Tabs below — bottom ~50% */}
+      <div className="flex-1 min-h-0 border-t border-[var(--color-dark-border)]">
+        <Tabs defaultValue="overview" className="flex flex-col h-full">
+          <div className="shrink-0 px-2 pt-1">
+            <TabsList className="w-full overflow-x-auto">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="positions">Positions ({filteredPositions.length})</TabsTrigger>
+              <TabsTrigger value="advanced">Advanced</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+              <TabsTrigger value="exposure">Exposure</TabsTrigger>
+            </TabsList>
               </div>
 
               <div className="flex-1 min-h-0 overflow-auto px-2 pb-2">
@@ -781,8 +772,6 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
               </div>
             </Tabs>
           </div>
-        </div>
-      </PanelHeader>
     </div>
   );
 

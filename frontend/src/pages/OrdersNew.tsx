@@ -1064,16 +1064,10 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
   // ── Main Panel (65%) ─────────────────────────────────────────────────
   const mainPanel = (
     <div className="flex flex-col h-full">
-      <PanelHeader
-        title="Order Book"
-        panelId="orders-main"
-        onRefresh={fetchData}
-      >
-        <div className="flex flex-col h-full">
-          {/* OrderFlowTimeline hero — top ~40% */}
-          <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
-            <div className="p-3 h-full">
-              <div className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wide">Order Flow — Last 7 Days</div>
+      {/* OrderFlowTimeline hero — top ~40% */}
+      <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
+        <div className="p-2 h-full">
+          <div className="text-[10px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Order Flow — Last 7 Days</div>
               <OrderFlowTimeline
                 orders={orders.map((o) => ({
                   id: o.id,
@@ -1552,8 +1546,6 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               </TabsContent>
             </Tabs>
           </div>
-        </div>
-      </PanelHeader>
     </div>
   );
 
