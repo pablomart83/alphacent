@@ -3,14 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   PlayCircle, PauseCircle, Settings, RefreshCw, Search,
-  AlertCircle, TrendingUp, BarChart3, Zap, Clock, Trash2,
+  AlertCircle, Clock, Trash2,
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
 import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
 import { PanelHeader } from '../components/layout/PanelHeader';
 import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
-import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
 import { TradingCyclePipeline } from '../components/trading/TradingCyclePipeline';
 // Card imports removed — using PanelHeader sections instead
@@ -1169,247 +1168,213 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 2: Strategy Lifecycle */}
-            <TabsContent value="lifecycle" className="space-y-2">
-              {/* Lifecycle Visualization */}
-              <PanelHeader title="Strategy Lifecycle Flow" panelId="autonomous-lifecycle-flow">
-                <div className="p-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <button onClick={() => setStrategyStageFilter('PROPOSED')}
-                      className={cn('bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 transition-all hover:scale-105 cursor-pointer',
-                        strategyStageFilter === 'PROPOSED' && 'ring-2 ring-blue-500')}>
-                      <div className="text-center">
-                        <div className="text-xs font-mono font-semibold text-blue-400 mb-1">Proposed</div>
-                        <div className="text-2xl font-mono font-bold text-gray-200">{lifecycleCounts.proposed}</div>
-                      </div>
-                    </button>
-                    <button onClick={() => setStrategyStageFilter('BACKTESTED')}
-                      className={cn('bg-purple-500/10 border border-purple-500/30 rounded-lg p-3 transition-all hover:scale-105 cursor-pointer',
-                        strategyStageFilter === 'BACKTESTED' && 'ring-2 ring-purple-500')}>
-                      <div className="text-center">
-                        <div className="text-xs font-mono font-semibold text-purple-400 mb-1">Backtested</div>
-                        <div className="text-2xl font-mono font-bold text-gray-200">{lifecycleCounts.backtested}</div>
-                      </div>
-                    </button>
-                    <button onClick={() => setStrategyStageFilter(strategyStageFilter === 'DEMO' || strategyStageFilter === 'LIVE' ? 'all' : 'DEMO')}
-                      className={cn('bg-accent-green/10 border border-accent-green/30 rounded-lg p-3 transition-all hover:scale-105 cursor-pointer',
-                        (strategyStageFilter === 'DEMO' || strategyStageFilter === 'LIVE') && 'ring-2 ring-accent-green')}>
-                      <div className="text-center">
-                        <div className="text-xs font-mono font-semibold text-accent-green mb-1">Active</div>
-                        <div className="text-2xl font-mono font-bold text-gray-200">{lifecycleCounts.active}</div>
-                      </div>
-                    </button>
-                    <button onClick={() => setStrategyStageFilter('RETIRED')}
-                      className={cn('bg-accent-red/10 border border-accent-red/30 rounded-lg p-3 transition-all hover:scale-105 cursor-pointer',
-                        strategyStageFilter === 'RETIRED' && 'ring-2 ring-accent-red')}>
-                      <div className="text-center">
-                        <div className="text-xs font-mono font-semibold text-accent-red mb-1">Retired</div>
-                        <div className="text-2xl font-mono font-bold text-gray-200">{lifecycleCounts.retired}</div>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              </PanelHeader>
+            <TabsContent value="lifecycle" className="space-y-3 p-2">
+              {/* Lifecycle stage buttons — compact inline row */}
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { key: 'PROPOSED', label: 'Proposed', count: lifecycleCounts.proposed, color: 'blue' },
+                  { key: 'BACKTESTED', label: 'Backtested', count: lifecycleCounts.backtested, color: 'purple' },
+                  { key: 'DEMO', label: 'Active', count: lifecycleCounts.active, color: 'green' },
+                  { key: 'RETIRED', label: 'Retired', count: lifecycleCounts.retired, color: 'red' },
+                ].map(s => (
+                  <button key={s.key}
+                    onClick={() => setStrategyStageFilter(strategyStageFilter === s.key ? 'all' : s.key)}
+                    className={cn(
+                      'flex items-center justify-between rounded-md border px-3 py-2 transition-all cursor-pointer',
+                      `bg-${s.color}-500/10 border-${s.color}-500/30`,
+                      strategyStageFilter === s.key && `ring-1 ring-${s.color}-500`,
+                    )}
+                    style={{
+                      backgroundColor: `color-mix(in srgb, ${s.color === 'green' ? '#22c55e' : s.color === 'red' ? '#ef4444' : s.color === 'blue' ? '#3b82f6' : '#8b5cf6'} 10%, transparent)`,
+                      borderColor: `color-mix(in srgb, ${s.color === 'green' ? '#22c55e' : s.color === 'red' ? '#ef4444' : s.color === 'blue' ? '#3b82f6' : '#8b5cf6'} 30%, transparent)`,
+                    }}
+                  >
+                    <span className="text-[11px] text-gray-400">{s.label}</span>
+                    <span className="text-lg font-mono font-bold text-gray-200">{s.count}</span>
+                  </button>
+                ))}
+              </div>
 
-              {/* Strategies Table */}
-              <PanelHeader title="Strategies" panelId="autonomous-strategies-table">
-                <div className="p-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-                    <div className="text-xs text-muted-foreground">
-                      {filteredStrategies.length} of {strategies.length} strategies
-                      {strategyStageFilter !== 'all' && ` in ${strategyStageFilter}`}
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <div className="relative">
-                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                        <Input placeholder="Search..." value={strategySearch}
-                          onChange={(e) => setStrategySearch(e.target.value)}
-                          className="pl-7 h-7 text-xs w-full sm:w-[160px]" />
-                      </div>
-                      <Select value={strategyStageFilter} onValueChange={setStrategyStageFilter}>
-                        <SelectTrigger className="w-full sm:w-[120px] h-7 text-xs">
-                          <SelectValue placeholder="Stage" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Stages</SelectItem>
-                          <SelectItem value="PROPOSED">Proposed</SelectItem>
-                          <SelectItem value="BACKTESTED">Backtested</SelectItem>
-                          <SelectItem value="DEMO">Demo</SelectItem>
-                          <SelectItem value="LIVE">Live</SelectItem>
-                          <SelectItem value="RETIRED">Retired</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  {filteredStrategies.length > 0 ? (
-                    <DataTable columns={strategyColumns} data={filteredStrategies} pageSize={20} showPagination={true} />
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground text-xs">
-                      {strategySearch || strategyStageFilter !== 'all' ? 'No strategies match filters' : 'No strategies found'}
-                    </div>
-                  )}
+              {/* Filters + table — flat, no PanelHeader wrapper */}
+              <div className="flex items-center gap-2 py-1">
+                <span className="text-[10px] text-gray-500">{filteredStrategies.length} of {strategies.length}</span>
+                <div className="relative ml-auto">
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
+                  <Input placeholder="Search..." value={strategySearch}
+                    onChange={(e) => setStrategySearch(e.target.value)}
+                    className="pl-7 h-7 text-[11px] w-[150px]" />
                 </div>
-              </PanelHeader>
+                <Select value={strategyStageFilter} onValueChange={setStrategyStageFilter}>
+                  <SelectTrigger className="w-[110px] h-7 text-[11px]">
+                    <SelectValue placeholder="Stage" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Stages</SelectItem>
+                    <SelectItem value="PROPOSED">Proposed</SelectItem>
+                    <SelectItem value="BACKTESTED">Backtested</SelectItem>
+                    <SelectItem value="DEMO">Demo</SelectItem>
+                    <SelectItem value="RETIRED">Retired</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {filteredStrategies.length > 0 ? (
+                <DataTable columns={strategyColumns} data={filteredStrategies} pageSize={20} showPagination={true} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
+              ) : (
+                <div className="text-center py-6 text-gray-500 text-[11px]">
+                  {strategySearch || strategyStageFilter !== 'all' ? 'No strategies match filters' : 'No strategies found'}
+                </div>
+              )}
             </TabsContent>
 
             {/* Tab 3: Recent Activity */}
-            <TabsContent value="activity" className="space-y-2">
-              <PanelHeader title="Recent Autonomous Orders" panelId="autonomous-orders">
-                <div className="p-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
-                    <div className="text-xs text-muted-foreground">
-                      Last 50 orders • {filteredOrders.length} of {orders.length}
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <div className="relative">
-                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                        <Input placeholder="Search symbol..." value={orderSearch}
-                          onChange={(e) => setOrderSearch(e.target.value)}
-                          className="pl-7 h-7 text-xs w-full sm:w-[160px]" />
-                      </div>
-                      <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
-                        <SelectTrigger className="w-full sm:w-[110px] h-7 text-xs">
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Status</SelectItem>
-                          <SelectItem value="PENDING">Pending</SelectItem>
-                          <SelectItem value="FILLED">Filled</SelectItem>
-                          <SelectItem value="PARTIALLY_FILLED">Partial</SelectItem>
-                          <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                          <SelectItem value="REJECTED">Rejected</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={orderSideFilter} onValueChange={setOrderSideFilter}>
-                        <SelectTrigger className="w-full sm:w-[100px] h-7 text-xs">
-                          <SelectValue placeholder="Side" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Sides</SelectItem>
-                          <SelectItem value="BUY">Buy</SelectItem>
-                          <SelectItem value="SELL">Sell</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  {filteredOrders.length > 0 ? (
-                    <DataTable columns={orderColumns} data={filteredOrders} pageSize={20} showPagination={true} />
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground text-xs">
-                      {orderSearch || orderStatusFilter !== 'all' || orderSideFilter !== 'all'
-                        ? 'No orders match filters' : 'No autonomous orders found'}
-                    </div>
-                  )}
+            <TabsContent value="activity" className="space-y-2 p-2">
+              {/* Filters — flat inline row */}
+              <div className="flex items-center gap-2 py-1">
+                <span className="text-[10px] text-gray-500">Last 50 orders · {filteredOrders.length} of {orders.length}</span>
+                <div className="relative ml-auto">
+                  <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
+                  <Input placeholder="Search symbol..." value={orderSearch}
+                    onChange={(e) => setOrderSearch(e.target.value)}
+                    className="pl-7 h-7 text-[11px] w-[150px]" />
                 </div>
-              </PanelHeader>
+                <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
+                  <SelectTrigger className="w-[100px] h-7 text-[11px]">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="PENDING">Pending</SelectItem>
+                    <SelectItem value="FILLED">Filled</SelectItem>
+                    <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                    <SelectItem value="REJECTED">Rejected</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={orderSideFilter} onValueChange={setOrderSideFilter}>
+                  <SelectTrigger className="w-[90px] h-7 text-[11px]">
+                    <SelectValue placeholder="Side" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="BUY">Buy</SelectItem>
+                    <SelectItem value="SELL">Sell</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {filteredOrders.length > 0 ? (
+                <DataTable columns={orderColumns} data={filteredOrders} pageSize={20} showPagination={true} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
+              ) : (
+                <div className="text-center py-6 text-gray-500 text-[11px]">
+                  {orderSearch || orderStatusFilter !== 'all' || orderSideFilter !== 'all'
+                    ? 'No orders match filters' : 'No autonomous orders found'}
+                </div>
+              )}
             </TabsContent>
 
             {/* Tab 4: Signal Activity */}
-            <TabsContent value="signals" className="space-y-2">
-              <div className="flex items-center justify-between mb-2">
-                <div />
-                <Button variant="outline" size="sm" onClick={handleRefreshSignals} disabled={signalRefreshing} className="gap-2 h-7 text-xs">
-                  <RefreshCw className={cn('h-3 w-3', signalRefreshing && 'animate-spin')} />
-                  Refresh
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <MetricCard label="Signals Generated" value={signalData?.summary.total ?? 0} icon={Zap} />
-                <MetricCard label="Accepted" value={signalData?.summary.accepted ?? 0} icon={TrendingUp} trend="up" />
-                <MetricCard label="Rejected" value={signalData?.summary.rejected ?? 0} icon={AlertCircle} trend="down" />
-                <MetricCard label="Acceptance Rate" value={`${signalData?.summary.acceptance_rate ?? 0}%`} icon={BarChart3} />
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* Rejection Reasons */}
-                <PanelHeader title="Rejection Reasons" panelId="autonomous-rejection-reasons">
-                  <div className="p-3">
-                    {signalData?.summary.rejection_reasons && signalData.summary.rejection_reasons.length > 0 ? (
-                      <div className="space-y-2">
-                        {signalData.summary.rejection_reasons.map((r) => (
-                          <div key={r.reason}>
-                            <div className="flex justify-between text-xs mb-1">
-                              <span className="text-gray-300 truncate">{r.reason}</span>
-                              <span className="text-muted-foreground ml-2 whitespace-nowrap">{r.count} ({r.percentage.toFixed(0)}%)</span>
-                            </div>
-                            <div className="w-full bg-muted rounded-full h-1.5">
-                              <div className="bg-accent-red/70 h-1.5 rounded-full transition-all"
-                                style={{ width: `${Math.min(r.percentage, 100)}%` }} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-muted-foreground text-xs">No rejections recorded.</p>
-                    )}
-                  </div>
-                </PanelHeader>
-
-                {/* Recent Signals Table */}
-                <div className="lg:col-span-2">
-                  <PanelHeader title="Recent Signals" panelId="autonomous-recent-signals"
-                    actions={
-                      <Select value={signalFilter} onValueChange={setSignalFilter}>
-                        <SelectTrigger className="w-[100px] h-6 text-[10px]">
-                          <SelectValue placeholder="Filter" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All</SelectItem>
-                          <SelectItem value="ACCEPTED">Accepted</SelectItem>
-                          <SelectItem value="REJECTED">Rejected</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    }>
-                    <div className="p-3 max-h-[400px] overflow-y-auto">
-                      <table className="w-full text-xs">
-                        <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
-                          <tr className="border-b border-border text-muted-foreground text-[10px]">
-                            <th className="text-left py-1.5 pr-2">Time</th>
-                            <th className="text-left py-1.5 pr-2">Symbol</th>
-                            <th className="text-left py-1.5 pr-2">Side</th>
-                            <th className="text-left py-1.5 pr-2">Decision</th>
-                            <th className="text-left py-1.5">Reason</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(signalData?.signals ?? [])
-                            .filter(s => signalFilter === 'all' || s.decision === signalFilter)
-                            .slice(0, 50)
-                            .map((s) => (
-                            <tr key={s.id} className="border-b border-border/50 hover:bg-muted/30">
-                              <td className="py-1.5 pr-2 text-[10px] text-muted-foreground whitespace-nowrap">
-                                {utcToLocal(s.created_at).toLocaleString('en-US', {
-                                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                                })}
-                              </td>
-                              <td className="py-1.5 pr-2 font-mono font-semibold">{s.symbol}</td>
-                              <td className="py-1.5 pr-2">
-                                <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono',
-                                  s.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red')}>
-                                  {s.side}
-                                </span>
-                              </td>
-                              <td className="py-1.5 pr-2">
-                                <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono font-semibold',
-                                  s.decision === 'ACCEPTED' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red')}>
-                                  {s.decision}
-                                </span>
-                              </td>
-                              <td className="py-1.5 text-[10px] text-muted-foreground truncate max-w-[150px]" title={s.rejection_reason || ''}>
-                                {s.rejection_reason || '—'}
-                              </td>
-                            </tr>
-                          ))}
-                          {(!signalData?.signals || signalData.signals.length === 0) && (
-                            <tr>
-                              <td colSpan={5} className="py-6 text-center text-muted-foreground text-xs">
-                                No signal decisions recorded yet.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
+            <TabsContent value="signals" className="space-y-3 p-2">
+              {/* Signal metrics — inline dense grid */}
+              <div className="flex items-center gap-2">
+                <div className="grid grid-cols-4 gap-2 flex-1">
+                  {[
+                    { label: 'Generated', value: String(signalData?.summary.total ?? 0), color: 'text-gray-200' },
+                    { label: 'Accepted', value: String(signalData?.summary.accepted ?? 0), color: 'text-[#22c55e]' },
+                    { label: 'Rejected', value: String(signalData?.summary.rejected ?? 0), color: 'text-[#ef4444]' },
+                    { label: 'Accept Rate', value: `${signalData?.summary.acceptance_rate ?? 0}%`, color: 'text-blue-400' },
+                  ].map((m, i) => (
+                    <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
+                      <div className="text-[9px] text-gray-500 uppercase tracking-wide">{m.label}</div>
+                      <div className={cn('text-sm font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                     </div>
-                  </PanelHeader>
+                  ))}
+                </div>
+                <button onClick={handleRefreshSignals} disabled={signalRefreshing}
+                  className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors shrink-0" title="Refresh signals">
+                  <RefreshCw className={cn('h-3.5 w-3.5', signalRefreshing && 'animate-spin')} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                {/* Rejection Reasons — flat section */}
+                <div>
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Rejection Reasons</div>
+                  {signalData?.summary.rejection_reasons && signalData.summary.rejection_reasons.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {signalData.summary.rejection_reasons.map((r) => (
+                        <div key={r.reason}>
+                          <div className="flex justify-between text-[10px] mb-0.5">
+                            <span className="text-gray-300 truncate">{r.reason}</span>
+                            <span className="text-gray-500 ml-2 shrink-0">{r.count} ({r.percentage.toFixed(0)}%)</span>
+                          </div>
+                          <div className="w-full bg-gray-800 rounded-full h-1">
+                            <div className="bg-[#ef4444]/70 h-1 rounded-full" style={{ width: `${Math.min(r.percentage, 100)}%` }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-[10px]">No rejections recorded.</p>
+                  )}
+                </div>
+
+                {/* Recent Signals Table — flat */}
+                <div className="lg:col-span-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Recent Signals</div>
+                    <Select value={signalFilter} onValueChange={setSignalFilter}>
+                      <SelectTrigger className="w-[90px] h-6 text-[10px]">
+                        <SelectValue placeholder="Filter" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All</SelectItem>
+                        <SelectItem value="ACCEPTED">Accepted</SelectItem>
+                        <SelectItem value="REJECTED">Rejected</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="max-h-[350px] overflow-y-auto">
+                    <table className="w-full text-[11px] font-mono">
+                      <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
+                        <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[10px]">
+                          <th className="text-left py-1 pr-2">Time</th>
+                          <th className="text-left py-1 pr-2">Symbol</th>
+                          <th className="text-left py-1 pr-2">Side</th>
+                          <th className="text-left py-1 pr-2">Decision</th>
+                          <th className="text-left py-1">Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(signalData?.signals ?? [])
+                          .filter(s => signalFilter === 'all' || s.decision === signalFilter)
+                          .slice(0, 50)
+                          .map((s) => (
+                          <tr key={s.id} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/30">
+                            <td className="py-1 pr-2 text-[10px] text-gray-500 whitespace-nowrap">
+                              {utcToLocal(s.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </td>
+                            <td className="py-1 pr-2 font-semibold text-gray-200">{s.symbol}</td>
+                            <td className="py-1 pr-2">
+                              <span className={cn('px-1 py-0.5 rounded text-[9px]',
+                                s.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>
+                                {s.side}
+                              </span>
+                            </td>
+                            <td className="py-1 pr-2">
+                              <span className={cn('px-1 py-0.5 rounded text-[9px] font-semibold',
+                                s.decision === 'ACCEPTED' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>
+                                {s.decision}
+                              </span>
+                            </td>
+                            <td className="py-1 text-[10px] text-gray-500 truncate max-w-[150px]" title={s.rejection_reason || ''}>
+                              {s.rejection_reason || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                        {(!signalData?.signals || signalData.signals.length === 0) && (
+                          <tr><td colSpan={5} className="py-6 text-center text-gray-500 text-[10px]">No signal decisions recorded.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </TabsContent>
@@ -1495,101 +1460,101 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 6: Walk-Forward Analytics */}
-            <TabsContent value="walkforward" className="space-y-2">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <PanelHeader title="Walk-Forward Analytics" panelId="autonomous-wf-analytics">
-                  <div className="p-3">
-                    {walkForwardLoading ? (
-                      <div className="flex items-center justify-center h-24 text-xs text-muted-foreground">Loading...</div>
-                    ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-[10px] font-mono">
-                          <thead>
-                            <tr className="border-b border-dark-border text-muted-foreground">
-                              <th className="py-1.5 px-2 text-left">Cycle</th>
-                              <th className="py-1.5 px-2 text-right">Proposals</th>
-                              <th className="py-1.5 px-2 text-right">BTs</th>
-                              <th className="py-1.5 px-2 text-right">Pass Rate</th>
-                              <th className="py-1.5 px-2 text-right">Avg Sharpe</th>
+            <TabsContent value="walkforward" className="space-y-3 p-2">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {/* Cycle History Table */}
+                <div>
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Cycle History</div>
+                  {walkForwardLoading ? (
+                    <div className="flex items-center justify-center h-24 text-[10px] text-gray-500">Loading...</div>
+                  ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
+                    <div className="overflow-x-auto max-h-[300px]">
+                      <table className="w-full text-[10px] font-mono">
+                        <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
+                          <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
+                            <th className="py-1 px-2 text-left">Cycle</th>
+                            <th className="py-1 px-2 text-right">Proposals</th>
+                            <th className="py-1 px-2 text-right">BTs</th>
+                            <th className="py-1 px-2 text-right">Pass Rate</th>
+                            <th className="py-1 px-2 text-right">Avg Sharpe</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {walkForwardData.cycles.slice(0, 20).map((c: any, idx: number) => (
+                            <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/30">
+                              <td className="py-1 px-2 text-gray-500">{c.date || c.cycle_id || `#${idx + 1}`}</td>
+                              <td className="py-1 px-2 text-right text-gray-300">{c.proposals ?? '—'}</td>
+                              <td className="py-1 px-2 text-right text-gray-300">{c.backtests ?? '—'}</td>
+                              <td className={cn('py-1 px-2 text-right', (c.pass_rate ?? 0) >= 50 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+                                {c.pass_rate != null ? `${c.pass_rate.toFixed(1)}%` : '—'}
+                              </td>
+                              <td className="py-1 px-2 text-right text-gray-300">{c.avg_sharpe != null ? c.avg_sharpe.toFixed(2) : '—'}</td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {walkForwardData.cycles.slice(0, 20).map((c: any, idx: number) => (
-                              <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
-                                <td className="py-1.5 px-2 text-muted-foreground">{c.date || c.cycle_id || `#${idx + 1}`}</td>
-                                <td className="py-1.5 px-2 text-right">{c.proposals ?? '—'}</td>
-                                <td className="py-1.5 px-2 text-right">{c.backtests ?? '—'}</td>
-                                <td className={cn('py-1.5 px-2 text-right', (c.pass_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
-                                  {c.pass_rate != null ? `${c.pass_rate.toFixed(1)}%` : '—'}
-                                </td>
-                                <td className="py-1.5 px-2 text-right">{c.avg_sharpe != null ? c.avg_sharpe.toFixed(2) : '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="flex items-center justify-center h-24 text-xs text-muted-foreground">No walk-forward data</div>
-                    )}
-                  </div>
-                </PanelHeader>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-[10px] text-gray-500">No walk-forward data</div>
+                  )}
+                </div>
 
-                <PanelHeader title="WF Pass Rate Trend" panelId="autonomous-wf-passrate">
-                  <div className="p-3">
-                    {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
-                      <InteractiveChart
-                        data={walkForwardData.pass_rate_history}
-                        dataKeys={[{ key: 'pass_rate', color: designColors.green, type: 'line' }]}
-                        xAxisKey="date"
-                        height={200}
-                        periods={['1M', '3M', '6M', '1Y', 'ALL']}
-                        defaultPeriod={walkForwardPeriod}
-                        onPeriodChange={(p) => {
-                          setWalkForwardPeriod(p);
-                          if (tradingMode) {
-                            apiClient.getWalkForwardAnalytics(tradingMode, p).then(setWalkForwardData).catch(() => {});
-                          }
-                        }}
-                        tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No pass rate history</div>
-                    )}
-                  </div>
-                </PanelHeader>
+                {/* Pass Rate Trend Chart */}
+                <div>
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Pass Rate Trend</div>
+                  {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
+                    <InteractiveChart
+                      data={walkForwardData.pass_rate_history}
+                      dataKeys={[{ key: 'pass_rate', color: designColors.green, type: 'line' }]}
+                      xAxisKey="date"
+                      height={200}
+                      periods={['1M', '3M', '6M', '1Y', 'ALL']}
+                      defaultPeriod={walkForwardPeriod}
+                      onPeriodChange={(p) => {
+                        setWalkForwardPeriod(p);
+                        if (tradingMode) {
+                          apiClient.getWalkForwardAnalytics(tradingMode, p).then(setWalkForwardData).catch(() => {});
+                        }
+                      }}
+                      tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
+                    />
+                  ) : (
+                    <div className="text-center py-6 text-[10px] text-gray-500">No pass rate history</div>
+                  )}
+                </div>
               </div>
 
-              {/* Similarity Rejections */}
+              {/* Similarity Rejections — flat table */}
               {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 && (
-                <PanelHeader title="Similarity Rejections" panelId="autonomous-similarity">
-                  <div className="p-3 overflow-x-auto">
+                <div>
+                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Similarity Rejections</div>
+                  <div className="overflow-x-auto">
                     <table className="w-full text-[10px] font-mono">
                       <thead>
-                        <tr className="border-b border-dark-border text-muted-foreground">
-                          <th className="py-1.5 px-2 text-left">Rejected Strategy</th>
-                          <th className="py-1.5 px-2 text-left">Existing Strategy</th>
-                          <th className="py-1.5 px-2 text-right">Similarity %</th>
+                        <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
+                          <th className="py-1 px-2 text-left">Rejected Strategy</th>
+                          <th className="py-1 px-2 text-left">Existing Strategy</th>
+                          <th className="py-1 px-2 text-right">Similarity %</th>
                         </tr>
                       </thead>
                       <tbody>
                         {walkForwardData.similarity_rejections.map((r: any, idx: number) => (
-                          <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
-                            <td className="py-1.5 px-2 text-gray-200 truncate max-w-[180px]">{r.rejected_name || '—'}</td>
-                            <td className="py-1.5 px-2 text-gray-300 truncate max-w-[180px]">{r.existing_name || '—'}</td>
-                            <td className="py-1.5 px-2 text-right text-accent-red">{r.similarity != null ? `${(r.similarity * 100).toFixed(1)}%` : '—'}</td>
+                          <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/30">
+                            <td className="py-1 px-2 text-gray-200 truncate max-w-[180px]">{r.rejected_name || '—'}</td>
+                            <td className="py-1 px-2 text-gray-300 truncate max-w-[180px]">{r.existing_name || '—'}</td>
+                            <td className="py-1 px-2 text-right text-[#ef4444]">{r.similarity != null ? `${(r.similarity * 100).toFixed(1)}%` : '—'}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                </PanelHeader>
+                </div>
               )}
             </TabsContent>
 
             {/* Tab 7: Conviction Score */}
-            <TabsContent value="conviction" className="space-y-2">
-              <PanelHeader title="Conviction Score Decomposition" panelId="autonomous-conviction">
-                <div className="p-3">
+            <TabsContent value="conviction" className="space-y-3 p-2">
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Conviction Score Decomposition</div>
                   {(() => {
                     const activeWithConviction = strategies.filter(
                       (s) => (s.status === 'DEMO' || s.status === 'LIVE') && s.metadata?.conviction_score
@@ -1642,8 +1607,6 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       </div>
                     );
                   })()}
-                </div>
-              </PanelHeader>
             </TabsContent>
           </Tabs>
         </div>

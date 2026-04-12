@@ -1,8 +1,8 @@
 import { type FC, useCallback, useState } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  AlertTriangle, Shield, TrendingDown, Activity, BarChart3,
-  RefreshCw, Search, AlertCircle, Settings as SettingsIcon,
+  AlertTriangle, Shield, Activity, BarChart3,
+  RefreshCw, AlertCircle, Settings as SettingsIcon,
   Zap,
 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Cell, BarChart, Bar, PieChart, Pie } from 'recharts';
@@ -11,11 +11,12 @@ import { PageTemplate } from '../components/PageTemplate';
 import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
 import { PanelHeader } from '../components/layout/PanelHeader';
 import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
-import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
+import { SectionLabel } from '../components/ui/SectionLabel';
+import { MetricGrid } from '../components/ui/MetricGrid';
+import { FilterBar } from '../components/ui/FilterBar';
 import { Button } from '../components/ui/Button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
-import { Input } from '../components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Progress } from '../components/ui/progress';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
@@ -446,220 +447,210 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
               <div className="flex-1 min-h-0 overflow-auto px-2 pb-2">
                 {/* Overview Tab */}
-                <TabsContent value="overview" className="space-y-2 mt-2">
-                  {/* Risk Status Banner */}
-                  <PanelHeader title="Risk Status" panelId="risk-status-card">
-                    <div className={cn(
-                      'p-3 border rounded-lg',
-                      riskStatus.status === 'safe' && 'border-accent-green/30 bg-accent-green/5',
-                      riskStatus.status === 'warning' && 'border-yellow-500/30 bg-yellow-500/5',
-                      riskStatus.status === 'danger' && 'border-accent-red/30 bg-accent-red/5'
-                    )}>
-                      <div className="flex items-start gap-2">
-                        {riskStatus.status === 'safe' && <Shield className="h-5 w-5 text-accent-green flex-shrink-0 mt-0.5" />}
-                        {riskStatus.status === 'warning' && <AlertTriangle className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />}
-                        {riskStatus.status === 'danger' && <AlertCircle className="h-5 w-5 text-accent-red flex-shrink-0 mt-0.5" />}
-                        <div className="flex-1">
-                          <p className={cn(
-                            'text-sm font-semibold mb-1',
-                            riskStatus.status === 'safe' && 'text-accent-green',
-                            riskStatus.status === 'warning' && 'text-yellow-400',
-                            riskStatus.status === 'danger' && 'text-accent-red'
-                          )}>
-                            {riskStatus.status === 'safe' && 'Portfolio Risk: Safe'}
-                            {riskStatus.status === 'warning' && 'Portfolio Risk: Warning'}
-                            {riskStatus.status === 'danger' && 'Portfolio Risk: Danger'}
-                          </p>
-                          <p className="text-xs text-muted-foreground">{riskStatus.message}</p>
-                          {riskStatus.reasons.length > 0 && riskStatus.status !== 'safe' && (
-                            <div className="mt-1 space-y-0.5">
-                              {riskStatus.reasons.map((reason, idx) => (
-                                <p key={idx} className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
-                                  <span className={cn('w-1 h-1 rounded-full flex-shrink-0', reason.includes('DANGER') ? 'bg-accent-red' : 'bg-yellow-400')} />
-                                  {reason}
-                                </p>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => window.location.href = '/settings'}>
-                          <SettingsIcon className="h-3 w-3" /> Limits
-                        </Button>
+                <TabsContent value="overview" className="space-y-3 mt-2">
+                  {/* Risk Status Banner — compact inline */}
+                  <SectionLabel>Risk Status</SectionLabel>
+                  <div className={cn(
+                    'p-3 border rounded-lg',
+                    riskStatus.status === 'safe' && 'border-accent-green/30 bg-accent-green/5',
+                    riskStatus.status === 'warning' && 'border-yellow-500/30 bg-yellow-500/5',
+                    riskStatus.status === 'danger' && 'border-accent-red/30 bg-accent-red/5'
+                  )}>
+                    <div className="flex items-start gap-2">
+                      {riskStatus.status === 'safe' && <Shield className="h-5 w-5 text-accent-green flex-shrink-0 mt-0.5" />}
+                      {riskStatus.status === 'warning' && <AlertTriangle className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />}
+                      {riskStatus.status === 'danger' && <AlertCircle className="h-5 w-5 text-accent-red flex-shrink-0 mt-0.5" />}
+                      <div className="flex-1">
+                        <p className={cn(
+                          'text-sm font-semibold mb-1',
+                          riskStatus.status === 'safe' && 'text-accent-green',
+                          riskStatus.status === 'warning' && 'text-yellow-400',
+                          riskStatus.status === 'danger' && 'text-accent-red'
+                        )}>
+                          {riskStatus.status === 'safe' && 'Portfolio Risk: Safe'}
+                          {riskStatus.status === 'warning' && 'Portfolio Risk: Warning'}
+                          {riskStatus.status === 'danger' && 'Portfolio Risk: Danger'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{riskStatus.message}</p>
+                        {riskStatus.reasons.length > 0 && riskStatus.status !== 'safe' && (
+                          <div className="mt-1 space-y-0.5">
+                            {riskStatus.reasons.map((reason, idx) => (
+                              <p key={idx} className="text-[10px] font-mono text-muted-foreground flex items-center gap-1">
+                                <span className={cn('w-1 h-1 rounded-full flex-shrink-0', reason.includes('DANGER') ? 'bg-accent-red' : 'bg-yellow-400')} />
+                                {reason}
+                              </p>
+                            ))}
+                          </div>
+                        )}
                       </div>
+                      <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => window.location.href = '/settings'}>
+                        <SettingsIcon className="h-3 w-3" /> Limits
+                      </Button>
                     </div>
-                  </PanelHeader>
-
-                  {/* Risk Metrics Grid */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <MetricCard label="VaR (95%)" value={riskMetrics?.var_95 || 0} format="currency" icon={TrendingDown} tooltip="Value at Risk at 95% confidence level" />
-                    <MetricCard label="Max Drawdown" value={riskMetrics?.max_drawdown || 0} format="percentage" icon={TrendingDown} tooltip="Maximum peak-to-trough decline" />
-                    <MetricCard label="Current Drawdown" value={riskMetrics?.current_drawdown || 0} format="percentage" trend={riskMetrics && riskMetrics.current_drawdown > 5 ? 'down' : 'neutral'} icon={Activity} tooltip="Current drawdown from peak" />
-                    <MetricCard label="Leverage" value={riskMetrics?.leverage || 0} format="number" icon={BarChart3} tooltip="Portfolio leverage ratio" />
                   </div>
 
+                  {/* Risk Metrics Grid */}
+                  <MetricGrid
+                    items={[
+                      { label: 'VaR (95%)', value: formatCurrency(riskMetrics?.var_95 || 0), color: 'text-[#ef4444]' },
+                      { label: 'Max Drawdown', value: formatPercentage(riskMetrics?.max_drawdown || 0), color: 'text-[#ef4444]' },
+                      { label: 'Current Drawdown', value: formatPercentage(riskMetrics?.current_drawdown || 0), color: riskMetrics && riskMetrics.current_drawdown > 5 ? 'text-[#ef4444]' : 'text-gray-200' },
+                      { label: 'Leverage', value: (riskMetrics?.leverage || 0).toFixed(2), color: 'text-gray-200' },
+                    ]}
+                    cols={2}
+                  />
+
                   {/* Risk Limits */}
-                  <PanelHeader title="Risk Limits" panelId="risk-limits-card">
-                    <div className="p-3 space-y-3">
-                      {riskParams && riskMetrics && (
-                        <>
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-xs">
-                              <span className="text-muted-foreground">Position Size</span>
-                              <span className="font-mono font-semibold">
-                                {formatPercentage(accountBalance && accountBalance > 0 && positions.length > 0 ? Math.max(...positions.map(p => (Math.abs((p as any).invested_amount || p.quantity * p.current_price) / accountBalance) * 100)) : 0)} / {formatPercentage(riskParams.max_position_size * 100)}
-                              </span>
-                            </div>
-                            <Progress value={accountBalance && accountBalance > 0 && positions.length > 0 ? (Math.max(...positions.map(p => (Math.abs((p as any).invested_amount || p.quantity * p.current_price) / accountBalance) * 100)) / (riskParams.max_position_size * 100)) * 100 : 0} className="h-1.5" />
+                  <SectionLabel>Risk Limits</SectionLabel>
+                  <div className="space-y-3">
+                    {riskParams && riskMetrics && (
+                      <>
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Position Size</span>
+                            <span className="font-mono font-semibold">
+                              {formatPercentage(accountBalance && accountBalance > 0 && positions.length > 0 ? Math.max(...positions.map(p => (Math.abs((p as any).invested_amount || p.quantity * p.current_price) / accountBalance) * 100)) : 0)} / {formatPercentage(riskParams.max_position_size * 100)}
+                            </span>
                           </div>
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-xs">
-                              <span className="text-muted-foreground">Portfolio Exposure</span>
-                              <span className="font-mono font-semibold">
-                                {formatPercentage(accountBalance && accountBalance > 0 ? (riskMetrics.total_exposure / accountBalance) * 100 : 0)} / {formatPercentage(riskParams.max_portfolio_exposure * 100)}
-                              </span>
-                            </div>
-                            <Progress value={accountBalance && accountBalance > 0 ? ((riskMetrics.total_exposure / accountBalance) * 100 / (riskParams.max_portfolio_exposure * 100)) * 100 : 0} className="h-1.5" />
+                          <Progress value={accountBalance && accountBalance > 0 && positions.length > 0 ? (Math.max(...positions.map(p => (Math.abs((p as any).invested_amount || p.quantity * p.current_price) / accountBalance) * 100)) / (riskParams.max_position_size * 100)) * 100 : 0} className="h-1.5" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Portfolio Exposure</span>
+                            <span className="font-mono font-semibold">
+                              {formatPercentage(accountBalance && accountBalance > 0 ? (riskMetrics.total_exposure / accountBalance) * 100 : 0)} / {formatPercentage(riskParams.max_portfolio_exposure * 100)}
+                            </span>
                           </div>
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-xs">
-                              <span className="text-muted-foreground">Daily Loss</span>
-                              <span className="font-mono font-semibold">
-                                {formatPercentage(riskMetrics.current_drawdown)} / {formatPercentage(riskParams.max_daily_loss * 100)}
-                              </span>
-                            </div>
-                            <Progress value={(riskMetrics.current_drawdown / (riskParams.max_daily_loss * 100)) * 100} className="h-1.5" />
+                          <Progress value={accountBalance && accountBalance > 0 ? ((riskMetrics.total_exposure / accountBalance) * 100 / (riskParams.max_portfolio_exposure * 100)) * 100 : 0} className="h-1.5" />
+                        </div>
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Daily Loss</span>
+                            <span className="font-mono font-semibold">
+                              {formatPercentage(riskMetrics.current_drawdown)} / {formatPercentage(riskParams.max_daily_loss * 100)}
+                            </span>
                           </div>
-                        </>
-                      )}
-                    </div>
-                  </PanelHeader>
+                          <Progress value={(riskMetrics.current_drawdown / (riskParams.max_daily_loss * 100)) * 100} className="h-1.5" />
+                        </div>
+                      </>
+                    )}
+                  </div>
 
                   {/* Risk Alerts */}
-                  <PanelHeader title="Risk Alerts" panelId="risk-alerts-card">
-                    <div className="p-3">
-                      {riskAlerts.length > 0 ? (
-                        <div className="space-y-2">
-                          {riskAlerts.map(alert => (
-                            <div key={alert.id} className={cn(
-                              'p-2 rounded-lg border',
-                              alert.severity === 'danger' && 'bg-accent-red/5 border-accent-red/30',
-                              alert.severity === 'warning' && 'bg-yellow-500/5 border-yellow-500/30',
-                              alert.severity === 'info' && 'bg-blue-500/5 border-blue-500/30'
-                            )}>
-                              <div className="flex items-start gap-2">
-                                {alert.severity === 'danger' && <AlertCircle className="h-3.5 w-3.5 text-accent-red flex-shrink-0 mt-0.5" />}
-                                {alert.severity === 'warning' && <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />}
-                                {alert.severity === 'info' && <Activity className="h-3.5 w-3.5 text-blue-400 flex-shrink-0 mt-0.5" />}
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-semibold">{alert.title}</p>
-                                  <p className="text-[10px] text-muted-foreground">{alert.message}</p>
-                                </div>
-                              </div>
+                  <SectionLabel>Risk Alerts</SectionLabel>
+                  {riskAlerts.length > 0 ? (
+                    <div className="space-y-2">
+                      {riskAlerts.map(alert => (
+                        <div key={alert.id} className={cn(
+                          'p-2 rounded-lg border',
+                          alert.severity === 'danger' && 'bg-accent-red/5 border-accent-red/30',
+                          alert.severity === 'warning' && 'bg-yellow-500/5 border-yellow-500/30',
+                          alert.severity === 'info' && 'bg-blue-500/5 border-blue-500/30'
+                        )}>
+                          <div className="flex items-start gap-2">
+                            {alert.severity === 'danger' && <AlertCircle className="h-3.5 w-3.5 text-accent-red flex-shrink-0 mt-0.5" />}
+                            {alert.severity === 'warning' && <AlertTriangle className="h-3.5 w-3.5 text-yellow-400 flex-shrink-0 mt-0.5" />}
+                            {alert.severity === 'info' && <Activity className="h-3.5 w-3.5 text-blue-400 flex-shrink-0 mt-0.5" />}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold">{alert.title}</p>
+                              <p className="text-[10px] text-muted-foreground">{alert.message}</p>
                             </div>
-                          ))}
+                          </div>
                         </div>
-                      ) : (
-                        <div className="text-center py-4 text-muted-foreground">
-                          <Shield className="h-8 w-8 mx-auto mb-1 opacity-50" />
-                          <p className="text-xs">No active risk alerts</p>
-                        </div>
-                      )}
+                      ))}
                     </div>
-                  </PanelHeader>
+                  ) : (
+                    <div className="text-center py-4 text-muted-foreground">
+                      <Shield className="h-8 w-8 mx-auto mb-1 opacity-50" />
+                      <p className="text-xs">No active risk alerts</p>
+                    </div>
+                  )}
                 </TabsContent>
 
                 {/* Positions Tab */}
                 <TabsContent value="positions" className="space-y-2 mt-2">
-                  <PanelHeader title="Position Risk Analysis" panelId="risk-positions-card">
-                    <div className="p-3">
-                      <div className="flex flex-col sm:flex-row gap-2 mb-3">
-                        <div className="relative flex-1">
-                          <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                          <Input placeholder="Search symbol..." value={positionSearch} onChange={(e) => setPositionSearch(e.target.value)} className="pl-8 h-8 text-xs" />
-                        </div>
-                        <Select value={riskLevelFilter} onValueChange={setRiskLevelFilter}>
-                          <SelectTrigger className="w-[120px] h-8 text-xs">
-                            <SelectValue placeholder="Risk Level" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All Levels</SelectItem>
-                            <SelectItem value="low">Low</SelectItem>
-                            <SelectItem value="medium">Medium</SelectItem>
-                            <SelectItem value="high">High</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {filteredPositions.length > 0 ? (
-                        <div className="max-h-[400px] overflow-y-auto">
-                          <DataTable columns={positionRiskColumns} data={filteredPositions} pageSize={20} showPagination={true} />
-                        </div>
-                      ) : (
-                        <div className="text-center py-8 text-xs text-muted-foreground">
-                          {positionSearch || riskLevelFilter !== 'all' ? 'No positions match your filters' : 'No open positions'}
-                        </div>
-                      )}
+                  <SectionLabel>Position Risk Analysis</SectionLabel>
+                  <FilterBar
+                    searchValue={positionSearch}
+                    onSearchChange={setPositionSearch}
+                    searchPlaceholder="Search symbol..."
+                  >
+                    <Select value={riskLevelFilter} onValueChange={setRiskLevelFilter}>
+                      <SelectTrigger className="w-[120px] h-7 text-xs">
+                        <SelectValue placeholder="Risk Level" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Levels</SelectItem>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </FilterBar>
+                  {filteredPositions.length > 0 ? (
+                    <div className="max-h-[400px] overflow-y-auto">
+                      <DataTable columns={positionRiskColumns} data={filteredPositions} pageSize={20} showPagination={true} />
                     </div>
-                  </PanelHeader>
+                  ) : (
+                    <div className="text-center py-8 text-xs text-muted-foreground">
+                      {positionSearch || riskLevelFilter !== 'all' ? 'No positions match your filters' : 'No open positions'}
+                    </div>
+                  )}
                 </TabsContent>
 
                 {/* Advanced Tab */}
                 <TabsContent value="advanced" className="space-y-2 mt-2">
                   {/* VaR Section */}
-                  <PanelHeader title="Value at Risk (VaR)" panelId="risk-var-card">
-                    <div className="p-3">
-                      <p className="text-[10px] text-muted-foreground mb-2">
-                        Historical simulation using {advancedRisk?.var?.trading_days_used || 252} trading days
-                      </p>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5">
-                          <p className="text-[10px] text-muted-foreground mb-1">95% VaR (Daily)</p>
-                          <p className="text-xl font-bold font-mono text-yellow-400">{formatCurrency(advancedRisk?.var?.var_95 || 0)}</p>
-                        </div>
-                        <div className="p-3 rounded-lg border border-accent-red/30 bg-accent-red/5">
-                          <p className="text-[10px] text-muted-foreground mb-1">99% VaR (Daily)</p>
-                          <p className="text-xl font-bold font-mono text-accent-red">{formatCurrency(advancedRisk?.var?.var_99 || 0)}</p>
-                        </div>
-                      </div>
+                  <SectionLabel>Value at Risk (VaR)</SectionLabel>
+                  <p className="text-[10px] text-muted-foreground mb-2">
+                    Historical simulation using {advancedRisk?.var?.trading_days_used || 252} trading days
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5">
+                      <p className="text-[10px] text-muted-foreground mb-1">95% VaR (Daily)</p>
+                      <p className="text-xl font-bold font-mono text-yellow-400">{formatCurrency(advancedRisk?.var?.var_95 || 0)}</p>
                     </div>
-                  </PanelHeader>
+                    <div className="p-3 rounded-lg border border-accent-red/30 bg-accent-red/5">
+                      <p className="text-[10px] text-muted-foreground mb-1">99% VaR (Daily)</p>
+                      <p className="text-xl font-bold font-mono text-accent-red">{formatCurrency(advancedRisk?.var?.var_99 || 0)}</p>
+                    </div>
+                  </div>
 
                   {/* Stress Tests */}
-                  <PanelHeader title="Stress Test Scenarios" panelId="risk-stress-card">
-                    <div className="p-3">
-                      {(advancedRisk?.stress_tests || []).length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                          {(advancedRisk?.stress_tests || []).map((scenario: any, idx: number) => (
-                            <div key={idx} className={cn(
-                              'p-3 rounded-lg border',
-                              scenario.estimated_loss_pct > 5 ? 'border-accent-red/30 bg-accent-red/5' : scenario.estimated_loss_pct > 2 ? 'border-yellow-500/30 bg-yellow-500/5' : 'border-blue-500/30 bg-blue-500/5'
-                            )}>
-                              <div className="flex items-start justify-between mb-1">
-                                <p className="text-xs font-semibold">{scenario.name}</p>
-                                <span className={cn('text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded', scenario.estimated_loss_pct > 5 ? 'bg-accent-red/20 text-accent-red' : scenario.estimated_loss_pct > 2 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400')}>
-                                  -{formatPercentage(scenario.estimated_loss_pct)}
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-muted-foreground mb-1">{scenario.description}</p>
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-mono font-semibold text-accent-red">-{formatCurrency(scenario.estimated_loss)}</span>
-                                <span className="text-[10px] text-muted-foreground">{scenario.affected_positions} affected</span>
-                              </div>
-                            </div>
-                          ))}
+                  <SectionLabel>Stress Test Scenarios</SectionLabel>
+                  {(advancedRisk?.stress_tests || []).length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {(advancedRisk?.stress_tests || []).map((scenario: any, idx: number) => (
+                        <div key={idx} className={cn(
+                          'p-3 rounded-lg border',
+                          scenario.estimated_loss_pct > 5 ? 'border-accent-red/30 bg-accent-red/5' : scenario.estimated_loss_pct > 2 ? 'border-yellow-500/30 bg-yellow-500/5' : 'border-blue-500/30 bg-blue-500/5'
+                        )}>
+                          <div className="flex items-start justify-between mb-1">
+                            <p className="text-xs font-semibold">{scenario.name}</p>
+                            <span className={cn('text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded', scenario.estimated_loss_pct > 5 ? 'bg-accent-red/20 text-accent-red' : scenario.estimated_loss_pct > 2 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400')}>
+                              -{formatPercentage(scenario.estimated_loss_pct)}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mb-1">{scenario.description}</p>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-mono font-semibold text-accent-red">-{formatCurrency(scenario.estimated_loss)}</span>
+                            <span className="text-[10px] text-muted-foreground">{scenario.affected_positions} affected</span>
+                          </div>
                         </div>
-                      ) : (
-                        <div className="text-center py-6 text-muted-foreground">
-                          <Zap className="h-8 w-8 mx-auto mb-1 opacity-50" />
-                          <p className="text-xs">No open positions for stress testing</p>
-                        </div>
-                      )}
+                      ))}
                     </div>
-                  </PanelHeader>
+                  ) : (
+                    <div className="text-center py-6 text-muted-foreground">
+                      <Zap className="h-8 w-8 mx-auto mb-1 opacity-50" />
+                      <p className="text-xs">No open positions for stress testing</p>
+                    </div>
+                  )}
 
                   {/* CIO Risk Metrics */}
                   {cioRisk && (
-                    <PanelHeader title="CIO Risk Metrics" panelId="risk-cio-card">
-                      <div className="p-3 space-y-3">
+                    <>
+                      <SectionLabel>CIO Risk Metrics</SectionLabel>
+                      <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-3">
                           <div className="p-2 rounded border border-[var(--color-dark-border)]">
                             <p className="text-[10px] text-muted-foreground mb-0.5">Gross Exposure</p>
@@ -694,7 +685,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                           </div>
                         </div>
                       </div>
-                    </PanelHeader>
+                    </>
                   )}
                 </TabsContent>
 
@@ -716,32 +707,27 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                   </div>
                   {riskHistory.length > 0 ? (
                     <>
-                      <PanelHeader title="VaR Over Time" panelId="risk-var-history">
-                        <div className="p-3">
-                          <ResponsiveContainer width="100%" height={180}>
-                            <LineChart data={riskHistoryData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                              <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '10px' }} />
-                              <YAxis stroke="#9ca3af" style={{ fontSize: '10px' }} tickFormatter={(value) => `${(value / 1000).toFixed(1)}k`} />
-                              <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', fontSize: '11px' }} formatter={(value: number | undefined) => value !== undefined ? [`${(value ?? 0).toFixed(0)}`, 'VaR'] : ['', 'VaR']} />
-                              <Line type="monotone" dataKey="var_95" stroke="#ef4444" strokeWidth={2} dot={false} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </PanelHeader>
-                      <PanelHeader title="Drawdown Over Time" panelId="risk-dd-history">
-                        <div className="p-3">
-                          <ResponsiveContainer width="100%" height={180}>
-                            <AreaChart data={riskHistoryData}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                              <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '10px' }} />
-                              <YAxis stroke="#9ca3af" style={{ fontSize: '10px' }} tickFormatter={(value) => `${(value ?? 0).toFixed(1)}%`} />
-                              <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', fontSize: '11px' }} formatter={(value: number | undefined) => value !== undefined ? [`${(value ?? 0).toFixed(2)}%`, 'Drawdown'] : ['', 'Drawdown']} />
-                              <Area type="monotone" dataKey="drawdown" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.3} strokeWidth={2} />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </PanelHeader>
+                      <SectionLabel>VaR Over Time</SectionLabel>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <LineChart data={riskHistoryData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '10px' }} />
+                          <YAxis stroke="#9ca3af" style={{ fontSize: '10px' }} tickFormatter={(value) => `${(value / 1000).toFixed(1)}k`} />
+                          <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', fontSize: '11px' }} formatter={(value: number | undefined) => value !== undefined ? [`${(value ?? 0).toFixed(0)}`, 'VaR'] : ['', 'VaR']} />
+                          <Line type="monotone" dataKey="var_95" stroke="#ef4444" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+
+                      <SectionLabel>Drawdown Over Time</SectionLabel>
+                      <ResponsiveContainer width="100%" height={180}>
+                        <AreaChart data={riskHistoryData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '10px' }} />
+                          <YAxis stroke="#9ca3af" style={{ fontSize: '10px' }} tickFormatter={(value) => `${(value ?? 0).toFixed(1)}%`} />
+                          <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', fontSize: '11px' }} formatter={(value: number | undefined) => value !== undefined ? [`${(value ?? 0).toFixed(2)}%`, 'Drawdown'] : ['', 'Drawdown']} />
+                          <Area type="monotone" dataKey="drawdown" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.3} strokeWidth={2} />
+                        </AreaChart>
+                      </ResponsiveContainer>
                     </>
                   ) : (
                     <div className="border border-dashed border-muted-foreground/30 rounded-lg p-6 text-center">
@@ -756,47 +742,41 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
                 {/* Exposure Tab */}
                 <TabsContent value="exposure" className="space-y-2 mt-2">
-                  <PanelHeader title="Sector Exposure" panelId="risk-sector-exposure-tab">
-                    <div className="p-3">
-                      {sectorPieData.length > 0 ? (
-                        <ResponsiveContainer width="100%" height={220}>
-                          <PieChart>
-                            <Pie data={sectorPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                              {sectorPieData.map((_, idx) => (
-                                <Cell key={idx} fill={SECTOR_COLORS[idx % SECTOR_COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <RechartsTooltip contentStyle={{ ...chartTheme.tooltip, fontFamily: chartTheme.fontFamily, fontSize: 11 }} formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(0)}`, 'Invested']} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      ) : (
-                        <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No position data</div>
-                      )}
-                    </div>
-                  </PanelHeader>
+                  <SectionLabel>Sector Exposure</SectionLabel>
+                  {sectorPieData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <PieChart>
+                        <Pie data={sectorPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}>
+                          {sectorPieData.map((_, idx) => (
+                            <Cell key={idx} fill={SECTOR_COLORS[idx % SECTOR_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip contentStyle={{ ...chartTheme.tooltip, fontFamily: chartTheme.fontFamily, fontSize: 11 }} formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(0)}`, 'Invested']} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No position data</div>
+                  )}
 
                   {/* Long/Short Exposure */}
-                  <PanelHeader title="Long/Short Exposure" panelId="risk-longshort-tab">
-                    <div className="p-3">
-                      {riskHistory.length > 0 ? (
-                        <InteractiveChart
-                          data={riskHistory.map((h: any) => ({
-                            date: h.date,
-                            long: Math.abs(h.exposure || 0) * 0.7,
-                            short: -(Math.abs(h.exposure || 0) * 0.3),
-                          }))}
-                          dataKeys={[
-                            { key: 'long', color: designColors.green, type: 'area' },
-                            { key: 'short', color: designColors.red, type: 'area' },
-                          ]}
-                          xAxisKey="date"
-                          height={200}
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No exposure history data</div>
-                      )}
-                    </div>
-                  </PanelHeader>
+                  <SectionLabel>Long/Short Exposure</SectionLabel>
+                  {riskHistory.length > 0 ? (
+                    <InteractiveChart
+                      data={riskHistory.map((h: any) => ({
+                        date: h.date,
+                        long: Math.abs(h.exposure || 0) * 0.7,
+                        short: -(Math.abs(h.exposure || 0) * 0.3),
+                      }))}
+                      dataKeys={[
+                        { key: 'long', color: designColors.green, type: 'area' },
+                        { key: 'short', color: designColors.red, type: 'area' },
+                      ]}
+                      xAxisKey="date"
+                      height={200}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No exposure history data</div>
+                  )}
                 </TabsContent>
               </div>
             </Tabs>
