@@ -72,7 +72,7 @@ function DataTableComponent<TData, TValue>({
   return (
     <div className={cn('space-y-4', className)}>
       <div className="rounded-md border border-border overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-xs">
           <thead>
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} className="border-b border-dark-border">

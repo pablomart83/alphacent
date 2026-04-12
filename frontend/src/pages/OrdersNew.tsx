@@ -1081,7 +1081,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               key={tab.value}
               onClick={() => { setOrdersTab(tab.value); if (tab.value === 'analytics') fetchExecutionQuality(); }}
               className={cn(
-                'px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap transition-colors shrink-0',
+                'px-3 py-1 text-[13px] font-medium rounded whitespace-nowrap transition-colors shrink-0',
                 ordersTab === tab.value
                   ? 'bg-gray-700/60 text-gray-100'
                   : cn('text-gray-500 hover:text-gray-300 hover:bg-gray-800/40', tab.highlight && 'text-amber-400')

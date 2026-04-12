@@ -914,7 +914,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           key={tab.id}
           onClick={() => setActiveTab(tab.id)}
           className={cn(
-            'px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap transition-colors shrink-0',
+            'px-3 py-1 text-[13px] font-medium rounded whitespace-nowrap transition-colors shrink-0',
             activeTab === tab.id
               ? 'bg-gray-700/60 text-gray-100'
               : cn('text-gray-500 hover:text-gray-300 hover:bg-gray-800/40', tab.highlight)

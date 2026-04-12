@@ -420,7 +420,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
               key={tab.value}
               onClick={() => setRiskTab(tab.value)}
               className={cn(
-                'px-2.5 py-1 text-xs font-medium rounded whitespace-nowrap transition-colors shrink-0',
+                'px-3 py-1 text-[13px] font-medium rounded whitespace-nowrap transition-colors shrink-0',
                 riskTab === tab.value
                   ? 'bg-gray-700/60 text-gray-100'
                   : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/40'
