@@ -4,7 +4,7 @@ import { Search, RefreshCw, AlertCircle, Eye } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
 import { DataTable } from '../components/trading/DataTable';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
+import { SectionLabel } from '../components/ui/SectionLabel';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -236,58 +236,54 @@ export const WatchlistPage: FC<WatchlistPageProps> = ({ onLogout }) => {
         <RefreshIndicator visible={pollingRefreshing && !loading} />
 
         {/* Filters */}
-        <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div className="relative lg:col-span-2">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-                <Input
-                  placeholder="Search by symbol..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <Select value={assetClassFilter} onValueChange={setAssetClassFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Asset Class" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Asset Classes</SelectItem>
-                  <SelectItem value="stock">Stocks</SelectItem>
-                  <SelectItem value="etf">ETFs</SelectItem>
-                  <SelectItem value="forex">Forex</SelectItem>
-                  <SelectItem value="index">Indices</SelectItem>
-                  <SelectItem value="commodity">Commodities</SelectItem>
-                  <SelectItem value="crypto">Crypto</SelectItem>
-                </SelectContent>
-              </Select>
+        <div className="mb-6 border border-border rounded-md p-4">
+          <SectionLabel>Filters</SectionLabel>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="relative lg:col-span-2">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+              <Input
+                placeholder="Search by symbol..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
             </div>
-          </CardContent>
-        </Card>
+            <Select value={assetClassFilter} onValueChange={setAssetClassFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Asset Class" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Asset Classes</SelectItem>
+                <SelectItem value="stock">Stocks</SelectItem>
+                <SelectItem value="etf">ETFs</SelectItem>
+                <SelectItem value="forex">Forex</SelectItem>
+                <SelectItem value="index">Indices</SelectItem>
+                <SelectItem value="commodity">Commodities</SelectItem>
+                <SelectItem value="crypto">Crypto</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
         {/* Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Eye className="h-5 w-5" />
-                Market Data
-              </span>
-              <span className="text-sm font-mono text-gray-400">
-                {filteredRows.length} of {rows.length} symbols
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <DataTable columns={columns} data={filteredRows} pageSize={25} />
-            {rows.length > 0 && (
-              <p className="text-xs text-gray-500 mt-4 font-mono">
-                Data sourced from open positions. Change values reflect unrealized P&L. Real-time updates via WebSocket.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+        <div className="border border-border rounded-md p-4">
+          <SectionLabel actions={
+            <span className="text-[10px] font-mono text-gray-400">
+              {filteredRows.length} of {rows.length} symbols
+            </span>
+          }>
+            <span className="flex items-center gap-2">
+              <Eye className="h-3.5 w-3.5" />
+              Market Data
+            </span>
+          </SectionLabel>
+          <DataTable columns={columns} data={filteredRows} pageSize={25} />
+          {rows.length > 0 && (
+            <p className="text-[10px] text-gray-500 mt-4 font-mono">
+              Data sourced from open positions. Change values reflect unrealized P&L. Real-time updates via WebSocket.
+            </p>
+          )}
+        </div>
       </motion.div>
       </PageTemplate>
     </DashboardLayout>

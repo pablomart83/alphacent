@@ -1,7 +1,7 @@
 import { type FC, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { TrendingUp, Activity } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
+import { SectionLabel } from '../../components/ui/SectionLabel';
 import { MetricCard } from '../../components/trading/MetricCard';
 import { InteractiveChart } from '../../components/charts/InteractiveChart';
 import { DataSection, ChartSkeleton, MetricGridSkeleton } from '../../components/ui/loading-skeletons';
@@ -48,20 +48,18 @@ export const RollingStatisticsTab: FC<RollingStatisticsTabProps> = ({
       onRetry={onRetry}
     >
       {insufficientData ? (
-        <Card>
-          <CardContent className="py-12">
-            <div className="text-center text-muted-foreground font-mono">
-              <Activity className="h-8 w-8 mx-auto mb-3 opacity-50" />
-              <p>Minimum {rollingWindow} trading days required for rolling statistics.</p>
-              <p className="text-sm mt-1">Try selecting a longer period or a shorter rolling window.</p>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="border border-border rounded-md p-12">
+          <div className="text-center text-muted-foreground font-mono">
+            <Activity className="h-8 w-8 mx-auto mb-3 opacity-50" />
+            <p>Minimum {rollingWindow} trading days required for rolling statistics.</p>
+            <p className="text-[10px] mt-1">Try selecting a longer period or a shorter rolling window.</p>
+          </div>
+        </div>
       ) : data ? (
         <>
           {/* Window size toggle */}
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground font-mono">Window:</span>
+            <span className="text-[10px] text-muted-foreground font-mono">Window:</span>
             {WINDOWS.map((w) => (
               <button
                 key={w}
@@ -111,58 +109,50 @@ export const RollingStatisticsTab: FC<RollingStatisticsTabProps> = ({
 
           {/* Rolling charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader><CardTitle className="text-base">Rolling Sharpe Ratio ({rollingWindow}d)</CardTitle></CardHeader>
-              <CardContent>
-                <InteractiveChart
-                  data={data.rolling_sharpe.map(d => ({ date: d.date, sharpe: d.value }))}
-                  dataKeys={[{ key: 'sharpe', color: chartTheme.series.portfolio, type: 'line' }]}
-                  xAxisKey="date"
-                  height={250}
-                  showZoom
-                  tooltipFormatter={(v: number) => [v.toFixed(3), 'Sharpe']}
-                />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-base">Rolling Beta vs SPY ({rollingWindow}d)</CardTitle></CardHeader>
-              <CardContent>
-                <InteractiveChart
-                  data={data.rolling_beta.map(d => ({ date: d.date, beta: d.value }))}
-                  dataKeys={[{ key: 'beta', color: '#eab308', type: 'line' }]}
-                  xAxisKey="date"
-                  height={250}
-                  showZoom
-                  tooltipFormatter={(v: number) => [v.toFixed(3), 'Beta']}
-                />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-base">Rolling Alpha ({rollingWindow}d)</CardTitle></CardHeader>
-              <CardContent>
-                <InteractiveChart
-                  data={data.rolling_alpha.map(d => ({ date: d.date, alpha: d.value }))}
-                  dataKeys={[{ key: 'alpha', color: chartTheme.series.alpha, type: 'area' }]}
-                  xAxisKey="date"
-                  height={250}
-                  showZoom
-                  tooltipFormatter={(v: number) => [`${v.toFixed(3)}%`, 'Alpha']}
-                />
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-base">Rolling Volatility ({rollingWindow}d)</CardTitle></CardHeader>
-              <CardContent>
-                <InteractiveChart
-                  data={data.rolling_volatility.map(d => ({ date: d.date, volatility: d.value }))}
-                  dataKeys={[{ key: 'volatility', color: chartTheme.series.drawdown, type: 'area' }]}
-                  xAxisKey="date"
-                  height={250}
-                  showZoom
-                  tooltipFormatter={(v: number) => [`${v.toFixed(3)}%`, 'Volatility']}
-                />
-              </CardContent>
-            </Card>
+            <div className="border border-border rounded-md p-4">
+              <SectionLabel>Rolling Sharpe Ratio ({rollingWindow}d)</SectionLabel>
+              <InteractiveChart
+                data={data.rolling_sharpe.map(d => ({ date: d.date, sharpe: d.value }))}
+                dataKeys={[{ key: 'sharpe', color: chartTheme.series.portfolio, type: 'line' }]}
+                xAxisKey="date"
+                height={250}
+                showZoom
+                tooltipFormatter={(v: number) => [v.toFixed(3), 'Sharpe']}
+              />
+            </div>
+            <div className="border border-border rounded-md p-4">
+              <SectionLabel>Rolling Beta vs SPY ({rollingWindow}d)</SectionLabel>
+              <InteractiveChart
+                data={data.rolling_beta.map(d => ({ date: d.date, beta: d.value }))}
+                dataKeys={[{ key: 'beta', color: '#eab308', type: 'line' }]}
+                xAxisKey="date"
+                height={250}
+                showZoom
+                tooltipFormatter={(v: number) => [v.toFixed(3), 'Beta']}
+              />
+            </div>
+            <div className="border border-border rounded-md p-4">
+              <SectionLabel>Rolling Alpha ({rollingWindow}d)</SectionLabel>
+              <InteractiveChart
+                data={data.rolling_alpha.map(d => ({ date: d.date, alpha: d.value }))}
+                dataKeys={[{ key: 'alpha', color: chartTheme.series.alpha, type: 'area' }]}
+                xAxisKey="date"
+                height={250}
+                showZoom
+                tooltipFormatter={(v: number) => [`${v.toFixed(3)}%`, 'Alpha']}
+              />
+            </div>
+            <div className="border border-border rounded-md p-4">
+              <SectionLabel>Rolling Volatility ({rollingWindow}d)</SectionLabel>
+              <InteractiveChart
+                data={data.rolling_volatility.map(d => ({ date: d.date, volatility: d.value }))}
+                dataKeys={[{ key: 'volatility', color: chartTheme.series.drawdown, type: 'area' }]}
+                xAxisKey="date"
+                height={250}
+                showZoom
+                tooltipFormatter={(v: number) => [`${v.toFixed(3)}%`, 'Volatility']}
+              />
+            </div>
           </div>
         </>
       ) : null}

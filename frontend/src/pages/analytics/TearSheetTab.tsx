@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/Card';
+import { SectionLabel } from '../../components/ui/SectionLabel';
 import { UnderwaterPlot } from '../../components/charts/UnderwaterPlot';
 import { ReturnDistribution } from '../../components/charts/ReturnDistribution';
 import { MonthlyReturnsHeatmap } from '../../components/charts/MonthlyReturnsHeatmap';
@@ -52,112 +52,92 @@ export const TearSheetTab: FC<TearSheetTabProps> = ({
           {/* Underwater Plot */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Underwater Plot (Drawdown from Peak)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <UnderwaterPlot data={data.underwater_plot} height={280} />
-              </CardContent>
-            </Card>
+            <div className="border border-border rounded-md p-4">
+              <SectionLabel>Underwater Plot (Drawdown from Peak)</SectionLabel>
+              <UnderwaterPlot data={data.underwater_plot} height={280} />
+            </div>
           </motion.div>
 
           {/* Worst Drawdowns Table */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.05 }}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Worst Drawdowns</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border">
-                        {['Rank', 'Start Date', 'Trough Date', 'Recovery Date', 'Depth', 'Duration (days)', 'Recovery (days)'].map(h => (
-                          <th key={h} className="px-3 py-2 text-left text-xs font-mono text-muted-foreground">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.worst_drawdowns.map((dd, i) => (
-                        <tr key={dd.rank} className={cn('border-b border-border/50', i % 2 === 0 && 'bg-muted/30')}>
-                          <td className="px-3 py-2 font-mono font-semibold">{dd.rank}</td>
-                          <td className="px-3 py-2 font-mono text-sm">{dd.start_date}</td>
-                          <td className="px-3 py-2 font-mono text-sm">{dd.trough_date}</td>
-                          <td className="px-3 py-2 font-mono text-sm">{dd.recovery_date ?? '—'}</td>
-                          <td className="px-3 py-2 font-mono text-sm text-accent-red">{formatPercentage(dd.depth_pct)}</td>
-                          <td className="px-3 py-2 font-mono text-sm">{dd.duration_days}</td>
-                          <td className="px-3 py-2 font-mono text-sm">{dd.recovery_days ?? '—'}</td>
-                        </tr>
+            <div className="border border-border rounded-md p-4">
+              <SectionLabel>Worst Drawdowns</SectionLabel>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      {['Rank', 'Start Date', 'Trough Date', 'Recovery Date', 'Depth', 'Duration (days)', 'Recovery (days)'].map(h => (
+                        <th key={h} className="px-3 py-2 text-left text-xs font-mono text-muted-foreground">{h}</th>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.worst_drawdowns.map((dd, i) => (
+                      <tr key={dd.rank} className={cn('border-b border-border/50', i % 2 === 0 && 'bg-muted/30')}>
+                        <td className="px-3 py-2 font-mono font-semibold">{dd.rank}</td>
+                        <td className="px-3 py-2 font-mono text-sm">{dd.start_date}</td>
+                        <td className="px-3 py-2 font-mono text-sm">{dd.trough_date}</td>
+                        <td className="px-3 py-2 font-mono text-sm">{dd.recovery_date ?? '—'}</td>
+                        <td className="px-3 py-2 font-mono text-sm text-accent-red">{formatPercentage(dd.depth_pct)}</td>
+                        <td className="px-3 py-2 font-mono text-sm">{dd.duration_days}</td>
+                        <td className="px-3 py-2 font-mono text-sm">{dd.recovery_days ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </motion.div>
 
           {/* Return Distribution */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.1 }}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Return Distribution</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ReturnDistribution
-                  data={data.return_distribution}
-                  skew={data.skew}
-                  kurtosis={data.kurtosis}
-                  height={280}
-                />
-              </CardContent>
-            </Card>
+            <div className="border border-border rounded-md p-4">
+              <SectionLabel>Return Distribution</SectionLabel>
+              <ReturnDistribution
+                data={data.return_distribution}
+                skew={data.skew}
+                kurtosis={data.kurtosis}
+                height={280}
+              />
+            </div>
           </motion.div>
 
           {/* Cumulative Returns by Year */}
           {data.annual_returns.length > 0 && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.15 }}>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Cumulative Returns by Year</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={data.annual_returns}>
-                      <CartesianGrid {...chartGridProps} />
-                      <XAxis dataKey="year" {...chartAxisProps} />
-                      <YAxis {...chartAxisProps} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-                      <Tooltip
-                        contentStyle={{ ...chartTooltipStyle, fontFamily: chartTheme.fontFamily, fontSize: 11 }}
-                        formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(2)}%`, 'Return']}
-                        labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-                      />
-                      <Bar dataKey="return_pct" radius={[4, 4, 0, 0]}>
-                        {data.annual_returns.map((entry, idx) => (
-                          <Cell key={idx} fill={entry.return_pct >= 0 ? colors.green : colors.red} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
+              <div className="border border-border rounded-md p-4">
+                <SectionLabel>Cumulative Returns by Year</SectionLabel>
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={data.annual_returns}>
+                    <CartesianGrid {...chartGridProps} />
+                    <XAxis dataKey="year" {...chartAxisProps} />
+                    <YAxis {...chartAxisProps} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
+                    <Tooltip
+                      contentStyle={{ ...chartTooltipStyle, fontFamily: chartTheme.fontFamily, fontSize: 11 }}
+                      formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(2)}%`, 'Return']}
+                      labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
+                    />
+                    <Bar dataKey="return_pct" radius={[4, 4, 0, 0]}>
+                      {data.annual_returns.map((entry, idx) => (
+                        <Cell key={idx} fill={entry.return_pct >= 0 ? colors.green : colors.red} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </motion.div>
           )}
 
           {/* Monthly Returns Heatmap */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3, delay: 0.2 }}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Monthly Returns Heatmap</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <MonthlyReturnsHeatmap data={data.monthly_returns} />
-              </CardContent>
-            </Card>
+            <div className="border border-border rounded-md p-4">
+              <SectionLabel>Monthly Returns Heatmap</SectionLabel>
+              <MonthlyReturnsHeatmap data={data.monthly_returns} />
+            </div>
           </motion.div>
         </>
       ) : null}
