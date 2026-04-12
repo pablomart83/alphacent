@@ -1580,7 +1580,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         panelId="orders-side"
         onRefresh={fetchExecutionQuality}
       >
-        <div className="flex flex-col gap-2 p-2 h-full">
+        <div className="flex flex-col gap-2 p-2 overflow-auto">
           {/* CompactMetricRow: total orders, fill rate, avg slippage, pending */}
           <CompactMetricRow metrics={sideMetrics} />
 
@@ -1628,7 +1628,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
           </div>
 
           {/* Recent Fills List */}
-          <div className="border border-[var(--color-dark-border)] rounded-lg p-3 flex-1 min-h-0">
+          <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
             <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">
               Recent Fills ({recentFills.length})
             </div>
