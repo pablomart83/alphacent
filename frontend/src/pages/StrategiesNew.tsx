@@ -7,6 +7,10 @@ import {
 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { DashboardLayout } from '../components/DashboardLayout';
+import { PageTemplate } from '../components/PageTemplate';
+import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
+import { PanelHeader } from '../components/layout/PanelHeader';
+import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
 import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
 import { TemplateManager } from '../components/trading/TemplateManager';
@@ -1268,6 +1272,94 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     },
   ];
 
+  // ── Side panel computed data ──────────────────────────────────────
+  const sideMetrics: CompactMetric[] = useMemo(() => [
+    { label: 'Active', value: summaryMetrics.active, trend: summaryMetrics.active > 0 ? 'up' as const : 'neutral' as const },
+    { label: 'Backtested', value: summaryMetrics.backtested, trend: 'neutral' as const },
+    {
+      label: 'Avg Sharpe',
+      value: activeStrategies.length > 0
+        ? (activeStrategies.reduce((sum, s) => sum + (s.performance_metrics?.sharpe_ratio || 0), 0) / activeStrategies.length).toFixed(2)
+        : 'N/A',
+      trend: 'neutral' as const,
+    },
+    {
+      label: 'Avg Win Rate',
+      value: activeStrategies.length > 0
+        ? formatPercentage(
+            (activeStrategies.reduce((sum, s) => sum + (s.performance_metrics?.win_rate || 0), 0) / activeStrategies.length) * 100
+          )
+        : 'N/A',
+      trend: 'neutral' as const,
+    },
+  ], [summaryMetrics, activeStrategies]);
+
+  // Top 5 template rankings for sidebar
+  const top5Rankings = useMemo(() => {
+    return [...templateRankings]
+      .sort((a: any, b: any) => (b.win_rate ?? 0) - (a.win_rate ?? 0))
+      .slice(0, 5);
+  }, [templateRankings]);
+
+  // Recent lifecycle events (activations, retirements, demotions)
+  const recentLifecycleEvents = useMemo(() => {
+    const events: Array<{ type: string; name: string; timestamp: string; color: string }> = [];
+
+    // Recent activations (strategies that are DEMO/LIVE, sorted by updated_at)
+    activeStrategies
+      .filter(s => s.updated_at)
+      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+      .slice(0, 3)
+      .forEach(s => events.push({
+        type: 'Activated',
+        name: s.name,
+        timestamp: s.updated_at,
+        color: 'text-accent-green',
+      }));
+
+    // Recent retirements
+    retiredStrategies
+      .filter(s => s.retired_at)
+      .sort((a, b) => new Date(b.retired_at!).getTime() - new Date(a.retired_at!).getTime())
+      .slice(0, 3)
+      .forEach(s => events.push({
+        type: 'Retired',
+        name: s.name,
+        timestamp: s.retired_at!,
+        color: 'text-accent-red',
+      }));
+
+    // Recent demotions
+    idleDemotions.slice(0, 3).forEach((d: any) => events.push({
+      type: 'Demoted',
+      name: d.name,
+      timestamp: d.timestamp || '',
+      color: 'text-yellow-400',
+    }));
+
+    return events
+      .filter(e => e.timestamp)
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 8);
+  }, [activeStrategies, retiredStrategies, idleDemotions]);
+
+  // Header actions for PageTemplate
+  const headerActions = (
+    <>
+      <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
+      <Button
+        onClick={fetchStrategies}
+        disabled={refreshing}
+        variant="outline"
+        size="sm"
+        title="Reload strategies from database"
+      >
+        <RefreshCw className={cn('h-4 w-4 mr-2', refreshing && 'animate-spin')} />
+        {refreshing ? 'Refreshing...' : 'Refresh'}
+      </Button>
+    </>
+  );
+
   if (loading || tradingModeLoading) {
     return (
       <DashboardLayout onLogout={onLogout}>
@@ -1293,89 +1385,67 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     );
   }
 
-  return (
-    <DashboardLayout onLogout={onLogout}>
-      <div className="p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto relative">
-        <RefreshIndicator visible={pollingRefreshing && !loading} />
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-6"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-gray-100 font-mono mb-2 flex items-center gap-3">
-                <Target className="h-8 w-8 text-accent-green" />
-                Strategies
-              </h1>
-              <div className="flex items-center gap-3">
-                <p className="text-gray-400 text-sm">
-                  Manage and monitor your trading strategies
-                </p>
-                <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-              </div>
-            </div>
-            <Button
-              onClick={fetchStrategies}
-              disabled={refreshing}
-              variant="outline"
-              size="sm"
-              title="Reload strategies from database"
-            >
-              <RefreshCw className={cn('h-4 w-4 mr-2', refreshing && 'animate-spin')} />
-              {refreshing ? 'Refreshing...' : 'Refresh'}
-            </Button>
-          </div>
-        </motion.div>
+  // ── Main Panel (65%) ─────────────────────────────────────────────────
+  const mainPanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader
+        title="Strategies"
+        panelId="strategies-main"
+        onRefresh={fetchStrategies}
+      >
+        <div className="flex flex-col h-full overflow-hidden">
 
         {/* Tabs */}
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="bg-dark-surface border border-dark-border">
-            <TabsTrigger value="overview" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <BarChart3 className="h-4 w-4 mr-2" />
-              Overview
-            </TabsTrigger>
-            <TabsTrigger value="active" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <TrendingUp className="h-4 w-4 mr-2" />
-              Active ({filteredActiveStrategies.length})
-            </TabsTrigger>
-            <TabsTrigger value="backtested" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <Activity className="h-4 w-4 mr-2" />
-              Backtested ({filteredBacktestedStrategies.length})
-            </TabsTrigger>
-            <TabsTrigger value="retired" onClick={fetchRetiredStrategies} className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <Trash2 className="h-4 w-4 mr-2" />
-              Retired ({filteredRetiredStrategies.length})
-            </TabsTrigger>
-            <TabsTrigger value="templates" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <Layers className="h-4 w-4 mr-2" />
-              DSL Templates
-            </TabsTrigger>
-            <TabsTrigger value="ae-templates" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <Layers className="h-4 w-4 mr-2" />
-              AE Templates
-            </TabsTrigger>
-            <TabsTrigger value="symbols" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <Target className="h-4 w-4 mr-2" />
-              Symbols
-            </TabsTrigger>
-            <TabsTrigger value="rankings" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <Trophy className="h-4 w-4 mr-2" />
-              Rankings
-            </TabsTrigger>
-            <TabsTrigger value="blacklists" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <Ban className="h-4 w-4 mr-2" />
-              Blacklists ({blacklists.length})
-            </TabsTrigger>
-            <TabsTrigger value="demotions" className="data-[state=active]:bg-accent-green/20 data-[state=active]:text-accent-green">
-              <ArrowDownCircle className="h-4 w-4 mr-2" />
-              Demotions ({idleDemotions.length})
-            </TabsTrigger>
-          </TabsList>
+        <Tabs defaultValue="overview" className="flex flex-col h-full">
+          <div className="shrink-0 px-3 pt-2">
+            <TabsList className="w-full overflow-x-auto">
+              <TabsTrigger value="overview" className="gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="active" className="gap-2">
+                <TrendingUp className="h-4 w-4" />
+                Active ({filteredActiveStrategies.length})
+              </TabsTrigger>
+              <TabsTrigger value="backtested" className="gap-2">
+                <Activity className="h-4 w-4" />
+                Backtested ({filteredBacktestedStrategies.length})
+              </TabsTrigger>
+              <TabsTrigger value="retired" onClick={fetchRetiredStrategies} className="gap-2">
+                <Trash2 className="h-4 w-4" />
+                Retired ({filteredRetiredStrategies.length})
+              </TabsTrigger>
+              <TabsTrigger value="templates" className="gap-2">
+                <Layers className="h-4 w-4" />
+                DSL Templates
+              </TabsTrigger>
+              <TabsTrigger value="ae-templates" className="gap-2">
+                <Layers className="h-4 w-4" />
+                AE Templates
+              </TabsTrigger>
+              <TabsTrigger value="symbols" className="gap-2">
+                <Target className="h-4 w-4" />
+                Symbols
+              </TabsTrigger>
+              <TabsTrigger value="rankings" className="gap-2">
+                <Trophy className="h-4 w-4" />
+                Rankings
+              </TabsTrigger>
+              <TabsTrigger value="blacklists" className="gap-2">
+                <Ban className="h-4 w-4" />
+                Blacklists ({blacklists.length})
+              </TabsTrigger>
+              <TabsTrigger value="demotions" className="gap-2">
+                <ArrowDownCircle className="h-4 w-4" />
+                Demotions ({idleDemotions.length})
+              </TabsTrigger>
+            </TabsList>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-auto px-3 pb-2">
 
           {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6">
+          <TabsContent value="overview" className="space-y-4">
             {/* Summary Metrics */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
@@ -1555,10 +1625,9 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           </TabsContent>
 
           {/* Active Strategies Tab */}
-          <TabsContent value="active" className="space-y-6">
+          <TabsContent value="active" className="space-y-4">
             {/* Filters */}
-            <Card>
-              <CardContent className="pt-6">
+            <PanelHeader title="Filters" panelId="strategies-active-filters">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   <div className="relative xl:col-span-2">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
@@ -1717,27 +1786,18 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+            </PanelHeader>
 
             {/* Strategies Table */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5" />
-                    Active Strategies
-                  </span>
-                  <span className="text-sm font-mono text-gray-400">
-                    {selectedStrategies.size > 0 
-                      ? `${selectedStrategies.size} selected of ${filteredActiveStrategies.length} (${activeStrategies.length} total)`
-                      : `${filteredActiveStrategies.length} of ${activeStrategies.length} strategies`
-                    }
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
+            <PanelHeader title="Active Strategies" panelId="strategies-active-table"
+              actions={<span className="text-[10px] font-mono text-gray-400">
+                {selectedStrategies.size > 0 
+                  ? `${selectedStrategies.size} selected of ${filteredActiveStrategies.length}`
+                  : `${filteredActiveStrategies.length} of ${activeStrategies.length}`
+                }
+              </span>}
+            >
+              <div className="overflow-x-auto p-3">
                 <DataTable
                   columns={activeStrategyColumns}
                   data={filteredActiveStrategies}
@@ -1756,16 +1816,14 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
                   }}
                 />
-                </div>
-              </CardContent>
-            </Card>
+              </div>
+            </PanelHeader>
           </TabsContent>
 
           {/* Backtested Strategies Tab */}
-          <TabsContent value="backtested" className="space-y-6">
+          <TabsContent value="backtested" className="space-y-4">
             {/* Filters */}
-            <Card>
-              <CardContent className="pt-6">
+            <PanelHeader title="Filters" panelId="strategies-backtested-filters">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   <div className="relative xl:col-span-2">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
@@ -1880,26 +1938,15 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+            </PanelHeader>
 
             {/* Backtested Strategies Table */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <Activity className="h-5 w-5" />
-                    Backtested Strategies
-                  </span>
-                  <span className="text-sm font-mono text-gray-400">
-                    {selectedStrategies.size > 0 
-                      ? `${selectedStrategies.size} selected of ${filteredBacktestedStrategies.length} (${backtestedStrategies.length} total)`
-                      : `${filteredBacktestedStrategies.length} of ${backtestedStrategies.length} strategies`
-                    }
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
+            <PanelHeader title="Backtested Strategies" panelId="strategies-backtested-table"
+              actions={<span className="text-[10px] font-mono text-gray-400">
+                {filteredBacktestedStrategies.length} of {backtestedStrategies.length}
+              </span>}
+            >
+              <div className="p-3">
                 <DataTable
                   columns={backtestedStrategyColumns}
                   data={filteredBacktestedStrategies}
@@ -1918,15 +1965,14 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
                   }}
                 />
-              </CardContent>
-            </Card>
+              </div>
+            </PanelHeader>
           </TabsContent>
 
           {/* Retired Strategies Tab */}
-          <TabsContent value="retired" className="space-y-6">
+          <TabsContent value="retired" className="space-y-4">
             {/* Filters */}
-            <Card>
-              <CardContent className="pt-6">
+            <PanelHeader title="Filters" panelId="strategies-retired-filters">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                   <div className="relative xl:col-span-2">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
@@ -2024,29 +2070,15 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+            </PanelHeader>
 
             {/* Retired Strategies Table */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <span className="flex items-center gap-2">
-                    <Trash2 className="h-5 w-5" />
-                    Retired Strategies
-                  </span>
-                  <span className="text-sm font-mono text-gray-400">
-                    {selectedStrategies.size > 0 
-                      ? `${selectedStrategies.size} selected of ${filteredRetiredStrategies.length} (${retiredStrategies.length} total)`
-                      : `${filteredRetiredStrategies.length} of ${retiredStrategies.length} strategies`
-                    }
-                  </span>
-                </CardTitle>
-                <CardDescription>
-                  These strategies have been retired. You can permanently delete them from the database.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+            <PanelHeader title="Retired Strategies" panelId="strategies-retired-table"
+              actions={<span className="text-[10px] font-mono text-gray-400">
+                {filteredRetiredStrategies.length} of {retiredStrategies.length}
+              </span>}
+            >
+              <div className="p-3">
                 <DataTable
                   columns={retiredStrategyColumns}
                   data={filteredRetiredStrategies}
@@ -2065,33 +2097,29 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
                   }}
                 />
-              </CardContent>
-            </Card>
+              </div>
+            </PanelHeader>
           </TabsContent>
 
           {/* DSL Templates Tab */}
-          <TabsContent value="templates" className="space-y-6">
+          <TabsContent value="templates" className="space-y-4">
             <TemplateManager category="dsl" />
           </TabsContent>
 
           {/* AE Templates Tab */}
-          <TabsContent value="ae-templates" className="space-y-6">
+          <TabsContent value="ae-templates" className="space-y-4">
             <TemplateManager category="alpha_edge" />
           </TabsContent>
 
           {/* Symbols Tab */}
-          <TabsContent value="symbols" className="space-y-6">
+          <TabsContent value="symbols" className="space-y-4">
             <SymbolManager />
           </TabsContent>
 
           {/* Template Rankings Tab (Task 9.1) */}
-          <TabsContent value="rankings" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Template Rankings</CardTitle>
-                <CardDescription>Performance rankings across all strategy templates</CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="rankings" className="space-y-4">
+            <PanelHeader title="Template Rankings" panelId="strategies-rankings">
+              <div className="p-3">
                 {templateRankingsLoading ? (
                   <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Loading rankings...</div>
                 ) : templateRankings.length === 0 ? (
@@ -2119,7 +2147,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                       </Select>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full text-xs font-mono">
+                      <table className="w-full text-xs font-mono table-dense">
                         <thead>
                           <tr className="border-b border-dark-border text-muted-foreground">
                             {[
@@ -2175,30 +2203,19 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     </div>
                   </>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </PanelHeader>
           </TabsContent>
 
           {/* Blacklists Tab (Task 9.1) */}
-          <TabsContent value="blacklists" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="text-base">Blacklisted Combos</CardTitle>
-                    <CardDescription>Blocked template+symbol combinations</CardDescription>
-                  </div>
-                  <div className="text-sm font-mono text-muted-foreground">
-                    Total: <span className="text-gray-200 font-semibold">{blacklists.length}</span>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="blacklists" className="space-y-4">
+            <PanelHeader title={`Blacklisted Combos (${blacklists.length})`} panelId="strategies-blacklists">
+              <div className="p-3">
                 {blacklists.length === 0 ? (
                   <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No blacklisted combinations</div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs font-mono">
+                    <table className="w-full text-xs font-mono table-dense">
                       <thead>
                         <tr className="border-b border-dark-border text-muted-foreground">
                           <th className="py-2 px-2 text-left">Template</th>
@@ -2222,23 +2239,19 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     </table>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </PanelHeader>
           </TabsContent>
 
           {/* Idle Demotions Tab (Task 9.1) */}
-          <TabsContent value="demotions" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Idle Demotions</CardTitle>
-                <CardDescription>Recently demoted strategies due to inactivity</CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="demotions" className="space-y-4">
+            <PanelHeader title="Idle Demotions" panelId="strategies-demotions">
+              <div className="p-3">
                 {idleDemotions.length === 0 ? (
                   <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No recent demotions</div>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs font-mono">
+                    <table className="w-full text-xs font-mono table-dense">
                       <thead>
                         <tr className="border-b border-dark-border text-muted-foreground">
                           <th className="py-2 px-2 text-left">Strategy</th>
@@ -2258,13 +2271,138 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     </table>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </PanelHeader>
           </TabsContent>
+          </div>
         </Tabs>
 
-        {/* Strategy Details Dialog */}
-        <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+        </div>
+      </PanelHeader>
+    </div>
+  );
+
+  // ── Side Panel (35%) ─────────────────────────────────────────────────
+  const sidePanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader
+        title="Intelligence"
+        panelId="strategies-side"
+        onRefresh={fetchStrategies}
+      >
+        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+          {/* CompactMetricRow: active, backtested, avg Sharpe, avg win rate */}
+          <CompactMetricRow metrics={sideMetrics} />
+
+          {/* Top 5 Template Rankings Mini-Table */}
+          <PanelHeader title="Top 5 Template Rankings" panelId="strategies-side-rankings">
+            <div className="p-3">
+              {templateRankingsLoading ? (
+                <div className="text-center py-4 text-[10px] text-gray-500">Loading...</div>
+              ) : top5Rankings.length === 0 ? (
+                <div className="text-center py-4 text-[10px] text-gray-500">No ranking data</div>
+              ) : (
+                <table className="w-full text-xs font-mono table-dense">
+                  <thead>
+                    <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
+                      <th className="py-1 px-2 text-left text-[11px]">Template</th>
+                      <th className="py-1 px-2 text-right text-[11px]">Win Rate</th>
+                      <th className="py-1 px-2 text-right text-[11px]">Sharpe</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {top5Rankings.map((t: any, idx: number) => (
+                      <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-[var(--color-dark-hover)]/50">
+                        <td className="py-1 px-2 text-gray-200 truncate max-w-[140px]">{t.name || t.template_name || '—'}</td>
+                        <td className={cn('py-1 px-2 text-right', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
+                          {t.win_rate != null ? `${t.win_rate.toFixed(1)}%` : '—'}
+                        </td>
+                        <td className="py-1 px-2 text-right">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </PanelHeader>
+
+          {/* Recent Lifecycle Events */}
+          <PanelHeader title="Recent Lifecycle Events" panelId="strategies-side-events">
+            <div className="p-3">
+              {recentLifecycleEvents.length === 0 ? (
+                <div className="text-center py-4 text-[10px] text-gray-500">No recent events</div>
+              ) : (
+                <div className="space-y-1.5 overflow-auto max-h-[300px]">
+                  {recentLifecycleEvents.map((event, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between py-1.5 px-2 rounded bg-[var(--color-dark-surface)] hover:bg-[var(--color-dark-surface)]/80 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={cn(
+                          'text-[10px] font-mono font-semibold px-1 py-0.5 rounded',
+                          event.type === 'Activated' && 'bg-accent-green/20 text-accent-green',
+                          event.type === 'Retired' && 'bg-accent-red/20 text-accent-red',
+                          event.type === 'Demoted' && 'bg-yellow-400/20 text-yellow-400',
+                        )}>
+                          {event.type}
+                        </span>
+                        <span className="font-mono text-xs text-gray-200 truncate">
+                          {event.name}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-gray-500 shrink-0 ml-2">
+                        {formatTimestamp(event.timestamp)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </PanelHeader>
+        </div>
+      </PanelHeader>
+    </div>
+  );
+
+  // ── Return: 2-panel layout ─────────────────────────────────────────
+  return (
+    <DashboardLayout onLogout={onLogout}>
+      <PageTemplate
+        title="◆ Strategies"
+        description={tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading'}
+        actions={headerActions}
+      >
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="h-full"
+        >
+          <RefreshIndicator visible={pollingRefreshing && !loading} />
+          <ResizablePanelLayout
+            layoutId="strategies-panels"
+            direction="horizontal"
+            panels={[
+              {
+                id: 'strategies-main',
+                defaultSize: 65,
+                minSize: 400,
+                content: mainPanel,
+              },
+              {
+                id: 'strategies-side',
+                defaultSize: 35,
+                minSize: 250,
+                content: sidePanel,
+              },
+            ]}
+          />
+        </motion.div>
+      </PageTemplate>
+
+      {/* Strategy Details Dialog */}
+      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -2764,7 +2902,6 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             )}
           </DialogContent>
         </Dialog>
-      </div>
     </DashboardLayout>
   );
 };

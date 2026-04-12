@@ -937,3 +937,202 @@ curl https://alphacent.co.uk/health
 ### Infrastructure
 - Consider t3.small downgrade — waiting on CloudWatch memory data
 - FMP API rate limit (300/min) — monitor with corrected per-call counting
+
+
+### Session Improvements (April 11, 2026 — Session 5: Profitability Audit & Alpha Generation)
+
+#### 79. Profitability Audit & Short Exposure Reduction ✅
+- Full P&L audit: 95 closed trades, -$674 realized, 34% win rate, +$5,539 unrealized
+- **Root cause #1**: Shorts bleeding -$1,114 (29% win rate) — fighting a recovering market
+- **Root cause #2**: "Etoro Closed" positions (-$571) — DEMO account artifact
+- **Root cause #3**: R-multiples terrible — almost no trades above +1R
+- Reduced `min_short_pct` from 35% to 15% in ranging/ranging_low_vol regimes
+- **Files**: `config/autonomous_trading.yaml`
+
+#### 80. Minimum Position Size $2K ✅
+- Raised minimum from $10 to $2,000 for all asset classes (was 57 positions under $1K generating noise)
+- Bump guard raised from 3x to 10x — allows $200+ calculated sizes to be bumped to $2K
+- Post-adjustment minimum also set to $2K with same 10x guard
+- **Files**: `src/risk/risk_manager.py`, `src/execution/order_executor.py`
+
+#### 81. Partial Exit & Trailing Stop Optimization ✅
+- Removed first partial exit at 10% profit (was capping winners too early)
+- Only partial exit now at 18% profit taking 33%
+- Trailing stop activation raised from 8% to 12% (was getting shaken out on normal volatility)
+- **Files**: `config/autonomous_trading.yaml`
+
+#### 82. Conviction Threshold & Dynamic Template Weighting ✅
+- Conviction threshold raised from 55 to 60
+- Performance feedback range widened: template weights 0.4x-1.5x (was 0.7x-1.15x)
+- P&L-weighted scoring with confidence scaling (more trades = more trust)
+- Symbol score cap widened to ±15 (was ±5)
+- **Files**: `config/autonomous_trading.yaml`, `src/strategy/strategy_proposer.py`
+
+#### 83. Direction-Aware Fundamental Quality Scoring ✅ (±15 conviction points)
+- New conviction component: `_score_fundamental_quality()` in ConvictionScorer
+- LONG signals: strong fundamentals (earnings beat, revenue growth, insider buying, high ROE, buybacks) → up to +15
+- SHORT signals: weak fundamentals → up to +15 (don't short quality, short garbage)
+- Uses FundamentalData from FMP: earnings_surprise, revenue_growth, insider_net_buying, roe, shares_change_percent
+- Only applies to stocks — forex/crypto/commodities/indices/ETFs return 0
+- **Files**: `src/strategy/conviction_scorer.py`
+
+#### 84. Multi-Strategy Confluence ✅
+- Multiple strategies can now open positions in the same symbol (was blocked at 1)
+- Position limit: 5 per symbol per timeframe bucket (1d/4h/1h independent)
+- Same-strategy dedup preserved (a strategy can't double its own position)
+- Cross-strategy pending order blocking removed (was preventing confluence)
+- Signal coordination keeps top N by confidence instead of just top 1
+- **Files**: `src/core/trading_scheduler.py`, `config/autonomous_trading.yaml`
+
+#### 85. EXIT Signal Processing ✅ (CRITICAL)
+- **Problem**: DSL exit conditions (e.g., `RSI(14) > 62`) were evaluated in backtesting but silently dropped in live trading. Positions only closed via SL/TP/trailing stops.
+- **Fix**: EXIT_LONG/EXIT_SHORT signals now flow through the trading scheduler. When a strategy's exit conditions fire, the position is marked `pending_closure` and the monitoring service closes it on eToro.
+- This closes the gap between backtest performance (which assumed exits) and live performance (which ignored them)
+- **Files**: `src/core/trading_scheduler.py`
+
+#### 86. Position Matching Fix ✅
+- **Bug**: When multiple strategies traded the same symbol, the position creation code matched ANY open position with same symbol/side — stealing another strategy's eToro position ID
+- **Fix**: Match by eToro position ID first, then fall back to same-strategy + symbol + side with no eToro ID yet
+- **Files**: `src/core/trading_scheduler.py`
+
+#### 87. Crypto 4H/1H Templates ✅
+- **Research**: HTX/KuCoin backtests show 4H MACD on BTC: +96% vs +49% buy-and-hold, ETH: +205% vs +53%. 1H and below underperform 90% of the time.
+- **4H templates** (proven alpha timeframe): Crypto 4H MACD Trend, Crypto 4H RSI Dip Buy, Crypto 4H EMA Momentum, Crypto 4H BB Squeeze Breakout
+- **1H templates** (selective, high-conviction only): Crypto 1H RSI Extreme Bounce (RSI < 20), Crypto 1H BB Extreme Dip (BB lower at 2.5 std)
+- Per-timeframe position limits: 5 per symbol per 1d/4h/1h bucket (BTC can have up to 15 total)
+- **Files**: `src/strategy/strategy_templates.py`, `src/core/trading_scheduler.py`
+
+#### 88. Crypto Template SL/TP Fix ✅
+- All ~40 pre-existing crypto intraday templates were missing `"interval": "1h"` in metadata
+- Auto-set interval from `intraday`/`interval_4h` flags in `__post_init__`
+- Enforced 4% SL / 8% TP floor for all crypto templates (eToro's 2% round-trip cost)
+- Pre-existing 4H crypto templates widened from 3.5-4% SL / 6-8% TP to 5-6% SL / 12-15% TP
+- **Files**: `src/strategy/strategy_templates.py`
+
+#### 89. Full Template Audit ✅ (252 → 241 templates)
+- **Removed 11 duplicates**: RSI Overbought Short, Stochastic Overbought Short, Bollinger Band Short, Bollinger Volatility Breakout, Low Vol RSI Mean Reversion, Volume Dry-Up Reversal Long, Keltner Midline Bounce Long, Stochastic Midrange Long, MACD Momentum, 4H Downtrend Oversold Bounce (R:R=1.1), BB Midband Reversion Tight (entry≈exit)
+- **Enforced floors in `__post_init__`**: 1d stocks: 3% SL / 5% TP minimum. Crypto: 4% SL / 8% TP minimum. All templates: R:R ≥ 1.5 (auto-widens TP)
+- 3 removed templates have 6 open positions — will run their course naturally, just won't be reproduced
+- **Files**: `src/strategy/strategy_templates.py`
+
+---
+
+## Current System State (April 11, 2026 — Updated Session 5)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$162K, equity ~$464K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~101 DEMO + 97 BACKTESTED
+- **Open positions:** ~125 (including 2 new BTC + 2 new ETH from multi-strategy confluence)
+- **Templates:** 241 (was 252, removed 11 duplicates)
+- **Crypto templates:** 77 total (56 on 1h, 10 on 4h, 11 on 1d)
+- **Monitoring:** 24/7 + CloudWatch alerting + EXIT signal processing
+- **Market regime:** Equity: ranging_low_vol, Crypto: trending_up
+- **Key changes:** EXIT signals now close positions, multi-strategy confluence (up to 5 per symbol per timeframe), $2K minimum positions, direction-aware fundamental scoring
+
+---
+
+## Open Items (Updated Session 5)
+
+### Performance Monitoring (Next Week)
+- Monitor win rate impact of wider SL/TP and EXIT signal processing (target: >45%)
+- Track how many positions are closed by EXIT signals vs SL/TP vs trailing stops
+- Monitor multi-strategy confluence: are 5 BTC LONGs from different strategies correlated or independent?
+- Check if $2K minimum is rejecting too many signals (watch for "below minimum" log frequency)
+- Evaluate fundamental quality scoring impact on short selection quality
+
+### From Previous Sessions
+1. ~~Signal generation — Are conviction scores using meaningful inputs?~~ ✅ (fundamental quality + carry + cycle)
+2. Template-symbol matching — Should template weights decay over time? *(addressed with dynamic weighting)*
+3. Risk controls — Portfolio-level VaR check before new positions
+4. ~~Order execution — Is signal coordination too aggressive?~~ ✅ (multi-strategy confluence)
+5. ~~Performance feedback loop — Is it chasing past winners?~~ ✅ (P&L-weighted, confidence-scaled)
+6. ~~EXIT signals not being processed~~ ✅ (wired through trading scheduler)
+
+### Infrastructure
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+- FMP API rate limit (300/min) — monitor with corrected per-call counting
+
+### Session Improvements (April 12, 2026 — Session 6: QuantFury-Inspired UI Overhaul Planning)
+
+#### 100. Tab Styling Overhaul ✅ (minor, pre-planning)
+- Replaced pill/rounded-bg tab style with underline-indicator pattern across all pages
+- Active tabs: green (#10b981) bottom border (2px) + green text, inactive: muted gray
+- Removed all per-page tab overrides (StrategiesNew, AnalyticsNew, OrdersNew, SettingsNew, PortfolioNew, AutonomousNew, RiskNew)
+- Cleaned up TabsList grid layouts to `w-full overflow-x-auto` everywhere
+- Card shadow deepened, sidebar active state changed to left accent bar, scrollbars thinned
+- **Files**: `frontend/src/components/ui/tabs.tsx`, `frontend/src/components/ui/Card.tsx`, `frontend/src/components/Sidebar.tsx`, `frontend/src/components/GlobalSummaryBar.tsx`, `frontend/src/components/DashboardLayout.tsx`, `frontend/src/index.css`, all page components with TabsList
+
+#### 101. QuantFury-Inspired UI Overhaul — Spec Updated (NOT YET IMPLEMENTED)
+- **Problem identified**: The UI has all the right data but presents it poorly. Flat vertical-scroll layout, sidebar eating 256px, no visual hierarchy, can't tell which tab is active, low information density, no command-center feel. Compared against QuantFury, Quant Landing, and Bloomberg-style trading terminals.
+- **Research conducted**: QuantFury web platform (horizontal nav, multi-panel layout, live position strip, contextual widgets, dense data), Devexperts trading UX best practices (simplicity + power, avoid clutter, every pixel serves a purpose), HedgeUI resizable panel patterns (react-resizable-panels, CSS-based resize, localStorage persistence), professional trading terminal design patterns.
+- **Spec updated**: Added Requirements 22-30 and Phase 2 tasks (17-24) to `.kiro/specs/quant-platform-ui-overhaul/`
+- **9 new requirements**:
+  - Req 22: Horizontal TopNavBar replacing sidebar (reclaim ~200px horizontal space)
+  - Req 23: Multi-panel resizable layout system (react-resizable-panels)
+  - Req 24: Live position ticker strip with WebSocket updates
+  - Req 25: Contextual bottom widget panels on ALL pages (Top Movers, Recent Signals, Market Regime, Strategy Alerts, Macro Pulse)
+  - Req 26: Compact metric rows + dense tables (2x data density)
+  - Req 27: Panel title bars with collapse/refresh/close actions
+  - Req 28: Chart-as-hero layout on Overview (≥60% of content area)
+  - Req 29: Consistent PageTemplate across all 11 pages
+  - Req 30: Micro-interactions (animated numbers, flash on change, hover glow, tab transitions)
+- **Phase 2 tasks** (all unchecked, ready to execute):
+  - Task 17: Build ALL shared components (TopNavBar, MetricsBar, PositionTickerStrip, PanelHeader, ResizablePanelLayout, PageTemplate, CompactMetricRow, BottomWidgetZone, 5 widgets, DenseTable, tighter Cards) + 3 backend endpoints + DashboardLayout restructure
+  - Task 18: Checkpoint
+  - Task 19: Redesign ALL 11 pages with panel layouts (Overview 3-panel, Portfolio/Orders/Strategies/Autonomous/Risk/Data/System/Audit 2-panel, Analytics/Settings full-width)
+  - Task 20: Checkpoint
+  - Task 21: Micro-interactions (animated numbers, flash, hover glow, tab fade-in)
+  - Task 22: Checkpoint
+  - Task 23: Cross-page audit + performance audit + cleanup deprecated components
+  - Task 24: Final checkpoint + deploy
+- **New dependency**: `react-resizable-panels` (~12KB)
+- **New backend endpoints needed**: `GET /dashboard/top-movers`, `GET /dashboard/recent-signals`, `GET /dashboard/strategy-alerts`
+- **Components to deprecate**: Sidebar.tsx (→ TopNavBar), GlobalSummaryBar.tsx (→ MetricsBar)
+- **NOT YET IMPLEMENTED** — spec is ready, execution starts next session from Task 17
+- **Files**: `.kiro/specs/quant-platform-ui-overhaul/requirements.md`, `design.md`, `tasks.md`
+
+---
+
+## Current System State (April 12, 2026 — Updated Session 6)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$162K, equity ~$464K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~101 DEMO + 97 BACKTESTED
+- **Open positions:** ~125
+- **Templates:** 241
+- **Monitoring:** 24/7 + CloudWatch alerting + EXIT signal processing
+- **Market regime:** Equity: ranging_low_vol, Crypto: trending_up
+- **Frontend:** Tab underline styling applied, all other Phase 1 UI overhaul complete (tasks 1-16 done). Phase 2 (QuantFury layout overhaul, tasks 17-24) spec'd but NOT started.
+- **Key next action:** Execute Phase 2 starting from Task 17 in `.kiro/specs/quant-platform-ui-overhaul/tasks.md`
+
+---
+
+## Open Items (Updated Session 6)
+
+### UI/UX — Phase 2 Execution (NEXT SESSION PRIORITY)
+- Execute Phase 2 tasks 17-24 from `.kiro/specs/quant-platform-ui-overhaul/tasks.md`
+- Start with Task 17: install react-resizable-panels, build all shared components, backend endpoints, restructure DashboardLayout
+- Then Task 19: redesign all 11 pages with panel layouts
+- Then Tasks 21-24: micro-interactions, audit, cleanup, deploy
+
+### Performance Monitoring
+- Monitor win rate impact of wider SL/TP and EXIT signal processing (target: >45%)
+- Track EXIT signal vs SL/TP vs trailing stop close ratios
+- Monitor multi-strategy confluence correlation
+- Check $2K minimum rejection frequency
+- Evaluate fundamental quality scoring on short selection
+
+### Infrastructure
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+- FMP API rate limit (300/min) — monitor with corrected per-call counting
+- **Deploy workflow improvement needed**: When SCP'ing `autonomous_trading.yaml` to EC2, API keys get overwritten. Either: (a) re-patch keys after SCP via Secrets Manager fetch, or (b) only SCP the config sections that changed and leave keys alone. Current workaround: always run the Secrets Manager patch step after any config file SCP. This should be automated in the deploy script.
+
+### From Previous Sessions
+1. ~~Signal generation — conviction scores~~ ✅
+2. Template-symbol matching — dynamic weighting ✅
+3. Risk controls — Portfolio-level VaR check before new positions (still open)
+4. ~~Order execution — multi-strategy confluence~~ ✅
+5. ~~Performance feedback loop~~ ✅
+6. ~~EXIT signals~~ ✅

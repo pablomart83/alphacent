@@ -1,10 +1,13 @@
-import { type FC, useEffect, useState, useCallback } from 'react';
+import { type FC, useEffect, useState, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, BarChart3, PieChart, Activity, Download, FileText,
   Search, ArrowUpDown, Calendar, Target, Zap
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
+import { PageTemplate } from '../components/PageTemplate';
+import { PanelHeader } from '../components/layout/PanelHeader';
+import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
 import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
@@ -662,6 +665,66 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
     }
   });
 
+  // ── CompactMetricRow metrics for the top of the page ──
+  const compactMetrics: CompactMetric[] = useMemo(() => [
+    {
+      label: 'Total Return',
+      value: `${(performanceMetrics?.total_return ?? 0) >= 0 ? '+' : ''}${(performanceMetrics?.total_return ?? 0).toFixed(2)}%`,
+      trend: (performanceMetrics?.total_return ?? 0) >= 0 ? 'up' as const : 'down' as const,
+    },
+    {
+      label: 'Sharpe',
+      value: (performanceMetrics?.sharpe_ratio ?? 0).toFixed(2),
+      trend: (performanceMetrics?.sharpe_ratio ?? 0) >= 1 ? 'up' as const : (performanceMetrics?.sharpe_ratio ?? 0) >= 0 ? 'neutral' as const : 'down' as const,
+    },
+    {
+      label: 'Max DD',
+      value: `${(performanceMetrics?.max_drawdown ?? 0).toFixed(2)}%`,
+      trend: 'down' as const,
+    },
+    {
+      label: 'Win Rate',
+      value: `${(performanceMetrics?.win_rate ?? 0).toFixed(1)}%`,
+      trend: (performanceMetrics?.win_rate ?? 0) >= 50 ? 'up' as const : 'down' as const,
+    },
+    {
+      label: 'Profit Factor',
+      value: (performanceMetrics?.profit_factor ?? 0).toFixed(2),
+      trend: (performanceMetrics?.profit_factor ?? 0) >= 1.5 ? 'up' as const : (performanceMetrics?.profit_factor ?? 0) >= 1 ? 'neutral' as const : 'down' as const,
+    },
+    {
+      label: 'Trades',
+      value: String(performanceMetrics?.total_trades ?? 0),
+      trend: 'neutral' as const,
+    },
+  ], [performanceMetrics]);
+
+  // ── Header actions for PageTemplate ──
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
+      <Select value={period} onValueChange={(value) => setPeriod(value as typeof period)}>
+        <SelectTrigger className="w-[130px]">
+          <Calendar className="h-4 w-4 mr-2" />
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="1M">1 Month</SelectItem>
+          <SelectItem value="3M">3 Months</SelectItem>
+          <SelectItem value="6M">6 Months</SelectItem>
+          <SelectItem value="1Y">1 Year</SelectItem>
+          <SelectItem value="ALL">All Time</SelectItem>
+        </SelectContent>
+      </Select>
+      <Button variant="outline" size="sm" onClick={handleExportCSV}>
+        <Download className="h-4 w-4 mr-2" />
+        Export CSV
+      </Button>
+      <TearSheetGenerator />
+      <RefreshButton loading={refreshing} label="Refresh" onClick={handleRefresh} />
+    </div>
+  );
+
   const strategyColumns: ColumnDef<StrategyAttribution>[] = [
     {
       accessorKey: 'strategy_name',
@@ -784,9 +847,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   if (loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <div className="p-4 sm:p-6 lg:p-8">
+        <PageTemplate title="◆ Analytics" description="Comprehensive performance analysis and insights">
           <PageSkeleton />
-        </div>
+        </PageTemplate>
       </DashboardLayout>
     );
   }
@@ -794,60 +857,34 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   if (error && !performanceMetrics) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <div className="p-4 sm:p-6 lg:p-8">
+        <PageTemplate title="◆ Analytics" description="Error loading data">
           <div className="flex flex-col items-center justify-center h-64 gap-4">
             <Activity className="h-8 w-8 text-accent-red" />
             <div className="text-gray-400 font-mono">Failed to load analytics</div>
             <p className="text-sm text-muted-foreground">{error}</p>
             <Button variant="outline" size="sm" onClick={() => fetchAnalyticsData()}>Retry</Button>
           </div>
-        </div>
+        </PageTemplate>
       </DashboardLayout>
     );
   }
 
   return (
     <DashboardLayout onLogout={onLogout}>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}
-        className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto relative">
-        <RefreshIndicator visible={pollingRefreshing && !loading} />
-        <div className="mb-6 lg:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-100 font-mono mb-2">
-              ◆ Analytics
-            </h1>
-            <div className="flex items-center gap-3">
-              <p className="text-sm text-muted-foreground font-mono">
-                Comprehensive performance analysis and insights
-              </p>
-              <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-            </div>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Select value={period} onValueChange={(value) => setPeriod(value as typeof period)}>
-              <SelectTrigger className="w-full sm:w-[140px]">
-                <Calendar className="h-4 w-4 mr-2" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1M">1 Month</SelectItem>
-                <SelectItem value="3M">3 Months</SelectItem>
-                <SelectItem value="6M">6 Months</SelectItem>
-                <SelectItem value="1Y">1 Year</SelectItem>
-                <SelectItem value="ALL">All Time</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" size="sm" onClick={handleExportCSV}>
-              <Download className="h-4 w-4 mr-2" />
-              Export CSV
-            </Button>
-            <TearSheetGenerator />
-            <RefreshButton loading={refreshing} label="Refresh" onClick={handleRefresh} />
-          </div>
-        </div>
+      <PageTemplate
+        title="◆ Analytics"
+        description={tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading'}
+        actions={headerActions}
+      >
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}
+          className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto relative">
+          <RefreshIndicator visible={pollingRefreshing && !loading} />
+
+          {/* CompactMetricRow: total return, Sharpe, max DD, win rate, profit factor, trades */}
+          <CompactMetricRow metrics={compactMetrics} className="mb-4" />
 
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full h-auto" style={{ gridTemplateColumns: 'repeat(10, 1fr)' }}>
+          <TabsList className="w-full overflow-x-auto">
             <TabsTrigger value="performance" className="gap-2">
               <TrendingUp className="h-4 w-4" />
               <span className="hidden sm:inline">Performance</span>
@@ -892,8 +929,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
           <TabsContent value="performance" className="space-y-6">
             {/* Key Metrics Row */}
+            <PanelHeader title="Key Metrics" panelId="analytics-key-metrics">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }} className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              transition={{ duration: 0.3 }} className="grid grid-cols-2 md:grid-cols-4 gap-4 p-3">
               <MetricCard label="Total Return" value={Number(performanceMetrics?.total_return) || 0}
                 format="percentage" trend={performanceMetrics && performanceMetrics.total_return >= 0 ? 'up' : 'down'}
                 icon={TrendingUp} tooltip="Total portfolio return for selected period" />
@@ -904,11 +942,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               <MetricCard label="Win Rate" value={Number(performanceMetrics?.win_rate) || 0}
                 format="percentage" icon={Zap} tooltip="Percentage of winning trades" />
             </motion.div>
+            </PanelHeader>
 
             {/* CIO Metrics Row — Calmar, CAGR, Information Ratio */}
             {cioDashboard && (
+              <PanelHeader title="CIO Metrics" panelId="analytics-cio-metrics">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.03 }} className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                transition={{ duration: 0.3, delay: 0.03 }} className="grid grid-cols-2 md:grid-cols-4 gap-4 p-3">
                 <Card>
                   <CardContent className="pt-4 pb-3">
                     <p className="text-xs text-muted-foreground mb-1">CAGR</p>
@@ -945,12 +985,14 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </CardContent>
                 </Card>
               </motion.div>
+              </PanelHeader>
             )}
 
             {/* Realized vs Unrealized P&L + Streak + Slippage */}
             {cioDashboard && (
+              <PanelHeader title="P&L & Execution" panelId="analytics-pnl-execution">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.04 }} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                transition={{ duration: 0.3, delay: 0.04 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3">
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">P&L Breakdown</CardTitle>
@@ -988,12 +1030,14 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </CardContent>
                 </Card>
               </motion.div>
+              </PanelHeader>
             )}
 
             {/* Strategy Lifecycle + Trade Quality + Closure Analysis */}
             {cioDashboard && (
+              <PanelHeader title="Strategy Lifecycle & Trade Quality" panelId="analytics-lifecycle">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.045 }} className="space-y-4">
+                transition={{ duration: 0.3, delay: 0.045 }} className="space-y-4 p-3">
                 
                 {/* Pipeline Health */}
                 <Card>
@@ -1096,12 +1140,14 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </Card>
                 </div>
               </motion.div>
+              </PanelHeader>
             )}
 
             {/* Daily P&L Table */}
             {cioDashboard && cioDashboard.daily_pnl_table.length > 0 && (
+              <PanelHeader title="Daily P&L" panelId="analytics-daily-pnl">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.048 }}>
+                transition={{ duration: 0.3, delay: 0.048 }} className="p-3">
                 <Card>
                   <CardHeader>
                     <CardTitle>Daily P&L</CardTitle>
@@ -1143,11 +1189,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </CardContent>
                 </Card>
               </motion.div>
+              </PanelHeader>
             )}
 
             {/* Expectancy + Profit Factor Cards */}
+            <PanelHeader title="Expectancy & Profit Factor" panelId="analytics-expectancy">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.05 }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              transition={{ duration: 0.3, delay: 0.05 }} className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3">
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Expectancy</CardTitle>
@@ -1195,10 +1243,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
             {/* Equity Curve with Benchmark */}
+            <PanelHeader title="Equity Curve" panelId="analytics-equity-curve">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}>
+              transition={{ duration: 0.3, delay: 0.1 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Equity Curve</CardTitle>
@@ -1225,11 +1275,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
             {/* Monthly Returns Heatmap */}
             {perfStats?.monthly_returns && perfStats.monthly_returns.length > 0 && (
+              <PanelHeader title="Monthly Returns Heatmap" panelId="analytics-monthly-returns">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.15 }}>
+                transition={{ duration: 0.3, delay: 0.15 }} className="p-3">
                 <Card>
                   <CardHeader>
                     <CardTitle>Monthly Returns Heatmap</CardTitle>
@@ -1286,11 +1338,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </CardContent>
                 </Card>
               </motion.div>
+              </PanelHeader>
             )}
 
             {/* Win Rate by Day of Week + Win Rate by Hour */}
+            <PanelHeader title="Win Rate Analysis" panelId="analytics-win-rate">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              transition={{ duration: 0.3, delay: 0.2 }} className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Win Rate by Day of Week</CardTitle>
@@ -1336,11 +1390,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
             {/* Winners vs Losers Analysis */}
             {perfStats?.winners_vs_losers?.winners && (
+              <PanelHeader title="Winners vs Losers" panelId="analytics-winners-losers">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.25 }}>
+                transition={{ duration: 0.3, delay: 0.25 }} className="p-3">
                 <Card>
                   <CardHeader>
                     <CardTitle>Winners vs Losers Analysis</CardTitle>
@@ -1376,11 +1432,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </CardContent>
                 </Card>
               </motion.div>
+              </PanelHeader>
             )}
 
             {/* Drawdown + Returns Distribution */}
+            <PanelHeader title="Drawdown & Returns Distribution" panelId="analytics-drawdown-returns">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              transition={{ duration: 0.3, delay: 0.3 }} className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Drawdown Chart</CardTitle>
@@ -1422,9 +1480,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
           </TabsContent>
 
           <TabsContent value="attribution" className="space-y-6">
+            <PanelHeader title="Strategy Contribution" panelId="analytics-strategy-contribution">
             <Card>
               <CardHeader>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1491,9 +1551,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 )}
               </CardContent>
             </Card>
+            </PanelHeader>
 
+            <PanelHeader title="Performance by Strategy" panelId="analytics-perf-by-strategy">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}>
+              transition={{ duration: 0.3, delay: 0.1 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Performance by Strategy</CardTitle>
@@ -1512,11 +1574,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
           </TabsContent>
 
           <TabsContent value="trades" className="space-y-6">
+            <PanelHeader title="Trade Metrics" panelId="analytics-trade-metrics">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }} className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              transition={{ duration: 0.3 }} className="grid grid-cols-2 md:grid-cols-3 gap-4 p-3">
               <MetricCard label="Total Trades" value={Number(tradeAnalytics?.trade_statistics?.total_trades) || 0}
                 format="number" icon={BarChart3} tooltip="Total number of trades executed" />
               <MetricCard label="Winning Trades" value={Number(tradeAnalytics?.trade_statistics?.winning_trades) || 0}
@@ -1524,9 +1588,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               <MetricCard label="Losing Trades" value={Number(tradeAnalytics?.trade_statistics?.losing_trades) || 0}
                 format="number" icon={Activity} tooltip="Number of losing trades" />
             </motion.div>
+            </PanelHeader>
 
+            <PanelHeader title="Trade Distribution" panelId="analytics-trade-distribution">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              transition={{ duration: 0.3, delay: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 gap-6 p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Win/Loss Distribution</CardTitle>
@@ -1565,9 +1631,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
+            <PanelHeader title="P&L by Day of Week" panelId="analytics-pnl-by-day">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}>
+              transition={{ duration: 0.3, delay: 0.2 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>P&L by Day of Week</CardTitle>
@@ -1586,9 +1654,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
+            <PanelHeader title="Trade Statistics" panelId="analytics-trade-stats">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}>
+              transition={{ duration: 0.3, delay: 0.3 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Trade Statistics</CardTitle>
@@ -1618,11 +1688,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
           </TabsContent>
 
           <TabsContent value="regime" className="space-y-6">
             {/* Current Regimes by Asset Class */}
             {regimeAnalysis?.current_regimes && Object.keys(regimeAnalysis.current_regimes).length > 0 && (
+              <PanelHeader title="Current Market Regimes" panelId="analytics-current-regimes">
               <Card>
                 <CardHeader>
                   <CardTitle>Current Market Regimes</CardTitle>
@@ -1647,10 +1719,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </div>
                 </CardContent>
               </Card>
+              </PanelHeader>
             )}
 
             {/* Market Context (FRED Macro Data) */}
             {regimeAnalysis?.market_context && regimeAnalysis.market_context.vix && (
+              <PanelHeader title="Macro Market Context" panelId="analytics-macro-context">
               <Card>
                 <CardHeader>
                   <CardTitle>Macro Market Context</CardTitle>
@@ -1680,10 +1754,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </div>
                 </CardContent>
               </Card>
+              </PanelHeader>
             )}
 
             {/* Crypto Cycle + Forex Carry */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <PanelHeader title="Crypto Cycle & Forex Carry" panelId="analytics-crypto-forex">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-3">
               {regimeAnalysis?.crypto_cycle && regimeAnalysis.crypto_cycle.phase && (
                 <Card>
                   <CardHeader>
@@ -1739,7 +1815,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </Card>
               )}
             </div>
+            </PanelHeader>
 
+            <PanelHeader title="Performance by Market Regime" panelId="analytics-perf-by-regime">
             <Card>
               <CardHeader>
                 <CardTitle>Performance by Market Regime</CardTitle>
@@ -1753,9 +1831,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 )}
               </CardContent>
             </Card>
+            </PanelHeader>
 
+            <PanelHeader title="Regime Transition Timeline" panelId="analytics-regime-transitions">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}>
+              transition={{ duration: 0.3, delay: 0.1 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Regime Transition Timeline</CardTitle>
@@ -1785,9 +1865,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
+            <PanelHeader title="Strategy Performance by Regime" panelId="analytics-strategy-regime-perf">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}>
+              transition={{ duration: 0.3, delay: 0.2 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Strategy Performance by Regime</CardTitle>
@@ -1837,11 +1919,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
           </TabsContent>
 
           <TabsContent value="alpha-edge" className="space-y-6">
+            <PanelHeader title="Filter Statistics" panelId="analytics-filter-stats">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              transition={{ duration: 0.3 }} className="grid grid-cols-1 md:grid-cols-2 gap-6 p-3">
               
               {/* Fundamental Filter Statistics */}
               <Card>
@@ -1962,10 +2046,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
             {/* Conviction Score Distribution */}
+            <PanelHeader title="Conviction Score Distribution" panelId="analytics-conviction-dist">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}>
+              transition={{ duration: 0.3, delay: 0.1 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Conviction Score Distribution</CardTitle>
@@ -2010,10 +2096,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
             {/* Strategy Template Performance */}
+            <PanelHeader title="Template Performance" panelId="analytics-template-perf">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}>
+              transition={{ duration: 0.3, delay: 0.2 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Strategy Template Performance Comparison</CardTitle>
@@ -2060,10 +2148,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
             {/* Transaction Cost Savings */}
+            <PanelHeader title="Transaction Cost Savings" panelId="analytics-tx-cost-savings">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}>
+              transition={{ duration: 0.3, delay: 0.3 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Transaction Cost Savings</CardTitle>
@@ -2134,10 +2224,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
           </TabsContent>
 
           <TabsContent value="trade-journal" className="space-y-6">
             {/* Trade Journal Table with Filters */}
+            <PanelHeader title="Trade Journal" panelId="analytics-trade-journal">
             <Card>
               <CardHeader>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -2328,10 +2420,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 )}
               </CardContent>
             </Card>
+            </PanelHeader>
 
             {/* MAE/MFE Visualization */}
+            <PanelHeader title="MAE vs MFE Analysis" panelId="analytics-mae-mfe">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}>
+              transition={{ duration: 0.3, delay: 0.1 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>MAE vs MFE Analysis</CardTitle>
@@ -2395,10 +2489,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
             {/* Pattern Recognition Insights */}
+            <PanelHeader title="Pattern Recognition" panelId="analytics-pattern-recognition">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              transition={{ duration: 0.3, delay: 0.2 }} className="grid grid-cols-1 lg:grid-cols-2 gap-6 p-3">
               
               {/* Best Performing Patterns */}
               <Card>
@@ -2468,10 +2564,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
 
             {/* Actionable Recommendations */}
+            <PanelHeader title="Actionable Recommendations" panelId="analytics-recommendations">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}>
+              transition={{ duration: 0.3, delay: 0.3 }} className="p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Actionable Recommendations</CardTitle>
@@ -2510,9 +2608,8 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </CardContent>
               </Card>
             </motion.div>
+            </PanelHeader>
           </TabsContent>
-
-          {/* ── Rolling Statistics Tab ── */}
           <TabsContent value="rolling-statistics" className="space-y-6">
             <RollingStatisticsTab
               data={rollingStats}
@@ -2560,6 +2657,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           </TabsContent>
         </Tabs>
       </motion.div>
+      </PageTemplate>
     </DashboardLayout>
   );
 };

@@ -10,4 +10,4 @@ export { Input } from './Input';
 
 export { Label } from './Label';
 
-export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from './Table';
+export { Table, DenseTable, TableHeader, TableBody, TableRow, TableHead, TableCell } from './Table';

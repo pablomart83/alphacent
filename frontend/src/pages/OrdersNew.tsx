@@ -1,13 +1,15 @@
 import React, { type FC, useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  Activity, TrendingUp, Clock, AlertCircle, Search,
+  Clock, AlertCircle, Search,
   RefreshCw, Download, MoreVertical, X, Calendar
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
-import { MetricCard } from '../components/trading/MetricCard';
+import { PageTemplate } from '../components/PageTemplate';
+import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
+import { PanelHeader } from '../components/layout/PanelHeader';
+import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataTable } from '../components/trading/DataTable';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Input } from '../components/ui/Input';
@@ -25,7 +27,7 @@ import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
 import { format, subDays, startOfDay, endOfDay, formatDistanceToNow } from 'date-fns';
 import { utcToLocal } from '../lib/date-utils';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
 import { OrderFlowTimeline } from '../components/charts/OrderFlowTimeline';
 import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
@@ -49,31 +51,26 @@ const getMarketStatus = (): { isOpen: boolean; nextOpen: Date | null; label: str
   const now = new Date();
   const utcHour = now.getUTCHours();
   const utcMinute = now.getUTCMinutes();
-  const utcDay = now.getUTCDay(); // 0=Sun, 6=Sat
+  const utcDay = now.getUTCDay();
 
-  // US market hours: 9:30 AM - 4:00 PM ET = 14:30 - 21:00 UTC (EST) or 13:30 - 20:00 UTC (EDT)
-  // Using approximate EDT hours
-  const marketOpenUTC = 13 * 60 + 30; // 13:30 UTC
-  const marketCloseUTC = 20 * 60; // 20:00 UTC
+  const marketOpenUTC = 13 * 60 + 30;
+  const marketCloseUTC = 20 * 60;
   const currentMinutes = utcHour * 60 + utcMinute;
 
   const isWeekday = utcDay >= 1 && utcDay <= 5;
   const isDuringHours = currentMinutes >= marketOpenUTC && currentMinutes < marketCloseUTC;
   const isOpen = isWeekday && isDuringHours;
 
-  // Calculate next market open
   let nextOpen: Date | null = null;
   if (!isOpen) {
     const next = new Date(now);
     if (isWeekday && currentMinutes < marketOpenUTC) {
-      // Today before open
       next.setUTCHours(13, 30, 0, 0);
     } else {
-      // After close or weekend — find next weekday
       let daysToAdd = 1;
-      if (utcDay === 5) daysToAdd = 3; // Friday → Monday
-      else if (utcDay === 6) daysToAdd = 2; // Saturday → Monday
-      else if (utcDay === 0) daysToAdd = 1; // Sunday → Monday
+      if (utcDay === 5) daysToAdd = 3;
+      else if (utcDay === 6) daysToAdd = 2;
+      else if (utcDay === 0) daysToAdd = 1;
       next.setDate(next.getDate() + daysToAdd);
       next.setUTCHours(13, 30, 0, 0);
     }
@@ -143,7 +140,6 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       setRefreshing(true);
       setError(null);
       
-      // Fetch orders and pending closures in parallel (skip execution quality for speed)
       const [ordersData, pendingClosuresData] = await Promise.all([
         apiClient.getOrders(tradingMode),
         apiClient.getPendingClosures(tradingMode).catch(err => {
@@ -152,12 +148,10 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         }),
       ]);
       
-      // Sort by created_at descending (most recent first)
       const sortedOrders = ordersData.sort((a, b) => 
         utcToLocal(b.created_at).getTime() - utcToLocal(a.created_at).getTime()
       );
       
-      // Map as OrderWithMetrics (execution metrics populated later if analytics tab is viewed)
       const ordersWithMetrics: OrderWithMetrics[] = sortedOrders.map(order => ({
         ...order,
         slippage: undefined,
@@ -179,7 +173,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     }
   }, [tradingMode]);
 
-  // Fetch execution quality data (heavier - only when analytics tab is viewed)
+  // Fetch execution quality data
   const fetchExecutionQuality = async () => {
     if (!tradingMode) return;
     try {
@@ -190,7 +184,6 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     }
   };
 
-  // usePolling replaces manual useEffect + setInterval — skip REST polling when WS connected
   const { isRefreshing: pollingRefreshing } = usePolling({
     fetchFn: fetchData,
     intervalMs: 15000,
@@ -209,7 +202,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       if (result.filled > 0 || result.cancelled > 0) {
         toast.info(`Updated: ${result.filled} executed, ${result.cancelled} cancelled`);
       }
-      await fetchData(); // Refresh data after sync
+      await fetchData();
     } catch (error) {
       console.error('Failed to sync orders:', error);
       toast.error('Failed to sync orders with eToro');
@@ -223,10 +216,8 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     const unsubscribeOrder = wsManager.onOrderUpdate((order: Order) => {
       setOrders((prev) => {
         const index = prev.findIndex(o => o.id === order.id);
-        // Use order data as-is from WebSocket (backend should provide execution metrics)
         const orderWithMetrics: OrderWithMetrics = {
           ...order,
-          // Only add execution metrics if not already present from backend
           slippage: (order as OrderWithMetrics).slippage ?? undefined,
           fill_time_seconds: (order as OrderWithMetrics).fill_time_seconds ?? undefined,
           rejection_reason: (order as OrderWithMetrics).rejection_reason ?? undefined,
@@ -254,10 +245,8 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
   const cancelledOrders = orders.filter(o => o.status === 'CANCELLED').length;
   const rejectedOrders = orders.filter(o => o.status === 'REJECTED').length;
   
-  // Count filled orders with metrics for display
   const filledOrdersWithMetrics = orders.filter(o => o.status === 'FILLED' && o.slippage !== undefined);
   
-  // Execution quality metrics - use backend data if available, otherwise calculate from orders
   const avgSlippage = (executionQuality as any)?.avg_slippage_bps ?? (() => {
     return filledOrdersWithMetrics.length > 0
       ? filledOrdersWithMetrics.reduce((sum, o) => sum + (o.slippage || 0), 0) / filledOrdersWithMetrics.length
@@ -272,14 +261,10 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       : 0;
   })();
 
-  // Get unique strategies for filters
   const uniqueStrategies = Array.from(new Set(
-    orders
-      .map(o => o.strategy_id)
-      .filter(Boolean)
+    orders.map(o => o.strategy_id).filter(Boolean)
   ));
 
-  // Queued orders (PENDING or SUBMITTED status) for the Order Queue tab
   const queuedOrders = orders.filter(o => o.status === 'PENDING' || (o.status as string) === 'SUBMITTED');
   const marketStatus = getMarketStatus();
 
@@ -329,27 +314,6 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     return matchesSearch && matchesStatus && matchesSide && matchesSource && matchesStrategy && matchesDate;
   });
 
-  // Order flow timeline (last 24 hours)
-  const last24Hours = orders.filter(o => {
-    const orderTime = utcToLocal(o.created_at).getTime();
-    const now = Date.now();
-    return now - orderTime <= 24 * 60 * 60 * 1000;
-  });
-  
-  const orderFlowData = Array.from({ length: 24 }, (_, i) => {
-    const hour = 23 - i;
-    const hourStart = Date.now() - (hour + 1) * 60 * 60 * 1000;
-    const hourEnd = Date.now() - hour * 60 * 60 * 1000;
-    const hourOrders = last24Hours.filter(o => {
-      const orderTime = utcToLocal(o.created_at).getTime();
-      return orderTime >= hourStart && orderTime < hourEnd;
-    });
-    return {
-      hour: `${hour}h ago`,
-      orders: hourOrders.length,
-    };
-  }).reverse();
-
   // Filter orders by analytics period
   const getPeriodDays = () => {
     switch (analyticsPeriod) {
@@ -367,7 +331,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     return orderTime >= periodStart;
   });
 
-  // Slippage by strategy data - use backend data if available
+  // Slippage by strategy data
   const slippageByStrategy = (executionQuality as any)?.slippage_by_strategy 
     ? Object.entries((executionQuality as any).slippage_by_strategy).map(([strategy, slippage]) => ({
         strategy: strategy.substring(0, 8) || 'Unknown',
@@ -384,12 +348,12 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     };
   }).filter(d => d.slippage !== 0);
 
-  // Fill rate trend (based on selected period)
+  // Fill rate trend
   const getTrendDays = () => {
     switch (analyticsPeriod) {
-      case '1D': return 24; // 24 hours
-      case '1W': return 7;  // 7 days
-      case '1M': return 30; // 30 days
+      case '1D': return 24;
+      case '1W': return 7;
+      case '1M': return 30;
       default: return 7;
     }
   };
@@ -398,7 +362,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
   const fillRateTrend = Array.from({ length: trendDays }, (_, i) => {
     const day = trendDays - 1 - i;
     const dayStart = analyticsPeriod === '1D' 
-      ? Date.now() - (day + 1) * 60 * 60 * 1000  // Hours for 1D
+      ? Date.now() - (day + 1) * 60 * 60 * 1000
       : startOfDay(subDays(new Date(), day)).getTime();
     const dayEnd = analyticsPeriod === '1D'
       ? Date.now() - day * 60 * 60 * 1000
@@ -417,7 +381,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     };
   }).reverse();
 
-  // Rejection reasons breakdown - use backend data if available
+  // Rejection reasons breakdown
   const rejectionData = (executionQuality as any)?.rejection_reasons
     ? Object.entries((executionQuality as any).rejection_reasons).map(([reason, count]) => ({
         name: reason || 'Unknown',
@@ -481,7 +445,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     try {
       await apiClient.closeFilledOrderPosition(orderId, tradingMode);
       toast.success('Position closed successfully on eToro');
-      await fetchData(); // Refresh to get updated positions
+      await fetchData();
     } catch (error) {
       console.error('Failed to close position:', error);
       toast.error('Failed to close position');
@@ -492,7 +456,6 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
   const handleBulkCancelOrders = async () => {
     if (selectedOrders.size === 0) return;
     
-    // Filter to only cancellable orders (PENDING or SUBMITTED status)
     const cancellableOrders = Array.from(selectedOrders).filter(orderId => {
       const order = orders.find(o => o.id === orderId);
       return order && (order.status === 'PENDING' || (order.status as string) === 'SUBMITTED');
@@ -531,22 +494,22 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     }
   };
 
-  // Smart bulk action - handles different order statuses
+  // Smart bulk action
   const handleSmartBulkAction = async () => {
     if (selectedOrders.size === 0) return;
     
     const selectedOrdersList = Array.from(selectedOrders).map(id => orders.find(o => o.id === id)!).filter(Boolean);
     
-    const pendingOrders = selectedOrdersList.filter(o => o.status === 'PENDING' || (o.status as string) === 'SUBMITTED');
-    const filledOrders = selectedOrdersList.filter(o => o.status === 'FILLED');
-    const cancelledOrders = selectedOrdersList.filter(o => o.status === 'CANCELLED');
-    const failedOrders = selectedOrdersList.filter(o => (o.status as string) === 'FAILED');
+    const pendingOrdrs = selectedOrdersList.filter(o => o.status === 'PENDING' || (o.status as string) === 'SUBMITTED');
+    const filledOrdrs = selectedOrdersList.filter(o => o.status === 'FILLED');
+    const cancelledOrdrs = selectedOrdersList.filter(o => o.status === 'CANCELLED');
+    const failedOrdrs = selectedOrdersList.filter(o => (o.status as string) === 'FAILED');
     
     const actions = [];
-    if (pendingOrders.length > 0) actions.push(`Cancel ${pendingOrders.length} Pending order(s)`);
-    if (filledOrders.length > 0) actions.push(`Close ${filledOrders.length} position(s) on eToro and delete`);
-    if (cancelledOrders.length > 0) actions.push(`Delete ${cancelledOrders.length} Cancelled order(s)`);
-    if (failedOrders.length > 0) actions.push(`Delete ${failedOrders.length} Failed order(s)`);
+    if (pendingOrdrs.length > 0) actions.push(`Cancel ${pendingOrdrs.length} Pending order(s)`);
+    if (filledOrdrs.length > 0) actions.push(`Close ${filledOrdrs.length} position(s) on eToro and delete`);
+    if (cancelledOrdrs.length > 0) actions.push(`Delete ${cancelledOrdrs.length} Cancelled order(s)`);
+    if (failedOrdrs.length > 0) actions.push(`Delete ${failedOrdrs.length} Failed order(s)`);
     
     if (actions.length === 0) {
       toast.error('No actionable orders selected.');
@@ -562,8 +525,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     let deletedCount = 0;
     let failCount = 0;
     
-    // Cancel PENDING orders
-    for (const order of pendingOrders) {
+    for (const order of pendingOrdrs) {
       try {
         await apiClient.cancelOrder(order.id, tradingMode!);
         cancelledCount++;
@@ -574,19 +536,16 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       }
     }
     
-    // Close positions for FILLED orders
-    for (const order of filledOrders) {
+    for (const order of filledOrdrs) {
       try {
         await apiClient.closeFilledOrderPosition(order.id, tradingMode!);
         positionsClosedCount++;
       } catch (error) {
         console.error(`Failed to close position for order ${order.id}:`, error);
-        // Continue anyway - we'll try to delete the order
       }
     }
     
-    // Delete FILLED, CANCELLED, and FAILED orders
-    const ordersToDelete = [...filledOrders, ...cancelledOrders, ...failedOrders];
+    const ordersToDelete = [...filledOrdrs, ...cancelledOrdrs, ...failedOrdrs];
     if (ordersToDelete.length > 0) {
       try {
         const result = await apiClient.bulkDeleteOrders(ordersToDelete.map(o => o.id), tradingMode!);
@@ -600,8 +559,6 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     }
     
     setSelectedOrders(new Set());
-    
-    // Refresh data to get updated positions
     await fetchData();
     
     const messages = [];
@@ -621,7 +578,6 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
   const handleBulkDeleteOrders = async () => {
     if (selectedOrders.size === 0) return;
     
-    // Filter to only deletable orders (CANCELLED, FAILED, or FILLED status)
     const deletableOrders = Array.from(selectedOrders).filter(orderId => {
       const order = orders.find(o => o.id === orderId);
       return order && (order.status === 'CANCELLED' || order.status === 'FILLED' || (order.status as string) === 'FAILED');
@@ -662,7 +618,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       await apiClient.approvePositionClosure(positionId, tradingMode);
       toast.success('Position closed successfully');
       setPendingClosures(prev => prev.filter(p => p.id !== positionId));
-      await fetchData(); // Refresh data
+      await fetchData();
     } catch (error) {
       console.error('Failed to close position:', error);
       toast.error('Failed to close position');
@@ -681,7 +637,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       const result = await apiClient.approveBulkClosures(Array.from(selectedClosures), tradingMode!);
       
       setSelectedClosures(new Set());
-      await fetchData(); // Refresh data
+      await fetchData();
       
       if (result.success_count > 0) {
         toast.success(`Closed ${result.success_count} positions successfully`);
@@ -910,7 +866,6 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
           CANCELLED: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
           REJECTED: 'bg-accent-red/20 text-accent-red border-accent-red/30',
         };
-        // Map internal status to eToro-standard display labels
         const statusLabels: Record<string, string> = {
           PENDING: 'Pending',
           SUBMITTED: 'Pending',
@@ -1027,6 +982,20 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     },
   ];
 
+  // Recent fills for side panel (last 10 filled orders)
+  const recentFills = orders
+    .filter(o => o.status === 'FILLED')
+    .slice(0, 10);
+
+  // Compact metrics for side panel
+  const sideMetrics: CompactMetric[] = [
+    { label: 'Total', value: totalOrders, trend: 'neutral' },
+    { label: 'Fill Rate', value: `${fillRate.toFixed(1)}%`, trend: fillRate >= 80 ? 'up' : fillRate >= 50 ? 'neutral' : 'down' },
+    { label: 'Avg Slip', value: `${avgSlippage.toFixed(2)}%`, trend: avgSlippage <= 0 ? 'up' : 'down' },
+    { label: 'Pending', value: pendingOrders, trend: pendingOrders > 0 ? 'neutral' : 'up', color: pendingOrders > 0 ? '#eab308' : undefined },
+  ];
+
+  // Loading state
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
@@ -1037,6 +1006,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     );
   }
 
+  // Error state
   if (error && orders.length === 0) {
     const classified = classifyError(new Error(error), 'orders');
     return (
@@ -1053,434 +1023,115 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     );
   }
 
-  return (
-    <DashboardLayout onLogout={onLogout}>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.3 }}
-        className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto relative"
+  // Header actions for PageTemplate
+  const headerActions = (
+    <>
+      <DataFreshnessIndicator lastFetchedAt={lastUpdated} />
+      <Button
+        variant="default"
+        size="sm"
+        onClick={() => { resetOrderForm(); setOrderFormOpen(true); }}
+        className="gap-2 bg-accent-green hover:bg-accent-green/80 text-black"
       >
-        <RefreshIndicator visible={pollingRefreshing && !loading} />
-        {/* Header */}
-        <div className="mb-6 lg:mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-100 font-mono mb-2">
-              ◆ Orders
-            </h1>
-            <div className="flex items-center gap-3">
-              <p className="text-gray-400 text-sm">
-                Order execution monitoring and analytics
-              </p>
-              <DataFreshnessIndicator lastFetchedAt={lastUpdated} />
+        + New Order
+      </Button>
+      <Button variant="outline" size="sm" onClick={exportToCSV} className="gap-2">
+        <Download className="h-4 w-4" />
+        Export
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleSyncOrders}
+        disabled={syncing}
+        className="gap-2"
+        title="Sync order statuses with eToro"
+      >
+        <RefreshCw className={cn('h-4 w-4', syncing && 'animate-spin')} />
+        {syncing ? 'Syncing...' : '🔄 Sync'}
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={fetchData}
+        disabled={refreshing}
+        className="gap-2"
+      >
+        <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+        Refresh
+      </Button>
+    </>
+  );
+
+  // ── Main Panel (65%) ─────────────────────────────────────────────────
+  const mainPanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader
+        title="Orders"
+        panelId="orders-main"
+        onRefresh={fetchData}
+      >
+        <div className="flex flex-col h-full overflow-hidden">
+          {/* OrderFlowTimeline hero — top ~40% */}
+          <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
+            <div className="p-3 h-full">
+              <div className="text-xs text-gray-500 mb-1 font-semibold uppercase tracking-wide">Order Flow — Last 7 Days</div>
+              <OrderFlowTimeline
+                orders={orders.map((o) => ({
+                  id: o.id,
+                  symbol: o.symbol,
+                  status: o.status,
+                  side: o.side,
+                  created_at: o.created_at,
+                  quantity: o.quantity,
+                }))}
+                days={7}
+              />
             </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => { resetOrderForm(); setOrderFormOpen(true); }}
-              className="gap-2 bg-accent-green hover:bg-accent-green/80 text-black"
-            >
-              + New Order
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={exportToCSV}
-              className="gap-2"
-            >
-              <Download className="h-4 w-4" />
-              Export
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleSyncOrders}
-              disabled={syncing}
-              className="gap-2"
-              title="Sync order statuses with eToro"
-            >
-              <RefreshCw className={cn('h-4 w-4', syncing && 'animate-spin')} />
-              {syncing ? 'Syncing...' : '🔄 Sync eToro'}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={fetchData}
-              disabled={refreshing}
-              className="gap-2"
-            >
-              <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-              Refresh
-            </Button>
-          </div>
-        </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="timeline">Timeline</TabsTrigger>
-            <TabsTrigger value="queue" className={queuedOrders.length > 0 ? 'text-amber-400' : ''}>
-              Order Queue {queuedOrders.length > 0 && `(${queuedOrders.length})`}
-            </TabsTrigger>
-            <TabsTrigger value="all">
-              All Orders ({filteredOrders.length})
-            </TabsTrigger>
-            <TabsTrigger value="pending-closures">
-              Pending Closures ({pendingClosures.length})
-            </TabsTrigger>
-            <TabsTrigger value="analytics" onClick={fetchExecutionQuality}>
-              Execution Analytics
-            </TabsTrigger>
-          </TabsList>
+          {/* Orders DenseTable with tabs — bottom ~60% */}
+          <div className="flex-1 min-h-0 overflow-hidden border-t border-[var(--color-dark-border)]">
+            <Tabs defaultValue="all" className="flex flex-col h-full">
+              <div className="shrink-0 px-3 pt-2">
+                <TabsList className="w-full overflow-x-auto">
+                  <TabsTrigger value="all">
+                    All ({filteredOrders.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="queue" className={queuedOrders.length > 0 ? 'text-amber-400' : ''}>
+                    Queue {queuedOrders.length > 0 && `(${queuedOrders.length})`}
+                  </TabsTrigger>
+                  <TabsTrigger value="pending-closures">
+                    Closures ({pendingClosures.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="analytics" onClick={fetchExecutionQuality}>
+                    Analytics
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
-          {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-6">
-            {/* Order Summary Metrics */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-              className="grid grid-cols-2 md:grid-cols-5 gap-4"
-            >
-              <MetricCard
-                label="Total Orders"
-                value={totalOrders}
-                format="number"
-                icon={Activity}
-                tooltip="Total number of orders"
-              />
-              <MetricCard
-                label="Pending"
-                value={pendingOrders}
-                format="number"
-                icon={Clock}
-                tooltip="Orders awaiting execution"
-              />
-              <MetricCard
-                label="Executed"
-                value={filledOrders}
-                format="number"
-                icon={TrendingUp}
-                tooltip="Successfully executed orders"
-              />
-              <MetricCard
-                label="Cancelled"
-                value={cancelledOrders}
-                format="number"
-                icon={X}
-                tooltip="Cancelled orders"
-              />
-              <MetricCard
-                label="Rejected"
-                value={rejectedOrders}
-                format="number"
-                icon={AlertCircle}
-                tooltip="Rejected orders"
-              />
-            </motion.div>
-
-            {/* Execution Quality Cards */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}
-              className="grid grid-cols-1 md:grid-cols-3 gap-4"
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Avg Slippage</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className={cn(
-                    'text-2xl font-bold font-mono',
-                    avgSlippage >= 0 ? 'text-accent-red' : 'text-accent-green'
-                  )}>
-                    {formatPercentage(avgSlippage)}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Based on {filledOrdersWithMetrics.length} filled orders
-                  </p>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Fill Rate</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold font-mono text-accent-green">
-                    {formatPercentage(fillRate)}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {filledOrders} of {totalOrders} orders filled
-                  </p>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Avg Fill Time</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold font-mono text-blue-400">
-                    {avgFillTime.toFixed(1)}s
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Average execution time
-                  </p>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Order Flow Timeline */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Order Flow Timeline</CardTitle>
-                  <CardDescription>
-                    Order activity over the last 24 hours
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {orderFlowData.some(d => d.orders > 0) ? (
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={orderFlowData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis 
-                          dataKey="hour" 
-                          stroke="#9ca3af"
-                          tick={{ fontSize: 12 }}
-                        />
-                        <YAxis stroke="#9ca3af" tick={{ fontSize: 12 }} />
-                        <RechartsTooltip
-                          contentStyle={{
-                            backgroundColor: '#1f2937',
-                            border: '1px solid #374151',
-                            borderRadius: '0.5rem',
-                          }}
-                        />
-                        <Bar dataKey="orders" fill="#3b82f6" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="text-center py-12 text-muted-foreground">
-                      No orders in the last 24 hours
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </motion.div>
-          </TabsContent>
-
-          {/* Order Flow Timeline Tab (Task 9.3) */}
-          <TabsContent value="timeline" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Order Flow Timeline</CardTitle>
-                <CardDescription>Order events over the last 7 days — placed, filled, cancelled</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <OrderFlowTimeline
-                  orders={orders.map((o) => ({
-                    id: o.id,
-                    symbol: o.symbol,
-                    status: o.status,
-                    side: o.side,
-                    created_at: o.created_at,
-                    quantity: o.quantity,
-                  }))}
-                  days={7}
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Order Queue Tab */}
-          <TabsContent value="queue" className="space-y-4">
-            {/* Market Status Banner */}
-            <Card className={cn(
-              'border',
-              marketStatus.isOpen ? 'border-accent-green/30 bg-accent-green/5' : 'border-amber-500/30 bg-amber-500/5'
-            )}>
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      'h-3 w-3 rounded-full animate-pulse',
-                      marketStatus.isOpen ? 'bg-accent-green' : 'bg-amber-500'
-                    )} />
-                    <div>
-                      <p className={cn(
-                        'text-sm font-semibold',
-                        marketStatus.isOpen ? 'text-accent-green' : 'text-amber-400'
-                      )}>
-                        {marketStatus.label}
-                      </p>
-                      {!marketStatus.isOpen && marketStatus.nextOpen && (
-                        <p className="text-xs text-gray-400">
-                          Next open: {format(marketStatus.nextOpen, 'EEE, MMM d \'at\' h:mm a')} UTC
-                          {' '}({formatDistanceToNow(marketStatus.nextOpen, { addSuffix: true })})
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-sm font-mono text-gray-400">
-                    {queuedOrders.length} order{queuedOrders.length !== 1 ? 's' : ''} queued
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className={queuedOrders.length > 0 ? 'border-amber-500/30' : ''}>
-              <CardHeader>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Clock className={cn('h-5 w-5', queuedOrders.length > 0 ? 'text-amber-500' : 'text-muted-foreground')} />
-                      Order Queue
-                    </CardTitle>
-                    <CardDescription>
-                      {queuedOrders.length > 0
-                        ? `${queuedOrders.length} pending order${queuedOrders.length !== 1 ? 's' : ''} waiting for execution`
-                        : 'No orders currently queued'}
-                    </CardDescription>
-                  </div>
-                  {queuedOrders.length > 0 && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={handleCancelAllQueued}
-                      className="gap-2"
-                    >
-                      <X className="h-4 w-4" />
-                      Cancel All ({queuedOrders.length})
-                    </Button>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {queuedOrders.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Clock className="h-12 w-12 text-gray-600 mx-auto mb-3" />
-                    <div className="text-gray-400 font-mono mb-2">No queued orders</div>
-                    <div className="text-sm text-gray-500">
-                      Orders placed when the market is closed will appear here
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {queuedOrders.map((order) => {
-                      const age = formatDistanceToNow(utcToLocal(order.created_at), { addSuffix: true });
-                      const isWaitingForMarket = !marketStatus.isOpen;
-                      return (
-                        <motion.div
-                          key={order.id}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="flex items-center justify-between p-4 rounded-lg border border-amber-500/20 bg-amber-500/5"
-                        >
-                          <div className="flex items-center gap-4 min-w-0">
-                            <div className="flex flex-col">
-                              <span className="font-mono font-semibold text-sm text-gray-200">
-                                {order.symbol}
-                              </span>
-                              <span className={cn(
-                                'text-xs font-mono font-semibold',
-                                order.side === 'BUY' ? 'text-accent-green' : 'text-accent-red'
-                              )}>
-                                {order.side}
-                              </span>
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-sm text-gray-300 font-mono">
-                                {formatCurrency(order.quantity)}
-                              </span>
-                              <span className="text-xs text-gray-500">
-                                {order.price ? `@ ${formatCurrency(order.price)}` : 'Market'}
-                              </span>
-                            </div>
-                            <div className="flex flex-col">
-                              <span className="text-xs text-gray-400">
-                                Queued {age}
-                              </span>
-                              <span className={cn(
-                                'text-xs px-1.5 py-0.5 rounded mt-0.5 w-fit',
-                                isWaitingForMarket
-                                  ? 'bg-amber-500/20 text-amber-400'
-                                  : 'bg-blue-500/20 text-blue-400'
-                              )}>
-                                {isWaitingForMarket ? 'Waiting for market open' : 'Processing'}
-                              </span>
-                            </div>
-                            {!marketStatus.isOpen && marketStatus.nextOpen && (
-                              <div className="hidden md:flex flex-col">
-                                <span className="text-xs text-gray-500">Est. execution</span>
-                                <span className="text-xs text-amber-400 font-mono">
-                                  {formatDistanceToNow(marketStatus.nextOpen, { addSuffix: true })}
-                                </span>
-                              </div>
-                            )}
-                            {order.strategy_id && order.strategy_id !== 'manual_order' && (
-                              <span className="hidden lg:inline text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 font-mono">
-                                {order.strategy_id.substring(0, 8)}...
-                              </span>
-                            )}
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleCancelOrder(order.id)}
-                            className="border-accent-red/30 text-accent-red hover:bg-accent-red/10 gap-1 shrink-0"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                            Cancel
-                          </Button>
-                        </motion.div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* All Orders Tab */}
-          <TabsContent value="all" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div>
-                    <CardTitle>All Orders</CardTitle>
-                    <CardDescription>
-                      Complete order history with advanced filtering • {filteredOrders.length} of {orders.length} orders
-                    </CardDescription>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
+              {/* All Orders Tab */}
+              <TabsContent value="all" className="flex-1 min-h-0 overflow-hidden px-3 pb-2">
+                <div className="flex flex-col h-full gap-2">
+                  {/* Filters row */}
+                  <div className="flex flex-wrap gap-2 shrink-0">
                     <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                       <Input
                         placeholder="Search symbol..."
                         value={orderSearch}
                         onChange={(e) => setOrderSearch(e.target.value)}
-                        className="pl-9 w-full sm:w-[200px]"
+                        className="pl-8 h-8 text-xs w-[150px]"
                       />
                     </div>
-                    
                     <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
-                      <SelectTrigger className="w-full sm:w-[140px]">
+                      <SelectTrigger className="w-[120px] h-8 text-xs">
                         <SelectValue placeholder="Status" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Status</SelectItem>
                         <SelectItem value="PENDING">Pending</SelectItem>
-                        <SelectItem value="SUBMITTED">Pending (Submitted)</SelectItem>
+                        <SelectItem value="SUBMITTED">Submitted</SelectItem>
                         <SelectItem value="FILLED">Executed</SelectItem>
                         <SelectItem value="PARTIALLY_FILLED">Partial</SelectItem>
                         <SelectItem value="CANCELLED">Cancelled</SelectItem>
@@ -1488,9 +1139,8 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                         <SelectItem value="REJECTED">Rejected</SelectItem>
                       </SelectContent>
                     </Select>
-                    
                     <Select value={orderSideFilter} onValueChange={setOrderSideFilter}>
-                      <SelectTrigger className="w-full sm:w-[120px]">
+                      <SelectTrigger className="w-[100px] h-8 text-xs">
                         <SelectValue placeholder="Side" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1499,9 +1149,8 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                         <SelectItem value="SELL">Sell</SelectItem>
                       </SelectContent>
                     </Select>
-                    
                     <Select value={orderSourceFilter} onValueChange={setOrderSourceFilter}>
-                      <SelectTrigger className="w-full sm:w-[140px]">
+                      <SelectTrigger className="w-[120px] h-8 text-xs">
                         <SelectValue placeholder="Source" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1510,10 +1159,9 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                         <SelectItem value="manual">Manual</SelectItem>
                       </SelectContent>
                     </Select>
-                    
                     {uniqueStrategies.length > 0 && (
                       <Select value={orderStrategyFilter} onValueChange={setOrderStrategyFilter}>
-                        <SelectTrigger className="w-full sm:w-[140px]">
+                        <SelectTrigger className="w-[120px] h-8 text-xs">
                           <SelectValue placeholder="Strategy" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1526,12 +1174,11 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                         </SelectContent>
                       </Select>
                     )}
-                    
                     <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
                       <PopoverTrigger asChild>
-                        <Button variant="outline" size="sm" className="gap-2">
-                          <Calendar className="h-4 w-4" />
-                          {dateRange.from || dateRange.to ? 'Date Range' : 'All Dates'}
+                        <Button variant="outline" size="sm" className="gap-1 h-8 text-xs">
+                          <Calendar className="h-3.5 w-3.5" />
+                          {dateRange.from || dateRange.to ? 'Dates' : 'All'}
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-4" align="end">
@@ -1553,158 +1200,188 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                             />
                           </div>
                           <div className="flex gap-2">
-                            <Button size="sm" variant="outline" onClick={clearDateRange} className="flex-1">
-                              Clear
-                            </Button>
-                            <Button size="sm" onClick={() => setShowDatePicker(false)} className="flex-1">
-                              Apply
-                            </Button>
+                            <Button size="sm" variant="outline" onClick={clearDateRange} className="flex-1">Clear</Button>
+                            <Button size="sm" onClick={() => setShowDatePicker(false)} className="flex-1">Apply</Button>
                           </div>
                         </div>
                       </PopoverContent>
                     </Popover>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {/* Bulk Actions Toolbar */}
-                {selectedOrders.size > 0 && (
-                  <div className="flex items-center gap-3 mb-4 p-3 bg-dark-lighter rounded-lg border border-dark-border">
-                    <span className="text-sm text-gray-400 font-mono">
-                      {selectedOrders.size} selected
-                    </span>
-                    <Button
-                      onClick={handleSmartBulkAction}
-                      variant="default"
-                      size="sm"
-                      className="gap-2"
-                    >
-                      <X className="h-4 w-4" />
-                      Clean Up Selected
-                    </Button>
-                    <Button
-                      onClick={handleBulkCancelOrders}
-                      variant="destructive"
-                      size="sm"
-                      className="gap-2"
-                    >
-                      <X className="h-4 w-4" />
-                      Cancel Selected
-                    </Button>
-                    <Button
-                      onClick={handleBulkDeleteOrders}
-                      variant="destructive"
-                      size="sm"
-                      className="gap-2"
-                    >
-                      <X className="h-4 w-4" />
-                      Delete Selected
-                    </Button>
-                    <Button
-                      onClick={() => setSelectedOrders(new Set())}
-                      variant="ghost"
-                      size="sm"
-                    >
-                      Clear Selection
-                    </Button>
-                  </div>
-                )}
-                
-                {filteredOrders.length > 0 ? (
-                  <div className="max-h-[600px] overflow-y-auto">
-                    <DataTable
-                      columns={orderColumns}
-                      data={filteredOrders}
-                      pageSize={20}
-                      showPagination={true}
-                      getRowId={(row) => row.id}
-                      rowSelection={Object.fromEntries(
-                        Array.from(selectedOrders).map(id => [id, true])
-                      )}
-                      onRowSelectionChange={(updaterOrValue) => {
-                        const currentSelection = Object.fromEntries(
-                          Array.from(selectedOrders).map(id => [id, true])
-                        );
-                        const newSelection = typeof updaterOrValue === 'function' 
-                          ? updaterOrValue(currentSelection)
-                          : updaterOrValue;
-                        setSelectedOrders(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="text-center py-12 text-muted-foreground">
-                    {orderSearch || orderStatusFilter !== 'all' || orderSideFilter !== 'all' || orderSourceFilter !== 'all' || orderStrategyFilter !== 'all' || dateRange.from || dateRange.to
-                      ? 'No orders match your filters' 
-                      : 'No orders found'}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
 
-          {/* Pending Closures Tab */}
-          <TabsContent value="pending-closures" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div>
-                    <CardTitle>Pending Position Closures</CardTitle>
-                    <CardDescription>
-                      Positions from retired strategies awaiting closure approval • {pendingClosures.length} positions
-                    </CardDescription>
+                  {/* Bulk Actions */}
+                  {selectedOrders.size > 0 && (
+                    <div className="flex items-center gap-2 p-2 bg-dark-lighter rounded border border-dark-border shrink-0">
+                      <span className="text-xs text-gray-400 font-mono">{selectedOrders.size} selected</span>
+                      <Button onClick={handleSmartBulkAction} variant="default" size="sm" className="gap-1 h-7 text-xs">
+                        <X className="h-3 w-3" /> Clean Up
+                      </Button>
+                      <Button onClick={handleBulkCancelOrders} variant="destructive" size="sm" className="gap-1 h-7 text-xs">
+                        Cancel
+                      </Button>
+                      <Button onClick={handleBulkDeleteOrders} variant="destructive" size="sm" className="gap-1 h-7 text-xs">
+                        Delete
+                      </Button>
+                      <Button onClick={() => setSelectedOrders(new Set())} variant="ghost" size="sm" className="h-7 text-xs">
+                        Clear
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Table */}
+                  <div className="flex-1 min-h-0 overflow-auto">
+                    {filteredOrders.length > 0 ? (
+                      <DataTable
+                        columns={orderColumns}
+                        data={filteredOrders}
+                        pageSize={20}
+                        showPagination={true}
+                        getRowId={(row) => row.id}
+                        rowSelection={Object.fromEntries(
+                          Array.from(selectedOrders).map(id => [id, true])
+                        )}
+                        onRowSelectionChange={(updaterOrValue) => {
+                          const currentSelection = Object.fromEntries(
+                            Array.from(selectedOrders).map(id => [id, true])
+                          );
+                          const newSelection = typeof updaterOrValue === 'function' 
+                            ? updaterOrValue(currentSelection)
+                            : updaterOrValue;
+                          setSelectedOrders(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
+                        }}
+                      />
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground text-sm">
+                        {orderSearch || orderStatusFilter !== 'all' || orderSideFilter !== 'all' || orderSourceFilter !== 'all' || orderStrategyFilter !== 'all' || dateRange.from || dateRange.to
+                          ? 'No orders match your filters' 
+                          : 'No orders found'}
+                      </div>
+                    )}
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                {pendingClosures.length === 0 ? (
-                  <div className="text-center py-12">
-                    <div className="text-gray-400 font-mono mb-2">No pending closures</div>
-                    <div className="text-sm text-gray-500">
-                      Positions from retired strategies will appear here for approval
+              </TabsContent>
+
+              {/* Order Queue Tab */}
+              <TabsContent value="queue" className="flex-1 min-h-0 overflow-auto px-3 pb-2">
+                {/* Market Status Banner */}
+                <div className={cn(
+                  'flex items-center justify-between p-3 rounded-lg border mb-3',
+                  marketStatus.isOpen ? 'border-accent-green/30 bg-accent-green/5' : 'border-amber-500/30 bg-amber-500/5'
+                )}>
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      'h-2.5 w-2.5 rounded-full animate-pulse',
+                      marketStatus.isOpen ? 'bg-accent-green' : 'bg-amber-500'
+                    )} />
+                    <div>
+                      <p className={cn(
+                        'text-xs font-semibold',
+                        marketStatus.isOpen ? 'text-accent-green' : 'text-amber-400'
+                      )}>
+                        {marketStatus.label}
+                      </p>
+                      {!marketStatus.isOpen && marketStatus.nextOpen && (
+                        <p className="text-[10px] text-gray-400">
+                          Next: {format(marketStatus.nextOpen, 'EEE, MMM d h:mm a')} UTC
+                        </p>
+                      )}
                     </div>
                   </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-gray-400">
+                      {queuedOrders.length} queued
+                    </span>
+                    {queuedOrders.length > 0 && (
+                      <Button variant="destructive" size="sm" onClick={handleCancelAllQueued} className="gap-1 h-7 text-xs">
+                        <X className="h-3 w-3" /> Cancel All
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {queuedOrders.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Clock className="h-8 w-8 text-gray-600 mx-auto mb-2" />
+                    <div className="text-gray-400 font-mono text-sm mb-1">No queued orders</div>
+                    <div className="text-xs text-gray-500">Orders placed when market is closed appear here</div>
+                  </div>
                 ) : (
-                  <div className="space-y-4">
-                    {/* Bulk Actions */}
-                    {selectedClosures.size > 0 && (
-                      <div className="flex items-center gap-4 p-4 bg-dark-card border border-gray-700 rounded-lg">
-                        <span className="text-sm text-gray-300 font-mono">
-                          {selectedClosures.size} selected
-                        </span>
-                        <Button
-                          onClick={handleBulkApproveClosures}
-                          variant="default"
-                          size="sm"
-                          className="gap-2"
+                  <div className="space-y-2">
+                    {queuedOrders.map((order) => {
+                      const age = formatDistanceToNow(utcToLocal(order.created_at), { addSuffix: true });
+                      const isWaitingForMarket = !marketStatus.isOpen;
+                      return (
+                        <div
+                          key={order.id}
+                          className="flex items-center justify-between p-3 rounded-lg border border-amber-500/20 bg-amber-500/5"
                         >
-                          <X className="h-4 w-4" />
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex flex-col">
+                              <span className="font-mono font-semibold text-xs text-gray-200">{order.symbol}</span>
+                              <span className={cn('text-[10px] font-mono font-semibold', order.side === 'BUY' ? 'text-accent-green' : 'text-accent-red')}>
+                                {order.side}
+                              </span>
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-xs text-gray-300 font-mono">{formatCurrency(order.quantity)}</span>
+                              <span className="text-[10px] text-gray-500">{order.price ? `@ ${formatCurrency(order.price)}` : 'Market'}</span>
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-[10px] text-gray-400">Queued {age}</span>
+                              <span className={cn(
+                                'text-[10px] px-1 py-0.5 rounded mt-0.5 w-fit',
+                                isWaitingForMarket ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
+                              )}>
+                                {isWaitingForMarket ? 'Waiting for market' : 'Processing'}
+                              </span>
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleCancelOrder(order.id)}
+                            className="border-accent-red/30 text-accent-red hover:bg-accent-red/10 gap-1 shrink-0 h-7 text-xs"
+                          >
+                            <X className="h-3 w-3" /> Cancel
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Pending Closures Tab */}
+              <TabsContent value="pending-closures" className="flex-1 min-h-0 overflow-auto px-3 pb-2">
+                {pendingClosures.length === 0 ? (
+                  <div className="text-center py-8">
+                    <div className="text-gray-400 font-mono text-sm mb-1">No pending closures</div>
+                    <div className="text-xs text-gray-500">Positions from retired strategies appear here</div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedClosures.size > 0 && (
+                      <div className="flex items-center gap-3 p-2 bg-dark-card border border-gray-700 rounded">
+                        <span className="text-xs text-gray-300 font-mono">{selectedClosures.size} selected</span>
+                        <Button onClick={handleBulkApproveClosures} variant="default" size="sm" className="gap-1 h-7 text-xs">
                           Close Selected
                         </Button>
                       </div>
                     )}
-
-                    {/* Pending Closures Table */}
                     <DataTable
                       columns={[
                         {
                           id: 'select',
                           header: () => {
-                            const allSelected = pendingClosures.length > 0 && 
-                              pendingClosures.every(p => selectedClosures.has(p.id));
-                            
+                            const allSelected = pendingClosures.length > 0 && pendingClosures.every(p => selectedClosures.has(p.id));
                             return (
                               <input
                                 type="checkbox"
                                 checked={allSelected}
                                 onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setSelectedClosures(new Set(pendingClosures.map(p => p.id)));
-                                  } else {
-                                    setSelectedClosures(new Set());
-                                  }
+                                  if (e.target.checked) setSelectedClosures(new Set(pendingClosures.map(p => p.id)));
+                                  else setSelectedClosures(new Set());
                                 }}
-                                className="w-4 h-4 rounded border-gray-600 bg-dark-surface text-accent-green focus:ring-accent-green"
+                                className="w-4 h-4 rounded border-gray-600"
                               />
                             );
                           },
@@ -1713,112 +1390,47 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                               type="checkbox"
                               checked={row.getIsSelected()}
                               onChange={(e) => row.toggleSelected(!!e.target.checked)}
-                              className="w-4 h-4 rounded border-gray-600 bg-dark-surface text-accent-green focus:ring-accent-green"
+                              className="w-4 h-4 rounded border-gray-600"
                             />
                           ),
                         },
                         {
                           accessorKey: 'symbol',
                           header: 'Symbol',
-                          cell: ({ row }) => (
-                            <div className="font-mono text-sm text-gray-200">
-                              {row.original.symbol}
-                            </div>
-                          ),
+                          cell: ({ row }) => <div className="font-mono text-xs">{row.original.symbol}</div>,
                         },
                         {
                           accessorKey: 'side',
                           header: 'Side',
                           cell: ({ row }) => (
-                            <div className={cn(
-                              'font-mono text-sm font-semibold',
-                              row.original.side === 'BUY' ? 'text-accent-green' : 'text-accent-red'
-                            )}>
+                            <span className={cn('font-mono text-xs font-semibold', row.original.side === 'BUY' ? 'text-accent-green' : 'text-accent-red')}>
                               {row.original.side}
-                            </div>
+                            </span>
                           ),
                         },
                         {
                           accessorKey: 'quantity',
-                          header: () => <div className="text-right">Quantity</div>,
-                          cell: ({ row }) => (
-                            <div className="text-right font-mono text-sm">
-                              {row.original.quantity}
-                            </div>
-                          ),
-                        },
-                        {
-                          accessorKey: 'entry_price',
-                          header: () => <div className="text-right">Entry</div>,
-                          cell: ({ row }) => (
-                            <div className="text-right font-mono text-sm">
-                              {formatCurrency(row.original.entry_price)}
-                            </div>
-                          ),
-                        },
-                        {
-                          accessorKey: 'current_price',
-                          header: () => <div className="text-right">Current</div>,
-                          cell: ({ row }) => (
-                            <div className="text-right font-mono text-sm">
-                              {formatCurrency(row.original.current_price)}
-                            </div>
-                          ),
+                          header: () => <div className="text-right">Qty</div>,
+                          cell: ({ row }) => <div className="text-right font-mono text-xs">{row.original.quantity}</div>,
                         },
                         {
                           accessorKey: 'unrealized_pnl',
                           header: () => <div className="text-right">P&L</div>,
                           cell: ({ row }) => {
                             const pnl = row.original.unrealized_pnl;
-                            const pnlPercent = row.original.unrealized_pnl_percent;
                             return (
-                              <div className="text-right">
-                                <div className={cn(
-                                  'font-mono text-sm font-semibold',
-                                  pnl >= 0 ? 'text-accent-green' : 'text-accent-red'
-                                )}>
-                                  {formatCurrency(pnl)}
-                                </div>
-                                <div className={cn(
-                                  'font-mono text-xs',
-                                  pnl >= 0 ? 'text-accent-green/70' : 'text-accent-red/70'
-                                )}>
-                                  {formatPercentage(pnlPercent)}
-                                </div>
+                              <div className={cn('text-right font-mono text-xs font-semibold', pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                                {formatCurrency(pnl)}
                               </div>
                             );
                           },
-                        },
-                        {
-                          accessorKey: 'strategy_id',
-                          header: 'Strategy',
-                          cell: ({ row }) => (
-                            <div className="font-mono text-sm text-gray-400">
-                              {row.original.strategy_id}
-                            </div>
-                          ),
-                        },
-                        {
-                          accessorKey: 'closure_reason',
-                          header: 'Reason',
-                          cell: ({ row }) => (
-                            <div className="text-sm text-gray-400 max-w-xs truncate">
-                              {row.original.closure_reason || 'Strategy retired'}
-                            </div>
-                          ),
                         },
                         {
                           id: 'actions',
                           header: () => <div className="text-right">Actions</div>,
                           cell: ({ row }) => (
                             <div className="flex justify-end">
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => handleApproveClosure(row.original.id)}
-                                className="gap-2"
-                              >
-                                <X className="h-4 w-4" />
+                              <Button variant="default" size="sm" onClick={() => handleApproveClosure(row.original.id)} className="h-7 text-xs">
                                 Close
                               </Button>
                             </div>
@@ -1827,9 +1439,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                       ]}
                       data={pendingClosures}
                       getRowId={(row) => row.id}
-                      rowSelection={Object.fromEntries(
-                        Array.from(selectedClosures).map(id => [id, true])
-                      )}
+                      rowSelection={Object.fromEntries(Array.from(selectedClosures).map(id => [id, true]))}
                       onRowSelectionChange={(updater) => {
                         const newSelection = typeof updater === 'function'
                           ? updater(Object.fromEntries(Array.from(selectedClosures).map(id => [id, true])))
@@ -1839,71 +1449,38 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                     />
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </TabsContent>
 
-          {/* Execution Analytics Tab */}
-          <TabsContent value="analytics" className="space-y-6">
-            {/* Period Selector */}
-            <div className="flex justify-end">
-              <div className="flex gap-2">
-                <Button
-                  variant={analyticsPeriod === '1D' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setAnalyticsPeriod('1D')}
-                >
-                  1D
-                </Button>
-                <Button
-                  variant={analyticsPeriod === '1W' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setAnalyticsPeriod('1W')}
-                >
-                  1W
-                </Button>
-                <Button
-                  variant={analyticsPeriod === '1M' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setAnalyticsPeriod('1M')}
-                >
-                  1M
-                </Button>
-              </div>
-            </div>
+              {/* Execution Analytics Tab */}
+              <TabsContent value="analytics" className="flex-1 min-h-0 overflow-auto px-3 pb-2 space-y-4">
+                {/* Period Selector */}
+                <div className="flex justify-end">
+                  <div className="flex gap-1">
+                    {(['1D', '1W', '1M'] as const).map(p => (
+                      <Button
+                        key={p}
+                        variant={analyticsPeriod === p ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => setAnalyticsPeriod(p)}
+                        className="h-7 text-xs px-2"
+                      >
+                        {p}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
 
-            {/* Slippage by Strategy */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Slippage by Strategy</CardTitle>
-                  <CardDescription>
-                    Average slippage for each strategy
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+                {/* Slippage by Strategy */}
+                <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
+                  <div className="text-xs font-semibold text-gray-300 mb-2">Slippage by Strategy</div>
                   {slippageByStrategy.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={300}>
+                    <ResponsiveContainer width="100%" height={180}>
                       <BarChart data={slippageByStrategy} layout="vertical">
                         <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis type="number" stroke="#9ca3af" tick={{ fontSize: 12 }} />
-                        <YAxis 
-                          type="category" 
-                          dataKey="strategy" 
-                          stroke="#9ca3af"
-                          tick={{ fontSize: 12 }}
-                          width={80}
-                        />
+                        <XAxis type="number" stroke="#9ca3af" tick={{ fontSize: 10 }} />
+                        <YAxis type="category" dataKey="strategy" stroke="#9ca3af" tick={{ fontSize: 10 }} width={60} />
                         <RechartsTooltip
-                          contentStyle={{
-                            backgroundColor: '#1f2937',
-                            border: '1px solid #374151',
-                            borderRadius: '0.5rem',
-                          }}
+                          contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.5rem' }}
                           formatter={(value: number | string | undefined) => {
                             if (value === undefined || value === null) return 'N/A';
                             if (typeof value === 'number') return `${value.toFixed(4)}%`;
@@ -1914,308 +1491,383 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="text-center py-12 text-muted-foreground">
-                      No slippage data available
-                    </div>
+                    <div className="text-center py-6 text-muted-foreground text-xs">No slippage data</div>
                   )}
-                </CardContent>
-              </Card>
-            </motion.div>
+                </div>
 
-            {/* Fill Rate Trend */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Fill Rate Trend</CardTitle>
-                  <CardDescription>
-                    Daily fill rate over the last 7 days
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+                {/* Fill Rate Trend */}
+                <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
+                  <div className="text-xs font-semibold text-gray-300 mb-2">Fill Rate Trend</div>
                   {fillRateTrend.some(d => d.fillRate > 0) ? (
-                    <ResponsiveContainer width="100%" height={300}>
+                    <ResponsiveContainer width="100%" height={180}>
                       <LineChart data={fillRateTrend}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis 
-                          dataKey="date" 
-                          stroke="#9ca3af"
-                          tick={{ fontSize: 12 }}
-                        />
-                        <YAxis 
-                          stroke="#9ca3af" 
-                          tick={{ fontSize: 12 }}
-                          domain={[0, 100]}
-                        />
+                        <XAxis dataKey="date" stroke="#9ca3af" tick={{ fontSize: 10 }} />
+                        <YAxis stroke="#9ca3af" tick={{ fontSize: 10 }} domain={[0, 100]} />
                         <RechartsTooltip
-                          contentStyle={{
-                            backgroundColor: '#1f2937',
-                            border: '1px solid #374151',
-                            borderRadius: '0.5rem',
-                          }}
+                          contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.5rem' }}
                           formatter={(value: number | string | undefined) => {
                             if (value === undefined || value === null) return 'N/A';
                             if (typeof value === 'number') return `${value.toFixed(1)}%`;
                             return value;
                           }}
                         />
-                        <Line 
-                          type="monotone" 
-                          dataKey="fillRate" 
-                          stroke="#10b981" 
-                          strokeWidth={2}
-                          dot={{ fill: '#10b981', r: 4 }}
-                        />
+                        <Line type="monotone" dataKey="fillRate" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 3 }} />
                       </LineChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="text-center py-12 text-muted-foreground">
-                      No fill rate data available
-                    </div>
+                    <div className="text-center py-6 text-muted-foreground text-xs">No fill rate data</div>
                   )}
-                </CardContent>
-              </Card>
-            </motion.div>
+                </div>
 
-            {/* Rejection Reasons Breakdown */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Rejection Reasons Breakdown</CardTitle>
-                  <CardDescription>
-                    Distribution of order rejection reasons
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+                {/* Rejection Reasons */}
+                <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
+                  <div className="text-xs font-semibold text-gray-300 mb-2">Rejection Reasons</div>
                   {rejectionData.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <ResponsiveContainer width="100%" height={250}>
+                    <div className="grid grid-cols-2 gap-3">
+                      <ResponsiveContainer width="100%" height={150}>
                         <PieChart>
-                          <Pie
-                            data={rejectionData}
-                            cx="50%"
-                            cy="50%"
-                            labelLine={false}
-                            label={false}
-                            outerRadius={80}
-                            fill="#8884d8"
-                            dataKey="value"
-                          >
+                          <Pie data={rejectionData} cx="50%" cy="50%" labelLine={false} label={false} outerRadius={55} fill="#8884d8" dataKey="value">
                             {rejectionData.map((_, index) => (
                               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                             ))}
                           </Pie>
-                          <RechartsTooltip
-                            contentStyle={{
-                              backgroundColor: '#1f2937',
-                              border: '1px solid #374151',
-                              borderRadius: '0.5rem',
-                            }}
-                          />
-                          <Legend
-                            verticalAlign="bottom"
-                            height={36}
-                            iconType="circle"
-                          />
+                          <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.5rem' }} />
                         </PieChart>
                       </ResponsiveContainer>
-                      
-                      <div className="space-y-3">
+                      <div className="space-y-1.5">
                         {rejectionData.map((item, index) => (
-                          <div key={item.name} className="flex items-center justify-between p-3 bg-muted rounded-lg">
-                            <div className="flex items-center gap-3">
-                              <div 
-                                className="w-3 h-3 rounded-full" 
-                                style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                              />
-                              <span className="text-sm text-gray-200">{item.name}</span>
+                          <div key={item.name} className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                              <span className="text-gray-300 truncate">{item.name}</span>
                             </div>
-                            <span className="text-sm font-mono font-semibold text-gray-200">
-                              {String(item.value)}
-                            </span>
+                            <span className="font-mono font-semibold text-gray-200">{String(item.value)}</span>
                           </div>
                         ))}
                       </div>
                     </div>
                   ) : (
-                    <div className="text-center py-12 text-muted-foreground">
-                      No rejected orders
-                    </div>
+                    <div className="text-center py-6 text-muted-foreground text-xs">No rejected orders</div>
                   )}
-                </CardContent>
-              </Card>
-            </motion.div>
-          </TabsContent>
-        </Tabs>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+        </div>
+      </PanelHeader>
+    </div>
+  );
 
-        {/* Cancel Order Confirmation Dialog */}
-        <ConfirmDialog
-          open={cancelDialogOpen}
-          onOpenChange={setCancelDialogOpen}
-          title="Cancel Order"
-          description={cancelTarget ? `Cancel ${cancelTarget.side} order for ${formatCurrency(cancelTarget.quantity)} ${cancelTarget.symbol}?` : 'Cancel this order?'}
-          confirmLabel="Cancel Order"
-          confirmVariant="destructive"
-          onConfirm={async () => {
-            if (cancelTarget) {
-              await handleCancelOrder(cancelTarget.id);
-              setCancelTarget(null);
-            }
-          }}
-        />
+  // ── Side Panel (35%) ─────────────────────────────────────────────────
+  const sidePanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader
+        title="Execution"
+        panelId="orders-side"
+        onRefresh={fetchExecutionQuality}
+      >
+        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+          {/* CompactMetricRow: total orders, fill rate, avg slippage, pending */}
+          <CompactMetricRow metrics={sideMetrics} />
 
-        {/* Manual Order Form Dialog */}
-        <Dialog open={orderFormOpen} onOpenChange={(open) => { setOrderFormOpen(open); if (!open) resetOrderForm(); }}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>{orderFormStep === 'fill' ? 'New Order' : 'Review Order'}</DialogTitle>
-              <DialogDescription>
-                {orderFormStep === 'fill' ? 'Enter order details' : 'Confirm your order before submitting'}
-              </DialogDescription>
-            </DialogHeader>
-
-            {orderFormStep === 'fill' ? (
-              <div className="space-y-4">
-                {/* Symbol */}
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-gray-300">Symbol</div>
-                  <Input
-                    placeholder="e.g. AAPL"
-                    value={orderForm.symbol}
-                    onChange={(e) => { setOrderForm(f => ({ ...f, symbol: e.target.value })); setOrderFormErrors(e2 => ({ ...e2, symbol: '' })); }}
-                    className={orderFormErrors.symbol ? 'border-accent-red' : ''}
+          {/* Execution Quality Mini-Chart (fill rate sparkline) */}
+          <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Execution Quality</div>
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              <div className="text-center">
+                <div className={cn('text-lg font-bold font-mono', avgSlippage >= 0 ? 'text-accent-red' : 'text-accent-green')}>
+                  {formatPercentage(avgSlippage)}
+                </div>
+                <div className="text-[10px] text-gray-500">Avg Slippage</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold font-mono text-accent-green">
+                  {formatPercentage(fillRate)}
+                </div>
+                <div className="text-[10px] text-gray-500">Fill Rate</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold font-mono text-blue-400">
+                  {avgFillTime.toFixed(1)}s
+                </div>
+                <div className="text-[10px] text-gray-500">Avg Fill Time</div>
+              </div>
+            </div>
+            {/* Mini fill rate trend chart */}
+            {fillRateTrend.some(d => d.fillRate > 0) ? (
+              <ResponsiveContainer width="100%" height={80}>
+                <LineChart data={fillRateTrend}>
+                  <Line type="monotone" dataKey="fillRate" stroke="#10b981" strokeWidth={1.5} dot={false} />
+                  <YAxis domain={[0, 100]} hide />
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.375rem', fontSize: 10 }}
+                    formatter={(value: number | string | undefined) => {
+                      if (typeof value === 'number') return `${value.toFixed(1)}%`;
+                      return value;
+                    }}
                   />
-                  {orderFormErrors.symbol && <p className="text-xs text-accent-red">{orderFormErrors.symbol}</p>}
-                </div>
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-center py-4 text-[10px] text-gray-500">No trend data</div>
+            )}
+          </div>
 
-                {/* Side */}
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-gray-300">Side</div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant={orderForm.side === 'BUY' ? 'default' : 'outline'}
-                      size="sm"
-                      className={cn('flex-1', orderForm.side === 'BUY' && 'bg-accent-green hover:bg-accent-green/80 text-black')}
-                      onClick={() => setOrderForm(f => ({ ...f, side: 'BUY' }))}
-                    >
-                      BUY
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={orderForm.side === 'SELL' ? 'default' : 'outline'}
-                      size="sm"
-                      className={cn('flex-1', orderForm.side === 'SELL' && 'bg-accent-red hover:bg-accent-red/80 text-white')}
-                      onClick={() => setOrderForm(f => ({ ...f, side: 'SELL' }))}
-                    >
-                      SELL
-                    </Button>
+          {/* Recent Fills List */}
+          <div className="border border-[var(--color-dark-border)] rounded-lg p-3 flex-1 min-h-0">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">
+              Recent Fills ({recentFills.length})
+            </div>
+            {recentFills.length === 0 ? (
+              <div className="text-center py-4 text-xs text-gray-500">No filled orders</div>
+            ) : (
+              <div className="space-y-1.5 overflow-auto max-h-[300px]">
+                {recentFills.map((order) => (
+                  <div
+                    key={order.id}
+                    className="flex items-center justify-between py-1.5 px-2 rounded bg-[var(--color-dark-surface)] hover:bg-[var(--color-dark-surface)]/80 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className={cn(
+                        'text-[10px] font-mono font-semibold px-1 py-0.5 rounded',
+                        order.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red'
+                      )}>
+                        {order.side}
+                      </span>
+                      <span className="font-mono text-xs font-semibold text-gray-200 truncate">
+                        {order.symbol}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-mono text-xs text-gray-300">
+                        {formatCurrency(order.quantity)}
+                      </span>
+                      <span className="text-[10px] text-gray-500">
+                        {formatTimestamp(order.created_at)}
+                      </span>
+                    </div>
                   </div>
-                </div>
+                ))}
+              </div>
+            )}
+          </div>
 
-                {/* Order Type */}
-                <div className="space-y-1">
-                  <div className="text-sm font-medium text-gray-300">Order Type</div>
-                  <Select value={orderForm.orderType} onValueChange={(v) => setOrderForm(f => ({ ...f, orderType: v as 'MARKET' | 'LIMIT' }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="MARKET">Market</SelectItem>
-                      <SelectItem value="LIMIT">Limit</SelectItem>
-                    </SelectContent>
-                  </Select>
+          {/* Order Status Breakdown */}
+          <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Status Breakdown</div>
+            <div className="space-y-1.5">
+              {[
+                { label: 'Executed', count: filledOrders, color: 'text-accent-green', bg: 'bg-accent-green' },
+                { label: 'Pending', count: pendingOrders, color: 'text-yellow-400', bg: 'bg-yellow-400' },
+                { label: 'Cancelled', count: cancelledOrders, color: 'text-gray-400', bg: 'bg-gray-400' },
+                { label: 'Rejected', count: rejectedOrders, color: 'text-accent-red', bg: 'bg-accent-red' },
+              ].map(item => (
+                <div key={item.label} className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <div className={cn('w-1.5 h-1.5 rounded-full', item.bg)} />
+                    <span className="text-xs text-gray-400">{item.label}</span>
+                  </div>
+                  <span className={cn('text-xs font-mono font-semibold', item.color)}>{item.count}</span>
                 </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </PanelHeader>
+    </div>
+  );
 
-                {/* Quantity */}
+  // ── Return: 2-panel layout ─────────────────────────────────────────
+  return (
+    <DashboardLayout onLogout={onLogout}>
+      <PageTemplate
+        title="◆ Orders"
+        description={tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading'}
+        actions={headerActions}
+      >
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="h-full"
+        >
+          <RefreshIndicator visible={pollingRefreshing && !loading} />
+          <ResizablePanelLayout
+            layoutId="orders-panels"
+            direction="horizontal"
+            panels={[
+              {
+                id: 'orders-main',
+                defaultSize: 65,
+                minSize: 400,
+                content: mainPanel,
+              },
+              {
+                id: 'orders-side',
+                defaultSize: 35,
+                minSize: 250,
+                content: sidePanel,
+              },
+            ]}
+          />
+        </motion.div>
+      </PageTemplate>
+
+      {/* Cancel Order Confirmation Dialog */}
+      <ConfirmDialog
+        open={cancelDialogOpen}
+        onOpenChange={setCancelDialogOpen}
+        title="Cancel Order"
+        description={cancelTarget ? `Cancel ${cancelTarget.side} order for ${formatCurrency(cancelTarget.quantity)} ${cancelTarget.symbol}?` : 'Cancel this order?'}
+        confirmLabel="Cancel Order"
+        confirmVariant="destructive"
+        onConfirm={async () => {
+          if (cancelTarget) {
+            await handleCancelOrder(cancelTarget.id);
+            setCancelTarget(null);
+          }
+        }}
+      />
+
+      {/* Manual Order Form Dialog */}
+      <Dialog open={orderFormOpen} onOpenChange={(open) => { setOrderFormOpen(open); if (!open) resetOrderForm(); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{orderFormStep === 'fill' ? 'New Order' : 'Review Order'}</DialogTitle>
+            <DialogDescription>
+              {orderFormStep === 'fill' ? 'Enter order details' : 'Confirm your order before submitting'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {orderFormStep === 'fill' ? (
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-gray-300">Symbol</div>
+                <Input
+                  placeholder="e.g. AAPL"
+                  value={orderForm.symbol}
+                  onChange={(e) => { setOrderForm(f => ({ ...f, symbol: e.target.value })); setOrderFormErrors(e2 => ({ ...e2, symbol: '' })); }}
+                  className={orderFormErrors.symbol ? 'border-accent-red' : ''}
+                />
+                {orderFormErrors.symbol && <p className="text-xs text-accent-red">{orderFormErrors.symbol}</p>}
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-gray-300">Side</div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={orderForm.side === 'BUY' ? 'default' : 'outline'}
+                    size="sm"
+                    className={cn('flex-1', orderForm.side === 'BUY' && 'bg-accent-green hover:bg-accent-green/80 text-black')}
+                    onClick={() => setOrderForm(f => ({ ...f, side: 'BUY' }))}
+                  >
+                    BUY
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={orderForm.side === 'SELL' ? 'default' : 'outline'}
+                    size="sm"
+                    className={cn('flex-1', orderForm.side === 'SELL' && 'bg-accent-red hover:bg-accent-red/80 text-white')}
+                    onClick={() => setOrderForm(f => ({ ...f, side: 'SELL' }))}
+                  >
+                    SELL
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-gray-300">Order Type</div>
+                <Select value={orderForm.orderType} onValueChange={(v) => setOrderForm(f => ({ ...f, orderType: v as 'MARKET' | 'LIMIT' }))}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MARKET">Market</SelectItem>
+                    <SelectItem value="LIMIT">Limit</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-gray-300">Quantity</div>
+                <Input
+                  type="number"
+                  placeholder="0.00"
+                  min="0"
+                  step="0.01"
+                  value={orderForm.quantity}
+                  onChange={(e) => { setOrderForm(f => ({ ...f, quantity: e.target.value })); setOrderFormErrors(e2 => ({ ...e2, quantity: '' })); }}
+                  className={orderFormErrors.quantity ? 'border-accent-red' : ''}
+                />
+                {orderFormErrors.quantity && <p className="text-xs text-accent-red">{orderFormErrors.quantity}</p>}
+              </div>
+
+              {orderForm.orderType === 'LIMIT' && (
                 <div className="space-y-1">
-                  <div className="text-sm font-medium text-gray-300">Quantity</div>
+                  <div className="text-sm font-medium text-gray-300">Limit Price</div>
                   <Input
                     type="number"
                     placeholder="0.00"
                     min="0"
                     step="0.01"
-                    value={orderForm.quantity}
-                    onChange={(e) => { setOrderForm(f => ({ ...f, quantity: e.target.value })); setOrderFormErrors(e2 => ({ ...e2, quantity: '' })); }}
-                    className={orderFormErrors.quantity ? 'border-accent-red' : ''}
+                    value={orderForm.price}
+                    onChange={(e) => { setOrderForm(f => ({ ...f, price: e.target.value })); setOrderFormErrors(e2 => ({ ...e2, price: '' })); }}
+                    className={orderFormErrors.price ? 'border-accent-red' : ''}
                   />
-                  {orderFormErrors.quantity && <p className="text-xs text-accent-red">{orderFormErrors.quantity}</p>}
+                  {orderFormErrors.price && <p className="text-xs text-accent-red">{orderFormErrors.price}</p>}
                 </div>
+              )}
 
-                {/* Price (only for LIMIT) */}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setOrderFormOpen(false)}>Cancel</Button>
+                <Button onClick={handleOrderFormNext}>Review Order</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="p-4 bg-dark-surface rounded-lg border border-dark-border space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-400">Symbol</span>
+                  <span className="text-sm font-mono font-semibold text-gray-200">{orderForm.symbol.toUpperCase()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-400">Side</span>
+                  <span className={cn('text-sm font-mono font-semibold', orderForm.side === 'BUY' ? 'text-accent-green' : 'text-accent-red')}>
+                    {orderForm.side}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-400">Type</span>
+                  <span className="text-sm font-mono text-gray-200">{orderForm.orderType}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-400">Quantity</span>
+                  <span className="text-sm font-mono text-gray-200">{parseFloat(orderForm.quantity).toFixed(2)}</span>
+                </div>
                 {orderForm.orderType === 'LIMIT' && (
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-300">Limit Price</div>
-                    <Input
-                      type="number"
-                      placeholder="0.00"
-                      min="0"
-                      step="0.01"
-                      value={orderForm.price}
-                      onChange={(e) => { setOrderForm(f => ({ ...f, price: e.target.value })); setOrderFormErrors(e2 => ({ ...e2, price: '' })); }}
-                      className={orderFormErrors.price ? 'border-accent-red' : ''}
-                    />
-                    {orderFormErrors.price && <p className="text-xs text-accent-red">{orderFormErrors.price}</p>}
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-400">Limit Price</span>
+                    <span className="text-sm font-mono text-gray-200">{formatCurrency(parseFloat(orderForm.price))}</span>
                   </div>
                 )}
-
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setOrderFormOpen(false)}>Cancel</Button>
-                  <Button onClick={handleOrderFormNext}>Review Order</Button>
-                </DialogFooter>
               </div>
-            ) : (
-              <div className="space-y-4">
-                {/* Review summary */}
-                <div className="p-4 bg-dark-surface rounded-lg border border-dark-border space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-400">Symbol</span>
-                    <span className="text-sm font-mono font-semibold text-gray-200">{orderForm.symbol.toUpperCase()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-400">Side</span>
-                    <span className={cn('text-sm font-mono font-semibold', orderForm.side === 'BUY' ? 'text-accent-green' : 'text-accent-red')}>
-                      {orderForm.side}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-400">Type</span>
-                    <span className="text-sm font-mono text-gray-200">{orderForm.orderType}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-gray-400">Quantity</span>
-                    <span className="text-sm font-mono text-gray-200">{parseFloat(orderForm.quantity).toFixed(2)}</span>
-                  </div>
-                  {orderForm.orderType === 'LIMIT' && (
-                    <div className="flex justify-between">
-                      <span className="text-sm text-gray-400">Limit Price</span>
-                      <span className="text-sm font-mono text-gray-200">{formatCurrency(parseFloat(orderForm.price))}</span>
-                    </div>
-                  )}
-                </div>
 
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setOrderFormStep('fill')}>Back</Button>
-                  <Button
-                    onClick={handleOrderFormSubmit}
-                    disabled={orderSubmitting}
-                    className={cn(orderForm.side === 'BUY' ? 'bg-accent-green hover:bg-accent-green/80 text-black' : 'bg-accent-red hover:bg-accent-red/80 text-white')}
-                  >
-                    {orderSubmitting ? 'Submitting...' : `Submit ${orderForm.side} Order`}
-                  </Button>
-                </DialogFooter>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-      </motion.div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setOrderFormStep('fill')}>Back</Button>
+                <Button
+                  onClick={handleOrderFormSubmit}
+                  disabled={orderSubmitting}
+                  className={cn(orderForm.side === 'BUY' ? 'bg-accent-green hover:bg-accent-green/80 text-black' : 'bg-accent-red hover:bg-accent-red/80 text-white')}
+                >
+                  {orderSubmitting ? 'Submitting...' : `Submit ${orderForm.side} Order`}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 };

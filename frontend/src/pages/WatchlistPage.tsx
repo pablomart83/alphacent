@@ -2,6 +2,7 @@ import { type FC, useEffect, useState, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Search, RefreshCw, AlertCircle, Eye } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
+import { PageTemplate } from '../components/PageTemplate';
 import { DataTable } from '../components/trading/DataTable';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -188,7 +189,9 @@ export const WatchlistPage: FC<WatchlistPageProps> = ({ onLogout }) => {
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <div className="p-4 sm:p-6 lg:p-8"><PageSkeleton /></div>
+        <PageTemplate title="◆ Watchlist" description="Market overview sourced from open positions">
+          <PageSkeleton />
+        </PageTemplate>
       </DashboardLayout>
     );
   }
@@ -196,45 +199,42 @@ export const WatchlistPage: FC<WatchlistPageProps> = ({ onLogout }) => {
   if (error && rows.length === 0) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <div className="p-4 sm:p-6 lg:p-8">
+        <PageTemplate title="◆ Watchlist" description="Market overview sourced from open positions">
           <div className="flex flex-col items-center justify-center h-64 gap-4">
             <AlertCircle className="h-8 w-8 text-accent-red" />
             <div className="text-gray-400 font-mono">Failed to load watchlist</div>
             <p className="text-sm text-muted-foreground">{error}</p>
             <Button variant="outline" size="sm" onClick={fetchWatchlist}>Retry</Button>
           </div>
-        </div>
+        </PageTemplate>
       </DashboardLayout>
     );
   }
 
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
+      <Button variant="outline" size="sm" onClick={fetchWatchlist} disabled={pollingRefreshing}>
+        <RefreshCw className={cn('h-4 w-4 mr-2', pollingRefreshing && 'animate-spin')} />
+        Refresh
+      </Button>
+    </div>
+  );
+
   return (
     <DashboardLayout onLogout={onLogout}>
+      <PageTemplate
+        title="◆ Watchlist"
+        description="Market overview sourced from open positions"
+        actions={headerActions}
+      >
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.3 }}
-        className="p-4 sm:p-6 lg:p-8 max-w-[1600px] mx-auto relative"
+        className="p-4 sm:p-6 max-w-[1600px] mx-auto relative"
       >
         <RefreshIndicator visible={pollingRefreshing && !loading} />
-
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-100 font-mono mb-2 flex items-center gap-3">
-              <Eye className="h-8 w-8 text-accent-green" />
-              Watchlist
-            </h1>
-            <div className="flex items-center gap-3">
-              <p className="text-gray-400 text-sm">Market overview sourced from open positions</p>
-              <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={fetchWatchlist} disabled={pollingRefreshing}>
-            <RefreshCw className={cn('h-4 w-4 mr-2', pollingRefreshing && 'animate-spin')} />
-            Refresh
-          </Button>
-        </div>
 
         {/* Filters */}
         <Card className="mb-6">
@@ -290,6 +290,7 @@ export const WatchlistPage: FC<WatchlistPageProps> = ({ onLogout }) => {
           </CardContent>
         </Card>
       </motion.div>
+      </PageTemplate>
     </DashboardLayout>
   );
 };

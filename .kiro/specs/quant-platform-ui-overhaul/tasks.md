@@ -388,6 +388,227 @@ This plan transforms the AlphaCent frontend into an institutional-grade trading 
 - Checkpoints ensure incremental validation — each phase should build clean and be deployable
 - Backend tasks create new API endpoints; frontend tasks consume them
 - The existing tech stack (React 19, Recharts, Tailwind CSS 4, Radix UI, Zustand) is preserved throughout
-- New dependencies: html2canvas, jspdf, @tanstack/react-virtual, fuse.js
+- New dependencies: html2canvas, jspdf, @tanstack/react-virtual, fuse.js, react-resizable-panels
 - New routes: `/system-health`, `/audit-log`, `/portfolio/:symbol`
-- New Sidebar nav items: System Health, Audit Log
+- New Sidebar nav items: System Health, Audit Log (migrated to TopNavBar)
+
+---
+
+---
+
+## Phase 2: QuantFury-Inspired Layout Overhaul (Requirements 22-30)
+
+This phase transforms the AlphaCent layout from a sidebar + vertical-scroll pattern into a QuantFury-inspired horizontal-nav + multi-panel command-center layout. Every page gets a panel layout, every page gets the bottom widget zone, every table gets dense styling. All existing functionality is preserved.
+
+- [x] 17. Layout Foundation — All Shared Components + Dependencies + Backend
+  - [x] 17.1 Install react-resizable-panels and build all shared layout components
+    - Run `npm install react-resizable-panels` in `frontend/`
+    - Create `frontend/src/components/TopNavBar.tsx` — horizontal nav replacing Sidebar: brand left, nav links center (Overview, Portfolio, Orders, Strategies, Autonomous, Risk, Analytics, Data, System, Audit, Settings), account actions right (theme toggle, sync, notifications, user dropdown + logout). Active page: green bottom border + green text. Max 48px. Overflow scroll below 1280px. Hamburger menu below 768px. Preserve badge counts, permission filtering, user info.
+    - Create `frontend/src/components/MetricsBar.tsx` — merges Header + GlobalSummaryBar into single 40px row: connection dot, Equity, Daily P&L ($ and %), Positions, Strategies, Regime badge, Health score, Last Synced. Green/red P&L, yellow on WS disconnect. Condensed Multi-Timeframe at >1440px.
+    - Create `frontend/src/components/PositionTickerStrip.tsx` — horizontal scrollable strip (36px), top 15 positions by value: symbol, price, P&L % (green/red). Click → `/portfolio/:symbol`. WS-driven updates with flash animation. Hidden below 768px.
+    - Create `frontend/src/components/layout/PanelHeader.tsx` — darker bg than panel body, title left, action icons right (collapse/expand, refresh, optional close). Collapse persisted to localStorage.
+    - Create `frontend/src/components/layout/ResizablePanelLayout.tsx` — wraps react-resizable-panels. Horizontal/vertical splits, min 250px panels, CSS-based resize during drag, persist sizes to localStorage, single-column below 1024px.
+    - Create `frontend/src/components/PageTemplate.tsx` — consistent page shell: header zone (64px, title + actions), main content zone (fills remaining), bottom widget zone (BottomWidgetZone). Used by ALL pages.
+    - Create `frontend/src/components/trading/CompactMetricRow.tsx` — single horizontal row, 4-8 metrics inline (label + value + trend), max 40px height.
+    - Create `frontend/src/components/BottomWidgetZone.tsx` — horizontal row of closable mini-widgets, each with title bar + close (×), max 200px height, internal scroll, visibility persisted to localStorage, stacks vertically below 1024px. Rendered by PageTemplate, available on ALL pages.
+    - Create `frontend/src/components/widgets/TopMoversWidget.tsx` — top 5 gainers + top 5 losers from open positions by daily P&L %
+    - Create `frontend/src/components/widgets/RecentSignalsWidget.tsx` — last 5 signals with conviction score, direction, symbol
+    - Create `frontend/src/components/widgets/MarketRegimeWidget.tsx` — compact regime for 4 asset classes
+    - Create `frontend/src/components/widgets/StrategyAlertsWidget.tsx` — recent activations, retirements, pending closures
+    - Create `frontend/src/components/widgets/MacroPulseWidget.tsx` — VIX, Fed Funds, 10Y Treasury, Yield Curve, Inflation from existing regime endpoint
+    - Update `frontend/src/components/ui/Table.tsx` — add DenseTable variant: 32px rows, 12px font, 8px/4px padding. Apply as default to ALL data tables platform-wide (positions, orders, strategies, template rankings, blacklists, audit log, data quality, risk tables, autonomous tables).
+    - Update `frontend/src/components/ui/Card.tsx` — reduce padding to 12px (p-3), CardTitle to text-base. Replace ALL CardHeader usage across the platform with PanelHeader for consistent visual structure (darker header bg + action icons on every card section, including cards inside tab content on Analytics, Strategies, Risk, etc.).
+    - _Requirements: 22.1-22.8, 23.1-23.8, 24.1-24.7, 25.1-25.7, 26.1-26.6, 27.1-27.5, 29.1-29.4_
+
+  - [x] 17.2 Backend: Widget data endpoints
+    - Create `GET /dashboard/top-movers?mode=DEMO` in `src/api/routers/account.py` — top 5 gainers + top 5 losers from open positions by daily P&L %
+    - Create `GET /dashboard/recent-signals?mode=DEMO&limit=5` in `src/api/routers/strategies.py` — last N signals with conviction score, direction, symbol, strategy, timestamp
+    - Create `GET /dashboard/strategy-alerts?mode=DEMO&limit=10` in `src/api/routers/strategies.py` — recent lifecycle events (activations, retirements, pending closures, demotions)
+    - Macro data already available from existing `/analytics/regime-comprehensive` endpoint
+    - _Requirements: 25.2, 25.6_
+
+  - [x] 17.3 Restructure DashboardLayout
+    - Update `frontend/src/components/DashboardLayout.tsx`:
+      - Remove Sidebar, existing header, GlobalSummaryBar
+      - New structure: `flex flex-col h-screen` → TopNavBar → MetricsBar → PositionTickerStrip → `<main>` (full width)
+    - Verify all 11 pages still render correctly
+    - _Requirements: 22.1, 22.5, 22.8_
+
+- [ ] 18. Checkpoint — Layout foundation builds clean
+  - Verify `npm run build` succeeds
+  - Verify TopNavBar renders with correct active states and hamburger menu
+  - Verify MetricsBar shows all metrics correctly
+  - Verify PositionTickerStrip shows positions with live data
+  - Verify all shared components (PanelHeader, ResizablePanelLayout, PageTemplate, CompactMetricRow, BottomWidgetZone, all widgets) render correctly
+
+- [x] 19. Page Redesigns — Every Page Gets Panel Layout + PageTemplate + Widgets
+  - [x] 19.1 Overview — 3-panel command center
+    - PageTemplate + ResizablePanelLayout: Left (25%): CompactMetricRow + MultiTimeframeView + Strategy Pipeline. Center (50%): EquityCurveChart hero (min 400px, fills vertical, toolbar with PeriodSelector + benchmark toggle + fullscreen). Right (25%): Recent Trades + Position Summary by Asset Class. Center panel is the dominant element (≥60% of non-sidebar content area). All panels use PanelHeader. BottomWidgetZone below.
+    - _Requirements: 23.3, 28.1-28.4_
+
+  - [x] 19.2 Portfolio — 2-panel with position focus
+    - PageTemplate + ResizablePanelLayout: Main (70%): positions table (DenseTable) with sparklines, tabs within. Side (30%): position summary by asset class + sector exposure pie + allocation bar. PanelHeader on each. BottomWidgetZone below.
+    - _Requirements: 23.4_
+
+  - [x] 19.3 Orders — 2-panel with timeline prominence
+    - PageTemplate + ResizablePanelLayout: Main (65%): OrderFlowTimeline hero (top 40%) + orders DenseTable with tabs (bottom 60%). Side (35%): CompactMetricRow (total orders, fill rate, avg slippage, pending) + execution quality mini-chart + recent fills list. PanelHeader on each. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+  - [x] 19.4 Strategies — 2-panel with rankings sidebar
+    - PageTemplate + ResizablePanelLayout: Main (65%): strategy DenseTable with sparklines + all existing tabs (all tables within tabs also use DenseTable). Side (35%): CompactMetricRow (active, backtested, avg Sharpe, avg win rate) + top 5 template rankings mini-table + recent lifecycle events list. PanelHeader on each panel and on card sections within tabs. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+  - [x] 19.5 Autonomous — 2-panel with cycle visibility
+    - PageTemplate + ResizablePanelLayout: Main (65%): all existing tabs (tables within tabs use DenseTable). Side (35%): CompactMetricRow (cycle status, pass rate, proposals this week, active count) + cycle progress indicator + WF pass rate sparkline + recent similarity rejections. PanelHeader on each panel and on card sections within tabs. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+  - [x] 19.6 Risk — 2-panel with correlation hero
+    - PageTemplate + ResizablePanelLayout: Main (60%): CorrelationHeatmap hero (top 50%) + tabs below (tables within tabs use DenseTable). Side (40%): CompactMetricRow (VaR, max sector exposure, long/short ratio, beta) + sector exposure pie + risk contribution top 5 bar. PanelHeader on each panel and on card sections within tabs. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+  - [x] 19.7 Analytics — full-width with compact metrics
+    - PageTemplate (no side panel — tab content is data-dense): CompactMetricRow at top (total return, Sharpe, max DD, win rate, profit factor, trades) + 10 tabs below. Each tab's card sections use PanelHeader. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+  - [x] 19.8 Data Management — 2-panel with quality focus
+    - PageTemplate + ResizablePanelLayout: Main (65%): data quality DenseTable (297 symbols). Side (35%): CompactMetricRow (healthy/degraded/stale counts, avg score) + data source health cards + FMP cache + sync progress. PanelHeader on each. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+  - [x] 19.9 System Health — 2-panel with alerts focus
+    - PageTemplate + ResizablePanelLayout: Main (60%): 24h event timeline hero (top 40%) + service status cards below. Side (40%): circuit breaker cards (prominent, color-coded) + CompactMetricRow (uptime, error rate, response, cache hit). PanelHeader on each. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+  - [x] 19.10 Audit Log — 2-panel with lifecycle sidebar
+    - PageTemplate + ResizablePanelLayout: Main (65%): audit DenseTable (virtual scroll) + filters bar. Side (35%): CompactMetricRow (events today, warnings, errors, rejections) + signal rejections summary + lifecycle events summary + risk limit events summary. PanelHeader on each. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+  - [x] 19.11 Settings — full-width with tabs
+    - PageTemplate (no side panel — form-based content): tabs as-is. BottomWidgetZone below.
+    - _Requirements: 29.2_
+
+- [ ] 20. Checkpoint — All 11 page redesigns build clean
+  - Verify `npm run build` succeeds
+  - Verify every page renders with PageTemplate + appropriate panel layout
+  - Verify PanelHeader on all panels, CompactMetricRow on all pages with metrics
+  - Verify DenseTable on all data tables
+  - Verify BottomWidgetZone accessible and functional on every page
+  - Verify responsive degradation below 1024px on all pages
+
+- [x] 21. Micro-Interactions and Visual Polish
+  - [x] 21.1 Animated number transitions — create/update `animated-number.tsx`, count-up/down over 300ms. Apply to MetricsBar, PositionTickerStrip, CompactMetricRow on all pages. _Req: 30.1_
+  - [x] 21.2 Value flash on WS update — create/update `flash-wrapper.tsx`, green/red 20% opacity flash fading 500ms. Apply to PositionTickerStrip, MetricsBar. _Req: 30.2_
+  - [x] 21.3 Hover glow — Card border-color transition on hover, table row highlight, resize handle highlight, ticker chip scale(1.02). _Req: 30.3, 30.4, 30.6_
+  - [x] 21.4 Tab content fade-in — update TabsContent with 150ms fade-in on switch. _Req: 30.5_
+
+- [ ] 22. Checkpoint — Micro-interactions build clean
+
+- [x] 23. Final Integration + Cross-Page Audit + Cleanup
+  - [x] 23.1 Full cross-page visual audit — navigate all 11 pages, verify TopNavBar active state, MetricsBar accuracy, PanelHeader consistency, PageTemplate applied, DenseTable used, CompactMetricRow present, BottomWidgetZone functional. Test at 640px, 768px, 1024px, 1440px, 1920px. Fix inconsistencies.
+  - [x] 23.2 Performance audit — panel resize jank, WS update re-renders, ticker strip with 15+ updates, widget load impact, DenseTable with 297 rows.
+  - [x] 23.3 Clean up deprecated components — remove Sidebar.tsx, GlobalSummaryBar.tsx, update all imports. Verify build clean.
+
+- [-] 24. Final Checkpoint — Full QuantFury overhaul builds clean
+  - `npm run build` succeeds
+  - All 11 pages render correctly with new layout
+  - Responsive behavior works at all breakpoints
+  - BottomWidgetZone works on every page
+  - Commit, push, deploy to EC2, validate with user
+
+
+---
+
+## Phase 3: Professional Charting + Real-Time Streaming + Workspace Presets (Requirements 31-33)
+
+This phase replaces Recharts with TradingView Lightweight Charts for all time-series visualizations, adds real-time price streaming via WebSocket, and implements saved workspace presets. Recharts is fully removed after migration.
+
+- [ ] 25. TradingView Lightweight Charts Migration
+  - [ ] 25.1 Install lightweight-charts and build TvChart wrapper component
+    - Run `npm install lightweight-charts` in `frontend/`
+    - Create `frontend/src/components/charts/TvChart.tsx` — reusable wrapper around TradingView Lightweight Charts API. Supports: area, line, candlestick, histogram series. Props: data, chartType, theme (AlphaCent dark: bg #0a0e1a, grid #1f2937, up #22c55e, down #ef4444, crosshair #9ca3af, text #f3f4f6), height, onCrosshairMove, timeRange. Handles chart creation, resize via ResizeObserver, cleanup on unmount.
+    - Create `frontend/src/components/charts/TvPeriodSelector.tsx` — PeriodSelector that integrates with TvChart's time range API (setVisibleRange) instead of filtering data client-side.
+    - _Requirements: 31.1, 31.4, 31.5_
+
+  - [ ] 25.2 Migrate EquityCurveChart to TradingView
+    - Rewrite `frontend/src/components/charts/EquityCurveChart.tsx` using TvChart: portfolio as area series (blue), SPY as line series (gray dashed), alpha shading between them. Crosshair tooltip showing portfolio value, SPY value, alpha. Synchronized drawdown sub-chart below (separate TvChart instance sharing time range). "Benchmark unavailable" badge when SPY missing. PeriodSelector via TvPeriodSelector.
+    - _Requirements: 31.2_
+
+  - [ ] 25.3 Migrate AssetPlot to TradingView candlestick chart
+    - Rewrite `frontend/src/components/charts/AssetPlot.tsx` using TvChart: candlestick series for price data, volume histogram sub-chart, buy/sell markers (green ↑ / red ↓ at order dates/prices). Timeframe selector (5m, 15m, 1h, 4h, 1D) that fetches appropriate granularity data from backend.
+    - Backend: extend `GET /account/positions/:symbol/detail` to accept `interval` param (5m/15m/1h/4h/1d) and return OHLCV data at that granularity from historical_price_cache or eToro API.
+    - _Requirements: 31.3_
+
+  - [ ] 25.4 Migrate all remaining time-series charts to TradingView
+    - Migrate InteractiveChart usages across all pages to TvChart: rolling statistics charts (Analytics), equity trend charts (Strategies sparklines can stay as simple SVG), execution quality trend (TCA), walk-forward pass rate (Autonomous), portfolio turnover (Risk), long/short exposure (Risk), order flow timeline (Orders), 24h event timeline (System Health).
+    - For each migration: replace Recharts ResponsiveContainer + Line/Area/Bar with TvChart, preserve existing data flow and PeriodSelector behavior.
+    - _Requirements: 31.1, 31.4_
+
+  - [ ] 25.5 Implement non-time-series chart alternatives
+    - Verify that non-time-series visualizations remain functional without Recharts: CorrelationHeatmap (custom Canvas/SVG), ReturnDistribution histogram (custom SVG or lightweight bar renderer), MonthlyReturnsHeatmap (custom grid), sector exposure pie (custom SVG), stacked bar charts (custom SVG).
+    - Where these currently use Recharts BarChart/PieChart, replace with lightweight custom SVG components or a minimal utility like `d3-shape` for path generation only (no full D3 dependency).
+    - _Requirements: 31.8_
+
+  - [ ] 25.6 Remove Recharts dependency
+    - Remove `recharts` from `package.json`
+    - Run `npm uninstall recharts`
+    - Verify `npm run build` succeeds with zero Recharts imports remaining
+    - Verify bundle size reduction
+    - _Requirements: 31.7_
+
+- [ ] 26. Checkpoint — TradingView migration builds clean
+  - Verify `npm run build` succeeds with no Recharts references
+  - Verify EquityCurveChart renders with TradingView (area + SPY overlay + drawdown)
+  - Verify AssetPlot renders candlesticks with order markers
+  - Verify all other time-series charts render with TradingView
+  - Verify non-time-series charts (heatmaps, histograms, pies) still render correctly
+  - Verify chart theme matches AlphaCent dark theme
+
+- [ ] 27. Real-Time Price Streaming
+  - [ ] 27.1 Backend: WebSocket price streaming for chart symbols
+    - Extend `src/services/websocket.py` (or equivalent) to emit `price_tick` events when the monitoring service's quick price update runs (every 10 min) or when position sync detects price changes. Event payload: `{ symbol, price, timestamp, open, high, low, close, volume }`.
+    - Alternatively, if eToro API supports streaming: wire eToro price stream → WebSocket broadcast for symbols with open positions.
+    - _Requirements: 32.1_
+
+  - [ ] 27.2 Frontend: Wire WebSocket price ticks to TradingView charts
+    - Update TvChart wrapper to accept an `onNewTick` callback that appends a data point to the active series via `series.update()` (TradingView Lightweight Charts API).
+    - Update PositionDetailView to subscribe to `price_tick` events for the viewed symbol and feed ticks to the AssetPlot TvChart.
+    - Update EquityCurveChart to subscribe to portfolio equity updates and append to the area series.
+    - Show "Live data paused" indicator on chart when WebSocket disconnects, auto-resume on reconnect.
+    - _Requirements: 32.1, 32.2, 32.3, 32.4, 32.5_
+
+- [ ] 28. Checkpoint — Real-time streaming works
+  - Verify AssetPlot candlestick chart updates in real-time when price ticks arrive
+  - Verify EquityCurveChart updates with portfolio equity changes
+  - Verify no chart flicker or performance degradation during streaming
+  - Verify "Live data paused" indicator shows on WS disconnect
+
+- [ ] 29. Saved Workspace Presets
+  - [ ] 29.1 Build workspace preset system
+    - Create `frontend/src/lib/workspace-presets.ts` — manages saving/loading/switching workspace presets in localStorage. Each preset stores: per-page panel sizes, collapsed panel states, widget visibility, active tab per page.
+    - Up to 5 user presets + 3 default presets ("Trading", "Monitoring", "Analysis").
+    - "Trading" default: chart-dominant panels, position ticker prominent, widgets showing Top Movers + Recent Signals.
+    - "Monitoring" default: system health + alerts prominent, widgets showing Strategy Alerts + Market Regime.
+    - "Analysis" default: analytics tabs prominent, widgets showing Macro Pulse + Market Regime.
+    - _Requirements: 33.1, 33.2, 33.5_
+
+  - [ ] 29.2 Build workspace switcher UI
+    - Add workspace switcher dropdown to TopNavBar (right side, near account actions) or PageTemplate header.
+    - Shows: current preset name, list of saved presets, "Save Current" button, "Reset to Default" button.
+    - Switching presets transitions layout within 300ms.
+    - _Requirements: 33.3, 33.4_
+
+- [ ] 30. Checkpoint — Workspace presets work
+  - Verify presets save and restore correctly
+  - Verify switching between presets transitions smoothly
+  - Verify default presets provide sensible layouts
+
+- [ ] 31. Final Phase 3 Audit + Deploy
+  - [ ] 31.1 Full visual audit — verify all charts render with TradingView theme, real-time streaming works, presets save/load correctly, no Recharts remnants, bundle size improved.
+  - [ ] 31.2 Performance audit — chart rendering performance with TradingView (60fps zoom/pan), streaming performance (no jank with 1-10s tick intervals), preset switching speed (<300ms).
+  - [ ] 31.3 Cross-browser check — verify TradingView charts render correctly in Chrome, Firefox, Safari.
+
+- [ ] 32. Final Checkpoint — Phase 3 complete
+  - `npm run build` succeeds, Recharts fully removed
+  - All time-series charts use TradingView Lightweight Charts
+  - Real-time price streaming works on position detail and equity curve
+  - Workspace presets save/load/switch correctly
+  - Commit, push, deploy to EC2, validate with user

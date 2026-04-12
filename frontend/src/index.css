@@ -493,6 +493,28 @@ h4 {
 }
 
 /* Animations */
+/* Flash animations for value updates (FlashWrapper) */
+@keyframes flash-fade-green {
+  0% { background-color: rgba(34, 197, 94, 0.2); }
+  100% { background-color: transparent; }
+}
+@keyframes flash-fade-red {
+  0% { background-color: rgba(239, 68, 68, 0.2); }
+  100% { background-color: transparent; }
+}
+.flash-green {
+  animation: flash-fade-green 500ms ease-out forwards;
+}
+.flash-red {
+  animation: flash-fade-red 500ms ease-out forwards;
+}
+
+/* Tab content fade-in animation */
+@keyframes tab-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes slide-in-right {
   from {
     transform: translateX(100%);
@@ -558,6 +580,14 @@ h4 {
   }
 }
 
+/* Resize handle hover glow (react-resizable-panels) */
+[data-panel-resize-handle-id] {
+  transition: background-color 200ms ease;
+}
+[data-panel-resize-handle-id]:hover {
+  background-color: rgba(59, 130, 246, 0.25);
+}
+
 /* Focus Visible Styles for Keyboard Navigation */
 *:focus-visible {
   outline: 2px solid var(--color-accent-blue);
@@ -613,25 +643,29 @@ a, button, input, select, textarea {
 
 /* Scrollbar Styling */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-dark-bg);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-dark-border);
-  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #374151;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
 }
 
 [data-theme="light"] ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgba(0, 0, 0, 0.2);
 }
 
 /* Tooltip Width Fix - Force minimum width (scoped to avoid hitting dialogs) */

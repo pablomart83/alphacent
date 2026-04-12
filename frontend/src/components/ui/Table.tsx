@@ -4,14 +4,21 @@ import { cn } from '@/lib/utils';
 interface TableProps {
   children: ReactNode;
   className?: string;
+  /** Use dense variant with 32px rows, 12px font, tighter padding */
+  dense?: boolean;
 }
 
-export const Table: FC<TableProps> = ({ children, className = '' }) => {
+export const Table: FC<TableProps> = ({ children, className = '', dense = false }) => {
   return (
     <div className="overflow-x-auto">
-      <table className={cn('table w-full', className)}>{children}</table>
+      <table className={cn('table w-full', dense && 'table-dense', className)}>{children}</table>
     </div>
   );
+};
+
+/** DenseTable — convenience wrapper with dense=true by default */
+export const DenseTable: FC<Omit<TableProps, 'dense'>> = ({ children, className = '' }) => {
+  return <Table dense className={className}>{children}</Table>;
 };
 
 interface TableHeaderProps {
@@ -43,8 +50,8 @@ export const TableRow: FC<TableRowProps> = ({ children, onClick, className = '' 
     <tr
       onClick={onClick}
       className={cn(
-        'transition-colors even:bg-[var(--color-table-alt-row)]',
-        onClick && 'cursor-pointer hover:bg-[var(--color-dark-hover)]',
+        'transition-colors duration-150 even:bg-[var(--color-table-alt-row)] hover:bg-[var(--color-dark-hover)]',
+        onClick && 'cursor-pointer',
         className,
       )}
     >
@@ -63,6 +70,8 @@ export const TableHead: FC<TableHeadProps> = ({ children, className = '' }) => {
     <th
       className={cn(
         'px-4 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)] border-b border-[var(--color-dark-border)]',
+        // Dense variant: tighter padding
+        '[.table-dense_&]:px-2 [.table-dense_&]:py-1 [.table-dense_&]:text-[11px]',
         className,
       )}
     >
@@ -81,6 +90,8 @@ export const TableCell: FC<TableCellProps> = ({ children, className = '' }) => {
     <td
       className={cn(
         'px-4 py-3 text-sm border-b border-[var(--color-dark-border)]',
+        // Dense variant: 32px rows, 12px font, 8px/4px padding
+        '[.table-dense_&]:px-2 [.table-dense_&]:py-1 [.table-dense_&]:text-xs [.table-dense_&]:leading-[32px]',
         className,
       )}
     >

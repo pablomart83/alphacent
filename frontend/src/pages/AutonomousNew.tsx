@@ -1,15 +1,19 @@
-import { type FC, useEffect, useState, useCallback } from 'react';
+import { type FC, useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   Activity, PlayCircle, PauseCircle, Settings, RefreshCw, Search,
-  AlertCircle, TrendingUp, BarChart3, Zap, Clock, Calendar, Trash2,
+  AlertCircle, TrendingUp, BarChart3, Zap, Clock, Trash2,
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
+import { PageTemplate } from '../components/PageTemplate';
+import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
+import { PanelHeader } from '../components/layout/PanelHeader';
+import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
 import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
 import { TradingCyclePipeline } from '../components/trading/TradingCyclePipeline';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
+// Card imports removed — using PanelHeader sections instead
 import { Button } from '../components/ui/Button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Input } from '../components/ui/Input';
@@ -418,7 +422,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   };
 
   const handleTriggerCycle = async () => {
-    const filterSummary = [];
+    const filterSummary: string[] = [];
     if (cycleAssetClasses.size > 0) filterSummary.push(`Assets: ${[...cycleAssetClasses].join(', ')}`);
     if (cycleIntervals.size > 0) filterSummary.push(`Intervals: ${[...cycleIntervals].join(', ')}`);
     if (cycleStrategyTypes.size > 0) filterSummary.push(`Types: ${[...cycleStrategyTypes].join(', ')}`);
@@ -788,142 +792,107 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
     },
   ];
 
+  // ── Side panel compact metrics ─────────────────────────────────────────
+  const cycleStatusLabel = autonomousStatus?.enabled
+    ? (cycleProgress > 0 && cycleProgress < 100 ? 'Running' : 'Idle')
+    : 'Disabled';
+  const cycleStatusTrend = autonomousStatus?.enabled ? 'up' as const : 'neutral' as const;
+
+  const wfPassRate = useMemo(() => {
+    if (!lastCycleData || lastCycleData.backtested === 0) return '—';
+    return `${((lastCycleData.backtest_passed / lastCycleData.backtested) * 100).toFixed(0)}%`;
+  }, [lastCycleData]);
+
+  const proposalsThisWeek = lastCycleData?.proposals_generated ?? 0;
+
+  const sideMetrics: CompactMetric[] = useMemo(() => [
+    { label: 'Cycle', value: cycleStatusLabel, trend: cycleStatusTrend },
+    { label: 'Pass Rate', value: wfPassRate, trend: wfPassRate !== '—' && parseInt(wfPassRate) >= 50 ? 'up' as const : 'down' as const },
+    { label: 'Proposals', value: proposalsThisWeek },
+    { label: 'Active', value: lifecycleCounts.active, trend: 'up' as const },
+  ], [cycleStatusLabel, cycleStatusTrend, wfPassRate, proposalsThisWeek, lifecycleCounts.active]);
+
+  // ── Loading state ──────────────────────────────────────────────────────
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <div className="p-4 sm:p-6 lg:p-8">
+        <PageTemplate title="🤖 Autonomous" description="Autonomous trading system">
           <PageSkeleton />
-        </div>
+        </PageTemplate>
       </DashboardLayout>
     );
   }
 
-  return (
-    <DashboardLayout onLogout={onLogout}>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.3 }}
-        className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto relative"
+  // ── Header actions ─────────────────────────────────────────────────────
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={fetchData}
+        disabled={refreshing}
+        className="gap-2"
       >
-        <RefreshIndicator visible={pollingRefreshing || refreshing} />
+        <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+        Refresh
+      </Button>
+    </div>
+  );
 
-        {/* Header */}
-        <div className="mb-6 lg:mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-100 font-mono mb-2">
-              🤖 Autonomous Trading
-            </h1>
-            <div className="flex items-center gap-3">
-              <p className="text-gray-400 text-sm">
-                Monitor and control the autonomous trading system
-              </p>
-              <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-            </div>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchData}
-            disabled={refreshing}
-            className="gap-2"
-          >
-            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-            Refresh
-          </Button>
-        </div>
+  // ── Main Panel (65%) — All existing tabs ───────────────────────────────
+  const mainPanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader title="Autonomous" panelId="autonomous-main" onRefresh={fetchData}>
+        <div className="flex-1 overflow-auto p-3">
+          <RefreshIndicator visible={pollingRefreshing || refreshing} />
 
-        {/* Tabs */}
-        <Tabs defaultValue="control" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:inline-grid">
-            <TabsTrigger value="control">Control & Status</TabsTrigger>
-            <TabsTrigger value="lifecycle">
-              Strategy Lifecycle ({filteredStrategies.length})
-            </TabsTrigger>
-            <TabsTrigger value="activity">
-              Recent Activity ({filteredOrders.length})
-            </TabsTrigger>
-            <TabsTrigger value="signals">Signal Activity</TabsTrigger>
-            <TabsTrigger value="performance">Performance</TabsTrigger>
-            <TabsTrigger value="walkforward">Walk-Forward</TabsTrigger>
-            <TabsTrigger value="conviction">Conviction</TabsTrigger>
-          </TabsList>
+          <Tabs defaultValue="control" className="space-y-4">
+            <TabsList className="w-full overflow-x-auto">
+              <TabsTrigger value="control">Control & Status</TabsTrigger>
+              <TabsTrigger value="lifecycle">
+                Lifecycle ({filteredStrategies.length})
+              </TabsTrigger>
+              <TabsTrigger value="activity">
+                Activity ({filteredOrders.length})
+              </TabsTrigger>
+              <TabsTrigger value="signals">Signals</TabsTrigger>
+              <TabsTrigger value="performance">Performance</TabsTrigger>
+              <TabsTrigger value="walkforward">Walk-Forward</TabsTrigger>
+              <TabsTrigger value="conviction">Conviction</TabsTrigger>
+            </TabsList>
 
-          {/* Tab 1: Control & Status */}
-          <TabsContent value="control" className="space-y-6">
-            {/* Top Row - Status Badges */}
-            <div className="flex items-center justify-between">
-              <div className="flex gap-3">
-                {systemStatus && (
-                  <div className={cn(
-                    'px-4 py-2 rounded-lg text-sm font-mono border',
-                    getTradingStateColor(systemStatus.state)
-                  )}>
-                    {getTradingStateLabel(systemStatus.state)}
-                  </div>
-                )}
-                {autonomousStatus && (
-                  <div className={cn(
-                    'px-4 py-2 rounded-lg text-sm font-mono border',
-                    autonomousStatus.enabled
-                      ? 'bg-accent-green/20 text-accent-green border-accent-green/30'
-                      : 'bg-gray-500/20 text-gray-400 border-gray-500/30'
-                  )}>
-                    {autonomousStatus.enabled ? '● AUTO-MANAGEMENT ENABLED' : '○ AUTO-MANAGEMENT DISABLED'}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Compact Metric Row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="bg-muted/50 rounded-lg p-3 flex items-center gap-3">
-                <Zap className="h-4 w-4 text-accent-green flex-shrink-0" />
-                <div>
-                  <div className="text-xs text-muted-foreground">Active Strategies</div>
-                  <div className="text-lg font-mono font-bold">{systemStatus?.active_strategies ?? '—'}</div>
+            {/* Tab 1: Control & Status */}
+            <TabsContent value="control" className="space-y-4">
+              {/* Status Badges */}
+              <div className="flex items-center justify-between">
+                <div className="flex gap-3 flex-wrap">
+                  {systemStatus && (
+                    <div className={cn(
+                      'px-3 py-1.5 rounded-lg text-xs font-mono border',
+                      getTradingStateColor(systemStatus.state)
+                    )}>
+                      {getTradingStateLabel(systemStatus.state)}
+                    </div>
+                  )}
+                  {autonomousStatus && (
+                    <div className={cn(
+                      'px-3 py-1.5 rounded-lg text-xs font-mono border',
+                      autonomousStatus.enabled
+                        ? 'bg-accent-green/20 text-accent-green border-accent-green/30'
+                        : 'bg-gray-500/20 text-gray-400 border-gray-500/30'
+                    )}>
+                      {autonomousStatus.enabled ? '● AUTO ENABLED' : '○ AUTO DISABLED'}
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="bg-muted/50 rounded-lg p-3 flex items-center gap-3">
-                <TrendingUp className="h-4 w-4 text-blue-400 flex-shrink-0" />
-                <div>
-                  <div className="text-xs text-muted-foreground">Open Positions</div>
-                  <div className="text-lg font-mono font-bold">{systemStatus?.open_positions ?? '—'}</div>
-                </div>
-              </div>
-              <div className="bg-muted/50 rounded-lg p-3 flex items-center gap-3">
-                <Clock className="h-4 w-4 text-yellow-400 flex-shrink-0" />
-                <div>
-                  <div className="text-xs text-muted-foreground">Last Signal</div>
-                  <div className="text-sm font-mono">{systemStatus?.last_signal_generated ? formatTimestamp(systemStatus.last_signal_generated) : 'Never'}</div>
-                </div>
-              </div>
-              <div className="bg-muted/50 rounded-lg p-3 flex items-center gap-3">
-                <Activity className="h-4 w-4 flex-shrink-0" />
-                <div>
-                  <div className="text-xs text-muted-foreground">Market Regime</div>
-                  <div className={cn('text-sm font-mono font-semibold', autonomousStatus ? getRegimeColor(autonomousStatus.market_regime) : '')}>
-                    {autonomousStatus ? `${getRegimeIcon(autonomousStatus.market_regime)} ${autonomousStatus.market_regime}` : '—'}
-                  </div>
-                </div>
-              </div>
-            </div>
 
-            {/* Quick Controls Bar — Research Filters + Trigger Cycle, always visible */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.05 }}>
-              <Card>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex flex-col lg:flex-row lg:items-end gap-4">
-                    {/* Research Filters — compact inline */}
+              {/* Quick Controls Bar — Research Filters + Trigger Cycle */}
+              <PanelHeader title="Research Filters & Cycle" panelId="autonomous-research">
+                <div className="p-3">
+                  <div className="flex flex-col lg:flex-row lg:items-end gap-3">
                     <div className="flex-1 space-y-2">
-                      <div className="text-sm font-semibold flex items-center gap-2">
-                        <Search className="h-4 w-4" />
-                        Research Filters
-                        {(cycleAssetClasses.size > 0 || cycleIntervals.size > 0 || cycleStrategyTypes.size > 0) && (
-                          <span className="text-xs text-accent-blue font-normal">(filtered)</span>
-                        )}
-                      </div>
                       <div className="flex flex-wrap items-center gap-3">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs text-muted-foreground whitespace-nowrap">Assets:</span>
@@ -982,55 +951,38 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         )}
                       </div>
                     </div>
-                    {/* Trigger Cycle Button — prominent */}
                     <div className="flex gap-2 lg:flex-shrink-0">
                       <Button
                         onClick={handleTriggerCycle}
                         disabled={triggering || !autonomousStatus?.enabled}
-                        size="lg"
+                        size="sm"
                         className="gap-2 bg-accent-green hover:bg-accent-green/80 text-black font-semibold"
                       >
-                        <RefreshCw className={cn('h-4 w-4', triggering && 'animate-spin')} />
+                        <RefreshCw className={cn('h-3 w-3', triggering && 'animate-spin')} />
                         {triggering ? 'Running...' : 'Run Cycle'}
                       </Button>
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+                </div>
+              </PanelHeader>
 
-            {/* Trading Cycle Pipeline — top position */}
-            <TradingCyclePipeline cycleRunning={triggering || (cycleProgress > 0 && cycleProgress < 100)} />
+              {/* Trading Cycle Pipeline */}
+              <TradingCyclePipeline cycleRunning={triggering || (cycleProgress > 0 && cycleProgress < 100)} />
 
-            {/* Controls + System — 2-column grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left Column - Controls (Control Panel + Scheduled Execution) */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.1 }}
-              >
-                <Card className="h-full">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <PlayCircle className="h-5 w-5" />
-                      Controls
-                    </CardTitle>
-                    <CardDescription>
-                      Trading execution, lifecycle, and scheduling
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
+              {/* Controls + System — 2-column grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Left Column - Controls */}
+                <PanelHeader title="Controls" panelId="autonomous-controls">
+                  <div className="p-3 space-y-4">
                     {/* Trading State Warning */}
                     {systemStatus && systemStatus.state !== 'ACTIVE' && lifecycleCounts.active > 0 && (
-                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2">
                         <div className="flex items-start gap-2">
-                          <AlertCircle className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                          <AlertCircle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-yellow-300 text-sm font-medium">Trading Not Active</p>
-                            <p className="text-yellow-400/80 text-xs mt-1">
-                              You have {lifecycleCounts.active} strategies ready but trading is {systemStatus.state}.
-                              Start trading to begin signal generation and order execution.
+                            <p className="text-yellow-300 text-xs font-medium">Trading Not Active</p>
+                            <p className="text-yellow-400/80 text-[10px] mt-0.5">
+                              {lifecycleCounts.active} strategies ready but trading is {systemStatus.state}.
                             </p>
                           </div>
                         </div>
@@ -1039,78 +991,52 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                     {/* Trading Controls */}
                     <div>
-                      <h3 className="text-sm font-semibold mb-3">Signal Generation & Order Execution</h3>
-                      <div className="grid grid-cols-2 gap-3">
+                      <h3 className="text-xs font-semibold mb-2">Signal Generation & Execution</h3>
+                      <div className="grid grid-cols-2 gap-2">
                         {(!systemStatus || systemStatus.state === 'STOPPED') && (
-                          <Button
-                            onClick={handleStartTrading}
-                            disabled={tradingAction}
-                            variant="outline"
-                            className="w-full justify-start gap-2 border-accent-green/30 text-accent-green hover:bg-accent-green/10"
-                          >
-                            <PlayCircle className="h-4 w-4" />
-                            {tradingAction ? 'Starting...' : 'Start Trading'}
+                          <Button onClick={handleStartTrading} disabled={tradingAction} variant="outline" size="sm"
+                            className="w-full justify-start gap-2 border-accent-green/30 text-accent-green hover:bg-accent-green/10">
+                            <PlayCircle className="h-3 w-3" />
+                            {tradingAction ? 'Starting...' : 'Start'}
                           </Button>
                         )}
-
                         {systemStatus?.state === 'ACTIVE' && (
                           <>
-                            <Button
-                              onClick={handlePauseTrading}
-                              disabled={tradingAction}
-                              variant="outline"
-                              className="w-full justify-start gap-2 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10"
-                            >
-                              <PauseCircle className="h-4 w-4" />
-                              {tradingAction ? 'Pausing...' : 'Pause Trading'}
+                            <Button onClick={handlePauseTrading} disabled={tradingAction} variant="outline" size="sm"
+                              className="w-full justify-start gap-2 border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10">
+                              <PauseCircle className="h-3 w-3" />
+                              {tradingAction ? 'Pausing...' : 'Pause'}
                             </Button>
-                            <Button
-                              onClick={handleStopTrading}
-                              disabled={tradingAction}
-                              variant="outline"
-                              className="w-full justify-start gap-2 border-accent-red/30 text-accent-red hover:bg-accent-red/10"
-                            >
-                              <AlertCircle className="h-4 w-4" />
-                              {tradingAction ? 'Stopping...' : 'Stop Trading'}
+                            <Button onClick={handleStopTrading} disabled={tradingAction} variant="outline" size="sm"
+                              className="w-full justify-start gap-2 border-accent-red/30 text-accent-red hover:bg-accent-red/10">
+                              <AlertCircle className="h-3 w-3" />
+                              {tradingAction ? 'Stopping...' : 'Stop'}
                             </Button>
                           </>
                         )}
-
                         {systemStatus?.state === 'PAUSED' && (
                           <>
-                            <Button
-                              onClick={handleResumeTrading}
-                              disabled={tradingAction}
-                              variant="outline"
-                              className="w-full justify-start gap-2 border-accent-green/30 text-accent-green hover:bg-accent-green/10"
-                            >
-                              <PlayCircle className="h-4 w-4" />
-                              {tradingAction ? 'Resuming...' : 'Resume Trading'}
+                            <Button onClick={handleResumeTrading} disabled={tradingAction} variant="outline" size="sm"
+                              className="w-full justify-start gap-2 border-accent-green/30 text-accent-green hover:bg-accent-green/10">
+                              <PlayCircle className="h-3 w-3" />
+                              {tradingAction ? 'Resuming...' : 'Resume'}
                             </Button>
-                            <Button
-                              onClick={handleStopTrading}
-                              disabled={tradingAction}
-                              variant="outline"
-                              className="w-full justify-start gap-2 border-accent-red/30 text-accent-red hover:bg-accent-red/10"
-                            >
-                              <AlertCircle className="h-4 w-4" />
-                              {tradingAction ? 'Stopping...' : 'Stop Trading'}
+                            <Button onClick={handleStopTrading} disabled={tradingAction} variant="outline" size="sm"
+                              className="w-full justify-start gap-2 border-accent-red/30 text-accent-red hover:bg-accent-red/10">
+                              <AlertCircle className="h-3 w-3" />
+                              {tradingAction ? 'Stopping...' : 'Stop'}
                             </Button>
                           </>
                         )}
                       </div>
                     </div>
 
-                    {/* Strategy Lifecycle Controls */}
+                    {/* Lifecycle Controls */}
                     <div>
-                      <h3 className="text-sm font-semibold mb-3">Strategy Lifecycle</h3>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Button
-                          onClick={() => navigate('/settings')}
-                          variant="outline"
-                          className="w-full justify-start gap-2"
-                        >
-                          <Settings className="h-4 w-4" />
+                      <h3 className="text-xs font-semibold mb-2">Strategy Lifecycle</h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button onClick={() => navigate('/settings')} variant="outline" size="sm" className="w-full justify-start gap-2">
+                          <Settings className="h-3 w-3" />
                           Settings
                         </Button>
                         <Button
@@ -1122,470 +1048,220 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                               toast.error(`Failed: ${err.message}`);
                             }
                           }}
-                          variant="outline"
-                          className="w-full justify-start gap-2 col-span-2 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
+                          variant="outline" size="sm"
+                          className="w-full justify-start gap-2 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
                         >
-                          <Trash2 className="h-4 w-4" />
-                          Clear Blacklists & WF Cache
+                          <Trash2 className="h-3 w-3" />
+                          Clear Caches
                         </Button>
                       </div>
                     </div>
 
-                    {/* Warning when system is disabled */}
+                    {/* Auto-Management Warning */}
                     {autonomousStatus && !autonomousStatus.enabled && (
-                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2">
                         <div className="flex items-start gap-2">
-                          <AlertCircle className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+                          <AlertCircle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-yellow-300 text-sm font-medium">Auto-Management Disabled</p>
-                            <p className="text-yellow-400/80 text-xs mt-1">
-                              Automatic strategy proposal and retirement is disabled. Enable it in settings.
-                            </p>
+                            <p className="text-yellow-300 text-xs font-medium">Auto-Management Disabled</p>
+                            <p className="text-yellow-400/80 text-[10px] mt-0.5">Enable in settings.</p>
                           </div>
                         </div>
                       </div>
                     )}
+                  </div>
+                </PanelHeader>
 
-                    {/* Scheduled Execution */}
-                    <div>
-                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                        <Calendar className="h-4 w-4" />
-                        Scheduled Execution
-                      </h3>
-                      {scheduleConfig ? (
-                        <div className="space-y-3">
-                          {/* Enable/Disable toggle */}
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">
-                              {scheduleConfig.enabled ? 'Enabled' : 'Disabled'}
-                            </span>
-                            <button
-                              onClick={handleToggleSchedule}
-                              disabled={scheduleUpdating}
-                              className={cn(
-                                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none',
-                                scheduleConfig.enabled ? 'bg-accent-green' : 'bg-gray-600'
-                              )}
-                            >
-                              <span
-                                className={cn(
-                                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
-                                  scheduleConfig.enabled ? 'translate-x-6' : 'translate-x-1'
-                                )}
-                              />
-                            </button>
+                {/* Right Column - Schedule */}
+                <PanelHeader title="Scheduled Execution" panelId="autonomous-schedule">
+                  <div className="p-3 space-y-3">
+                    {scheduleConfig ? (
+                      <>
+                        {/* Enable/Disable toggle */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-muted-foreground">
+                            {scheduleConfig.enabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                          <button
+                            onClick={handleToggleSchedule}
+                            disabled={scheduleUpdating}
+                            className={cn(
+                              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none',
+                              scheduleConfig.enabled ? 'bg-accent-green' : 'bg-gray-600'
+                            )}
+                          >
+                            <span className={cn(
+                              'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
+                              scheduleConfig.enabled ? 'translate-x-5' : 'translate-x-0.5'
+                            )} />
+                          </button>
+                        </div>
+
+                        {/* Frequency */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-muted-foreground">Frequency</label>
+                          <div className="flex gap-1">
+                            {['daily', 'weekly'].map((freq) => (
+                              <button key={freq} onClick={() => {
+                                setEditFrequency(freq);
+                                if (freq === 'daily' && editHour === 2) setEditHour(22);
+                                if (freq === 'weekly' && editHour === 22) setEditHour(2);
+                              }} className={cn(
+                                'px-2 py-0.5 text-xs rounded-md border transition-colors',
+                                editFrequency === freq
+                                  ? 'bg-blue-500/20 border-blue-500 text-blue-400'
+                                  : 'border-border text-muted-foreground hover:border-blue-500/50'
+                              )}>
+                                {freq.charAt(0).toUpperCase() + freq.slice(1)}
+                              </button>
+                            ))}
                           </div>
+                        </div>
 
-                          {/* Frequency selector */}
+                        {/* Day of week (weekly only) */}
+                        {editFrequency === 'weekly' && (
                           <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground">Frequency</label>
-                            <div className="flex gap-1">
-                              {['daily', 'weekly'].map((freq) => (
-                                <button
-                                  key={freq}
-                                  onClick={() => {
-                                    setEditFrequency(freq);
-                                    if (freq === 'daily' && editHour === 2) setEditHour(22);
-                                    if (freq === 'weekly' && editHour === 22) setEditHour(2);
-                                  }}
-                                  className={cn(
-                                    'px-3 py-1 text-xs rounded-md border transition-colors',
-                                    editFrequency === freq
-                                      ? 'bg-blue-500/20 border-blue-500 text-blue-400'
-                                      : 'border-border text-muted-foreground hover:border-blue-500/50'
-                                  )}
-                                >
-                                  {freq.charAt(0).toUpperCase() + freq.slice(1)}
-                                </button>
+                            <label className="text-[10px] text-muted-foreground">Day</label>
+                            <select value={editDay} onChange={(e) => setEditDay(e.target.value)}
+                              className="w-full bg-background border border-border rounded-md px-2 py-1 text-xs">
+                              {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => (
+                                <option key={day} value={day}>{day.charAt(0).toUpperCase() + day.slice(1)}</option>
                               ))}
-                            </div>
+                            </select>
                           </div>
+                        )}
 
-                          {/* Day of week (only for weekly) */}
-                          {editFrequency === 'weekly' && (
-                            <div className="space-y-1">
-                              <label className="text-xs text-muted-foreground">Day of Week</label>
-                              <select
-                                value={editDay}
-                                onChange={(e) => setEditDay(e.target.value)}
-                                className="w-full bg-background border border-border rounded-md px-2 py-1 text-sm"
-                              >
-                                {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => (
-                                  <option key={day} value={day}>
-                                    {day.charAt(0).toUpperCase() + day.slice(1)}
-                                    {day === 'saturday' ? ' (recommended)' : ''}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-
-                          {/* Time picker */}
-                          <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground">Time (UTC)</label>
-                            <div className="flex gap-2 items-center">
-                              <select
-                                value={editHour}
-                                onChange={(e) => setEditHour(parseInt(e.target.value))}
-                                className="bg-background border border-border rounded-md px-2 py-1 text-sm w-16"
-                              >
-                                {Array.from({ length: 24 }, (_, i) => (
-                                  <option key={i} value={i}>{i.toString().padStart(2, '0')}</option>
-                                ))}
-                              </select>
-                              <span className="text-muted-foreground">:</span>
-                              <select
-                                value={editMinute}
-                                onChange={(e) => setEditMinute(parseInt(e.target.value))}
-                                className="bg-background border border-border rounded-md px-2 py-1 text-sm w-16"
-                              >
-                                {[0, 15, 30, 45].map((m) => (
-                                  <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
-                                ))}
-                              </select>
-                              <span className="text-xs text-muted-foreground">UTC</span>
-                            </div>
-                          </div>
-
-                          {/* Save button (show when config changed) */}
-                          {(editFrequency !== scheduleConfig.frequency ||
-                            editDay !== scheduleConfig.day_of_week ||
-                            editHour !== scheduleConfig.hour ||
-                            editMinute !== scheduleConfig.minute) && (
-                            <button
-                              onClick={handleSaveSchedule}
-                              disabled={scheduleUpdating}
-                              className="w-full px-3 py-1.5 text-xs rounded-md bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
-                            >
-                              {scheduleUpdating ? 'Saving...' : 'Save Schedule'}
-                            </button>
-                          )}
-
-                          {/* Next run display */}
-                          {nextScheduledRun && scheduleConfig.enabled && (
-                            <div className="bg-muted/50 rounded-lg p-3 flex items-center gap-2">
-                              <Clock className="h-4 w-4 text-blue-400 flex-shrink-0" />
-                              <div>
-                                <div className="text-xs text-muted-foreground">Next Scheduled Run</div>
-                                <div className="text-sm font-mono text-blue-400">
-                                  {new Date(nextScheduledRun).toLocaleString('en-US', {
-                                    weekday: 'short',
-                                    month: 'short',
-                                    day: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    timeZoneName: 'short',
-                                  })}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                          {lastScheduledRun && (
-                            <div className="text-xs text-muted-foreground">
-                              Last scheduled run: {formatTimestamp(lastScheduledRun)}
-                            </div>
-                          )}
-                          {!scheduleConfig.enabled && (
-                            <div className="text-xs text-yellow-400/80">
-                              Scheduled runs are disabled. Toggle to enable.
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="text-sm text-muted-foreground">Loading schedule...</div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-
-              {/* Right Column - System (System Status + Research Filters) */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.2 }}
-              >
-                <Card className="h-full">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Activity className="h-5 w-5" />
-                      System
-                    </CardTitle>
-                    <CardDescription>
-                      System metrics, cycle info, and research filters
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {autonomousStatus && (
-                      <div className="space-y-4">
-                        {/* Market Regime */}
-                        <div className="bg-muted rounded-lg p-4">
-                          <div className="text-xs text-muted-foreground mb-2">Market Regime</div>
-                          <div className={cn(
-                            'text-xl font-mono font-semibold flex items-center gap-2',
-                            getRegimeColor(autonomousStatus.market_regime)
-                          )}>
-                            {getRegimeIcon(autonomousStatus.market_regime)} {autonomousStatus.market_regime}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            Confidence: <span className={getConfidenceLabel(autonomousStatus.market_confidence).color}>{getConfidenceLabel(autonomousStatus.market_confidence).label}</span> ({(autonomousStatus.market_confidence * 100).toFixed(0)}%)
+                        {/* Time picker */}
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-muted-foreground">Time (UTC)</label>
+                          <div className="flex gap-1 items-center">
+                            <select value={editHour} onChange={(e) => setEditHour(parseInt(e.target.value))}
+                              className="bg-background border border-border rounded-md px-1.5 py-0.5 text-xs w-14">
+                              {Array.from({ length: 24 }, (_, i) => (
+                                <option key={i} value={i}>{i.toString().padStart(2, '0')}</option>
+                              ))}
+                            </select>
+                            <span className="text-muted-foreground text-xs">:</span>
+                            <select value={editMinute} onChange={(e) => setEditMinute(parseInt(e.target.value))}
+                              className="bg-background border border-border rounded-md px-1.5 py-0.5 text-xs w-14">
+                              {[0, 15, 30, 45].map((m) => (
+                                <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
+                              ))}
+                            </select>
+                            <span className="text-[10px] text-muted-foreground">UTC</span>
                           </div>
                         </div>
 
-                        {/* System Metrics */}
-                        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
-                          {systemStatus && (
-                            <>
-                              <div>
-                                <div className="text-xs text-muted-foreground mb-1">Active Strategies</div>
-                                <div className="text-2xl font-mono font-semibold">{systemStatus.active_strategies}</div>
-                              </div>
-                              <div>
-                                <div className="text-xs text-muted-foreground mb-1">Open Positions</div>
-                                <div className="text-2xl font-mono font-semibold">{systemStatus.open_positions}</div>
-                              </div>
-                              <div>
-                                <div className="text-xs text-muted-foreground mb-1">Uptime</div>
-                                <div className="text-lg font-mono font-semibold">
-                                  {Math.floor(systemStatus.uptime_seconds / 3600)}h{' '}
-                                  {Math.floor((systemStatus.uptime_seconds % 3600) / 60)}m
-                                </div>
-                              </div>
-                              <div>
-                                <div className="text-xs text-muted-foreground mb-1">Last Signal</div>
-                                <div className="text-sm font-mono">
-                                  {systemStatus.last_signal_generated 
-                                    ? formatTimestamp(systemStatus.last_signal_generated)
-                                    : 'Never'}
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
+                        {/* Save button */}
+                        {(editFrequency !== scheduleConfig.frequency ||
+                          editDay !== scheduleConfig.day_of_week ||
+                          editHour !== scheduleConfig.hour ||
+                          editMinute !== scheduleConfig.minute) && (
+                          <button onClick={handleSaveSchedule} disabled={scheduleUpdating}
+                            className="w-full px-2 py-1 text-xs rounded-md bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50">
+                            {scheduleUpdating ? 'Saving...' : 'Save Schedule'}
+                          </button>
+                        )}
 
-                        {/* Cumulative Cycle Stats */}
-                        <div className="grid grid-cols-3 gap-3 pt-4 border-t border-border">
-                          <div className="bg-muted/50 rounded-lg p-3 text-center">
-                            <div className="text-xs text-muted-foreground mb-1">Last Cycle</div>
-                            <div className="text-sm font-mono font-semibold text-gray-200">
-                              {autonomousStatus.last_cycle_time ? formatTimestamp(autonomousStatus.last_cycle_time) : '—'}
-                            </div>
-                          </div>
-                          <div className="bg-muted/50 rounded-lg p-3 text-center">
-                            <div className="text-xs text-muted-foreground mb-1">Total Activated</div>
-                            <div className="text-2xl font-mono font-semibold text-accent-green">
-                              {autonomousStatus.cycle_stats.activated_count}
-                            </div>
-                          </div>
-                          <div className="bg-muted/50 rounded-lg p-3 text-center">
-                            <div className="text-xs text-muted-foreground mb-1">Total Retired</div>
-                            <div className="text-2xl font-mono font-semibold text-accent-red">
-                              {autonomousStatus.cycle_stats.retired_count}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Last Cycle Metrics */}
-                        {lastCycleData && (
-                          <div className="pt-4 border-t border-border">
-                            <div className="text-xs font-semibold text-muted-foreground mb-2">Last Cycle Results</div>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="bg-muted/30 rounded-lg p-2.5">
-                                <div className="text-xs text-muted-foreground">Duration</div>
-                                <div className="text-sm font-mono font-semibold">
-                                  {lastCycleData.duration_seconds != null
-                                    ? lastCycleData.duration_seconds < 60
-                                      ? `${lastCycleData.duration_seconds.toFixed(0)}s`
-                                      : `${Math.floor(lastCycleData.duration_seconds / 60)}m ${Math.floor(lastCycleData.duration_seconds % 60)}s`
-                                    : '—'}
-                                </div>
-                              </div>
-                              <div className="bg-muted/30 rounded-lg p-2.5">
-                                <div className="text-xs text-muted-foreground">Proposals</div>
-                                <div className="text-sm font-mono font-semibold text-blue-400">{lastCycleData.proposals_generated}</div>
-                              </div>
-                              <div className="bg-muted/30 rounded-lg p-2.5">
-                                <div className="text-xs text-muted-foreground">BT Pass Rate</div>
-                                <div className="text-sm font-mono font-semibold text-purple-400">
-                                  {lastCycleData.backtested > 0
-                                    ? `${((lastCycleData.backtest_passed / lastCycleData.backtested) * 100).toFixed(0)}%`
-                                    : '—'}
-                                </div>
-                              </div>
-                              <div className="bg-muted/30 rounded-lg p-2.5">
-                                <div className="text-xs text-muted-foreground">Net Activations</div>
-                                <div className={cn(
-                                  'text-sm font-mono font-semibold',
-                                  (lastCycleData.activated - lastCycleData.strategies_retired) >= 0 ? 'text-accent-green' : 'text-accent-red'
-                                )}>
-                                  {lastCycleData.activated - lastCycleData.strategies_retired >= 0 ? '+' : ''}{lastCycleData.activated - lastCycleData.strategies_retired}
-                                </div>
+                        {/* Next run */}
+                        {nextScheduledRun && scheduleConfig.enabled && (
+                          <div className="bg-muted/50 rounded-lg p-2 flex items-center gap-2">
+                            <Clock className="h-3 w-3 text-blue-400 flex-shrink-0" />
+                            <div>
+                              <div className="text-[10px] text-muted-foreground">Next Run</div>
+                              <div className="text-xs font-mono text-blue-400">
+                                {new Date(nextScheduledRun).toLocaleString('en-US', {
+                                  weekday: 'short', month: 'short', day: 'numeric',
+                                  hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+                                })}
                               </div>
                             </div>
                           </div>
                         )}
-                      </div>
+                        {lastScheduledRun && (
+                          <div className="text-[10px] text-muted-foreground">
+                            Last run: {formatTimestamp(lastScheduledRun)}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-xs text-muted-foreground">Loading schedule...</div>
                     )}
-                  </CardContent>
-                </Card>
-              </motion.div>
-            </div>
+                  </div>
+                </PanelHeader>
+              </div>
 
-            {/* Trading Mode Warning */}
-            {tradingMode === 'DEMO' && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.5 }}
-              >
-                <Card className="border-yellow-500/30 bg-yellow-500/5">
-                  <CardContent className="pt-6">
-                    <div className="flex items-start gap-3">
-                      <AlertCircle className="h-5 w-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="text-sm font-semibold text-yellow-400 mb-1">
-                          Demo Mode Active
-                        </p>
-                        <p className="text-xs text-yellow-400/80">
-                          All trades are simulated. No real money is at risk.
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-          </TabsContent>
+              {/* Demo Mode Warning */}
+              {tradingMode === 'DEMO' && (
+                <div className="bg-yellow-500/5 border border-yellow-500/30 rounded-lg p-3 flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-semibold text-yellow-400">Demo Mode Active</p>
+                    <p className="text-[10px] text-yellow-400/80">All trades are simulated.</p>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
 
-          {/* Tab 2: Strategy Lifecycle */}
-          <TabsContent value="lifecycle" className="space-y-6">
-            {/* Lifecycle Visualization */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Strategy Lifecycle Flow</CardTitle>
-                  <CardDescription>
-                    Track strategies through their lifecycle stages
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <button
-                      onClick={() => setStrategyStageFilter('PROPOSED')}
-                      className={cn(
-                        'bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 transition-all hover:scale-105 cursor-pointer',
-                        strategyStageFilter === 'PROPOSED' && 'ring-2 ring-blue-500'
-                      )}
-                    >
+            {/* Tab 2: Strategy Lifecycle */}
+            <TabsContent value="lifecycle" className="space-y-4">
+              {/* Lifecycle Visualization */}
+              <PanelHeader title="Strategy Lifecycle Flow" panelId="autonomous-lifecycle-flow">
+                <div className="p-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <button onClick={() => setStrategyStageFilter('PROPOSED')}
+                      className={cn('bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 transition-all hover:scale-105 cursor-pointer',
+                        strategyStageFilter === 'PROPOSED' && 'ring-2 ring-blue-500')}>
                       <div className="text-center">
-                        <div className="text-sm font-mono font-semibold text-blue-400 mb-2">
-                          Proposed
-                        </div>
-                        <div className="text-3xl font-mono font-bold text-gray-200 mb-2">
-                          {lifecycleCounts.proposed}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          Generated from templates
-                        </div>
+                        <div className="text-xs font-mono font-semibold text-blue-400 mb-1">Proposed</div>
+                        <div className="text-2xl font-mono font-bold text-gray-200">{lifecycleCounts.proposed}</div>
                       </div>
                     </button>
-
-                    <button
-                      onClick={() => setStrategyStageFilter('BACKTESTED')}
-                      className={cn(
-                        'bg-purple-500/10 border border-purple-500/30 rounded-lg p-4 transition-all hover:scale-105 cursor-pointer',
-                        strategyStageFilter === 'BACKTESTED' && 'ring-2 ring-purple-500'
-                      )}
-                    >
+                    <button onClick={() => setStrategyStageFilter('BACKTESTED')}
+                      className={cn('bg-purple-500/10 border border-purple-500/30 rounded-lg p-3 transition-all hover:scale-105 cursor-pointer',
+                        strategyStageFilter === 'BACKTESTED' && 'ring-2 ring-purple-500')}>
                       <div className="text-center">
-                        <div className="text-sm font-mono font-semibold text-purple-400 mb-2">
-                          Backtested
-                        </div>
-                        <div className="text-3xl font-mono font-bold text-gray-200 mb-2">
-                          {lifecycleCounts.backtested}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          Historical validation
-                        </div>
+                        <div className="text-xs font-mono font-semibold text-purple-400 mb-1">Backtested</div>
+                        <div className="text-2xl font-mono font-bold text-gray-200">{lifecycleCounts.backtested}</div>
                       </div>
                     </button>
-
-                    <button
-                      onClick={() => setStrategyStageFilter(strategyStageFilter === 'DEMO' || strategyStageFilter === 'LIVE' ? 'all' : 'DEMO')}
-                      className={cn(
-                        'bg-accent-green/10 border border-accent-green/30 rounded-lg p-4 transition-all hover:scale-105 cursor-pointer',
-                        (strategyStageFilter === 'DEMO' || strategyStageFilter === 'LIVE') && 'ring-2 ring-accent-green'
-                      )}
-                    >
+                    <button onClick={() => setStrategyStageFilter(strategyStageFilter === 'DEMO' || strategyStageFilter === 'LIVE' ? 'all' : 'DEMO')}
+                      className={cn('bg-accent-green/10 border border-accent-green/30 rounded-lg p-3 transition-all hover:scale-105 cursor-pointer',
+                        (strategyStageFilter === 'DEMO' || strategyStageFilter === 'LIVE') && 'ring-2 ring-accent-green')}>
                       <div className="text-center">
-                        <div className="text-sm font-mono font-semibold text-accent-green mb-2">
-                          Active
-                        </div>
-                        <div className="text-3xl font-mono font-bold text-gray-200 mb-2">
-                          {lifecycleCounts.active}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          Live trading
-                        </div>
+                        <div className="text-xs font-mono font-semibold text-accent-green mb-1">Active</div>
+                        <div className="text-2xl font-mono font-bold text-gray-200">{lifecycleCounts.active}</div>
                       </div>
                     </button>
-
-                    <button
-                      onClick={() => setStrategyStageFilter('RETIRED')}
-                      className={cn(
-                        'bg-accent-red/10 border border-accent-red/30 rounded-lg p-4 transition-all hover:scale-105 cursor-pointer',
-                        strategyStageFilter === 'RETIRED' && 'ring-2 ring-accent-red'
-                      )}
-                    >
+                    <button onClick={() => setStrategyStageFilter('RETIRED')}
+                      className={cn('bg-accent-red/10 border border-accent-red/30 rounded-lg p-3 transition-all hover:scale-105 cursor-pointer',
+                        strategyStageFilter === 'RETIRED' && 'ring-2 ring-accent-red')}>
                       <div className="text-center">
-                        <div className="text-sm font-mono font-semibold text-accent-red mb-2">
-                          Retired
-                        </div>
-                        <div className="text-3xl font-mono font-bold text-gray-200 mb-2">
-                          {lifecycleCounts.retired}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          Underperforming
-                        </div>
+                        <div className="text-xs font-mono font-semibold text-accent-red mb-1">Retired</div>
+                        <div className="text-2xl font-mono font-bold text-gray-200">{lifecycleCounts.retired}</div>
                       </div>
                     </button>
                   </div>
-                </CardContent>
-              </Card>
-            </motion.div>
+                </div>
+              </PanelHeader>
 
-            {/* Strategies Table */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}
-            >
-              <Card>
-                <CardHeader>
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div>
-                      <CardTitle>Strategies</CardTitle>
-                      <CardDescription>
-                        {filteredStrategies.length} of {strategies.length} strategies
-                        {strategyStageFilter !== 'all' && ` in ${strategyStageFilter} stage`}
-                      </CardDescription>
+              {/* Strategies Table */}
+              <PanelHeader title="Strategies" panelId="autonomous-strategies-table">
+                <div className="p-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                    <div className="text-xs text-muted-foreground">
+                      {filteredStrategies.length} of {strategies.length} strategies
+                      {strategyStageFilter !== 'all' && ` in ${strategyStageFilter}`}
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          placeholder="Search strategy..."
-                          value={strategySearch}
+                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                        <Input placeholder="Search..." value={strategySearch}
                           onChange={(e) => setStrategySearch(e.target.value)}
-                          className="pl-9 w-full sm:w-[200px]"
-                        />
+                          className="pl-7 h-7 text-xs w-full sm:w-[160px]" />
                       </div>
                       <Select value={strategyStageFilter} onValueChange={setStrategyStageFilter}>
-                        <SelectTrigger className="w-full sm:w-[140px]">
+                        <SelectTrigger className="w-full sm:w-[120px] h-7 text-xs">
                           <SelectValue placeholder="Stage" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1599,651 +1275,658 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       </Select>
                     </div>
                   </div>
-                </CardHeader>
-                <CardContent>
                   {filteredStrategies.length > 0 ? (
-                    <div className="max-h-[600px] overflow-y-auto">
-                      <DataTable
-                        columns={strategyColumns}
-                        data={filteredStrategies}
-                        pageSize={20}
-                        showPagination={true}
-                      />
-                    </div>
+                    <DataTable columns={strategyColumns} data={filteredStrategies} pageSize={20} showPagination={true} />
                   ) : (
-                    <div className="text-center py-12 text-muted-foreground">
-                      {strategySearch || strategyStageFilter !== 'all'
-                        ? 'No strategies match your filters'
-                        : 'No strategies found'}
+                    <div className="text-center py-8 text-muted-foreground text-xs">
+                      {strategySearch || strategyStageFilter !== 'all' ? 'No strategies match filters' : 'No strategies found'}
                     </div>
                   )}
-                </CardContent>
-              </Card>
-            </motion.div>
-          </TabsContent>
-
-          {/* Tab 3: Recent Activity */}
-          <TabsContent value="activity" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div>
-                    <CardTitle>Recent Autonomous Orders</CardTitle>
-                    <CardDescription>
-                      Last 50 orders from autonomous strategies • {filteredOrders.length} of {orders.length} orders
-                    </CardDescription>
-                  </div>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        placeholder="Search symbol..."
-                        value={orderSearch}
-                        onChange={(e) => setOrderSearch(e.target.value)}
-                        className="pl-9 w-full sm:w-[200px]"
-                      />
-                    </div>
-                    <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
-                      <SelectTrigger className="w-full sm:w-[140px]">
-                        <SelectValue placeholder="Status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        <SelectItem value="PENDING">Pending</SelectItem>
-                        <SelectItem value="FILLED">Filled</SelectItem>
-                        <SelectItem value="PARTIALLY_FILLED">Partial</SelectItem>
-                        <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                        <SelectItem value="REJECTED">Rejected</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={orderSideFilter} onValueChange={setOrderSideFilter}>
-                      <SelectTrigger className="w-full sm:w-[120px]">
-                        <SelectValue placeholder="Side" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Sides</SelectItem>
-                        <SelectItem value="BUY">Buy</SelectItem>
-                        <SelectItem value="SELL">Sell</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                {filteredOrders.length > 0 ? (
-                  <div className="max-h-[600px] overflow-y-auto">
-                    <DataTable
-                      columns={orderColumns}
-                      data={filteredOrders}
-                      pageSize={20}
-                      showPagination={true}
-                    />
-                  </div>
-                ) : (
-                  <div className="text-center py-12 text-muted-foreground">
-                    {orderSearch || orderStatusFilter !== 'all' || orderSideFilter !== 'all'
-                      ? 'No orders match your filters'
-                      : 'No autonomous orders found'}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </PanelHeader>
+            </TabsContent>
 
-          {/* Tab 4: Signal Activity */}
-          <TabsContent value="signals" className="space-y-6">
-            {/* Summary Cards */}
-            <div className="flex items-center justify-between mb-2">
-              <div />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRefreshSignals}
-                disabled={signalRefreshing}
-                className="gap-2"
-              >
-                <RefreshCw className={cn('h-4 w-4', signalRefreshing && 'animate-spin')} />
-                Refresh
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <MetricCard
-                label="Signals Generated"
-                value={signalData?.summary.total ?? 0}
-                icon={Zap}
-              />
-              <MetricCard
-                label="Accepted"
-                value={signalData?.summary.accepted ?? 0}
-                icon={TrendingUp}
-                trend="up"
-              />
-              <MetricCard
-                label="Rejected"
-                value={signalData?.summary.rejected ?? 0}
-                icon={AlertCircle}
-                trend="down"
-              />
-              <MetricCard
-                label="Acceptance Rate"
-                value={`${signalData?.summary.acceptance_rate ?? 0}%`}
-                icon={BarChart3}
-              />
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Rejection Reasons Breakdown */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Rejection Reasons</CardTitle>
-                  <CardDescription>Why signals were rejected</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {signalData?.summary.rejection_reasons && signalData.summary.rejection_reasons.length > 0 ? (
-                    <div className="space-y-3">
-                      {signalData.summary.rejection_reasons.map((r) => (
-                        <div key={r.reason}>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className="text-gray-300 truncate">{r.reason}</span>
-                            <span className="text-muted-foreground ml-2 whitespace-nowrap">{r.count} ({r.percentage.toFixed(0)}%)</span>
-                          </div>
-                          <div className="w-full bg-muted rounded-full h-2">
-                            <div
-                              className="bg-accent-red/70 h-2 rounded-full transition-all"
-                              style={{ width: `${Math.min(r.percentage, 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
+            {/* Tab 3: Recent Activity */}
+            <TabsContent value="activity" className="space-y-4">
+              <PanelHeader title="Recent Autonomous Orders" panelId="autonomous-orders">
+                <div className="p-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                    <div className="text-xs text-muted-foreground">
+                      Last 50 orders • {filteredOrders.length} of {orders.length}
                     </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                        <Input placeholder="Search symbol..." value={orderSearch}
+                          onChange={(e) => setOrderSearch(e.target.value)}
+                          className="pl-7 h-7 text-xs w-full sm:w-[160px]" />
+                      </div>
+                      <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
+                        <SelectTrigger className="w-full sm:w-[110px] h-7 text-xs">
+                          <SelectValue placeholder="Status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Status</SelectItem>
+                          <SelectItem value="PENDING">Pending</SelectItem>
+                          <SelectItem value="FILLED">Filled</SelectItem>
+                          <SelectItem value="PARTIALLY_FILLED">Partial</SelectItem>
+                          <SelectItem value="CANCELLED">Cancelled</SelectItem>
+                          <SelectItem value="REJECTED">Rejected</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={orderSideFilter} onValueChange={setOrderSideFilter}>
+                        <SelectTrigger className="w-full sm:w-[100px] h-7 text-xs">
+                          <SelectValue placeholder="Side" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Sides</SelectItem>
+                          <SelectItem value="BUY">Buy</SelectItem>
+                          <SelectItem value="SELL">Sell</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {filteredOrders.length > 0 ? (
+                    <DataTable columns={orderColumns} data={filteredOrders} pageSize={20} showPagination={true} />
                   ) : (
-                    <p className="text-muted-foreground text-sm">No rejections recorded yet.</p>
+                    <div className="text-center py-8 text-muted-foreground text-xs">
+                      {orderSearch || orderStatusFilter !== 'all' || orderSideFilter !== 'all'
+                        ? 'No orders match filters' : 'No autonomous orders found'}
+                    </div>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </PanelHeader>
+            </TabsContent>
 
-              {/* Recent Signals Table */}
-              <Card className="lg:col-span-2">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-sm">Recent Signals</CardTitle>
-                      <CardDescription>Latest signal decisions</CardDescription>
-                    </div>
-                    <Select value={signalFilter} onValueChange={setSignalFilter}>
-                      <SelectTrigger className="w-[130px]">
-                        <SelectValue placeholder="Filter" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        <SelectItem value="ACCEPTED">Accepted</SelectItem>
-                        <SelectItem value="REJECTED">Rejected</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="max-h-[400px] overflow-y-auto">
-                    <table className="w-full text-sm">
-                      <thead className="sticky top-0 bg-card">
-                        <tr className="border-b border-border text-muted-foreground text-xs">
-                          <th className="text-left py-2 pr-2">Time</th>
-                          <th className="text-left py-2 pr-2">Symbol</th>
-                          <th className="text-left py-2 pr-2">Side</th>
-                          <th className="text-left py-2 pr-2">Decision</th>
-                          <th className="text-left py-2">Reason</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(signalData?.signals ?? [])
-                          .filter(s => signalFilter === 'all' || s.decision === signalFilter)
-                          .slice(0, 50)
-                          .map((s) => (
-                          <tr key={s.id} className="border-b border-border/50 hover:bg-muted/30">
-                            <td className="py-2 pr-2 text-xs text-muted-foreground whitespace-nowrap">
-                              {utcToLocal(s.created_at).toLocaleString('en-US', {
-                                month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                              })}
-                            </td>
-                            <td className="py-2 pr-2 font-mono font-semibold">{s.symbol}</td>
-                            <td className="py-2 pr-2">
-                              <span className={cn(
-                                'px-1.5 py-0.5 rounded text-xs font-mono',
-                                s.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red'
-                              )}>
-                                {s.side}
-                              </span>
-                            </td>
-                            <td className="py-2 pr-2">
-                              <span className={cn(
-                                'px-1.5 py-0.5 rounded text-xs font-mono font-semibold',
-                                s.decision === 'ACCEPTED'
-                                  ? 'bg-accent-green/20 text-accent-green'
-                                  : 'bg-accent-red/20 text-accent-red'
-                              )}>
-                                {s.decision}
-                              </span>
-                            </td>
-                            <td className="py-2 text-xs text-muted-foreground truncate max-w-[200px]" title={s.rejection_reason || ''}>
-                              {s.rejection_reason || '—'}
-                            </td>
-                          </tr>
+            {/* Tab 4: Signal Activity */}
+            <TabsContent value="signals" className="space-y-4">
+              <div className="flex items-center justify-between mb-2">
+                <div />
+                <Button variant="outline" size="sm" onClick={handleRefreshSignals} disabled={signalRefreshing} className="gap-2 h-7 text-xs">
+                  <RefreshCw className={cn('h-3 w-3', signalRefreshing && 'animate-spin')} />
+                  Refresh
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <MetricCard label="Signals Generated" value={signalData?.summary.total ?? 0} icon={Zap} />
+                <MetricCard label="Accepted" value={signalData?.summary.accepted ?? 0} icon={TrendingUp} trend="up" />
+                <MetricCard label="Rejected" value={signalData?.summary.rejected ?? 0} icon={AlertCircle} trend="down" />
+                <MetricCard label="Acceptance Rate" value={`${signalData?.summary.acceptance_rate ?? 0}%`} icon={BarChart3} />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Rejection Reasons */}
+                <PanelHeader title="Rejection Reasons" panelId="autonomous-rejection-reasons">
+                  <div className="p-3">
+                    {signalData?.summary.rejection_reasons && signalData.summary.rejection_reasons.length > 0 ? (
+                      <div className="space-y-2">
+                        {signalData.summary.rejection_reasons.map((r) => (
+                          <div key={r.reason}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-gray-300 truncate">{r.reason}</span>
+                              <span className="text-muted-foreground ml-2 whitespace-nowrap">{r.count} ({r.percentage.toFixed(0)}%)</span>
+                            </div>
+                            <div className="w-full bg-muted rounded-full h-1.5">
+                              <div className="bg-accent-red/70 h-1.5 rounded-full transition-all"
+                                style={{ width: `${Math.min(r.percentage, 100)}%` }} />
+                            </div>
+                          </div>
                         ))}
-                        {(!signalData?.signals || signalData.signals.length === 0) && (
-                          <tr>
-                            <td colSpan={5} className="py-8 text-center text-muted-foreground">
-                              No signal decisions recorded yet. Signals will appear here when the trading system generates them.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                      </div>
+                    ) : (
+                      <p className="text-muted-foreground text-xs">No rejections recorded.</p>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
+                </PanelHeader>
 
-          {/* Tab 5: Performance */}
-          <TabsContent value="performance" className="space-y-6">
-            {/* Performance Summary */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5" />
-                    Autonomous Performance Summary
-                  </CardTitle>
-                  <CardDescription>
-                    Overall system performance metrics
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <MetricCard
-                      label="Avg Sharpe Ratio"
-                      value={avgSharpe.toFixed(2)}
-                      format="text"
-                      icon={BarChart3}
-                      tooltip="Average Sharpe ratio across active strategies"
-                    />
-                    <MetricCard
-                      label="Avg Return"
-                      value={avgReturn}
-                      format="percentage"
-                      trend={avgReturn >= 0 ? 'up' : 'down'}
-                      icon={TrendingUp}
-                      tooltip="Average return across active strategies"
-                    />
-                    <MetricCard
-                      label="Avg Win Rate"
-                      value={avgWinRate}
-                      format="percentage"
-                      icon={Activity}
-                      tooltip="Average win rate across active strategies"
-                    />
-                    <MetricCard
-                      label="Active Strategies"
-                      value={lifecycleCounts.active}
-                      format="number"
-                      icon={Zap}
-                      tooltip="Number of currently active strategies"
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Lifecycle Metrics */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.2 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle>Lifecycle Metrics</CardTitle>
-                  <CardDescription>
-                    Strategy proposal, activation, and retirement statistics
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-muted rounded-lg p-4">
-                      <div className="text-xs text-muted-foreground mb-2">Total Proposed</div>
-                      <div className="text-2xl font-mono font-bold text-gray-200">
-                        {totalProposed}
-                      </div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-4">
-                      <div className="text-xs text-muted-foreground mb-2">Total Activated</div>
-                      <div className="text-2xl font-mono font-bold text-accent-green">
-                        {totalActivated}
-                      </div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-4">
-                      <div className="text-xs text-muted-foreground mb-2">Activation Rate</div>
-                      <div className="text-2xl font-mono font-bold text-blue-400">
-                        {activationRate.toFixed(1)}%
-                      </div>
-                    </div>
-                    <div className="bg-muted rounded-lg p-4">
-                      <div className="text-xs text-muted-foreground mb-2">Retirement Rate</div>
-                      <div className="text-2xl font-mono font-bold text-accent-red">
-                        {retirementRate.toFixed(1)}%
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Template Performance */}
-            {autonomousStatus && autonomousStatus.template_stats.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.3 }}
-              >
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Performance by Template</CardTitle>
-                    <CardDescription>
-                      Success rates and usage statistics for each template
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {autonomousStatus.template_stats.map((template) => (
-                        <div key={template.name} className="bg-muted rounded-lg p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="font-mono font-semibold text-sm">{template.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {template.usage_count} uses
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 bg-dark-bg rounded-full h-2 overflow-hidden">
-                              <div
-                                className={cn(
-                                  'h-full transition-all',
-                                  template.success_rate >= 0.6 ? 'bg-accent-green' :
-                                  template.success_rate >= 0.4 ? 'bg-yellow-400' :
-                                  'bg-accent-red'
-                                )}
-                                style={{ width: `${template.success_rate * 100}%` }}
-                              />
-                            </div>
-                            <div className="text-xs font-mono font-semibold min-w-[45px] text-right">
-                              {(template.success_rate * 100).toFixed(0)}%
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-
-            {/* Configuration Quick Access */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.4 }}
-            >
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Settings className="h-5 w-5" />
-                    Configuration Quick Access
-                  </CardTitle>
-                  <CardDescription>
-                    Current activation and retirement thresholds
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="text-sm font-semibold mb-2">Activation Thresholds</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="bg-muted rounded-lg p-2">
-                          <div className="text-xs text-muted-foreground">Min Sharpe</div>
-                          <div className="text-sm font-mono font-semibold">1.5</div>
-                        </div>
-                        <div className="bg-muted rounded-lg p-2">
-                          <div className="text-xs text-muted-foreground">Max Drawdown</div>
-                          <div className="text-sm font-mono font-semibold">15%</div>
-                        </div>
-                        <div className="bg-muted rounded-lg p-2">
-                          <div className="text-xs text-muted-foreground">Min Win Rate</div>
-                          <div className="text-sm font-mono font-semibold">50%</div>
-                        </div>
-                        <div className="bg-muted rounded-lg p-2">
-                          <div className="text-xs text-muted-foreground">Min Trades</div>
-                          <div className="text-sm font-mono font-semibold">20</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <h3 className="text-sm font-semibold mb-2">Retirement Triggers</h3>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div className="bg-muted rounded-lg p-2">
-                          <div className="text-xs text-muted-foreground">Max Sharpe</div>
-                          <div className="text-sm font-mono font-semibold">0.5</div>
-                        </div>
-                        <div className="bg-muted rounded-lg p-2">
-                          <div className="text-xs text-muted-foreground">Max Drawdown</div>
-                          <div className="text-sm font-mono font-semibold">15%</div>
-                        </div>
-                        <div className="bg-muted rounded-lg p-2">
-                          <div className="text-xs text-muted-foreground">Min Win Rate</div>
-                          <div className="text-sm font-mono font-semibold">40%</div>
-                        </div>
-                        <div className="bg-muted rounded-lg p-2">
-                          <div className="text-xs text-muted-foreground">Min Trades</div>
-                          <div className="text-sm font-mono font-semibold">30</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <Button
-                      onClick={() => navigate('/settings')}
-                      variant="outline"
-                      className="w-full sm:w-auto gap-2"
-                    >
-                      <Settings className="h-4 w-4" />
-                      Configure Thresholds
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </TabsContent>
-
-          {/* Walk-Forward Analytics Tab (Task 9.4) */}
-          <TabsContent value="walkforward" className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Per-Cycle Stats */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Walk-Forward Analytics</CardTitle>
-                  <CardDescription>Per-cycle stats: proposals, backtests, pass rate, avg Sharpe</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {walkForwardLoading ? (
-                    <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Loading walk-forward data...</div>
-                  ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs font-mono">
-                        <thead>
-                          <tr className="border-b border-dark-border text-muted-foreground">
-                            <th className="py-2 px-2 text-left">Cycle</th>
-                            <th className="py-2 px-2 text-right">Proposals</th>
-                            <th className="py-2 px-2 text-right">Backtests</th>
-                            <th className="py-2 px-2 text-right">Pass Rate</th>
-                            <th className="py-2 px-2 text-right">Avg Sharpe</th>
+                {/* Recent Signals Table */}
+                <div className="lg:col-span-2">
+                  <PanelHeader title="Recent Signals" panelId="autonomous-recent-signals"
+                    actions={
+                      <Select value={signalFilter} onValueChange={setSignalFilter}>
+                        <SelectTrigger className="w-[100px] h-6 text-[10px]">
+                          <SelectValue placeholder="Filter" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="ACCEPTED">Accepted</SelectItem>
+                          <SelectItem value="REJECTED">Rejected</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    }>
+                    <div className="p-3 max-h-[400px] overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
+                          <tr className="border-b border-border text-muted-foreground text-[10px]">
+                            <th className="text-left py-1.5 pr-2">Time</th>
+                            <th className="text-left py-1.5 pr-2">Symbol</th>
+                            <th className="text-left py-1.5 pr-2">Side</th>
+                            <th className="text-left py-1.5 pr-2">Decision</th>
+                            <th className="text-left py-1.5">Reason</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {walkForwardData.cycles.slice(0, 20).map((c: any, idx: number) => (
-                            <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
-                              <td className="py-2 px-2 text-muted-foreground">{c.date || c.cycle_id || `#${idx + 1}`}</td>
-                              <td className="py-2 px-2 text-right">{c.proposals ?? '—'}</td>
-                              <td className="py-2 px-2 text-right">{c.backtests ?? '—'}</td>
-                              <td className={cn('py-2 px-2 text-right', (c.pass_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
-                                {c.pass_rate != null ? `${c.pass_rate.toFixed(1)}%` : '—'}
+                          {(signalData?.signals ?? [])
+                            .filter(s => signalFilter === 'all' || s.decision === signalFilter)
+                            .slice(0, 50)
+                            .map((s) => (
+                            <tr key={s.id} className="border-b border-border/50 hover:bg-muted/30">
+                              <td className="py-1.5 pr-2 text-[10px] text-muted-foreground whitespace-nowrap">
+                                {utcToLocal(s.created_at).toLocaleString('en-US', {
+                                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                                })}
                               </td>
-                              <td className="py-2 px-2 text-right">{c.avg_sharpe != null ? c.avg_sharpe.toFixed(2) : '—'}</td>
+                              <td className="py-1.5 pr-2 font-mono font-semibold">{s.symbol}</td>
+                              <td className="py-1.5 pr-2">
+                                <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono',
+                                  s.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red')}>
+                                  {s.side}
+                                </span>
+                              </td>
+                              <td className="py-1.5 pr-2">
+                                <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono font-semibold',
+                                  s.decision === 'ACCEPTED' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red')}>
+                                  {s.decision}
+                                </span>
+                              </td>
+                              <td className="py-1.5 text-[10px] text-muted-foreground truncate max-w-[150px]" title={s.rejection_reason || ''}>
+                                {s.rejection_reason || '—'}
+                              </td>
                             </tr>
                           ))}
+                          {(!signalData?.signals || signalData.signals.length === 0) && (
+                            <tr>
+                              <td colSpan={5} className="py-6 text-center text-muted-foreground text-xs">
+                                No signal decisions recorded yet.
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No walk-forward data available</div>
-                  )}
-                </CardContent>
-              </Card>
+                  </PanelHeader>
+                </div>
+              </div>
+            </TabsContent>
 
-              {/* Pass Rate Over Time Chart */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Walk-Forward Pass Rate</CardTitle>
-                  <CardDescription>Pass rate trend over time</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
-                    <InteractiveChart
-                      data={walkForwardData.pass_rate_history}
-                      dataKeys={[{ key: 'pass_rate', color: designColors.green, type: 'line' }]}
-                      xAxisKey="date"
-                      height={250}
-                      periods={['1M', '3M', '6M', '1Y', 'ALL']}
-                      defaultPeriod={walkForwardPeriod}
-                      onPeriodChange={(p) => {
-                        setWalkForwardPeriod(p);
-                        if (tradingMode) {
-                          apiClient.getWalkForwardAnalytics(tradingMode, p).then(setWalkForwardData).catch(() => {});
-                        }
-                      }}
-                      tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">No pass rate history available</div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+            {/* Tab 5: Performance */}
+            <TabsContent value="performance" className="space-y-4">
+              <PanelHeader title="Performance Summary" panelId="autonomous-perf-summary">
+                <div className="p-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <MetricCard label="Avg Sharpe" value={avgSharpe.toFixed(2)} format="text" icon={BarChart3}
+                      tooltip="Average Sharpe ratio across active strategies" />
+                    <MetricCard label="Avg Return" value={avgReturn} format="percentage"
+                      trend={avgReturn >= 0 ? 'up' : 'down'} icon={TrendingUp} />
+                    <MetricCard label="Avg Win Rate" value={avgWinRate} format="percentage" icon={Activity} />
+                    <MetricCard label="Active" value={lifecycleCounts.active} format="number" icon={Zap} />
+                  </div>
+                </div>
+              </PanelHeader>
 
-            {/* Similarity Rejections */}
-            {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Similarity Rejections</CardTitle>
-                  <CardDescription>Strategies rejected due to similarity with existing ones</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs font-mono">
+              <PanelHeader title="Lifecycle Metrics" panelId="autonomous-lifecycle-metrics">
+                <div className="p-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-muted rounded-lg p-3">
+                      <div className="text-[10px] text-muted-foreground mb-1">Total Proposed</div>
+                      <div className="text-xl font-mono font-bold text-gray-200">{totalProposed}</div>
+                    </div>
+                    <div className="bg-muted rounded-lg p-3">
+                      <div className="text-[10px] text-muted-foreground mb-1">Total Activated</div>
+                      <div className="text-xl font-mono font-bold text-accent-green">{totalActivated}</div>
+                    </div>
+                    <div className="bg-muted rounded-lg p-3">
+                      <div className="text-[10px] text-muted-foreground mb-1">Activation Rate</div>
+                      <div className="text-xl font-mono font-bold text-blue-400">{activationRate.toFixed(1)}%</div>
+                    </div>
+                    <div className="bg-muted rounded-lg p-3">
+                      <div className="text-[10px] text-muted-foreground mb-1">Retirement Rate</div>
+                      <div className="text-xl font-mono font-bold text-accent-red">{retirementRate.toFixed(1)}%</div>
+                    </div>
+                  </div>
+                </div>
+              </PanelHeader>
+
+              {/* Template Performance */}
+              {autonomousStatus && autonomousStatus.template_stats.length > 0 && (
+                <PanelHeader title="Performance by Template" panelId="autonomous-template-perf">
+                  <div className="p-3 space-y-2">
+                    {autonomousStatus.template_stats.map((template) => (
+                      <div key={template.name} className="bg-muted rounded-lg p-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="font-mono font-semibold text-xs">{template.name}</div>
+                          <div className="text-[10px] text-muted-foreground">{template.usage_count} uses</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-dark-bg rounded-full h-1.5 overflow-hidden">
+                            <div className={cn('h-full transition-all',
+                              template.success_rate >= 0.6 ? 'bg-accent-green' :
+                              template.success_rate >= 0.4 ? 'bg-yellow-400' : 'bg-accent-red'
+                            )} style={{ width: `${template.success_rate * 100}%` }} />
+                          </div>
+                          <div className="text-[10px] font-mono font-semibold min-w-[35px] text-right">
+                            {(template.success_rate * 100).toFixed(0)}%
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </PanelHeader>
+              )}
+
+              {/* Configuration Quick Access */}
+              <PanelHeader title="Configuration" panelId="autonomous-config">
+                <div className="p-3 space-y-3">
+                  <div>
+                    <h3 className="text-xs font-semibold mb-2">Activation Thresholds</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div className="bg-muted rounded-lg p-2">
+                        <div className="text-[10px] text-muted-foreground">Min Sharpe</div>
+                        <div className="text-xs font-mono font-semibold">1.5</div>
+                      </div>
+                      <div className="bg-muted rounded-lg p-2">
+                        <div className="text-[10px] text-muted-foreground">Max DD</div>
+                        <div className="text-xs font-mono font-semibold">15%</div>
+                      </div>
+                      <div className="bg-muted rounded-lg p-2">
+                        <div className="text-[10px] text-muted-foreground">Min Win Rate</div>
+                        <div className="text-xs font-mono font-semibold">50%</div>
+                      </div>
+                      <div className="bg-muted rounded-lg p-2">
+                        <div className="text-[10px] text-muted-foreground">Min Trades</div>
+                        <div className="text-xs font-mono font-semibold">20</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-semibold mb-2">Retirement Triggers</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div className="bg-muted rounded-lg p-2">
+                        <div className="text-[10px] text-muted-foreground">Max Sharpe</div>
+                        <div className="text-xs font-mono font-semibold">0.5</div>
+                      </div>
+                      <div className="bg-muted rounded-lg p-2">
+                        <div className="text-[10px] text-muted-foreground">Max DD</div>
+                        <div className="text-xs font-mono font-semibold">15%</div>
+                      </div>
+                      <div className="bg-muted rounded-lg p-2">
+                        <div className="text-[10px] text-muted-foreground">Min Win Rate</div>
+                        <div className="text-xs font-mono font-semibold">40%</div>
+                      </div>
+                      <div className="bg-muted rounded-lg p-2">
+                        <div className="text-[10px] text-muted-foreground">Min Trades</div>
+                        <div className="text-xs font-mono font-semibold">30</div>
+                      </div>
+                    </div>
+                  </div>
+                  <Button onClick={() => navigate('/settings')} variant="outline" size="sm" className="gap-2">
+                    <Settings className="h-3 w-3" />
+                    Configure Thresholds
+                  </Button>
+                </div>
+              </PanelHeader>
+            </TabsContent>
+
+            {/* Tab 6: Walk-Forward Analytics */}
+            <TabsContent value="walkforward" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <PanelHeader title="Walk-Forward Analytics" panelId="autonomous-wf-analytics">
+                  <div className="p-3">
+                    {walkForwardLoading ? (
+                      <div className="flex items-center justify-center h-24 text-xs text-muted-foreground">Loading...</div>
+                    ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-[10px] font-mono">
+                          <thead>
+                            <tr className="border-b border-dark-border text-muted-foreground">
+                              <th className="py-1.5 px-2 text-left">Cycle</th>
+                              <th className="py-1.5 px-2 text-right">Proposals</th>
+                              <th className="py-1.5 px-2 text-right">BTs</th>
+                              <th className="py-1.5 px-2 text-right">Pass Rate</th>
+                              <th className="py-1.5 px-2 text-right">Avg Sharpe</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {walkForwardData.cycles.slice(0, 20).map((c: any, idx: number) => (
+                              <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
+                                <td className="py-1.5 px-2 text-muted-foreground">{c.date || c.cycle_id || `#${idx + 1}`}</td>
+                                <td className="py-1.5 px-2 text-right">{c.proposals ?? '—'}</td>
+                                <td className="py-1.5 px-2 text-right">{c.backtests ?? '—'}</td>
+                                <td className={cn('py-1.5 px-2 text-right', (c.pass_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
+                                  {c.pass_rate != null ? `${c.pass_rate.toFixed(1)}%` : '—'}
+                                </td>
+                                <td className="py-1.5 px-2 text-right">{c.avg_sharpe != null ? c.avg_sharpe.toFixed(2) : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-24 text-xs text-muted-foreground">No walk-forward data</div>
+                    )}
+                  </div>
+                </PanelHeader>
+
+                <PanelHeader title="WF Pass Rate Trend" panelId="autonomous-wf-passrate">
+                  <div className="p-3">
+                    {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
+                      <InteractiveChart
+                        data={walkForwardData.pass_rate_history}
+                        dataKeys={[{ key: 'pass_rate', color: designColors.green, type: 'line' }]}
+                        xAxisKey="date"
+                        height={200}
+                        periods={['1M', '3M', '6M', '1Y', 'ALL']}
+                        defaultPeriod={walkForwardPeriod}
+                        onPeriodChange={(p) => {
+                          setWalkForwardPeriod(p);
+                          if (tradingMode) {
+                            apiClient.getWalkForwardAnalytics(tradingMode, p).then(setWalkForwardData).catch(() => {});
+                          }
+                        }}
+                        tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No pass rate history</div>
+                    )}
+                  </div>
+                </PanelHeader>
+              </div>
+
+              {/* Similarity Rejections */}
+              {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 && (
+                <PanelHeader title="Similarity Rejections" panelId="autonomous-similarity">
+                  <div className="p-3 overflow-x-auto">
+                    <table className="w-full text-[10px] font-mono">
                       <thead>
                         <tr className="border-b border-dark-border text-muted-foreground">
-                          <th className="py-2 px-2 text-left">Rejected Strategy</th>
-                          <th className="py-2 px-2 text-left">Existing Strategy</th>
-                          <th className="py-2 px-2 text-right">Similarity %</th>
+                          <th className="py-1.5 px-2 text-left">Rejected Strategy</th>
+                          <th className="py-1.5 px-2 text-left">Existing Strategy</th>
+                          <th className="py-1.5 px-2 text-right">Similarity %</th>
                         </tr>
                       </thead>
                       <tbody>
                         {walkForwardData.similarity_rejections.map((r: any, idx: number) => (
                           <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
-                            <td className="py-2 px-2 text-gray-200 truncate max-w-[200px]">{r.rejected_name || '—'}</td>
-                            <td className="py-2 px-2 text-gray-300 truncate max-w-[200px]">{r.existing_name || '—'}</td>
-                            <td className="py-2 px-2 text-right text-accent-red">{r.similarity != null ? `${(r.similarity * 100).toFixed(1)}%` : '—'}</td>
+                            <td className="py-1.5 px-2 text-gray-200 truncate max-w-[180px]">{r.rejected_name || '—'}</td>
+                            <td className="py-1.5 px-2 text-gray-300 truncate max-w-[180px]">{r.existing_name || '—'}</td>
+                            <td className="py-1.5 px-2 text-right text-accent-red">{r.similarity != null ? `${(r.similarity * 100).toFixed(1)}%` : '—'}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                </CardContent>
-              </Card>
-            )}
-          </TabsContent>
+                </PanelHeader>
+              )}
+            </TabsContent>
 
-          {/* Conviction Score Tab (Task 9.4) */}
-          <TabsContent value="conviction" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Conviction Score Decomposition</CardTitle>
-                <CardDescription>Breakdown of conviction scores for active strategies</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {(() => {
-                  const activeWithConviction = strategies.filter(
-                    (s) => (s.status === 'DEMO' || s.status === 'LIVE') && s.metadata?.conviction_score
-                  );
-                  if (activeWithConviction.length === 0) {
-                    return <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No conviction score data available</div>;
-                  }
-                  const factors = ['signal_strength', 'fundamental_quality', 'regime_fit', 'carry_bias', 'halving_cycle'];
-                  const factorColors: Record<string, string> = {
-                    signal_strength: '#3b82f6',
-                    fundamental_quality: '#22c55e',
-                    regime_fit: '#f59e0b',
-                    carry_bias: '#8b5cf6',
-                    halving_cycle: '#ec4899',
-                  };
-                  return (
-                    <div className="space-y-3">
-                      {activeWithConviction.slice(0, 15).map((s) => {
-                        const total = s.metadata?.conviction_score || 0;
-                        const confidence = s.metadata?.confidence_factors || s.reasoning?.confidence_factors || {};
-                        return (
-                          <div key={s.id} className="space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-mono text-gray-300 truncate max-w-[200px]">{s.name}</span>
-                              <span className="text-xs font-mono font-semibold">{typeof total === 'number' ? total.toFixed(2) : total}</span>
+            {/* Tab 7: Conviction Score */}
+            <TabsContent value="conviction" className="space-y-4">
+              <PanelHeader title="Conviction Score Decomposition" panelId="autonomous-conviction">
+                <div className="p-3">
+                  {(() => {
+                    const activeWithConviction = strategies.filter(
+                      (s) => (s.status === 'DEMO' || s.status === 'LIVE') && s.metadata?.conviction_score
+                    );
+                    if (activeWithConviction.length === 0) {
+                      return <div className="flex items-center justify-center h-24 text-xs text-muted-foreground">No conviction score data</div>;
+                    }
+                    const factors = ['signal_strength', 'fundamental_quality', 'regime_fit', 'carry_bias', 'halving_cycle'];
+                    const factorColors: Record<string, string> = {
+                      signal_strength: '#3b82f6',
+                      fundamental_quality: '#22c55e',
+                      regime_fit: '#f59e0b',
+                      carry_bias: '#8b5cf6',
+                      halving_cycle: '#ec4899',
+                    };
+                    return (
+                      <div className="space-y-2">
+                        {activeWithConviction.slice(0, 15).map((s) => {
+                          const total = s.metadata?.conviction_score || 0;
+                          const confidence = s.metadata?.confidence_factors || s.reasoning?.confidence_factors || {};
+                          return (
+                            <div key={s.id} className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-mono text-gray-300 truncate max-w-[180px]">{s.name}</span>
+                                <span className="text-[10px] font-mono font-semibold">{typeof total === 'number' ? total.toFixed(2) : total}</span>
+                              </div>
+                              <div className="flex h-3 rounded overflow-hidden bg-dark-border/30">
+                                {factors.map((f) => {
+                                  const val = Number(confidence[f] || 0);
+                                  const pct = total > 0 ? (val / total) * 100 : 0;
+                                  if (pct <= 0) return null;
+                                  return (
+                                    <div key={f} className="h-full"
+                                      style={{ width: `${pct}%`, backgroundColor: factorColors[f] || '#6b7280' }}
+                                      title={`${f.replace(/_/g, ' ')}: ${val.toFixed(2)} (${pct.toFixed(0)}%)`} />
+                                  );
+                                })}
+                              </div>
                             </div>
-                            <div className="flex h-4 rounded overflow-hidden bg-dark-border/30">
-                              {factors.map((f) => {
-                                const val = Number(confidence[f] || 0);
-                                const pct = total > 0 ? (val / total) * 100 : 0;
-                                if (pct <= 0) return null;
-                                return (
-                                  <div
-                                    key={f}
-                                    className="h-full"
-                                    style={{ width: `${pct}%`, backgroundColor: factorColors[f] || '#6b7280' }}
-                                    title={`${f.replace(/_/g, ' ')}: ${val.toFixed(2)} (${pct.toFixed(0)}%)`}
-                                  />
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {/* Legend */}
-                      <div className="flex flex-wrap gap-3 mt-4 text-xs text-muted-foreground">
-                        {factors.map((f) => (
-                          <span key={f} className="flex items-center gap-1">
-                            <span className="w-3 h-3 rounded" style={{ backgroundColor: factorColors[f] }} />
-                            {f.replace(/_/g, ' ')}
-                          </span>
-                        ))}
+                          );
+                        })}
+                        <div className="flex flex-wrap gap-2 mt-3 text-[10px] text-muted-foreground">
+                          {factors.map((f) => (
+                            <span key={f} className="flex items-center gap-1">
+                              <span className="w-2.5 h-2.5 rounded" style={{ backgroundColor: factorColors[f] }} />
+                              {f.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </div>
                       </div>
+                    );
+                  })()}
+                </div>
+              </PanelHeader>
+            </TabsContent>
+          </Tabs>
+        </div>
+      </PanelHeader>
+    </div>
+  );
+
+  // ── Side Panel (35%) — Cycle Intelligence ──────────────────────────────
+  const sidePanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader title="Cycle Intelligence" panelId="autonomous-side" onRefresh={fetchData}>
+        <div className="flex flex-col gap-3 p-3 overflow-auto">
+          {/* Compact Metric Row */}
+          <CompactMetricRow metrics={sideMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
+
+          {/* Cycle Progress Indicator */}
+          <div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Cycle Progress
+            </div>
+            <div className="bg-muted rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-gray-300 font-mono">
+                  {cycleProgress > 0 && cycleProgress < 100 ? 'Running' : cycleProgress === 100 ? 'Complete' : 'Idle'}
+                </span>
+                <span className="text-xs font-mono font-semibold text-gray-200">{cycleProgress}%</span>
+              </div>
+              <div className="w-full bg-dark-bg rounded-full h-2 overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all duration-500',
+                    cycleProgress === 100 ? 'bg-accent-green' :
+                    cycleProgress > 0 ? 'bg-blue-500' : 'bg-gray-600'
+                  )}
+                  style={{ width: `${cycleProgress}%` }}
+                />
+              </div>
+              {lastCycleData && (
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">Duration</div>
+                    <div className="text-xs font-mono font-semibold">
+                      {lastCycleData.duration_seconds != null
+                        ? lastCycleData.duration_seconds < 60
+                          ? `${lastCycleData.duration_seconds.toFixed(0)}s`
+                          : `${Math.floor(lastCycleData.duration_seconds / 60)}m ${Math.floor(lastCycleData.duration_seconds % 60)}s`
+                        : '—'}
                     </div>
-                  );
-                })()}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </motion.div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">Proposals</div>
+                    <div className="text-xs font-mono font-semibold text-blue-400">{lastCycleData.proposals_generated}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">BT Pass Rate</div>
+                    <div className="text-xs font-mono font-semibold text-purple-400">
+                      {lastCycleData.backtested > 0
+                        ? `${((lastCycleData.backtest_passed / lastCycleData.backtested) * 100).toFixed(0)}%`
+                        : '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-muted-foreground">Net Activations</div>
+                    <div className={cn('text-xs font-mono font-semibold',
+                      (lastCycleData.activated - lastCycleData.strategies_retired) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                      {lastCycleData.activated - lastCycleData.strategies_retired >= 0 ? '+' : ''}{lastCycleData.activated - lastCycleData.strategies_retired}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* WF Pass Rate Sparkline */}
+          <div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              WF Pass Rate Trend
+            </div>
+            {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
+              <div className="bg-muted rounded-lg p-2">
+                <InteractiveChart
+                  data={walkForwardData.pass_rate_history.slice(-20)}
+                  dataKeys={[{ key: 'pass_rate', color: designColors.green, type: 'line' }]}
+                  xAxisKey="date"
+                  height={100}
+                  tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
+                />
+              </div>
+            ) : (
+              <div className="bg-muted rounded-lg p-3 text-center text-[10px] text-muted-foreground">
+                No pass rate history
+              </div>
+            )}
+          </div>
+
+          {/* System Status Summary */}
+          {autonomousStatus && (
+            <div>
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                Market Regime
+              </div>
+              <div className="bg-muted rounded-lg p-3">
+                <div className={cn(
+                  'text-sm font-mono font-semibold flex items-center gap-2',
+                  getRegimeColor(autonomousStatus.market_regime)
+                )}>
+                  {getRegimeIcon(autonomousStatus.market_regime)} {autonomousStatus.market_regime}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  Confidence: <span className={getConfidenceLabel(autonomousStatus.market_confidence).color}>
+                    {getConfidenceLabel(autonomousStatus.market_confidence).label}
+                  </span> ({(autonomousStatus.market_confidence * 100).toFixed(0)}%)
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Recent Similarity Rejections */}
+          <div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Recent Similarity Rejections
+            </div>
+            {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 ? (
+              <div className="space-y-1.5">
+                {walkForwardData.similarity_rejections.slice(0, 5).map((r: any, idx: number) => (
+                  <div key={idx} className="bg-muted rounded-lg p-2 flex items-center justify-between">
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-mono text-gray-300 truncate">{r.rejected_name || '—'}</div>
+                      <div className="text-[9px] text-muted-foreground truncate">vs {r.existing_name || '—'}</div>
+                    </div>
+                    <span className="text-[10px] font-mono font-semibold text-accent-red shrink-0 ml-2">
+                      {r.similarity != null ? `${(r.similarity * 100).toFixed(0)}%` : '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-muted rounded-lg p-3 text-center text-[10px] text-muted-foreground">
+                No similarity rejections
+              </div>
+            )}
+          </div>
+
+          {/* Cumulative Stats */}
+          {autonomousStatus && (
+            <div>
+              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+                Cumulative Stats
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="bg-muted rounded-lg p-2 text-center">
+                  <div className="text-[10px] text-muted-foreground">Last Cycle</div>
+                  <div className="text-[10px] font-mono font-semibold text-gray-200">
+                    {autonomousStatus.last_cycle_time ? formatTimestamp(autonomousStatus.last_cycle_time) : '—'}
+                  </div>
+                </div>
+                <div className="bg-muted rounded-lg p-2 text-center">
+                  <div className="text-[10px] text-muted-foreground">Activated</div>
+                  <div className="text-lg font-mono font-semibold text-accent-green">
+                    {autonomousStatus.cycle_stats.activated_count}
+                  </div>
+                </div>
+                <div className="bg-muted rounded-lg p-2 text-center">
+                  <div className="text-[10px] text-muted-foreground">Retired</div>
+                  <div className="text-lg font-mono font-semibold text-accent-red">
+                    {autonomousStatus.cycle_stats.retired_count}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </PanelHeader>
+    </div>
+  );
+
+  // ── Final Render — 2-panel layout ──────────────────────────────────────
+  return (
+    <DashboardLayout onLogout={onLogout}>
+      <PageTemplate
+        title="🤖 Autonomous"
+        description="Monitor and control the autonomous trading system"
+        actions={headerActions}
+      >
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="h-full"
+        >
+          <ResizablePanelLayout
+            layoutId="autonomous-panels"
+            direction="horizontal"
+            panels={[
+              {
+                id: 'autonomous-main',
+                defaultSize: 65,
+                minSize: 400,
+                content: mainPanel,
+              },
+              {
+                id: 'autonomous-side',
+                defaultSize: 35,
+                minSize: 250,
+                content: sidePanel,
+              },
+            ]}
+          />
+        </motion.div>
+      </PageTemplate>
     </DashboardLayout>
   );
 };
-

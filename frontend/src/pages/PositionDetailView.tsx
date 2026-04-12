@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, RefreshCw, AlertCircle } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
+import { PageTemplate } from '../components/PageTemplate';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
@@ -50,7 +51,9 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageSkeleton />
+        <PageTemplate title={`◆ ${symbol || 'Position'}`} description="Position Detail">
+          <PageSkeleton />
+        </PageTemplate>
       </DashboardLayout>
     );
   }
@@ -61,29 +64,32 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
   const position = detail?.position;
   const hasOrders = orders.length > 0;
 
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      <Button variant="ghost" size="sm" onClick={() => navigate('/portfolio')} className="gap-2">
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </Button>
+      <Button variant="outline" size="sm" onClick={fetchDetail} className="gap-2">
+        <RefreshCw className="h-4 w-4" />
+        Refresh
+      </Button>
+    </div>
+  );
+
   return (
     <DashboardLayout onLogout={onLogout}>
+      <PageTemplate
+        title={`◆ ${symbol || 'Position'}`}
+        description="Position Detail"
+        actions={headerActions}
+      >
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.3 }}
         className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto"
       >
-        {/* Header */}
-        <div className="mb-6 flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/portfolio')} className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </Button>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold text-gray-100 font-mono">{symbol}</h1>
-            <p className="text-sm text-muted-foreground">Position Detail</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={fetchDetail} className="gap-2">
-            <RefreshCw className="h-4 w-4" />
-            Refresh
-          </Button>
-        </div>
 
         {error ? (
           <Card className="border-accent-red/30 bg-accent-red/5">
@@ -227,7 +233,7 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
                 </CardHeader>
                 <CardContent>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs font-mono">
+                    <table className="w-full text-xs font-mono table-dense">
                       <thead>
                         <tr className="border-b border-dark-border text-muted-foreground">
                           <th className="py-2 px-2 text-left">Date</th>
@@ -258,6 +264,7 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
           </div>
         )}
       </motion.div>
+      </PageTemplate>
     </DashboardLayout>
   );
 };

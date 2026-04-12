@@ -4,18 +4,20 @@
 
 This design covers the comprehensive UI/UX overhaul of the AlphaCent autonomous trading platform frontend. The overhaul transforms the existing React 19 + Vite 8 + TypeScript application from its current inconsistent layout into an institutional-grade trading dashboard inspired by QuantConnect, Bloomberg Terminal, and pyfolio tear sheets.
 
-The overhaul spans 21 requirements across these domains:
+The overhaul spans 33 requirements across these domains:
 - **Core Visual Overhaul** (Reqs 1-5): SPY benchmark overlay, global summary bar, overview redesign, design system, chart interactivity
 - **Page Enhancements** (Reqs 6-9): Page-specific improvements, loading states, responsive layout, real-time WebSocket updates
 - **Advanced Analytics** (Reqs 10-13): Rolling statistics, performance attribution, drawdown/return distribution, position-level analytics
 - **Power User Features** (Reqs 14-16): Command palette, PDF tear sheet export, multi-timeframe performance
 - **Observability & Intelligence** (Reqs 17-21): System health, strategy lifecycle, data pipeline, TCA, audit trail
+- **QuantFury-Inspired Layout Overhaul** (Reqs 22-30): Horizontal top nav, multi-panel resizable layout, live position ticker, contextual widgets, compact metrics, panel title bars, chart-as-hero, consistent page template, micro-interactions
+- **Professional Charting & Streaming** (Reqs 31-33): TradingView Lightweight Charts replacing Recharts, real-time price streaming, saved workspace presets
 
 The existing tech stack is preserved: React 19, Tailwind CSS 4, Radix UI, Recharts 3.7, Zustand 5, Framer Motion 12, react-router-dom 7, @tanstack/react-table 8, axios, sonner, and the custom wsManager for WebSocket.
 
 ### Key Design Decisions
 
-1. **Recharts over TradingView Lightweight Charts**: Extend Recharts with custom zoom/pan/crosshair via `recharts` reference areas and custom tooltip components. Avoids adding a new charting dependency and keeps the bundle smaller. TradingView Lightweight Charts would be ideal for candlestick asset plots (Req 13) but the cost of maintaining two chart libraries outweighs the benefit for this phase.
+1. **TradingView Lightweight Charts replaces Recharts (Phase 3)**: Phase 1-2 use Recharts for rapid development. Phase 3 migrates all time-series charts to `lightweight-charts` for candlestick support, real-time streaming, and professional-grade interactivity. Non-time-series visualizations (heatmaps, histograms, pie charts, stacked bars) use custom SVG/Canvas since TradingView Lightweight Charts doesn't support them. Recharts is fully removed after migration.
 
 2. **Client-side PDF generation**: Use `html2canvas` + `jspdf` for tear sheet export (Req 15). Server-side generation would require a headless browser on EC2, adding complexity. Client-side keeps the backend unchanged.
 
@@ -34,16 +36,16 @@ The overhaul follows the existing architecture pattern: pages consume hooks that
 ```mermaid
 graph TD
     subgraph App Shell
-        A[App.tsx] --> B[DashboardLayout]
-        B --> C[Sidebar]
-        B --> D[Header]
-        B --> E[GlobalSummaryBar - NEW]
+        A[App.tsx] --> B[DashboardLayout - RESTRUCTURED]
+        B --> C[TopNavBar - NEW replaces Sidebar]
+        B --> D[MetricsBar - NEW merges Header+GlobalSummaryBar]
+        B --> E[PositionTickerStrip - NEW]
         B --> F[CommandPalette - NEW]
-        B --> G[Page Content]
+        B --> G[PageTemplate - NEW]
     end
 
     subgraph Pages
-        G --> H[OverviewNew - REDESIGNED]
+        G --> H[OverviewNew - MULTI-PANEL REDESIGN]
         G --> I[AnalyticsNew - NEW TABS]
         G --> J[RiskNew - NEW CHARTS]
         G --> K[StrategiesNew - NEW SECTIONS]
@@ -65,6 +67,16 @@ graph TD
         Y[MultiTimeframeView]
         Z[StrategyPipeline]
         AA[TearSheetGenerator]
+        BB[PanelHeader - NEW]
+        CC[CompactMetricRow - NEW]
+        DD[BottomWidgetZone - NEW]
+    end
+
+    subgraph Layout System
+        EE[ResizablePanelLayout - NEW]
+        EE --> FF[PanelGroup react-resizable-panels]
+        EE --> GG[Panel]
+        EE --> HH[PanelResizeHandle]
     end
 
     subgraph State Management
@@ -93,8 +105,16 @@ graph TD
 ```
 frontend/src/
 ├── components/
-│   ├── GlobalSummaryBar.tsx          # Persistent metrics bar (Req 2)
+│   ├── TopNavBar.tsx                 # Horizontal nav replacing Sidebar (Req 22)
+│   ├── MetricsBar.tsx                # Merged header+summary bar (Req 22)
+│   ├── PositionTickerStrip.tsx       # Live position chips (Req 24)
+│   ├── GlobalSummaryBar.tsx          # [DEPRECATED - merged into MetricsBar]
 │   ├── CommandPalette.tsx            # Ctrl+K navigation (Req 14)
+│   ├── PageTemplate.tsx              # Consistent page shell (Req 29)
+│   ├── BottomWidgetZone.tsx          # Contextual widget panels (Req 25)
+│   ├── layout/
+│   │   ├── ResizablePanelLayout.tsx  # Multi-panel system (Req 23)
+│   │   └── PanelHeader.tsx           # Panel title bar with actions (Req 27)
 │   ├── charts/
 │   │   ├── InteractiveChart.tsx      # Zoom/pan/crosshair wrapper (Req 5)
 │   │   ├── PeriodSelector.tsx        # 1W/1M/3M/6M/1Y/ALL buttons
@@ -107,7 +127,14 @@ frontend/src/
 │   │   ├── MultiTimeframeView.tsx   # Compact return cells (Req 16)
 │   │   └── OrderFlowTimeline.tsx    # Horizontal event timeline (Req 6)
 │   ├── trading/
+│   │   ├── CompactMetricRow.tsx     # Dense inline metrics (Req 26)
 │   │   └── StrategyPipeline.tsx     # Lifecycle visualization (Req 3)
+│   ├── widgets/
+│   │   ├── TopMoversWidget.tsx      # Portfolio gainers/losers (Req 25)
+│   │   ├── RecentSignalsWidget.tsx  # Last 5 signals (Req 25)
+│   │   ├── MarketRegimeWidget.tsx   # 4 asset class regimes (Req 25)
+│   │   ├── StrategyAlertsWidget.tsx # Activations/retirements (Req 25)
+│   │   └── MacroPulseWidget.tsx     # FRED indicators (Req 25)
 │   └── pdf/
 │       └── TearSheetGenerator.tsx   # PDF export logic (Req 15)
 ├── pages/
@@ -463,6 +490,7 @@ interface DataQualityEntry {
 | `jspdf` | PDF document generation | ~280KB |
 | `@tanstack/react-virtual` | Virtual scrolling for audit log | ~10KB |
 | `fuse.js` | Fuzzy search for command palette | ~15KB |
+| `react-resizable-panels` | Multi-panel resizable layout system | ~12KB |
 
 
 

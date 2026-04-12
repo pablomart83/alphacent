@@ -1518,6 +1518,31 @@ class ApiClient {
     const response = await this.client.get(`/audit/export${qs ? `?${qs}` : ''}`, { responseType: 'blob' });
     return response.data;
   }
+
+  // ============================================================================
+  // Widget Data Endpoints (Phase 2 — Task 17.2)
+  // ============================================================================
+
+  async getTopMovers(mode: TradingMode): Promise<{ gainers: any[]; losers: any[] }> {
+    const response = await this.client.get<ApiResponse<{ gainers: any[]; losers: any[] }>>(
+      `/dashboard/top-movers?mode=${mode}`
+    );
+    return this.handleResponse(response);
+  }
+
+  async getStrategyAlerts(mode: TradingMode): Promise<{ alerts: any[] }> {
+    const response = await this.client.get<ApiResponse<{ alerts: any[] }>>(
+      `/dashboard/strategy-alerts?mode=${mode}`
+    );
+    return this.handleResponse(response);
+  }
+
+  async getDashboardRecentSignals(mode: TradingMode, limit: number = 5): Promise<{ signals: any[]; total: number }> {
+    const response = await this.client.get<ApiResponse<{ signals: any[]; total: number }>>(
+      `/dashboard/recent-signals?mode=${mode}&limit=${limit}`
+    );
+    return this.handleResponse(response);
+  }
 }
 
 // Export singleton instance

@@ -10,6 +10,7 @@ import {
   UserPlus, Trash2, RotateCw, Lock
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
+import { PageTemplate } from '../components/PageTemplate';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { RefreshButton } from '../components/ui/RefreshButton';
@@ -731,48 +732,38 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
   if (loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <div className="p-4 sm:p-6 lg:p-8">
+        <PageTemplate title="◆ Settings" description="Configure trading mode, API credentials, risk parameters, and preferences">
           <div className="flex items-center justify-center h-64">
             <div className="text-gray-400 font-mono">Loading configuration...</div>
           </div>
-        </div>
+        </PageTemplate>
       </DashboardLayout>
     );
   }
 
+  const headerActions = (
+    <div className="flex items-center gap-3">
+      <RefreshButton loading={loading} label="Refresh" onClick={loadConfiguration} />
+      {lastUpdated && (
+        <div className="text-sm text-gray-500">
+          Last updated: {format(lastUpdated, 'MMM d, yyyy HH:mm')}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <DashboardLayout onLogout={onLogout}>
+      <PageTemplate
+        title="◆ Settings"
+        description="Configure trading mode, API credentials, risk parameters, and preferences"
+        actions={headerActions}
+      >
       <div className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto">
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-6"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-100 flex items-center gap-3">
-                <SettingsIcon className="h-8 w-8 text-blue-500" />
-                Settings
-              </h1>
-              <p className="text-gray-400 mt-1">
-                Configure trading mode, API credentials, risk parameters, and preferences
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <RefreshButton loading={loading} label="Refresh" onClick={loadConfiguration} />
-              {lastUpdated && (
-                <div className="text-sm text-gray-500">
-                  Last updated: {format(lastUpdated, 'MMM d, yyyy HH:mm')}
-                </div>
-              )}
-            </div>
-          </div>
-        </motion.div>
 
         {/* Tabs */}
         <Tabs defaultValue="trading-mode" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-9 lg:w-auto lg:inline-grid">
+          <TabsList className="w-full overflow-x-auto">
             <TabsTrigger value="trading-mode" className="flex items-center gap-2">
               <Activity className="h-4 w-4" />
               <span className="hidden sm:inline">Trading Mode</span>
@@ -2745,6 +2736,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </PageTemplate>
     </DashboardLayout>
   );
 };

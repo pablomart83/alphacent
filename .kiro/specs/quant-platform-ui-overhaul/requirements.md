@@ -349,3 +349,162 @@ AlphaCent is an autonomous quant trading platform managing ~$465K equity across 
 9. THE Audit Log page SHALL display at least 90 days of audit history, with older entries accessible via date range selection
 10. WHEN the Audit Log page loads, THE Audit Log page SHALL display the most recent 100 entries sorted by timestamp descending, with infinite scroll or pagination to load additional entries
 11. IF audit log data is unavailable for the selected date range, THEN THE Audit Log page SHALL display a message stating that no audit records exist for the selected period
+
+
+### Requirement 22: Horizontal Top Navigation (Replace Sidebar)
+
+**User Story:** As a trader, I want a horizontal top navigation bar instead of a sidebar, so that I have maximum horizontal screen space for data-dense panels and charts — matching the layout pattern used by QuantFury, TradingView, and Bloomberg.
+
+#### Acceptance Criteria
+
+1. THE Dashboard SHALL replace the vertical Sidebar with a horizontal TopNavBar rendered as the first element of the page, containing: AlphaCent brand/logo on the left, navigation links in the center, and account actions (theme toggle, sync, notifications, user menu, logout) on the right
+2. THE TopNavBar SHALL display navigation links as a horizontal row: Overview, Portfolio, Orders, Strategies, Autonomous, Risk, Analytics, Data, System, Audit, Settings — with the active page indicated by a green (#10b981) bottom border and green text
+3. THE TopNavBar SHALL occupy no more than 48 pixels in height to maximize vertical content space
+4. THE TopNavBar navigation links SHALL support overflow scrolling on viewports below 1280px where all links cannot fit in a single row
+5. THE Dashboard SHALL merge the existing Header bar (Live/Disconnected indicator, Last Synced, Daily P&L ticker, theme toggle, Sync eToro, Notifications) and the Global_Summary_Bar into a single unified MetricsBar rendered directly below the TopNavBar, occupying no more than 40 pixels in height
+6. THE MetricsBar SHALL display: connection status indicator (green dot for live, red for disconnected), Total Equity, Daily P&L ($ and %), Open Positions, Active Strategies, Market Regime badge, System Health score, and Last Synced timestamp — all in a single compact horizontal row
+7. WHEN the viewport width is below 768px, THE TopNavBar SHALL collapse navigation links into a hamburger menu icon that opens a full-screen overlay with all navigation links
+8. THE total vertical overhead of TopNavBar + MetricsBar SHALL not exceed 88 pixels, reclaiming approximately 200 pixels of horizontal space compared to the previous sidebar layout
+
+### Requirement 23: Multi-Panel Resizable Layout System
+
+**User Story:** As a power user, I want a multi-panel workspace where I can see charts, metrics, tables, and alerts simultaneously without scrolling, so that I have a command-center view of my portfolio — like QuantFury and Bloomberg Terminal.
+
+#### Acceptance Criteria
+
+1. THE Dashboard SHALL implement a resizable panel layout system using `react-resizable-panels` that allows the main content area to be divided into multiple panels visible simultaneously
+2. THE panel layout system SHALL support horizontal and vertical splits, with drag-to-resize handles between adjacent panels that enforce minimum panel widths of 250px
+3. THE Overview page SHALL use a default panel layout: left panel (30% width) containing key metrics + strategy pipeline, center panel (45% width) containing the equity curve chart, right panel (25% width) containing recent trades + position summary by asset class — all visible simultaneously without scrolling
+4. THE Portfolio page SHALL use a default panel layout: main panel (70% width) containing the positions table, side panel (30% width) containing position summary by asset class and sector exposure
+5. THE Analytics page SHALL retain its tab-based layout within a single panel, as the tab content is already data-dense
+6. WHEN the user resizes a panel by dragging a handle, THE layout system SHALL update panel sizes smoothly without causing chart re-render jank, using CSS-based resizing during drag and committing final sizes to state on pointer release
+7. THE panel layout system SHALL persist panel sizes to localStorage so that the user's layout preferences survive page reloads
+8. THE panel layout system SHALL provide sensible default layouts for each page that work well at 1920px viewport width, with graceful degradation to single-column stacked layout below 1024px viewport width
+
+### Requirement 24: Live Position Ticker Strip
+
+**User Story:** As a trader, I want a horizontal scrollable strip showing my top positions with live prices and P&L, so that I can monitor my portfolio at a glance and quickly navigate to any position — like QuantFury's watchlist bar.
+
+#### Acceptance Criteria
+
+1. THE Dashboard SHALL render a PositionTickerStrip below the MetricsBar, displaying the top 15 open positions sorted by absolute position value
+2. EACH position chip in the PositionTickerStrip SHALL display: symbol name, current price, and P&L change percentage — color-coded green for positive and red for negative
+3. THE PositionTickerStrip SHALL be horizontally scrollable when positions exceed the visible width, with smooth scroll behavior
+4. WHEN the user clicks a position chip, THE Dashboard SHALL navigate to the position detail view at `/portfolio/:symbol`
+5. WHEN the WebSocket_Feed delivers a position update, THE PositionTickerStrip SHALL update the affected position's price and P&L within 2 seconds, with a brief green/red flash animation on the changed value
+6. THE PositionTickerStrip SHALL occupy no more than 36 pixels in height
+7. WHEN the viewport width is below 768px, THE PositionTickerStrip SHALL be hidden to preserve vertical space, with positions accessible via the Portfolio page
+
+### Requirement 25: Contextual Widget Panels (Bottom Zone)
+
+**User Story:** As a trader, I want quick-access contextual widgets showing market movers, recent signals, regime status, and alerts, so that I can stay informed without switching pages — like QuantFury's bottom panel widgets.
+
+#### Acceptance Criteria
+
+1. THE Overview page bottom zone SHALL display a row of closable mini-widget panels, each with a title bar containing the widget name and a close (×) button
+2. THE bottom zone SHALL include the following default widgets: "Top Movers" (biggest gainers/losers in portfolio today), "Recent Signals" (last 5 signals with conviction scores and direction), "Market Regime" (compact regime status for all 4 asset classes with confidence percentages), "Strategy Alerts" (recent activations, retirements, pending closures), and "Macro Pulse" (key FRED indicators: VIX, Fed Funds, 10Y Treasury, Yield Curve, Inflation)
+3. EACH widget panel SHALL have a maximum height of 200px with internal scrolling for overflow content
+4. WHEN the user closes a widget via the × button, THE widget SHALL be hidden and the remaining widgets SHALL reflow to fill the available space
+5. THE widget visibility state SHALL be persisted to localStorage so closed widgets remain hidden across page reloads
+6. WHEN the WebSocket_Feed delivers relevant updates (position changes, new signals, regime changes), THE affected widgets SHALL update in real-time within 2 seconds
+7. WHEN the viewport width is below 1024px, THE bottom widget zone SHALL stack widgets vertically in a single column instead of a horizontal row
+
+### Requirement 26: Compact Metric Grids and Dense Tables
+
+**User Story:** As a power user, I want higher information density with compact metrics and denser tables, so that I can see 2x more data per screen without scrolling — matching the data density of professional trading terminals.
+
+#### Acceptance Criteria
+
+1. THE Design_System SHALL define a CompactMetricRow component that displays 4-8 metrics in a single horizontal row, each metric showing label + value + optional trend indicator inline, with a maximum height of 40px per row
+2. THE Overview page SHALL replace the existing 4-column MetricCard grid with a CompactMetricRow displaying: Total Equity, Daily P&L ($), Daily P&L (%), Sharpe (30d), Max Drawdown, Win Rate, Open Positions, Active Strategies — all in a single row
+3. THE Design_System SHALL define a DenseTable variant with 32px row height (reduced from the current ~44px), 12px font size for cell content, and tighter cell padding (8px horizontal, 4px vertical)
+4. ALL data tables across the platform (positions, orders, strategies, audit log, template rankings, blacklists) SHALL use the DenseTable variant by default
+5. THE Card component padding SHALL be reduced from 16px to 12px for all card instances across the platform
+6. THE CardTitle font size SHALL be reduced from text-2xl to text-base (16px) to reduce visual weight of card headers relative to card content
+
+### Requirement 27: Panel Title Bars with Actions
+
+**User Story:** As a user, I want each content panel to have a clear title bar with action buttons, so that I can instantly identify what each section shows and interact with it — like QuantFury's panel headers with close/minimize controls.
+
+#### Acceptance Criteria
+
+1. THE Design_System SHALL define a PanelHeader component with a slightly darker background than the panel body (using var(--color-dark-bg) instead of var(--color-dark-surface)), containing the panel title left-aligned and action icons right-aligned
+2. THE PanelHeader SHALL support the following action icons: collapse/expand toggle, refresh button (triggers data reload for that panel), and optionally a close button (for closable panels like bottom widgets)
+3. ALL Card components used as content sections on pages SHALL use PanelHeader as their header instead of the current CardHeader, providing consistent visual structure across all pages
+4. WHEN the user clicks the collapse toggle on a PanelHeader, THE panel body SHALL collapse to show only the PanelHeader (saving vertical space), and clicking again SHALL expand it back to full height
+5. THE collapse state of each panel SHALL be persisted to localStorage so collapsed panels remain collapsed across page reloads
+
+### Requirement 28: Chart-as-Hero Layout
+
+**User Story:** As a portfolio manager, I want the equity curve chart to dominate the Overview page as the centerpiece, so that the most important visualization commands immediate attention — like how QuantFury centers the price chart.
+
+#### Acceptance Criteria
+
+1. THE Overview page center panel SHALL allocate at least 60% of the main content area width to the EquityCurveChart, making it the visually dominant element
+2. THE EquityCurveChart in the center panel SHALL have a minimum height of 400px and SHALL expand to fill available vertical space within its panel
+3. THE EquityCurveChart SHALL include a compact toolbar above the chart with: PeriodSelector buttons, a benchmark toggle (show/hide SPY), and a fullscreen button that expands the chart to fill the entire content area
+4. WHEN the user clicks the fullscreen button, THE EquityCurveChart SHALL expand to fill the entire main content area (hiding side panels), with an exit-fullscreen button to restore the panel layout
+
+### Requirement 29: Consistent Page Template
+
+**User Story:** As a user, I want every page to use the same structural template, so that the platform feels like one cohesive application rather than a collection of different apps.
+
+#### Acceptance Criteria
+
+1. THE Dashboard SHALL define a PageTemplate component used by all pages, providing: a page header zone (title + description + action buttons), a main content zone (with optional panel layout), and an optional bottom widget zone
+2. ALL pages SHALL use the PageTemplate component, ensuring consistent spacing, padding, and structural hierarchy across Overview, Portfolio, Orders, Strategies, Autonomous, Risk, Analytics, Data, System Health, Audit Log, and Settings
+3. THE page header zone SHALL have a consistent height of 64px across all pages, with the page title (text-xl font-bold) on the left and action buttons (period selector, export, refresh) on the right
+4. THE main content zone SHALL fill the remaining vertical space between the page header and the bottom widget zone (if present), with no vertical scrolling required for the primary content on viewports above 1024px height
+
+### Requirement 30: Micro-Interactions and Visual Polish
+
+**User Story:** As a user, I want subtle animations and visual feedback on interactive elements, so that the platform feels alive and responsive — matching the polish of professional trading platforms.
+
+#### Acceptance Criteria
+
+1. THE Design_System SHALL implement animated number transitions on all P&L values, equity values, and metric displays, using a count-up/count-down animation over 300ms when values change
+2. WHEN a position's price or P&L changes via WebSocket update, THE affected value SHALL briefly flash with a green (#22c55e at 20% opacity) or red (#ef4444 at 20% opacity) background that fades over 500ms
+3. THE Design_System SHALL implement a subtle hover glow effect on all interactive cards and clickable table rows, using a 1px border-color transition to a lighter shade on hover
+4. ALL panel resize handles SHALL display a subtle highlight (lighter border color) on hover to indicate they are draggable
+5. WHEN the user switches between tabs on any page, THE tab content SHALL transition in with a 150ms fade-in animation
+6. THE PositionTickerStrip position chips SHALL have a subtle scale-up (1.02x) on hover to indicate interactivity
+
+
+### Requirement 31: TradingView Lightweight Charts Integration
+
+**User Story:** As a trader, I want professional-grade interactive charts with candlesticks, drawing tools, indicators, and real-time price streaming, so that the charting experience matches QuantFury and TradingView — not basic line charts.
+
+#### Acceptance Criteria
+
+1. THE Dashboard SHALL replace all Recharts-based time-series charts with TradingView Lightweight Charts (`lightweight-charts` library), providing candlestick, line, area, bar, and histogram chart types
+2. THE EquityCurveChart on the Overview page SHALL render as a TradingView area chart with SPY benchmark overlay, crosshair tooltip, and synchronized drawdown sub-chart — replacing the current Recharts implementation
+3. THE AssetPlot on the Position Detail page SHALL render as a TradingView candlestick chart with buy/sell order annotations (markers), volume histogram sub-chart, and timeframe selector (5m, 15m, 1h, 4h, 1D)
+4. ALL TradingView charts SHALL support: mouse-wheel zoom, click-and-drag pan, crosshair with tooltip showing OHLCV data, and time range selection via the existing PeriodSelector component
+5. THE TradingView charts SHALL use the AlphaCent dark theme: background #0a0e1a, grid #1f2937, up candles #22c55e, down candles #ef4444, crosshair #9ca3af, text #f3f4f6
+6. WHEN the WebSocket_Feed delivers a price update for a symbol being viewed, THE TradingView chart SHALL append the new data point in real-time without requiring a full chart re-render
+7. THE Recharts library SHALL be fully removed from the project after migration, with no dual-charting-library maintenance burden
+8. NON-time-series visualizations (correlation heatmaps, return distribution histograms, monthly returns heatmaps, pie charts, stacked bar charts) SHALL continue to use a lightweight alternative (e.g., custom SVG/Canvas or a minimal charting utility), as TradingView Lightweight Charts does not support these chart types
+
+### Requirement 32: Real-Time Price Streaming to Charts
+
+**User Story:** As a trader, I want charts that update in real-time as prices change, so that I can see live market movement without manually refreshing — like QuantFury's live-ticking charts.
+
+#### Acceptance Criteria
+
+1. WHEN a TradingView chart is displaying a symbol that has an open position, THE chart SHALL receive real-time price updates via the WebSocket_Feed and append new ticks to the chart within 1 second of receipt
+2. THE real-time price streaming SHALL support the PositionDetailView AssetPlot (candlestick chart for individual symbols) and the Overview EquityCurveChart (portfolio equity updates)
+3. WHEN a new price tick arrives, THE chart SHALL smoothly animate the latest candle/bar update without causing the entire chart to re-render or flicker
+4. IF the WebSocket_Feed disconnects, THE chart SHALL display a "Live data paused" indicator and resume streaming automatically on reconnection
+5. THE real-time streaming SHALL not degrade chart performance — charts SHALL maintain 60fps scroll/zoom even while receiving updates every 1-10 seconds
+
+### Requirement 33: Saved Workspace Presets
+
+**User Story:** As a power user, I want to save and switch between different workspace layouts, so that I can have a "trading" layout, a "monitoring" layout, and an "analysis" layout.
+
+#### Acceptance Criteria
+
+1. THE Dashboard SHALL support saving the current panel layout (sizes + collapsed states + widget visibility) as a named workspace preset
+2. THE user SHALL be able to create up to 5 workspace presets, each with a custom name
+3. THE Dashboard SHALL provide a workspace switcher in the TopNavBar or PageTemplate header allowing the user to switch between saved presets with a single click
+4. WHEN the user switches workspace presets, THE layout SHALL transition to the new arrangement within 300ms
+5. THE Dashboard SHALL provide default presets: "Trading" (chart-dominant, position ticker prominent), "Monitoring" (system health + alerts prominent), and "Analysis" (analytics tabs + metrics prominent)

@@ -2,16 +2,19 @@ import { type FC, useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  DollarSign, TrendingUp, TrendingDown, BarChart3,
-  ArrowRight,
+  Maximize2, Minimize2, Eye, EyeOff,
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
+import { PageTemplate } from '../components/PageTemplate';
+import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
+import { PanelHeader } from '../components/layout/PanelHeader';
+import { CompactMetricRow } from '../components/trading/CompactMetricRow';
+import type { CompactMetric } from '../components/trading/CompactMetricRow';
 import { RefreshButton } from '../components/ui/RefreshButton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
-import { DataSection, PageSkeleton, MetricGridSkeleton, ChartSkeleton, TableSkeleton } from '../components/ui/skeleton';
-import { MetricCard } from '../components/trading/MetricCard';
+import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
 import { EquityCurveChart } from '../components/charts/EquityCurveChart';
+import { PeriodSelector } from '../components/charts/PeriodSelector';
 import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 import { useTradingMode } from '../contexts/TradingModeContext';
@@ -70,8 +73,6 @@ const PIPELINE_STAGES = [
 ] as const;
 
 function countStrategiesByStage(strategies: Strategy[]): Record<string, number> {
-  // Cumulative counts: each stage includes strategies that have passed through it
-  // PROPOSED → BACKTESTED → ACTIVE (DEMO/LIVE) → RETIRED
   let proposed = 0, backtested = 0, active = 0, retired = 0;
   for (const s of strategies) {
     const status = s.status?.toUpperCase();
@@ -79,7 +80,6 @@ function countStrategiesByStage(strategies: Strategy[]): Record<string, number> 
     else if (status === 'BACKTESTED') { proposed++; backtested++; }
     else if (status === 'DEMO' || status === 'LIVE') { proposed++; backtested++; active++; }
     else if (status === 'RETIRED') { proposed++; backtested++; retired++; }
-    // PAUSED/INVALID strategies that were once active
     else if (status === 'PAUSED') { proposed++; backtested++; active++; }
   }
   return { proposed, backtested, active, retired };
@@ -162,9 +162,11 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const [recentTrades, setRecentTrades] = useState<Position[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [_error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [equityPeriod, setEquityPeriod] = useState('3M');
+  const [showBenchmark, setShowBenchmark] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Fetch all data
   const fetchAll = useCallback(async () => {
@@ -229,24 +231,52 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     [strategies],
   );
 
-  // Daily P&L from pnl_periods
   const dailyPnl = dashboard?.pnl_periods?.find(p => p.label === 'Today');
 
-  // Sharpe & max drawdown from quick_stats / drawdown_data
   const maxDrawdown = useMemo(() => {
     if (!dashboard?.drawdown_data?.length) return 0;
     return Math.min(...dashboard.drawdown_data.map(d => d.drawdown_pct));
   }, [dashboard?.drawdown_data]);
 
-  // Handle period click from MultiTimeframeView
   const handlePeriodClick = useCallback((period: string) => {
-    // Map MTF periods to equity curve periods
     const periodMap: Record<string, string> = {
       '1D': '1W', '1W': '1W', '1M': '1M', '3M': '3M',
       '6M': '6M', 'YTD': '1Y', '1Y': '1Y', 'ALL': 'ALL',
     };
     setEquityPeriod(periodMap[period] || '3M');
   }, []);
+
+  // Build compact metrics for left panel
+  const compactMetrics: CompactMetric[] = useMemo(() => {
+    const d = dashboard;
+    if (!d) return [];
+    const pnl = dailyPnl?.pnl_absolute ?? 0;
+    const pnlPct = dailyPnl?.pnl_percent ?? 0;
+    const sharpe = d.quick_stats?.win_rate_30d != null
+      ? (d.quick_stats.win_rate_30d / 100 * 2).toFixed(2)
+      : 'N/A';
+    return [
+      {
+        label: 'Equity',
+        value: formatCurrency(d.account_equity ?? 0),
+        trend: 'neutral' as const,
+      },
+      {
+        label: 'Daily P&L',
+        value: `${pnl >= 0 ? '+' : ''}${formatCurrency(pnl)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`,
+        trend: pnl > 0 ? 'up' as const : pnl < 0 ? 'down' as const : 'neutral' as const,
+      },
+      {
+        label: 'Sharpe',
+        value: sharpe,
+      },
+      {
+        label: 'Max DD',
+        value: `${maxDrawdown.toFixed(2)}%`,
+        trend: maxDrawdown < -5 ? 'down' as const : 'neutral' as const,
+      },
+    ];
+  }, [dashboard, dailyPnl, maxDrawdown]);
 
   if (tradingModeLoading || loading) {
     return (
@@ -258,242 +288,253 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
   const d = dashboard;
 
-  return (
-    <DashboardLayout onLogout={onLogout}>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.3 }}
-        className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto space-y-6 relative"
+  // Effective SPY data — hide if benchmark toggle is off
+  const effectiveSpyData = showBenchmark ? spyData : undefined;
+
+  // ── Header actions ─────────────────────────────────────────────────────
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
+      <TearSheetGenerator />
+      <RefreshButton loading={isRefreshing} label="Refresh" onClick={refresh} />
+    </div>
+  );
+
+  const modeLabel = tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading';
+
+  // ── Center panel toolbar actions ───────────────────────────────────────
+  const centerToolbar = (
+    <div className="flex items-center gap-2">
+      <PeriodSelector
+        activePeriod={equityPeriod}
+        onPeriodChange={setEquityPeriod}
+      />
+      <button
+        onClick={() => setShowBenchmark(!showBenchmark)}
+        className={cn(
+          'p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors',
+          showBenchmark && 'text-blue-400 hover:text-blue-300',
+        )}
+        title={showBenchmark ? 'Hide benchmark' : 'Show benchmark'}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between">
+        {showBenchmark ? <Eye size={14} /> : <EyeOff size={14} />}
+      </button>
+      <button
+        onClick={() => setIsFullscreen(!isFullscreen)}
+        className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+        title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+      >
+        {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+      </button>
+    </div>
+  );
+
+  // ── Left Panel Content ─────────────────────────────────────────────────
+  const leftPanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader title="Metrics" panelId="overview-metrics" onRefresh={refresh}>
+        <div className="flex flex-col gap-3 p-3 overflow-auto">
+          {/* Compact Metric Row */}
+          <CompactMetricRow metrics={compactMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
+
+          {/* Multi-Timeframe View */}
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-100 font-mono mb-1">
-              ◆ Command Centre
-            </h1>
-            <div className="flex items-center gap-3">
-              <p className="text-gray-400 text-sm">
-                {tradingMode === 'DEMO' ? '📊 Demo Mode' : '💰 Live Trading'} — Real-time portfolio intelligence
-              </p>
-              <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Performance
+            </div>
+            <MultiTimeframeView
+              returns={multiTimeframeReturns}
+              onPeriodClick={handlePeriodClick}
+              compact
+            />
+          </div>
+
+          {/* Strategy Pipeline */}
+          <div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Strategy Pipeline
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {PIPELINE_STAGES.map((stage) => (
+                <button
+                  key={stage.key}
+                  type="button"
+                  onClick={() => navigate(`/strategies?status=${stage.filter}`)}
+                  className={cn(
+                    'flex items-center justify-between rounded-md border px-3 py-1.5 transition-all',
+                    'hover:brightness-125 cursor-pointer',
+                    stage.bg, stage.border,
+                  )}
+                >
+                  <span className="text-xs text-gray-300">{stage.label}</span>
+                  <span className={cn('text-sm font-bold font-mono', stage.color)}>
+                    {strategyCounts[stage.key] ?? 0}
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <TearSheetGenerator />
-            <RefreshButton loading={isRefreshing} label="Refresh" onClick={refresh} />
-          </div>
         </div>
+      </PanelHeader>
+    </div>
+  );
 
-        {/* 1. Hero: Full-width EquityCurveChart with SPY benchmark */}
-        <DataSection
-          isLoading={!d}
-          error={error}
-          skeleton={<ChartSkeleton height={400} />}
-          onRetry={refresh}
-        >
-          {d && (
-            <Card>
-              <CardContent className="pt-4">
-                <EquityCurveChart
-                  equityData={d.equity_curve}
-                  spyData={spyData}
-                  period={equityPeriod}
-                  onPeriodChange={setEquityPeriod}
-                  height={380}
-                />
-              </CardContent>
-            </Card>
+  // ── Center Panel Content ───────────────────────────────────────────────
+  const centerPanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
+        <div className="flex-1 p-3 overflow-auto min-h-0">
+          {d ? (
+            <EquityCurveChart
+              equityData={d.equity_curve}
+              spyData={effectiveSpyData}
+              period={equityPeriod}
+              onPeriodChange={setEquityPeriod}
+              height={Math.max(400, 500)}
+            />
+          ) : (
+            <ChartSkeleton height={400} />
           )}
-        </DataSection>
-
-        {/* 2. MultiTimeframeView row */}
-        <DataSection
-          isLoading={!d}
-          error={null}
-          skeleton={<div className="h-14 bg-muted animate-pulse rounded-md" />}
-          onRetry={refresh}
-        >
-          <MultiTimeframeView
-            returns={multiTimeframeReturns}
-            onPeriodClick={handlePeriodClick}
-          />
-        </DataSection>
-
-        {/* 3. 4-column Metric Grid */}
-        <DataSection
-          isLoading={!d}
-          error={null}
-          skeleton={<MetricGridSkeleton columns={4} />}
-          onRetry={refresh}
-        >
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <MetricCard
-              label="Total Equity"
-              value={d?.account_equity ?? 0}
-              format="currency"
-              icon={DollarSign}
-              tooltip="Total account equity including unrealized P&L"
-            />
-            <MetricCard
-              label="Daily P&L"
-              value={dailyPnl?.pnl_absolute ?? 0}
-              change={dailyPnl?.pnl_percent ?? 0}
-              trend={(dailyPnl?.pnl_absolute ?? 0) > 0 ? 'up' : (dailyPnl?.pnl_absolute ?? 0) < 0 ? 'down' : 'neutral'}
-              format="currency"
-              icon={(dailyPnl?.pnl_absolute ?? 0) >= 0 ? TrendingUp : TrendingDown}
-              tooltip="Today's profit/loss (absolute and percentage)"
-            />
-            <MetricCard
-              label="Sharpe (30d)"
-              value={d?.quick_stats?.win_rate_30d != null ? (d.quick_stats.win_rate_30d / 100 * 2).toFixed(2) : 'N/A'}
-              format="text"
-              icon={BarChart3}
-              tooltip="Approximate 30-day Sharpe ratio"
-            />
-            <MetricCard
-              label="Max Drawdown"
-              value={maxDrawdown}
-              format="percentage"
-              trend={maxDrawdown < -5 ? 'down' : 'neutral'}
-              icon={TrendingDown}
-              tooltip="Maximum peak-to-trough drawdown over the displayed period"
-            />
-          </div>
-        </DataSection>
-
-        {/* 4. 2-column layout: Position summary + Recent trades */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {/* Left: Position summary by asset class */}
-          <DataSection
-            isLoading={!d}
-            error={null}
-            skeleton={<TableSkeleton rows={4} columns={3} />}
-            onRetry={refresh}
-          >
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Positions by Asset Class
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {assetClassSummary.length > 0 ? (
-                  <div className="space-y-2">
-                    {assetClassSummary.map((ac) => (
-                      <div key={ac.assetClass} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-gray-200">{ac.assetClass}</span>
-                          <span className="text-xs text-muted-foreground font-mono">({ac.count})</span>
-                        </div>
-                        <span className={cn(
-                          'text-sm font-mono font-semibold',
-                          ac.totalPnl > 0 ? 'text-accent-green' : ac.totalPnl < 0 ? 'text-accent-red' : 'text-gray-400',
-                        )}>
-                          {ac.totalPnl >= 0 ? '+' : ''}{formatCurrency(ac.totalPnl)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-6">No open positions</p>
-                )}
-              </CardContent>
-            </Card>
-          </DataSection>
-
-          {/* Right: Recent trades (last 10 closed positions) */}
-          <DataSection
-            isLoading={!d}
-            error={null}
-            skeleton={<TableSkeleton rows={5} columns={4} />}
-            onRetry={refresh}
-          >
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Recent Trades
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {recentTrades.length > 0 ? (
-                  <div className="space-y-1.5">
-                    {recentTrades.map((trade) => (
-                      <div key={trade.id} className="flex items-center justify-between py-1.5 border-b border-border/50 last:border-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-sm font-mono font-semibold text-gray-200 truncate">{trade.symbol}</span>
-                          <span className={cn(
-                            'text-[10px] font-mono px-1 py-0.5 rounded',
-                            trade.side === 'BUY' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400',
-                          )}>
-                            {trade.side}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className={cn(
-                            'text-sm font-mono font-semibold',
-                            (trade.realized_pnl ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red',
-                          )}>
-                            {(trade.realized_pnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(trade.realized_pnl ?? 0)}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground font-mono">
-                            {trade.closed_at ? formatDate(trade.closed_at, 'MMM d') : '—'}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground text-center py-6">No recent trades</p>
-                )}
-              </CardContent>
-            </Card>
-          </DataSection>
         </div>
+      </PanelHeader>
+    </div>
+  );
 
-        {/* 5. Strategy Pipeline */}
-        <DataSection
-          isLoading={!d}
-          error={null}
-          skeleton={<div className="h-20 bg-muted animate-pulse rounded-md" />}
-          onRetry={refresh}
-        >
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Strategy Pipeline
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center justify-center gap-2 flex-wrap">
-                {PIPELINE_STAGES.map((stage, i) => (
-                  <div key={stage.key} className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/strategies?status=${stage.filter}`)}
-                      className={cn(
-                        'flex flex-col items-center justify-center rounded-lg border px-5 py-3 min-w-[100px] transition-all',
-                        'hover:brightness-125 cursor-pointer',
-                        stage.bg, stage.border,
-                      )}
-                    >
-                      <span className={cn('text-2xl font-bold font-mono', stage.color)}>
-                        {strategyCounts[stage.key] ?? 0}
+  // ── Right Panel Content ────────────────────────────────────────────────
+  const rightPanel = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <PanelHeader title="Activity" panelId="overview-activity" onRefresh={refresh}>
+        <div className="flex flex-col gap-3 p-3 overflow-auto">
+          {/* Recent Trades */}
+          <div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Recent Trades
+            </div>
+            {recentTrades.length > 0 ? (
+              <div className="space-y-1">
+                {recentTrades.map((trade) => (
+                  <div key={trade.id} className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-mono font-semibold text-gray-200 truncate">{trade.symbol}</span>
+                      <span className={cn(
+                        'text-[9px] font-mono px-1 py-0.5 rounded',
+                        trade.side === 'BUY' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400',
+                      )}>
+                        {trade.side}
                       </span>
-                      <span className="text-[10px] text-muted-foreground mt-0.5">
-                        {stage.label}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className={cn(
+                        'text-xs font-mono font-semibold',
+                        (trade.realized_pnl ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red',
+                      )}>
+                        {(trade.realized_pnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(trade.realized_pnl ?? 0)}
                       </span>
-                    </button>
-                    {i < PIPELINE_STAGES.length - 1 && (
-                      <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                    )}
+                      <span className="text-[9px] text-muted-foreground font-mono">
+                        {trade.closed_at ? formatDate(trade.closed_at, 'MMM d') : '—'}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        </DataSection>
-      </motion.div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-4">No recent trades</p>
+            )}
+          </div>
+
+          {/* Position Summary by Asset Class */}
+          <div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Positions by Asset Class
+            </div>
+            {assetClassSummary.length > 0 ? (
+              <div className="space-y-1">
+                {assetClassSummary.map((ac) => (
+                  <div key={ac.assetClass} className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs text-gray-200">{ac.assetClass}</span>
+                      <span className="text-[10px] text-muted-foreground font-mono">({ac.count})</span>
+                    </div>
+                    <span className={cn(
+                      'text-xs font-mono font-semibold',
+                      ac.totalPnl > 0 ? 'text-accent-green' : ac.totalPnl < 0 ? 'text-accent-red' : 'text-gray-400',
+                    )}>
+                      {ac.totalPnl >= 0 ? '+' : ''}{formatCurrency(ac.totalPnl)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-4">No open positions</p>
+            )}
+          </div>
+        </div>
+      </PanelHeader>
+    </div>
+  );
+
+  // ── Fullscreen mode — center panel only ────────────────────────────────
+  if (isFullscreen) {
+    return (
+      <DashboardLayout onLogout={onLogout}>
+        <PageTemplate
+          title="◆ Command Centre"
+          description={modeLabel}
+          actions={headerActions}
+        >
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="h-full"
+          >
+            {centerPanel}
+          </motion.div>
+        </PageTemplate>
+      </DashboardLayout>
+    );
+  }
+
+  // ── Normal 3-panel layout ──────────────────────────────────────────────
+  return (
+    <DashboardLayout onLogout={onLogout}>
+      <PageTemplate
+        title="◆ Command Centre"
+        description={modeLabel}
+        actions={headerActions}
+      >
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.3 }}
+          className="h-full"
+        >
+          <ResizablePanelLayout
+            layoutId="overview-panels"
+            direction="horizontal"
+            panels={[
+              {
+                id: 'overview-left',
+                defaultSize: 25,
+                minSize: 200,
+                content: leftPanel,
+              },
+              {
+                id: 'overview-center',
+                defaultSize: 50,
+                minSize: 400,
+                content: centerPanel,
+              },
+              {
+                id: 'overview-right',
+                defaultSize: 25,
+                minSize: 200,
+                content: rightPanel,
+              },
+            ]}
+          />
+        </motion.div>
+      </PageTemplate>
     </DashboardLayout>
   );
 };
