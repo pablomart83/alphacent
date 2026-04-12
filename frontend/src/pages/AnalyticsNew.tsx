@@ -800,7 +800,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   if (loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="◆ Analytics" description="Comprehensive performance analysis and insights">
+        <PageTemplate title="◆ Analytics" compact={true}>
           <PageSkeleton />
         </PageTemplate>
       </DashboardLayout>
@@ -810,7 +810,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   if (error && !performanceMetrics) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="◆ Analytics" description="Error loading data">
+        <PageTemplate title="◆ Analytics" compact={true}>
           <div className="flex flex-col items-center justify-center h-64 gap-4">
             <Activity className="h-8 w-8 text-accent-red" />
             <div className="text-gray-400 font-mono">Failed to load analytics</div>
