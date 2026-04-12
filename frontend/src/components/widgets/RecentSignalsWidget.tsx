@@ -59,11 +59,11 @@ export const RecentSignalsWidget: FC = () => {
   }, [tradingMode, fetchSignals]);
 
   if (signals.length === 0) {
-    return <div className="text-[10px] text-gray-600 font-mono">No recent signals</div>;
+    return <div className="text-xs text-gray-600 font-mono">No recent signals</div>;
   }
 
   return (
-    <div className="space-y-1 text-[10px] font-mono">
+    <div className="space-y-1 text-xs font-mono">
       {signals.map((sig, idx) => (
         <div key={idx} className="flex items-center gap-2">
           <span

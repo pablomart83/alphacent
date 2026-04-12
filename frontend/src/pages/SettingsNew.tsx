@@ -818,7 +818,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         </div>
                         <div>
                           <h3 className="text-[12px] font-semibold text-gray-100">Demo Mode</h3>
-                          <p className="text-[10px] text-gray-400">Paper trading with simulated funds</p>
+                          <p className="text-xs text-gray-400">Paper trading with simulated funds</p>
                         </div>
                       </div>
                       {contextTradingMode === TradingMode.DEMO && (
@@ -873,7 +873,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         </div>
                         <div>
                           <h3 className="text-[12px] font-semibold text-gray-100">Live Mode</h3>
-                          <p className="text-[10px] text-gray-400">Real trading with actual funds</p>
+                          <p className="text-xs text-gray-400">Real trading with actual funds</p>
                         </div>
                       </div>
                       {contextTradingMode === TradingMode.LIVE && (
@@ -905,7 +905,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <Info className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
                     <div>
                       <div className="text-yellow-400 font-semibold text-[11px] mb-1">Demo Mode Active</div>
-                      <div className="text-[10px] text-gray-400">
+                      <div className="text-xs text-gray-400">
                         All trades are simulated. No real money is at risk. Use this mode to test strategies safely.
                       </div>
                     </div>
@@ -917,7 +917,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <AlertTriangle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
                     <div>
                       <div className="text-red-400 font-semibold text-[11px] mb-1">Live Mode Active</div>
-                      <div className="text-[10px] text-gray-400">
+                      <div className="text-xs text-gray-400">
                         Trading with real money. All orders will be executed on your live eToro account. Ensure risk parameters are properly configured.
                       </div>
                     </div>
@@ -929,7 +929,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
           {/* API Configuration Tab */}
           <TabsContent value="api" className="space-y-4">
             <SectionLabel>API Configuration</SectionLabel>
-            <p className="text-[10px] text-gray-500 mb-2">Configure your eToro API credentials for {contextTradingMode} mode</p>
+            <p className="text-xs text-gray-500 mb-2">Configure your eToro API credentials for {contextTradingMode} mode</p>
                 <form onSubmit={apiForm.handleSubmit(onApiConfigSubmit)} className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="publicKey" className="text-[11px]">eToro Public Key</Label>
@@ -950,7 +950,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       </button>
                     </div>
                     {apiForm.formState.errors.publicKey && (
-                      <p className="text-[10px] text-red-500">{apiForm.formState.errors.publicKey.message}</p>
+                      <p className="text-xs text-red-500">{apiForm.formState.errors.publicKey.message}</p>
                     )}
                   </div>
 
@@ -963,7 +963,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       {...apiForm.register('userKey')}
                     />
                     {apiForm.formState.errors.userKey && (
-                      <p className="text-[10px] text-red-500">{apiForm.formState.errors.userKey.message}</p>
+                      <p className="text-xs text-red-500">{apiForm.formState.errors.userKey.message}</p>
                     )}
                   </div>
 
@@ -1005,7 +1005,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       </div>
                     </div>
                     {connectionStatus && (
-                      <p className="text-[10px] text-gray-500">{connectionStatus.message}</p>
+                      <p className="text-xs text-gray-500">{connectionStatus.message}</p>
                     )}
                   </div>
 
@@ -1024,7 +1024,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
 
-                  <div className="text-[10px] text-gray-500 space-y-1 pt-2">
+                  <div className="text-xs text-gray-500 space-y-1 pt-2">
                     <p>• Get your API keys from eToro's developer portal</p>
                     <p>• Keys are encrypted before storage</p>
                     <p>• Separate keys for Demo and Live modes</p>
@@ -1048,9 +1048,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('max_position_size_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-[10px] text-gray-500">Maximum size of a single position as % of portfolio</p>
+                      <p className="text-xs text-gray-500">Maximum size of a single position as % of portfolio</p>
                       {riskForm.formState.errors.max_position_size_pct && (
-                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.max_position_size_pct.message}</p>
+                        <p className="text-xs text-red-500">{riskForm.formState.errors.max_position_size_pct.message}</p>
                       )}
                     </div>
 
@@ -1064,9 +1064,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('max_exposure_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-[10px] text-gray-500">Maximum total exposure across all positions</p>
+                      <p className="text-xs text-gray-500">Maximum total exposure across all positions</p>
                       {riskForm.formState.errors.max_exposure_pct && (
-                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.max_exposure_pct.message}</p>
+                        <p className="text-xs text-red-500">{riskForm.formState.errors.max_exposure_pct.message}</p>
                       )}
                     </div>
 
@@ -1080,9 +1080,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('max_daily_loss_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-[10px] text-gray-500">Circuit breaker activates at this loss threshold</p>
+                      <p className="text-xs text-gray-500">Circuit breaker activates at this loss threshold</p>
                       {riskForm.formState.errors.max_daily_loss_pct && (
-                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.max_daily_loss_pct.message}</p>
+                        <p className="text-xs text-red-500">{riskForm.formState.errors.max_daily_loss_pct.message}</p>
                       )}
                     </div>
 
@@ -1096,9 +1096,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('max_drawdown_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-[10px] text-gray-500">Maximum acceptable drawdown</p>
+                      <p className="text-xs text-gray-500">Maximum acceptable drawdown</p>
                       {riskForm.formState.errors.max_drawdown_pct && (
-                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.max_drawdown_pct.message}</p>
+                        <p className="text-xs text-red-500">{riskForm.formState.errors.max_drawdown_pct.message}</p>
                       )}
                     </div>
 
@@ -1112,9 +1112,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('position_risk_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-[10px] text-gray-500">Maximum risk per individual trade</p>
+                      <p className="text-xs text-gray-500">Maximum risk per individual trade</p>
                       {riskForm.formState.errors.position_risk_pct && (
-                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.position_risk_pct.message}</p>
+                        <p className="text-xs text-red-500">{riskForm.formState.errors.position_risk_pct.message}</p>
                       )}
                     </div>
 
@@ -1128,9 +1128,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('stop_loss_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-[10px] text-gray-500">Default stop loss percentage</p>
+                      <p className="text-xs text-gray-500">Default stop loss percentage</p>
                       {riskForm.formState.errors.stop_loss_pct && (
-                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.stop_loss_pct.message}</p>
+                        <p className="text-xs text-red-500">{riskForm.formState.errors.stop_loss_pct.message}</p>
                       )}
                     </div>
 
@@ -1144,9 +1144,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('take_profit_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-[10px] text-gray-500">Default take profit percentage</p>
+                      <p className="text-xs text-gray-500">Default take profit percentage</p>
                       {riskForm.formState.errors.take_profit_pct && (
-                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.take_profit_pct.message}</p>
+                        <p className="text-xs text-red-500">{riskForm.formState.errors.take_profit_pct.message}</p>
                       )}
                     </div>
                   </div>
@@ -1178,7 +1178,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
                         <Label htmlFor="trailing-stop-enabled" className="text-[11px]">Enable Trailing Stops</Label>
-                        <p className="text-[10px] text-gray-500">Automatically move stop-loss up as positions become profitable</p>
+                        <p className="text-xs text-gray-500">Automatically move stop-loss up as positions become profitable</p>
                       </div>
                       <Switch
                         id="trailing-stop-enabled"
@@ -1199,7 +1199,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="100"
                             {...positionManagementForm.register('trailing_stop_activation_pct', { valueAsNumber: true })}
                           />
-                          <p className="text-[10px] text-gray-500">Start trailing after this profit level (e.g., 5% = activate at 5% profit)</p>
+                          <p className="text-xs text-gray-500">Start trailing after this profit level (e.g., 5% = activate at 5% profit)</p>
                         </div>
 
                         <div className="space-y-2">
@@ -1212,7 +1212,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="100"
                             {...positionManagementForm.register('trailing_stop_distance_pct', { valueAsNumber: true })}
                           />
-                          <p className="text-[10px] text-gray-500">Distance below current price (e.g., 3% = trail 3% below peak)</p>
+                          <p className="text-xs text-gray-500">Distance below current price (e.g., 3% = trail 3% below peak)</p>
                         </div>
                       </div>
                     )}
@@ -1223,7 +1223,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
                         <Label htmlFor="partial-exit-enabled" className="text-[11px]">Enable Partial Exits</Label>
-                        <p className="text-[10px] text-gray-500">Take profits incrementally at predefined levels</p>
+                        <p className="text-xs text-gray-500">Take profits incrementally at predefined levels</p>
                       </div>
                       <Switch
                         id="partial-exit-enabled"
@@ -1261,7 +1261,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             </div>
                           </div>
                         ))}
-                        <p className="text-[10px] text-gray-500">Example: At 5% profit, exit 50% of position; at 10% profit, exit 25% more</p>
+                        <p className="text-xs text-gray-500">Example: At 5% profit, exit 50% of position; at 10% profit, exit 25% more</p>
                       </div>
                     )}
                   </div>
@@ -1271,7 +1271,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
                         <Label htmlFor="correlation-adjustment-enabled" className="text-[11px]">Enable Correlation Adjustment</Label>
-                        <p className="text-[10px] text-gray-500">Reduce position sizes for correlated assets to maintain diversification</p>
+                        <p className="text-xs text-gray-500">Reduce position sizes for correlated assets to maintain diversification</p>
                       </div>
                       <Switch
                         id="correlation-adjustment-enabled"
@@ -1292,7 +1292,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="1"
                             {...positionManagementForm.register('correlation_threshold', { valueAsNumber: true })}
                           />
-                          <p className="text-[10px] text-gray-500">Trigger adjustment when correlation exceeds this (0.7 = 70% correlation)</p>
+                          <p className="text-xs text-gray-500">Trigger adjustment when correlation exceeds this (0.7 = 70% correlation)</p>
                         </div>
 
                         <div className="space-y-2">
@@ -1305,7 +1305,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="1"
                             {...positionManagementForm.register('correlation_reduction_factor', { valueAsNumber: true })}
                           />
-                          <p className="text-[10px] text-gray-500">Size reduction multiplier (0.5 = reduce by 50% of correlation)</p>
+                          <p className="text-xs text-gray-500">Size reduction multiplier (0.5 = reduce by 50% of correlation)</p>
                         </div>
                       </div>
                     )}
@@ -1316,7 +1316,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
                         <Label htmlFor="regime-based-sizing-enabled" className="text-[11px]">Enable Regime-Based Sizing</Label>
-                        <p className="text-[10px] text-gray-500">Adjust position sizes based on market volatility and regime (advanced)</p>
+                        <p className="text-xs text-gray-500">Adjust position sizes based on market volatility and regime (advanced)</p>
                       </div>
                       <Switch
                         id="regime-based-sizing-enabled"
@@ -1374,7 +1374,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             />
                           </div>
                         </div>
-                        <p className="text-[10px] text-gray-500">Multipliers adjust base position size (1.0 = normal, 0.5 = half size, 1.5 = 50% larger)</p>
+                        <p className="text-xs text-gray-500">Multipliers adjust base position size (1.0 = normal, 0.5 = half size, 1.5 = 50% larger)</p>
                       </div>
                     )}
                   </div>
@@ -1384,7 +1384,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
                         <Label htmlFor="cancel-stale-orders" className="text-[11px]">Cancel Stale Orders</Label>
-                        <p className="text-[10px] text-gray-500">Automatically cancel pending orders that haven't filled</p>
+                        <p className="text-xs text-gray-500">Automatically cancel pending orders that haven't filled</p>
                       </div>
                       <Switch
                         id="cancel-stale-orders"
@@ -1405,7 +1405,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="168"
                             {...positionManagementForm.register('stale_order_hours', { valueAsNumber: true })}
                           />
-                          <p className="text-[10px] text-gray-500">Cancel orders older than this many hours (24 = 1 day, 168 = 1 week)</p>
+                          <p className="text-xs text-gray-500">Cancel orders older than this many hours (24 = 1 day, 168 = 1 week)</p>
                         </div>
                       </div>
                     )}
@@ -1416,7 +1416,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
                     <div>
                       <div className="text-yellow-400 font-semibold text-[11px] mb-1">Advanced Features</div>
-                      <div className="text-[10px] text-gray-400">
+                      <div className="text-xs text-gray-400">
                         These settings directly impact trading behavior. Test thoroughly in DEMO mode before enabling in LIVE mode. 
                         Regime-based sizing is an advanced feature - only enable after understanding your strategy's regime sensitivity.
                       </div>
@@ -1448,7 +1448,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                     <div className="space-y-0.5">
                       <Label htmlFor="autonomous-enabled" className="text-[11px]">Enable Autonomous System</Label>
-                      <p className="text-[10px] text-gray-500">Allow the system to autonomously propose and manage strategies</p>
+                      <p className="text-xs text-gray-500">Allow the system to autonomously propose and manage strategies</p>
                     </div>
                     <Switch
                       id="autonomous-enabled"
@@ -1470,7 +1470,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="500"
                           {...autonomousForm.register('proposal_count', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Number of strategy proposals per cycle (10-500)</p>
+                        <p className="text-xs text-gray-500">Number of strategy proposals per cycle (10-500)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1482,7 +1482,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="20"
                           {...autonomousForm.register('watchlist_size', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Number of symbols to watch (1-20)</p>
+                        <p className="text-xs text-gray-500">Number of symbols to watch (1-20)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1494,7 +1494,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('dynamic_symbol_additions', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Extra symbols added dynamically per strategy during signal generation (0-50)</p>
+                        <p className="text-xs text-gray-500">Extra symbols added dynamically per strategy during signal generation (0-50)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1507,7 +1507,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           value={Math.round(autonomousForm.watch('signal_generation_interval') / 60)}
                           onChange={(e) => autonomousForm.setValue('signal_generation_interval', Number(e.target.value) * 60)}
                         />
-                        <p className="text-[10px] text-gray-500">Time between signal generation runs (5-60 min)</p>
+                        <p className="text-xs text-gray-500">Time between signal generation runs (5-60 min)</p>
                       </div>
                     </div>
                   </div>
@@ -1525,7 +1525,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="500"
                           {...autonomousForm.register('max_active_strategies', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Maximum strategies to run simultaneously (5-500)</p>
+                        <p className="text-xs text-gray-500">Maximum strategies to run simultaneously (5-500)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1537,7 +1537,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="25"
                           {...autonomousForm.register('min_active_strategies', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Minimum strategies to maintain (3-25)</p>
+                        <p className="text-xs text-gray-500">Minimum strategies to maintain (3-25)</p>
                       </div>
                     </div>
 
@@ -1551,7 +1551,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="200"
                           {...autonomousForm.register('backtested_ttl_cycles', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Retire BACKTESTED strategies after N signal cycles without a trade (6-200, default 48 ≈ 24h)</p>
+                        <p className="text-xs text-gray-500">Retire BACKTESTED strategies after N signal cycles without a trade (6-200, default 48 ≈ 24h)</p>
                       </div>
                     </div>
                   </div>
@@ -1570,7 +1570,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="3.0"
                           {...autonomousForm.register('min_sharpe', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Minimum Sharpe for stocks, ETFs, forex, indices, commodities (0-3.0)</p>
+                        <p className="text-xs text-gray-500">Minimum Sharpe for stocks, ETFs, forex, indices, commodities (0-3.0)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1583,7 +1583,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="3.0"
                           {...autonomousForm.register('min_sharpe_crypto', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Minimum Sharpe for crypto strategies (0-3.0)</p>
+                        <p className="text-xs text-gray-500">Minimum Sharpe for crypto strategies (0-3.0)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1596,7 +1596,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('max_drawdown', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Maximum acceptable drawdown (5-50%)</p>
+                        <p className="text-xs text-gray-500">Maximum acceptable drawdown (5-50%)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1609,7 +1609,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="80"
                           {...autonomousForm.register('min_win_rate', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Minimum win rate for stocks/ETFs (30-80%)</p>
+                        <p className="text-xs text-gray-500">Minimum win rate for stocks/ETFs (30-80%)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1622,7 +1622,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="70"
                           {...autonomousForm.register('min_win_rate_crypto', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Minimum win rate for crypto strategies (20-70%)</p>
+                        <p className="text-xs text-gray-500">Minimum win rate for crypto strategies (20-70%)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1634,7 +1634,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('min_trades_dsl', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Min trades for technical strategies</p>
+                        <p className="text-xs text-gray-500">Min trades for technical strategies</p>
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="min_trades_alpha_edge" className="text-[11px]">Min Trades (Alpha Edge)</Label>
@@ -1645,7 +1645,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('min_trades_alpha_edge', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Min trades for fundamental strategies</p>
+                        <p className="text-xs text-gray-500">Min trades for fundamental strategies</p>
                       </div>
                     </div>
                   </div>
@@ -1664,7 +1664,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="2.0"
                           {...autonomousForm.register('retirement_max_sharpe', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Retire if Sharpe falls below this (0-2.0)</p>
+                        <p className="text-xs text-gray-500">Retire if Sharpe falls below this (0-2.0)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1677,7 +1677,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('retirement_max_drawdown', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Retire if drawdown exceeds this (5-50%)</p>
+                        <p className="text-xs text-gray-500">Retire if drawdown exceeds this (5-50%)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1690,7 +1690,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="60"
                           {...autonomousForm.register('retirement_min_win_rate', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Retire if win rate falls below this (20-60%)</p>
+                        <p className="text-xs text-gray-500">Retire if win rate falls below this (20-60%)</p>
                       </div>
                     </div>
                   </div>
@@ -1722,7 +1722,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
                         <Label htmlFor="fundamental-filters-enabled" className="text-[11px]">Enable Fundamental Filtering</Label>
-                        <p className="text-[10px] text-gray-500">Filter stocks based on fundamental criteria before trading</p>
+                        <p className="text-xs text-gray-500">Filter stocks based on fundamental criteria before trading</p>
                       </div>
                       <Switch
                         id="fundamental-filters-enabled"
@@ -1742,7 +1742,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="5"
                             {...alphaEdgeForm.register('fundamental_min_checks_passed', { valueAsNumber: true })}
                           />
-                          <p className="text-[10px] text-gray-500">Number of fundamental checks that must pass (out of 5)</p>
+                          <p className="text-xs text-gray-500">Number of fundamental checks that must pass (out of 5)</p>
                         </div>
 
                         <div className="space-y-3">
@@ -1751,7 +1751,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
                                 <Label htmlFor="check-profitable" className="text-[11px]">Profitable (EPS &gt; 0)</Label>
-                                <p className="text-[10px] text-gray-500">Company must be profitable</p>
+                                <p className="text-xs text-gray-500">Company must be profitable</p>
                               </div>
                               <Checkbox
                                 id="check-profitable"
@@ -1763,7 +1763,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
                                 <Label htmlFor="check-growing" className="text-[11px]">Growing Revenue</Label>
-                                <p className="text-[10px] text-gray-500">Revenue growth &gt; 0%</p>
+                                <p className="text-xs text-gray-500">Revenue growth &gt; 0%</p>
                               </div>
                               <Checkbox
                                 id="check-growing"
@@ -1775,7 +1775,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
                                 <Label htmlFor="check-valuation" className="text-[11px]">Reasonable Valuation</Label>
-                                <p className="text-[10px] text-gray-500">P/E ratio within acceptable range</p>
+                                <p className="text-xs text-gray-500">P/E ratio within acceptable range</p>
                               </div>
                               <Checkbox
                                 id="check-valuation"
@@ -1787,7 +1787,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
                                 <Label htmlFor="check-dilution" className="text-[11px]">No Excessive Dilution</Label>
-                                <p className="text-[10px] text-gray-500">Share count change &lt; 10%</p>
+                                <p className="text-xs text-gray-500">Share count change &lt; 10%</p>
                               </div>
                               <Checkbox
                                 id="check-dilution"
@@ -1799,7 +1799,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
                                 <Label htmlFor="check-insider" className="text-[11px]">Insider Buying</Label>
-                                <p className="text-[10px] text-gray-500">Net insider buying &gt; 0</p>
+                                <p className="text-xs text-gray-500">Net insider buying &gt; 0</p>
                               </div>
                               <Checkbox
                                 id="check-insider"
@@ -1818,7 +1818,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
                         <Label htmlFor="ml-filter-enabled" className="text-[11px]">Enable ML Signal Filtering</Label>
-                        <p className="text-[10px] text-gray-500">Use machine learning to filter trading signals</p>
+                        <p className="text-xs text-gray-500">Use machine learning to filter trading signals</p>
                       </div>
                       <Switch
                         id="ml-filter-enabled"
@@ -1839,7 +1839,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="95"
                             {...alphaEdgeForm.register('ml_min_confidence', { valueAsNumber: true })}
                           />
-                          <p className="text-[10px] text-gray-500">Only trade signals with ML confidence above this threshold</p>
+                          <p className="text-xs text-gray-500">Only trade signals with ML confidence above this threshold</p>
                         </div>
 
                         <div className="space-y-2">
@@ -1852,7 +1852,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="90"
                             {...alphaEdgeForm.register('ml_retrain_frequency_days', { valueAsNumber: true })}
                           />
-                          <p className="text-[10px] text-gray-500">How often to retrain the ML model with new data</p>
+                          <p className="text-xs text-gray-500">How often to retrain the ML model with new data</p>
                         </div>
                       </div>
                     )}
@@ -1871,7 +1871,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="20"
                           {...alphaEdgeForm.register('max_active_strategies', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Maximum number of active strategies (5-20)</p>
+                        <p className="text-xs text-gray-500">Maximum number of active strategies (5-20)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1883,7 +1883,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="90"
                           {...alphaEdgeForm.register('min_conviction_score', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Minimum conviction score to generate signals (50-90)</p>
+                        <p className="text-xs text-gray-500">Minimum conviction score to generate signals (50-90)</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1895,7 +1895,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="30"
                           {...alphaEdgeForm.register('min_holding_period_days', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Minimum days to hold a position</p>
+                        <p className="text-xs text-gray-500">Minimum days to hold a position</p>
                       </div>
 
                       <div className="space-y-2">
@@ -1907,7 +1907,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="10"
                           {...alphaEdgeForm.register('max_trades_per_strategy_per_month', { valueAsNumber: true })}
                         />
-                        <p className="text-[10px] text-gray-500">Maximum trades per strategy per month</p>
+                        <p className="text-xs text-gray-500">Maximum trades per strategy per month</p>
                       </div>
                     </div>
                   </div>
@@ -1919,7 +1919,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                         <div className="space-y-0.5">
                           <Label htmlFor="earnings-momentum-enabled" className="text-[11px]">Earnings Momentum</Label>
-                          <p className="text-[10px] text-gray-500">Trade small-cap stocks with positive earnings surprises</p>
+                          <p className="text-xs text-gray-500">Trade small-cap stocks with positive earnings surprises</p>
                         </div>
                         <Switch
                           id="earnings-momentum-enabled"
@@ -1931,7 +1931,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                         <div className="space-y-0.5">
                           <Label htmlFor="sector-rotation-enabled" className="text-[11px]">Sector Rotation</Label>
-                          <p className="text-[10px] text-gray-500">Rotate into sectors that outperform in current market regime</p>
+                          <p className="text-xs text-gray-500">Rotate into sectors that outperform in current market regime</p>
                         </div>
                         <Switch
                           id="sector-rotation-enabled"
@@ -1943,7 +1943,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                         <div className="space-y-0.5">
                           <Label htmlFor="quality-mean-reversion-enabled" className="text-[11px]">Quality Mean Reversion</Label>
-                          <p className="text-[10px] text-gray-500">Buy high-quality stocks when temporarily oversold</p>
+                          <p className="text-xs text-gray-500">Buy high-quality stocks when temporarily oversold</p>
                         </div>
                         <Switch
                           id="quality-mean-reversion-enabled"
@@ -1963,7 +1963,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         <div className="p-4 bg-dark-bg border border-dark-border rounded-lg">
                           <div className="flex items-center justify-between mb-2">
                             <Label className="text-[11px]">Financial Modeling Prep</Label>
-                            <span className="text-[10px] text-gray-500">
+                            <span className="text-xs text-gray-500">
                               {apiUsage.fmp_usage.calls_today} / {apiUsage.fmp_usage.limit}
                             </span>
                           </div>
@@ -1978,7 +1978,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               style={{ width: `${Math.min(apiUsage.fmp_usage.percentage, 100)}%` }}
                             />
                           </div>
-                          <p className="text-[10px] text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 mt-1">
                             {apiUsage.fmp_usage.remaining} calls remaining ({apiUsage.fmp_usage.percentage.toFixed(1)}% used)
                           </p>
                         </div>
@@ -1987,7 +1987,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         <div className="p-4 bg-dark-bg border border-dark-border rounded-lg">
                           <div className="flex items-center justify-between mb-2">
                             <Label className="text-[11px]">Alpha Vantage</Label>
-                            <span className="text-[10px] text-gray-500">
+                            <span className="text-xs text-gray-500">
                               {apiUsage.alpha_vantage_usage.calls_today} / {apiUsage.alpha_vantage_usage.limit}
                             </span>
                           </div>
@@ -2002,7 +2002,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               style={{ width: `${Math.min(apiUsage.alpha_vantage_usage.percentage, 100)}%` }}
                             />
                           </div>
-                          <p className="text-[10px] text-gray-500 mt-1">
+                          <p className="text-xs text-gray-500 mt-1">
                             {apiUsage.alpha_vantage_usage.remaining} calls remaining ({apiUsage.alpha_vantage_usage.percentage.toFixed(1)}% used)
                           </p>
                         </div>
@@ -2030,7 +2030,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
                     <div>
                       <div className="text-blue-400 font-semibold text-[11px] mb-1">Alpha Edge Features</div>
-                      <div className="text-[10px] text-gray-400">
+                      <div className="text-xs text-gray-400">
                         These settings control advanced alpha generation features including fundamental analysis, 
                         machine learning signal filtering, and specialized strategy templates. Test thoroughly in 
                         DEMO mode before enabling in LIVE mode.
@@ -2064,7 +2064,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
                     <Label className="text-[11px] text-red-400">Daily P&L Loss</Label>
-                    <p className="text-[10px] text-gray-500">Alert when daily P&L drops below threshold</p>
+                    <p className="text-xs text-gray-500">Alert when daily P&L drops below threshold</p>
                     {alertConfig.pnl_loss_enabled && (
                       <div className="flex items-center gap-2 mt-2">
                         <span className="text-[11px] text-gray-400">-$</span>
@@ -2088,7 +2088,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
                     <Label className="text-[11px] text-green-400">Daily P&L Gain</Label>
-                    <p className="text-[10px] text-gray-500">Alert when daily P&L exceeds threshold</p>
+                    <p className="text-xs text-gray-500">Alert when daily P&L exceeds threshold</p>
                     {alertConfig.pnl_gain_enabled && (
                       <div className="flex items-center gap-2 mt-2">
                         <span className="text-[11px] text-gray-400">+$</span>
@@ -2112,7 +2112,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
                     <Label className="text-[11px] text-amber-400">Drawdown</Label>
-                    <p className="text-[10px] text-gray-500">Alert when drawdown exceeds threshold</p>
+                    <p className="text-xs text-gray-500">Alert when drawdown exceeds threshold</p>
                     {alertConfig.drawdown_enabled && (
                       <div className="flex items-center gap-2 mt-2">
                         <Input
@@ -2137,7 +2137,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
                     <Label className="text-[11px] text-orange-400">Position Loss</Label>
-                    <p className="text-[10px] text-gray-500">Alert when any position loses more than threshold</p>
+                    <p className="text-xs text-gray-500">Alert when any position loses more than threshold</p>
                     {alertConfig.position_loss_enabled && (
                       <div className="flex items-center gap-2 mt-2">
                         <Input
@@ -2162,7 +2162,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
                     <Label className="text-[11px] text-purple-400">Margin Utilization</Label>
-                    <p className="text-[10px] text-gray-500">Alert when margin utilization exceeds threshold</p>
+                    <p className="text-xs text-gray-500">Alert when margin utilization exceeds threshold</p>
                     {alertConfig.margin_enabled && (
                       <div className="flex items-center gap-2 mt-2">
                         <Input
@@ -2190,7 +2190,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="space-y-0.5">
                     <Label className="text-[11px]">Autonomous Cycle Complete</Label>
-                    <p className="text-[10px] text-gray-500">Alert when an autonomous cycle finishes</p>
+                    <p className="text-xs text-gray-500">Alert when an autonomous cycle finishes</p>
                   </div>
                   <Switch
                     checked={alertConfig.cycle_complete_enabled}
@@ -2200,7 +2200,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="space-y-0.5">
                     <Label className="text-[11px]">Strategy Retired</Label>
-                    <p className="text-[10px] text-gray-500">Alert when a strategy is retired</p>
+                    <p className="text-xs text-gray-500">Alert when a strategy is retired</p>
                   </div>
                   <Switch
                     checked={alertConfig.strategy_retired_enabled}
@@ -2215,14 +2215,14 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="space-y-0.5">
                     <Label className="text-[11px]">In-App Notifications</Label>
-                    <p className="text-[10px] text-gray-500">Toast + persistent alert in notification panel (always on)</p>
+                    <p className="text-xs text-gray-500">Toast + persistent alert in notification panel (always on)</p>
                   </div>
-                  <span className="text-[10px] text-green-400 bg-green-500/10 px-2 py-1 rounded">Always On</span>
+                  <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded">Always On</span>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="space-y-0.5">
                     <Label className="text-[11px]">Browser Push Notifications</Label>
-                    <p className="text-[10px] text-gray-500">Get notified even when the tab is not focused (critical alerts only)</p>
+                    <p className="text-xs text-gray-500">Get notified even when the tab is not focused (critical alerts only)</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {!alertConfig.browser_push_enabled && (
@@ -2312,7 +2312,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 }>User Management</SectionLabel>
 
                   {/* Role legend */}
-                  <div className="flex gap-4 mb-4 text-[10px] text-gray-400">
+                  <div className="flex gap-4 mb-4 text-xs text-gray-400">
                     <span><span className="inline-block w-2 h-2 rounded-full bg-red-500 mr-1" />Admin — full access, user management</span>
                     <span><span className="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1" />Trader — trade, manage strategies</span>
                     <span><span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />Viewer — read-only dashboard access</span>
@@ -2324,7 +2324,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       <h4 className="text-[11px] font-medium text-gray-200">Create New User</h4>
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <Label htmlFor="create-username" className="text-[10px]">Username</Label>
+                          <Label htmlFor="create-username" className="text-xs">Username</Label>
                           <Input
                             id="create-username"
                             value={newUsername}
@@ -2333,7 +2333,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           />
                         </div>
                         <div>
-                          <Label htmlFor="create-password" className="text-[10px]">Password</Label>
+                          <Label htmlFor="create-password" className="text-xs">Password</Label>
                           <Input
                             id="create-password"
                             type="password"
@@ -2343,7 +2343,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           />
                         </div>
                         <div>
-                          <Label htmlFor="create-role" className="text-[10px]">Role</Label>
+                          <Label htmlFor="create-role" className="text-xs">Role</Label>
                           <select
                             id="create-role"
                             value={newRole}
@@ -2378,12 +2378,12 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       <table className="w-full text-[12px]">
                         <thead>
                           <tr className="border-b border-gray-700 text-gray-400">
-                            <th className="text-left py-2 px-3 text-[10px]">Username</th>
-                            <th className="text-left py-2 px-3 text-[10px]">Role</th>
-                            <th className="text-left py-2 px-3 text-[10px]">Status</th>
-                            <th className="text-left py-2 px-3 text-[10px]">Created</th>
-                            <th className="text-left py-2 px-3 text-[10px]">Last Login</th>
-                            <th className="text-right py-2 px-3 text-[10px]">Actions</th>
+                            <th className="text-left py-2 px-3 text-xs">Username</th>
+                            <th className="text-left py-2 px-3 text-xs">Role</th>
+                            <th className="text-left py-2 px-3 text-xs">Status</th>
+                            <th className="text-left py-2 px-3 text-xs">Created</th>
+                            <th className="text-left py-2 px-3 text-xs">Last Login</th>
+                            <th className="text-right py-2 px-3 text-xs">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2392,13 +2392,13 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               <td className="py-2 px-3 font-medium text-gray-200">
                                 {user.username}
                                 {user.username === authService.getUsername() && (
-                                  <span className="ml-2 text-[10px] text-blue-400">(you)</span>
+                                  <span className="ml-2 text-xs text-blue-400">(you)</span>
                                 )}
                               </td>
                               <td className="py-2 px-3">
                                 {user.username === authService.getUsername() ? (
                                   <span className={cn(
-                                    "px-2 py-0.5 rounded text-[10px] font-medium",
+                                    "px-2 py-0.5 rounded text-xs font-medium",
                                     user.role === 'admin' ? 'bg-red-900/30 text-red-400' :
                                     user.role === 'trader' ? 'bg-yellow-900/30 text-yellow-400' :
                                     'bg-blue-900/30 text-blue-400'
@@ -2410,7 +2410,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                     value={user.role}
                                     onChange={(e) => handleRoleChange(user.username, e.target.value)}
                                     className={cn(
-                                      "px-2 py-0.5 rounded text-[10px] font-medium border-0 cursor-pointer",
+                                      "px-2 py-0.5 rounded text-xs font-medium border-0 cursor-pointer",
                                       user.role === 'admin' ? 'bg-red-900/30 text-red-400' :
                                       user.role === 'trader' ? 'bg-yellow-900/30 text-yellow-400' :
                                       'bg-blue-900/30 text-blue-400'
@@ -2427,7 +2427,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                   onClick={() => user.username !== authService.getUsername() && handleToggleActive(user.username, user.is_active)}
                                   disabled={user.username === authService.getUsername()}
                                   className={cn(
-                                    "px-2 py-0.5 rounded text-[10px] font-medium",
+                                    "px-2 py-0.5 rounded text-xs font-medium",
                                     user.is_active ? 'bg-green-900/30 text-green-400' : 'bg-gray-700 text-gray-400',
                                     user.username !== authService.getUsername() && 'cursor-pointer hover:opacity-80'
                                   )}
@@ -2435,10 +2435,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                   {user.is_active ? 'Active' : 'Disabled'}
                                 </button>
                               </td>
-                              <td className="py-2 px-3 text-gray-400 text-[10px]">
+                              <td className="py-2 px-3 text-gray-400 text-xs">
                                 {user.created_at ? formatDate(user.created_at) : '—'}
                               </td>
-                              <td className="py-2 px-3 text-gray-400 text-[10px]">
+                              <td className="py-2 px-3 text-gray-400 text-xs">
                                 {user.last_login ? formatDateTime(user.last_login) : 'Never'}
                               </td>
                               <td className="py-2 px-3 text-right">
@@ -2451,31 +2451,31 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                           value={resetPasswordValue}
                                           onChange={(e) => setResetPasswordValue(e.target.value)}
                                           placeholder="new password"
-                                          className="h-7 w-32 text-[10px]"
+                                          className="h-7 w-32 text-xs"
                                         />
-                                        <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => handleResetPassword(user.username)}>
+                                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleResetPassword(user.username)}>
                                           Set
                                         </Button>
-                                        <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => { setResetPasswordUser(null); setResetPasswordValue(''); }}>
+                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setResetPasswordUser(null); setResetPasswordValue(''); }}>
                                           ✕
                                         </Button>
                                       </div>
                                     ) : deleteConfirmUser === user.username ? (
                                       <div className="flex items-center gap-1">
-                                        <span className="text-[10px] text-red-400">Delete?</span>
-                                        <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => handleDeleteUser(user.username)}>
+                                        <span className="text-xs text-red-400">Delete?</span>
+                                        <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => handleDeleteUser(user.username)}>
                                           Yes
                                         </Button>
-                                        <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setDeleteConfirmUser(null)}>
+                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setDeleteConfirmUser(null)}>
                                           No
                                         </Button>
                                       </div>
                                     ) : (
                                       <>
-                                        <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setResetPasswordUser(user.username)} title="Reset password">
+                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setResetPasswordUser(user.username)} title="Reset password">
                                           <Key className="h-3 w-3" />
                                         </Button>
-                                        <Button size="sm" variant="ghost" className="h-7 text-[10px] text-red-400 hover:text-red-300" onClick={() => setDeleteConfirmUser(user.username)} title="Delete user">
+                                        <Button size="sm" variant="ghost" className="h-7 text-xs text-red-400 hover:text-red-300" onClick={() => setDeleteConfirmUser(user.username)} title="Delete user">
                                           <Trash2 className="h-3 w-3" />
                                         </Button>
                                       </>
@@ -2496,7 +2496,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
               <div className="py-8 text-center text-gray-500">
                 <Shield className="h-8 w-8 mx-auto mb-2 opacity-50" />
                 <p className="text-[11px]">User management is only available to administrators.</p>
-                <p className="text-[10px] mt-1">Your role: <span className="text-gray-300">{authService.getRole()}</span></p>
+                <p className="text-xs mt-1">Your role: <span className="text-gray-300">{authService.getRole()}</span></p>
               </div>
             )}
           </TabsContent>
@@ -2504,9 +2504,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
           {/* Keyboard Shortcuts Tab */}
           <TabsContent value="shortcuts" className="space-y-4">
             <SectionLabel>Keyboard Shortcuts</SectionLabel>
-            <p className="text-[10px] text-gray-500 mb-2">
+            <p className="text-xs text-gray-500 mb-2">
               Use keyboard shortcuts to navigate faster. Shortcuts are disabled while typing in input fields.
-              Press <kbd className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-800 border border-gray-700 mx-1">?</kbd> anywhere to toggle this reference.
+              Press <kbd className="px-1.5 py-0.5 rounded text-xs font-mono bg-gray-800 border border-gray-700 mx-1">?</kbd> anywhere to toggle this reference.
             </p>
                 <div className="space-y-6">
                   {(['navigation', 'actions', 'general'] as const).map((category) => {
@@ -2525,7 +2525,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               className="flex items-center justify-between py-2 px-3 rounded-lg bg-dark-bg/50"
                             >
                               <span className="text-[12px] text-gray-300">{shortcut.description}</span>
-                              <kbd className="px-2.5 py-1 rounded text-[10px] font-mono bg-gray-800 border border-gray-700 text-gray-400">
+                              <kbd className="px-2.5 py-1 rounded text-xs font-mono bg-gray-800 border border-gray-700 text-gray-400">
                                 {shortcut.label}
                               </kbd>
                             </div>

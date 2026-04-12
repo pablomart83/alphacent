@@ -42,7 +42,7 @@ export const FilterBar: FC<FilterBarProps> = ({
   className,
 }) => (
   <div className={cn('flex items-center gap-2 py-1', className)}>
-    {info && <span className="text-[10px] text-gray-500 shrink-0">{info}</span>}
+    {info && <span className="text-xs text-gray-500 shrink-0">{info}</span>}
     {onSearchChange !== undefined && (
       <div className="relative ml-auto">
         <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />

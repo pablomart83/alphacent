@@ -68,7 +68,7 @@ export const MultiTimeframeView: FC<MultiTimeframeViewProps> = ({
               !onPeriodClick && 'cursor-default',
             )}
           >
-            <span className="text-[10px] font-medium text-text-secondary mb-0.5">
+            <span className="text-xs font-medium text-text-secondary mb-0.5">
               {period}
             </span>
             {isNull ? (
@@ -87,7 +87,7 @@ export const MultiTimeframeView: FC<MultiTimeframeViewProps> = ({
                 </span>
                 <span
                   className={cn(
-                    'text-[10px] font-mono leading-tight mt-0.5',
+                    'text-xs font-mono leading-tight mt-0.5',
                     alpha !== null && alpha > 0 && 'text-positive/70',
                     alpha !== null && alpha < 0 && 'text-negative/70',
                     (alpha === null || alpha === 0) && 'text-text-tertiary',

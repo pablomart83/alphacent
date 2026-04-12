@@ -1566,7 +1566,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         panelId="orders-side"
         onRefresh={fetchExecutionQuality}
       >
-        <div className="flex flex-col gap-2 p-2 overflow-auto">
+        <div className="flex flex-col gap-1 p-1.5 overflow-auto">
           {/* CompactMetricRow: total orders, fill rate, avg slippage, pending */}
           <CompactMetricRow metrics={sideMetrics} />
 
@@ -1594,6 +1594,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               </div>
             </div>
             {/* Mini fill rate trend chart */}
+            <div className="max-h-[120px] overflow-hidden">
             {fillRateTrend.some(d => d.fillRate > 0) ? (
               <TvChart
                 height={80}
@@ -1610,6 +1611,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
             ) : (
               <div className="text-center py-4 text-xs text-gray-500">No trend data</div>
             )}
+            </div>
           </div>
 
           {/* Recent Fills List */}

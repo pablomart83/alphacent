@@ -358,16 +358,16 @@ export const TemplateManager: FC<TemplateManagerProps> = ({ category = 'all' }) 
                       <td className="px-3 py-2">
                         <button onClick={() => setDetailTemplate(t)} className="text-left hover:text-accent-green transition-colors">
                           <div className="font-mono text-xs text-gray-200 truncate max-w-[220px]">{t.name}</div>
-                          <div className="text-[10px] text-gray-500 truncate max-w-[220px]">{t.description}</div>
+                          <div className="text-xs text-gray-500 truncate max-w-[220px]">{t.description}</div>
                         </button>
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <Badge className="text-[10px] bg-blue-500/15 text-blue-300 border-blue-500/20">
+                        <Badge className="text-xs bg-blue-500/15 text-blue-300 border-blue-500/20">
                           {(t.strategy_type || 'n/a').replace('_', ' ')}
                         </Badge>
                       </td>
                       <td className="px-3 py-2 text-center">
-                        <Badge className={cn("text-[10px]",
+                        <Badge className={cn("text-xs",
                           t.direction === 'short' ? "bg-red-500/15 text-red-300 border-red-500/20" : "bg-green-500/15 text-green-300 border-green-500/20"
                         )}>
                           {(t.direction || 'long').toUpperCase()}
@@ -419,11 +419,11 @@ export const TemplateManager: FC<TemplateManagerProps> = ({ category = 'all' }) 
                       <td className="px-3 py-2 text-center">
                         <div className="flex flex-wrap gap-0.5 justify-center">
                           {t.market_regimes.slice(0, 3).map(r => (
-                            <span key={r} className="text-[10px] px-1 py-0.5 rounded bg-dark-bg text-gray-500 border border-dark-border/50">
+                            <span key={r} className="text-xs px-1 py-0.5 rounded bg-dark-bg text-gray-500 border border-dark-border/50">
                               {r.replace('_', ' ').replace('ranging ', '').replace('trending ', '').slice(0, 8)}
                             </span>
                           ))}
-                          {t.market_regimes.length > 3 && <span className="text-[10px] text-gray-600">+{t.market_regimes.length - 3}</span>}
+                          {t.market_regimes.length > 3 && <span className="text-xs text-gray-600">+{t.market_regimes.length - 3}</span>}
                         </div>
                       </td>
                     </tr>
@@ -458,42 +458,42 @@ export const TemplateManager: FC<TemplateManagerProps> = ({ category = 'all' }) 
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Direction</div>
+                  <div className="text-xs text-gray-500 uppercase">Direction</div>
                   <div className={cn("font-mono text-sm font-bold", detailTemplate.direction === 'short' ? "text-red-400" : "text-green-400")}>
                     {(detailTemplate.direction || 'long').toUpperCase()}
                   </div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Interval</div>
+                  <div className="text-xs text-gray-500 uppercase">Interval</div>
                   <div className="font-mono text-sm font-bold text-gray-200">{detailTemplate.interval || '1d'}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">R:R Ratio</div>
+                  <div className="text-xs text-gray-500 uppercase">R:R Ratio</div>
                   <div className="font-mono text-sm font-bold text-gray-200">{detailTemplate.risk_reward_ratio?.toFixed(1) || '—'}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Type</div>
+                  <div className="text-xs text-gray-500 uppercase">Type</div>
                   <div className="font-mono text-sm font-bold text-blue-300">{(detailTemplate.strategy_type || 'n/a').replace('_', ' ')}</div>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Active Now</div>
+                  <div className="text-xs text-gray-500 uppercase">Active Now</div>
                   <div className="font-mono text-lg font-bold text-accent-green">{detailTemplate.active_strategies}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Avg Sharpe</div>
+                  <div className="text-xs text-gray-500 uppercase">Avg Sharpe</div>
                   <div className="font-mono text-lg font-bold text-gray-200">{detailTemplate.avg_sharpe?.toFixed(2) || '—'}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Win Rate</div>
+                  <div className="text-xs text-gray-500 uppercase">Win Rate</div>
                   <div className="font-mono text-lg font-bold text-gray-200">
                     {detailTemplate.avg_win_rate !== null ? formatPercentage(detailTemplate.avg_win_rate * 100) : '—'}
                   </div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Total P&L</div>
+                  <div className="text-xs text-gray-500 uppercase">Total P&L</div>
                   <div className={cn("font-mono text-lg font-bold",
                     (detailTemplate.total_pnl ?? 0) >= 0 ? "text-accent-green" : "text-accent-red"
                   )}>
@@ -523,7 +523,7 @@ export const TemplateManager: FC<TemplateManagerProps> = ({ category = 'all' }) 
                   <div className="text-xs text-gray-500 uppercase mb-1">Indicators</div>
                   <div className="flex flex-wrap gap-1">
                     {detailTemplate.indicators.map((ind, i) => (
-                      <Badge key={i} className="text-[10px] bg-purple-500/15 text-purple-300 border-purple-500/20">{ind}</Badge>
+                      <Badge key={i} className="text-xs bg-purple-500/15 text-purple-300 border-purple-500/20">{ind}</Badge>
                     ))}
                   </div>
                 </div>
@@ -532,7 +532,7 @@ export const TemplateManager: FC<TemplateManagerProps> = ({ category = 'all' }) 
                     <div className="text-xs text-gray-500 uppercase mb-1">Market Regimes</div>
                     <div className="flex flex-wrap gap-1">
                       {detailTemplate.market_regimes.map(r => (
-                        <Badge key={r} className="text-[10px] bg-dark-bg text-gray-400 border-dark-border">{r.replace('_', ' ')}</Badge>
+                        <Badge key={r} className="text-xs bg-dark-bg text-gray-400 border-dark-border">{r.replace('_', ' ')}</Badge>
                       ))}
                     </div>
                   </div>
@@ -540,7 +540,7 @@ export const TemplateManager: FC<TemplateManagerProps> = ({ category = 'all' }) 
                     <div className="text-xs text-gray-500 uppercase mb-1">Asset Classes</div>
                     <div className="flex flex-wrap gap-1">
                       {(detailTemplate.asset_classes || []).map(a => (
-                        <Badge key={a} className="text-[10px] bg-dark-bg text-gray-400 border-dark-border">{a}</Badge>
+                        <Badge key={a} className="text-xs bg-dark-bg text-gray-400 border-dark-border">{a}</Badge>
                       ))}
                     </div>
                   </div>

@@ -328,7 +328,7 @@ export const CommandPalette: FC<CommandPaletteProps> = () => {
               className="flex-1 bg-transparent text-sm text-gray-100 placeholder:text-muted-foreground outline-none font-mono"
               autoFocus
             />
-            <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-dark-border bg-dark-bg px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
+            <kbd className="hidden sm:inline-flex items-center gap-1 rounded border border-dark-border bg-dark-bg px-1.5 py-0.5 text-xs text-muted-foreground font-mono">
               ESC
             </kbd>
           </div>
@@ -353,7 +353,7 @@ export const CommandPalette: FC<CommandPaletteProps> = () => {
 
             {sections.map((section) => (
               <div key={section.label}>
-                <div className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <div className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   {section.label === 'Recent' && <Clock className="inline h-3 w-3 mr-1 -mt-0.5" />}
                   {section.label}
                 </div>
@@ -392,7 +392,7 @@ export const CommandPalette: FC<CommandPaletteProps> = () => {
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between border-t border-dark-border px-4 py-2 text-[10px] text-muted-foreground">
+          <div className="flex items-center justify-between border-t border-dark-border px-4 py-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-3">
               <span>
                 <kbd className="rounded border border-dark-border bg-dark-bg px-1 py-0.5 font-mono">↑↓</kbd> navigate

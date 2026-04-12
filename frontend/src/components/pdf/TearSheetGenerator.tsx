@@ -328,7 +328,7 @@ export const TearSheetGenerator: FC<TearSheetGeneratorProps> = ({ className }) =
 
       {showPeriodPicker && !generating && (
         <div className="absolute top-full right-0 mt-1 z-50 bg-dark-surface border border-dark-border rounded-lg shadow-xl py-1 min-w-[160px]">
-          <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Select Period
           </div>
           {PERIOD_OPTIONS.map((opt) => (

@@ -72,7 +72,7 @@ export const BottomWidgetZone: FC = () => {
           >
             {/* Widget title bar */}
             <div className="flex items-center justify-between px-2 py-1 min-h-[24px] bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]">
-              <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide truncate">
+              <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide truncate">
                 {widget.title}
               </span>
               <button
@@ -85,7 +85,7 @@ export const BottomWidgetZone: FC = () => {
             </div>
             {/* Widget content with internal scroll */}
             <div className="flex-1 overflow-auto min-h-0 p-2">
-              <Suspense fallback={<div className="text-[10px] text-gray-600 text-center py-2">Loading...</div>}>
+              <Suspense fallback={<div className="text-xs text-gray-600 text-center py-2">Loading...</div>}>
                 <WidgetComponent />
               </Suspense>
             </div>

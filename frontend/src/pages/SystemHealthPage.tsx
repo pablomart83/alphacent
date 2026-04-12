@@ -125,7 +125,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
   const mainPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Services" panelId="syshealth-main" onRefresh={fetch}>
-        <div className="flex flex-col gap-2 p-2 h-full">
+        <div className="flex flex-col gap-1 p-1.5 h-full">
           {/* Alert Banner */}
           {(hasOpenCB || hasStaleMonitoring) && (
             <div className="rounded-lg border p-3" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
@@ -296,7 +296,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
   const sidePanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Alerts" panelId="syshealth-side" onRefresh={fetch}>
-        <div className="flex flex-col gap-2 p-2 h-full">
+        <div className="flex flex-col gap-1 p-1.5 h-full">
           {/* CompactMetricRow: uptime, error rate, response, cache hit */}
           <CompactMetricRow metrics={sideMetrics} />
 

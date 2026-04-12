@@ -238,12 +238,12 @@ export const SymbolManager: FC = () => {
                       </button>
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <Badge className={cn("text-[10px]", assetClassColor[s.asset_class] || "bg-gray-500/15 text-gray-300 border-gray-500/20")}>
+                      <Badge className={cn("text-xs", assetClassColor[s.asset_class] || "bg-gray-500/15 text-gray-300 border-gray-500/20")}>
                         {s.asset_class}
                       </Badge>
                     </td>
                     <td className="px-3 py-2 text-center">
-                      <span className="text-[10px] px-1 py-0.5 rounded bg-dark-bg text-gray-500 border border-dark-border/50">
+                      <span className="text-xs px-1 py-0.5 rounded bg-dark-bg text-gray-500 border border-dark-border/50">
                         {s.sector.slice(0, 12)}
                       </span>
                     </td>
@@ -307,7 +307,7 @@ export const SymbolManager: FC = () => {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-3">
                   <span className="font-mono text-lg">{detailSymbol.symbol}</span>
-                  <Badge className={cn("text-[10px]", assetClassColor[detailSymbol.asset_class] || "bg-gray-500/15 text-gray-300")}>
+                  <Badge className={cn("text-xs", assetClassColor[detailSymbol.asset_class] || "bg-gray-500/15 text-gray-300")}>
                     {detailSymbol.asset_class}
                   </Badge>
                 </DialogTitle>
@@ -316,19 +316,19 @@ export const SymbolManager: FC = () => {
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Open Positions</div>
+                  <div className="text-xs text-gray-500 uppercase">Open Positions</div>
                   <div className="font-mono text-lg font-bold text-accent-green">{detailSymbol.open_positions}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Active Strategies</div>
+                  <div className="text-xs text-gray-500 uppercase">Active Strategies</div>
                   <div className="font-mono text-lg font-bold text-blue-400">{detailSymbol.active_strategies}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Avg Sharpe</div>
+                  <div className="text-xs text-gray-500 uppercase">Avg Sharpe</div>
                   <div className="font-mono text-lg font-bold text-gray-200">{detailSymbol.avg_sharpe?.toFixed(2) || '—'}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Total P&L</div>
+                  <div className="text-xs text-gray-500 uppercase">Total P&L</div>
                   <div className={cn("font-mono text-lg font-bold",
                     (detailSymbol.total_pnl ?? 0) >= 0 ? "text-accent-green" : "text-accent-red"
                   )}>
@@ -339,15 +339,15 @@ export const SymbolManager: FC = () => {
 
               <div className="grid grid-cols-3 gap-3 mt-3">
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Used</div>
+                  <div className="text-xs text-gray-500 uppercase">Used</div>
                   <div className="font-mono text-sm font-bold text-gray-400">{detailSymbol.usage_count}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Activated</div>
+                  <div className="text-xs text-gray-500 uppercase">Activated</div>
                   <div className="font-mono text-sm font-bold text-blue-400">{detailSymbol.activated_count}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-[10px] text-gray-500 uppercase">Traded</div>
+                  <div className="text-xs text-gray-500 uppercase">Traded</div>
                   <div className="font-mono text-sm font-bold text-accent-green">{detailSymbol.traded_count}</div>
                 </div>
               </div>

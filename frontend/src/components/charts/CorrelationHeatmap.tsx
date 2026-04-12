@@ -77,7 +77,7 @@ export const CorrelationHeatmap: FC<CorrelationHeatmapProps> = ({ data, symbols 
                     style={{ backgroundColor: getCorrelationBg(val) }}
                     title={`${rowSym} × ${colSym}: ${val.toFixed(2)}`}
                   >
-                    <span className="text-[10px] text-white/80">{val.toFixed(1)}</span>
+                    <span className="text-xs text-white/80">{val.toFixed(1)}</span>
                   </td>
                 );
               })}

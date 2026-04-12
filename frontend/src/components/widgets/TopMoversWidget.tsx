@@ -48,7 +48,7 @@ export const TopMoversWidget: FC = () => {
   }, [tradingMode, fetchMovers]);
 
   return (
-    <div className="flex gap-3 text-[10px] font-mono">
+    <div className="flex gap-3 text-xs font-mono">
       <div className="flex-1 min-w-0">
         <div className="text-gray-500 mb-1">▲ Gainers</div>
         {gainers.length === 0 ? (

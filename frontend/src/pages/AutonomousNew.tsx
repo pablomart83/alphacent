@@ -1645,7 +1645,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   const sidePanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Cycle Intelligence" panelId="autonomous-side" onRefresh={fetchData}>
-        <div className="flex flex-col gap-2 p-2">
+        <div className="flex flex-col gap-1 p-1.5">
           {/* Compact Metric Row */}
           <CompactMetricRow metrics={sideMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
 

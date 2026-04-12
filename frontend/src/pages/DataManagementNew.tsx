@@ -348,7 +348,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
         panelId="data-side"
         onRefresh={fetchStatus}
       >
-        <div className="flex flex-col gap-2 p-2 h-full">
+        <div className="flex flex-col gap-1 p-1.5 h-full">
           {/* CompactMetricRow: healthy/degraded/stale counts + avg score */}
           <CompactMetricRow metrics={sideMetrics} />
 

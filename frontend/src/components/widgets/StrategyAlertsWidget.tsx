@@ -59,11 +59,11 @@ export const StrategyAlertsWidget: FC = () => {
   }, [tradingMode, fetchAlerts]);
 
   if (alerts.length === 0) {
-    return <div className="text-[10px] text-gray-600 font-mono">No recent alerts</div>;
+    return <div className="text-xs text-gray-600 font-mono">No recent alerts</div>;
   }
 
   return (
-    <div className="space-y-1 text-[10px] font-mono">
+    <div className="space-y-1 text-xs font-mono">
       {alerts.map((alert, idx) => (
         <div key={idx} className="flex items-center gap-1.5">
           <span className="shrink-0">{TYPE_ICONS[alert.type] || '⚪'}</span>

@@ -51,7 +51,7 @@ export const DataFreshnessIndicator: FC<DataFreshnessIndicatorProps> = ({ lastFe
   return (
     <span className="inline-flex items-center gap-1" title={`Last updated: ${lastFetchedAt.toLocaleTimeString()}`}>
       <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', dotColor[level])} />
-      <span className="text-[10px] font-mono text-gray-500">{age}</span>
+      <span className="text-xs font-mono text-gray-500">{age}</span>
     </span>
   );
 };

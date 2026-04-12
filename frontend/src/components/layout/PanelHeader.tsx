@@ -59,7 +59,7 @@ export const PanelHeader: FC<PanelHeaderProps> = ({
     <div className="flex flex-col h-full min-h-0">
       <div
         className={cn(
-          'flex items-center justify-between px-3 py-1.5 min-h-[32px] shrink-0',
+          'flex items-center justify-between px-2 py-1 min-h-[32px] shrink-0',
           'bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]',
           className
         )}

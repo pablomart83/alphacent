@@ -48,7 +48,7 @@ export const InlineTerminal: FC<InlineTerminalProps> = memo(({ logs }) => {
           key={`${index}-${log.timestamp}`}
           className="flex items-start gap-2 py-0.5"
         >
-          <span className="text-gray-600 flex-shrink-0 select-none text-[10px] w-16">
+          <span className="text-gray-600 flex-shrink-0 select-none text-xs w-16">
             {log.timestamp}
           </span>
           <span
@@ -69,7 +69,7 @@ export const InlineTerminal: FC<InlineTerminalProps> = memo(({ logs }) => {
           </span>
           <span
             className={cn(
-              'flex-shrink-0 font-semibold w-12 select-none text-[10px]',
+              'flex-shrink-0 font-semibold w-12 select-none text-xs',
               log.level === 'INFO' ? 'text-blue-400' :
               log.level === 'SUCCESS' ? 'text-accent-green' :
               log.level === 'WARNING' ? 'text-yellow-400' :

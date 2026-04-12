@@ -65,11 +65,11 @@ export const MarketRegimeWidget: FC = () => {
   usePolling({ fetchFn: fetchRegimes, intervalMs: 30000, enabled: !!tradingMode });
 
   if (regimes.length === 0) {
-    return <div className="text-[10px] text-gray-600 font-mono">Loading regime data...</div>;
+    return <div className="text-xs text-gray-600 font-mono">Loading regime data...</div>;
   }
 
   return (
-    <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
+    <div className="grid grid-cols-2 gap-1.5 text-xs font-mono">
       {regimes.map(r => (
         <div key={r.assetClass} className="flex flex-col px-1.5 py-1 rounded bg-gray-900/50 border border-gray-800">
           <span className="text-gray-500 truncate">{r.assetClass}</span>

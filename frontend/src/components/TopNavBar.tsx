@@ -105,7 +105,7 @@ const WorkspaceSwitcher: FC = () => {
       {open && (
         <div className="absolute right-0 top-full mt-1 w-56 bg-[#161b22] border border-gray-700 rounded-lg shadow-xl z-50 py-1 text-xs">
           {/* Default presets */}
-          <div className="px-2 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Defaults</div>
+          <div className="px-2 py-1 text-xs text-gray-500 uppercase tracking-wider">Defaults</div>
           {defaults.map(p => (
             <button
               key={p.name}
@@ -124,7 +124,7 @@ const WorkspaceSwitcher: FC = () => {
           {userPresets.length > 0 && (
             <>
               <div className="border-t border-gray-700 my-1" />
-              <div className="px-2 py-1 text-[10px] text-gray-500 uppercase tracking-wider">Saved</div>
+              <div className="px-2 py-1 text-xs text-gray-500 uppercase tracking-wider">Saved</div>
               {userPresets.map(p => (
                 <button
                   key={p.name}
@@ -263,7 +263,7 @@ export const TopNavBar: FC<TopNavBarProps> = ({
                 >
                   {item.label}
                   {item.badge && (
-                    <span className="ml-1 bg-amber-500 text-black text-[10px] font-bold rounded-full h-4 min-w-[16px] inline-flex items-center justify-center px-1">
+                    <span className="ml-1 bg-amber-500 text-black text-xs font-bold rounded-full h-4 min-w-[16px] inline-flex items-center justify-center px-1">
                       {item.badge}
                     </span>
                   )}

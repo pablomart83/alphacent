@@ -406,7 +406,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const centerPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
-        <div className="p-2" style={{ height: 'calc(100% - 0px)' }}>
+        <div className="p-2 h-full">
           {d ? (
             <EquityCurveChart
               equityData={d.equity_curve}

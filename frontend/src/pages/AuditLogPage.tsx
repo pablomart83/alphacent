@@ -321,7 +321,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
   const sidePanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Summary" panelId="audit-side" onRefresh={fetch}>
-        <div className="flex flex-col gap-2 p-2 h-full">
+        <div className="flex flex-col gap-1 p-1.5 h-full">
           {/* CompactMetricRow: events today, warnings, errors, rejections */}
           <CompactMetricRow metrics={sideMetrics} />
 

@@ -1950,7 +1950,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
         panelId="strategies-side"
         onRefresh={fetchStrategies}
       >
-        <div className="flex flex-col gap-2 p-2 h-full">
+        <div className="flex flex-col gap-1 p-1.5 h-full">
           {/* CompactMetricRow */}
           <CompactMetricRow metrics={sideMetrics} />
 

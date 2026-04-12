@@ -874,7 +874,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           {/* ═══════════════════════════════════════════════════════════════
               PERFORMANCE TAB
               ═══════════════════════════════════════════════════════════════ */}
-          <TabsContent value="performance" className="space-y-3">
+          <TabsContent value="performance" className="space-y-2">
             {/* Key Metrics — simple 4-col grid */}
             <div className="grid grid-cols-4 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
               {[
@@ -955,7 +955,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               <>
                 <SectionLabel>Strategy Lifecycle & Trade Quality</SectionLabel>
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3, delay: 0.045 }} className="space-y-3">
+                  transition={{ duration: 0.3, delay: 0.045 }} className="space-y-2">
                   
                   {/* Pipeline Health */}
                   <div className="text-xs text-gray-500 tracking-wide mb-1">Strategy Pipeline (30 days)</div>
@@ -2074,7 +2074,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 const cH = svgH - m.top - m.bottom;
                 return (
                   <div className="relative w-full" style={{ height: svgH }}>
-                    <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${svgH}`} preserveAspectRatio="xMidYMid meet">
+                    <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${svgH}`} preserveAspectRatio="none">
                       <line x1={m.left} y1={m.top} x2={m.left} y2={svgH - m.bottom} stroke="#374151" />
                       <line x1={m.left} y1={svgH - m.bottom} x2={svgW - m.right} y2={svgH - m.bottom} stroke="#374151" />
                       <text x={svgW / 2} y={svgH - 5} textAnchor="middle" fill="#9ca3af" fontSize={10} fontFamily="monospace">MAE (%)</text>

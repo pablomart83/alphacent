@@ -443,7 +443,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
       </div>
 
       {/* Correlation Heatmap — below tabs, top ~40% */}
-      <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
+      <div className="shrink-0 max-h-[300px]" style={{ minHeight: '180px' }}>
         <div className="p-2 h-full overflow-auto">
           <div className="text-xs text-gray-500 mb-1 font-medium tracking-wide">Position Correlations</div>
           {correlationMatrix.length > 0 ? (
@@ -832,7 +832,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
         panelId="risk-side"
         onRefresh={refresh}
       >
-        <div className="flex flex-col gap-2 p-2 h-full">
+        <div className="flex flex-col gap-1 p-1.5 h-full">
           <CompactMetricRow metrics={sideMetrics} />
 
           {/* Sector Exposure Pie */}

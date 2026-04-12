@@ -58,7 +58,7 @@ export const MacroPulseWidget: FC = () => {
   usePolling({ fetchFn: fetchMacro, intervalMs: 60000, enabled: !!tradingMode });
 
   return (
-    <div className="space-y-1 text-[10px] font-mono">
+    <div className="space-y-1 text-xs font-mono">
       {indicators.map((ind, idx) => (
         <div key={idx} className="flex items-center justify-between">
           <span className="text-gray-500">{ind.label}</span>

@@ -247,7 +247,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
                     {status === 'error' && <XCircle className="h-4 w-4 text-accent-red" />}
                   </div>
                   <span className={cn(
-                    'text-[10px] font-mono text-center leading-tight',
+                    'text-xs font-mono text-center leading-tight',
                     status === 'pending' ? 'text-gray-600' : 'text-gray-300'
                   )}>
                     {stage.label}
@@ -274,7 +274,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
 
           return (
             <div className="mt-2 px-2">
-              <div className="flex items-center gap-2 text-[10px]">
+              <div className="flex items-center gap-2 text-xs">
                 <Loader2 className="h-3 w-3 text-blue-400 animate-spin flex-shrink-0" />
                 <span className="text-blue-400 font-medium">{runningStage.label}</span>
                 {progressPct != null && (
@@ -282,7 +282,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
                 )}
               </div>
               {phase && (
-                <div className="mt-1 text-[10px] text-muted-foreground font-mono truncate pl-5">
+                <div className="mt-1 text-xs text-muted-foreground font-mono truncate pl-5">
                   {phase}
                 </div>
               )}
@@ -302,7 +302,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
         {hasDisplayData && (() => {
           const metrics = buildMetricsSummary();
           return metrics.length > 0 ? (
-            <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono">
+            <div className="mt-3 pt-3 border-t border-border flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono">
               {metrics.map((m) => (
                 <span key={m.label} className="text-muted-foreground">
                   {m.label}: <span className={m.color}>{m.value}</span>
@@ -340,7 +340,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
                   }
                 }}
                 disabled={deletingCycles}
-                className="gap-1 text-[10px]"
+                className="gap-1 text-xs"
               >
                 <Trash2 className="h-3 w-3" />
                 {deletingCycles ? 'Deleting...' : `Delete (${selectedCycles.size})`}
@@ -352,7 +352,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
         </SectionLabel>
 
         {cycleHistory.length === 0 ? (
-          <div className="text-center py-4 text-muted-foreground text-[10px]">
+          <div className="text-center py-4 text-muted-foreground text-xs">
             No cycle history yet
           </div>
         ) : (
@@ -371,7 +371,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
                 }}
                 className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
               />
-              <span className="text-[10px] text-muted-foreground">Select All</span>
+              <span className="text-xs text-muted-foreground">Select All</span>
             </div>
             {cycleHistory.map((run) => (
               <CycleHistoryRow
@@ -452,7 +452,7 @@ const CycleSummaryCard: FC<{ stages: Record<string, StageState> }> = ({ stages }
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {summaryItems.map((item) => (
           <div key={item.label} className="bg-muted/30 rounded-lg p-2">
-            <div className="text-[10px] text-muted-foreground mb-0.5">{item.label}</div>
+            <div className="text-xs text-muted-foreground mb-0.5">{item.label}</div>
             <div className={cn('text-[12px] font-mono font-bold', item.color)}>
               {item.value}
             </div>
@@ -500,14 +500,14 @@ const CycleHistoryRow: FC<{ run: CycleRun; selected: boolean; onToggle: () => vo
           ) : (
             <Loader2 className="h-4 w-4 text-blue-400 animate-spin" />
           )}
-          <span className="text-[10px] text-muted-foreground font-mono">{timeAgo}</span>
-          <span className="text-[10px] text-gray-600">·</span>
-          <span className="text-[10px] text-muted-foreground font-mono">
+          <span className="text-xs text-muted-foreground font-mono">{timeAgo}</span>
+          <span className="text-xs text-gray-600">·</span>
+          <span className="text-xs text-muted-foreground font-mono">
             ⏱ {formatDuration(run.duration_seconds)}
           </span>
         </div>
         <span className={cn(
-          'text-[10px] font-mono px-1.5 py-0.5 rounded',
+          'text-xs font-mono px-1.5 py-0.5 rounded',
           isSuccess ? 'bg-accent-green/10 text-accent-green' :
           isError ? 'bg-accent-red/10 text-accent-red' :
           'bg-blue-500/10 text-blue-400'
@@ -515,7 +515,7 @@ const CycleHistoryRow: FC<{ run: CycleRun; selected: boolean; onToggle: () => vo
           {run.status.toUpperCase()}
         </span>
       </div>
-      <div className="flex items-center gap-4 text-[10px] font-mono">
+      <div className="flex items-center gap-4 text-xs font-mono">
         <span className="text-blue-400" title="Proposed">
           {run.proposals_generated} proposed
         </span>
