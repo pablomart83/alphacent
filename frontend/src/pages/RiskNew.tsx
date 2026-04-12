@@ -402,13 +402,13 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
   // ── Main Panel (60%) ──────────────────────────────────────────────────
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader
         title="Risk"
         panelId="risk-main"
         onRefresh={refresh}
       >
-        <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex flex-col h-full">
           {/* CorrelationHeatmap hero — top ~50% */}
           <div className="shrink-0" style={{ height: '50%', minHeight: '200px' }}>
             <div className="p-3 h-full overflow-auto">
@@ -434,7 +434,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
           </div>
 
           {/* Tabs below — bottom ~50% */}
-          <div className="flex-1 min-h-0 overflow-hidden border-t border-[var(--color-dark-border)]">
+          <div className="flex-1 min-h-0 border-t border-[var(--color-dark-border)]">
             <Tabs defaultValue="overview" className="flex flex-col h-full">
               <div className="shrink-0 px-3 pt-2">
                 <TabsList className="w-full overflow-x-auto">
@@ -810,13 +810,13 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
   // ── Side Panel (40%) ──────────────────────────────────────────────────
   const sidePanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader
         title="Risk Summary"
         panelId="risk-side"
         onRefresh={refresh}
       >
-        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+        <div className="flex flex-col gap-3 p-3 h-full">
           {/* CompactMetricRow: VaR, max sector exposure, long/short ratio, beta */}
           <CompactMetricRow metrics={sideMetrics} />
 

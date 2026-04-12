@@ -331,9 +331,9 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
   // ── Left Panel Content ─────────────────────────────────────────────────
   const leftPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Metrics" panelId="overview-metrics" onRefresh={refresh}>
-        <div className="flex flex-col gap-3 p-3 overflow-auto">
+        <div className="flex flex-col gap-3 p-3">
           {/* Compact Metric Row */}
           <CompactMetricRow metrics={compactMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
 
@@ -381,9 +381,9 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
   // ── Center Panel Content ───────────────────────────────────────────────
   const centerPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
-        <div className="flex-1 p-3 overflow-auto min-h-0">
+        <div className="flex-1 p-3 min-h-0">
           {d ? (
             <EquityCurveChart
               equityData={d.equity_curve}
@@ -402,9 +402,9 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
   // ── Right Panel Content ────────────────────────────────────────────────
   const rightPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Activity" panelId="overview-activity" onRefresh={refresh}>
-        <div className="flex flex-col gap-3 p-3 overflow-auto">
+        <div className="flex flex-col gap-3 p-3">
           {/* Recent Trades */}
           <div>
             <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">

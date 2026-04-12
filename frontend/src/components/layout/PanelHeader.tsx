@@ -56,10 +56,10 @@ export const PanelHeader: FC<PanelHeaderProps> = ({
   };
 
   return (
-    <div>
+    <div className="flex flex-col h-full min-h-0">
       <div
         className={cn(
-          'flex items-center justify-between px-3 py-1.5 min-h-[32px]',
+          'flex items-center justify-between px-3 py-1.5 min-h-[32px] shrink-0',
           'bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]',
           className
         )}
@@ -99,7 +99,11 @@ export const PanelHeader: FC<PanelHeaderProps> = ({
       </div>
 
       {/* Panel body — hidden when collapsed */}
-      {!isCollapsed && children}
+      {!isCollapsed && (
+        <div className="flex-1 min-h-0 overflow-auto">
+          {children}
+        </div>
+      )}
     </div>
   );
 };

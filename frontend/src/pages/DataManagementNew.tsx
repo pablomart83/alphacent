@@ -221,7 +221,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
   // ── Main Panel (65%) — Data Quality DenseTable ──────────────────────
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader
         title="Data Quality"
         panelId="data-main"
@@ -339,13 +339,13 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
   // ── Side Panel (35%) — Data Health ──────────────────────────────────
   const sidePanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader
         title="Data Health"
         panelId="data-side"
         onRefresh={fetchStatus}
       >
-        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+        <div className="flex flex-col gap-3 p-3 h-full">
           {/* CompactMetricRow: healthy/degraded/stale counts + avg score */}
           <CompactMetricRow metrics={sideMetrics} />
 

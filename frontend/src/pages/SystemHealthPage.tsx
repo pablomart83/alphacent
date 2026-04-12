@@ -120,9 +120,9 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
 
   // ── Main Panel (60%) — 24h Event Timeline Hero + Service Status Cards ──
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="System" panelId="syshealth-main" onRefresh={fetch}>
-        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+        <div className="flex flex-col gap-3 p-3 h-full">
           {/* Alert Banner */}
           {(hasOpenCB || hasStaleMonitoring) && (
             <div className="rounded-lg border p-3" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
@@ -291,9 +291,9 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
 
   // ── Side Panel (40%) — Circuit Breakers + CompactMetricRow + eToro API ──
   const sidePanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Alerts" panelId="syshealth-side" onRefresh={fetch}>
-        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+        <div className="flex flex-col gap-3 p-3 h-full">
           {/* CompactMetricRow: uptime, error rate, response, cache hit */}
           <CompactMetricRow metrics={sideMetrics} />
 

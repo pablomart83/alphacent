@@ -507,7 +507,7 @@ This phase transforms the AlphaCent layout from a sidebar + vertical-scroll patt
   - [x] 23.2 Performance audit — panel resize jank, WS update re-renders, ticker strip with 15+ updates, widget load impact, DenseTable with 297 rows.
   - [x] 23.3 Clean up deprecated components — remove Sidebar.tsx, GlobalSummaryBar.tsx, update all imports. Verify build clean.
 
-- [-] 24. Final Checkpoint — Full QuantFury overhaul builds clean
+- [x] 24. Final Checkpoint — Full QuantFury overhaul builds clean
   - `npm run build` succeeds
   - All 11 pages render correctly with new layout
   - Responsive behavior works at all breakpoints

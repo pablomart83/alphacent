@@ -1387,13 +1387,13 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
   // ── Main Panel (65%) ─────────────────────────────────────────────────
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader
         title="Strategies"
         panelId="strategies-main"
         onRefresh={fetchStrategies}
       >
-        <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex flex-col h-full">
 
         {/* Tabs */}
         <Tabs defaultValue="overview" className="flex flex-col h-full">
@@ -2284,13 +2284,13 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
   // ── Side Panel (35%) ─────────────────────────────────────────────────
   const sidePanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader
         title="Intelligence"
         panelId="strategies-side"
         onRefresh={fetchStrategies}
       >
-        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+        <div className="flex flex-col gap-3 p-3 h-full">
           {/* CompactMetricRow: active, backtested, avg Sharpe, avg win rate */}
           <CompactMetricRow metrics={sideMetrics} />
 

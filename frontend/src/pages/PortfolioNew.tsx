@@ -1062,9 +1062,9 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
   // ── Main Panel (70%) — Positions with tabs ─────────────────────────
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Positions" panelId="portfolio-positions" onRefresh={refresh}>
-        <div className="flex-1 overflow-auto min-h-0 p-3">
+        <div className="flex-1 min-h-0 p-3">
           <RefreshIndicator visible={pollingRefreshing} />
 
           {/* Error state */}
@@ -1400,9 +1400,9 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
   ];
 
   const sidePanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Summary" panelId="portfolio-summary">
-        <div className="flex-1 overflow-auto min-h-0 p-3 space-y-4">
+        <div className="flex-1 min-h-0 p-3 space-y-4">
           {/* Compact Metric Row */}
           <CompactMetricRow metrics={portfolioMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
 

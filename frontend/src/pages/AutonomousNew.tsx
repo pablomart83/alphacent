@@ -842,9 +842,9 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
   // ── Main Panel (65%) — All existing tabs ───────────────────────────────
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Autonomous" panelId="autonomous-main" onRefresh={fetchData}>
-        <div className="flex-1 overflow-auto p-3">
+        <div className="flex-1 p-3">
           <RefreshIndicator visible={pollingRefreshing || refreshing} />
 
           <Tabs defaultValue="control" className="space-y-4">
@@ -1726,9 +1726,9 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
   // ── Side Panel (35%) — Cycle Intelligence ──────────────────────────────
   const sidePanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Cycle Intelligence" panelId="autonomous-side" onRefresh={fetchData}>
-        <div className="flex flex-col gap-3 p-3 overflow-auto">
+        <div className="flex flex-col gap-3 p-3">
           {/* Compact Metric Row */}
           <CompactMetricRow metrics={sideMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
 

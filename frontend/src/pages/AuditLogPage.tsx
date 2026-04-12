@@ -151,9 +151,9 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
 
   // ── Main Panel (65%) — Filters Bar + Audit DenseTable with Virtual Scroll ──
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Audit Log" panelId="audit-main" onRefresh={fetch}>
-        <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex flex-col h-full">
           {/* Filters Bar */}
           <div className="p-2 border-b" style={{ borderColor: 'var(--color-dark-border)', backgroundColor: 'var(--color-dark-surface)' }}>
             <div className="flex flex-wrap items-center gap-2">
@@ -319,9 +319,9 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
 
   // ── Side Panel (35%) — CompactMetricRow + Summary Sections ──
   const sidePanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader title="Summary" panelId="audit-side" onRefresh={fetch}>
-        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+        <div className="flex flex-col gap-3 p-3 h-full">
           {/* CompactMetricRow: events today, warnings, errors, rejections */}
           <CompactMetricRow metrics={sideMetrics} />
 

@@ -1065,13 +1065,13 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
   // ── Main Panel (65%) ─────────────────────────────────────────────────
   const mainPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader
         title="Orders"
         panelId="orders-main"
         onRefresh={fetchData}
       >
-        <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex flex-col h-full">
           {/* OrderFlowTimeline hero — top ~40% */}
           <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
             <div className="p-3 h-full">
@@ -1091,7 +1091,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
           </div>
 
           {/* Orders DenseTable with tabs — bottom ~60% */}
-          <div className="flex-1 min-h-0 overflow-hidden border-t border-[var(--color-dark-border)]">
+          <div className="flex-1 min-h-0 border-t border-[var(--color-dark-border)]">
             <Tabs defaultValue="all" className="flex flex-col h-full">
               <div className="shrink-0 px-3 pt-2">
                 <TabsList className="w-full overflow-x-auto">
@@ -1561,13 +1561,13 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
   // ── Side Panel (35%) ─────────────────────────────────────────────────
   const sidePanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       <PanelHeader
         title="Execution"
         panelId="orders-side"
         onRefresh={fetchExecutionQuality}
       >
-        <div className="flex flex-col gap-3 p-3 overflow-auto h-full">
+        <div className="flex flex-col gap-3 p-3 h-full">
           {/* CompactMetricRow: total orders, fill rate, avg slippage, pending */}
           <CompactMetricRow metrics={sideMetrics} />
 
