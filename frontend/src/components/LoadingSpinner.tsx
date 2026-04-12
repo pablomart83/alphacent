@@ -27,7 +27,7 @@ interface LoadingOverlayProps {
 
 export const LoadingOverlay: FC<LoadingOverlayProps> = ({ message = 'Loading...' }) => {
   return (
-    <div className="flex flex-col items-center justify-center py-12">
+    <div className="flex flex-col items-center justify-center py-12 min-h-[200px]" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
       <LoadingSpinner size="lg" />
       <p className="mt-4 text-gray-400 text-sm font-mono">{message}</p>
     </div>

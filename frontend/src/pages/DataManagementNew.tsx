@@ -311,7 +311,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                     >
                       <td className="py-1 px-2" style={{ color: 'var(--color-text-primary)' }}>
                         {row.symbol}
-                        {row.quality_score < 60 && <span className="ml-1 text-red-400 text-[9px]" title="Low quality">⚠</span>}
+                        {row.quality_score < 60 && <span className="ml-1 text-red-400 text-[10px]" title="Low quality">⚠</span>}
                       </td>
                       <td className="py-1 px-2 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{row.asset_class || '—'}</td>
                       <td className="py-1 px-2 font-semibold" style={{ color: row.quality_score != null ? scoreColor(row.quality_score) : 'var(--color-text-secondary)' }}>
@@ -354,7 +354,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
           {/* Data Source Health Cards */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Data Source Health</div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Data Source Health</div>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { name: 'eToro', data: monitoringStatus?.system?.etoro },
@@ -373,7 +373,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                     }`} />
                     <span className="text-[10px] font-mono font-semibold" style={{ color: 'var(--color-text-primary)' }}>{name}</span>
                   </div>
-                  <p className="text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     <span className={
                       data?.status === 'healthy' ? 'text-green-400' :
                       data?.status === 'configured' ? 'text-blue-400' :
@@ -382,12 +382,12 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                     }>{data?.status ?? 'unknown'}</span>
                   </p>
                   {data?.error_count != null && (
-                    <p className="text-[9px] mt-0.5" style={{ color: data.error_count > 0 ? '#ef4444' : 'var(--color-text-secondary)' }}>
+                    <p className="text-[10px] mt-0.5" style={{ color: data.error_count > 0 ? '#ef4444' : 'var(--color-text-secondary)' }}>
                       Err: {data.error_count}
                     </p>
                   )}
                   {data?.avg_response_ms != null && (
-                    <p className="text-[9px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{data.avg_response_ms}ms</p>
+                    <p className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{data.avg_response_ms}ms</p>
                   )}
                 </div>
               ))}
@@ -397,7 +397,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
           {/* FMP Cache Status */}
           {monitoringStatus?.system?.fmp && (
             <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">FMP Cache</div>
+              <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">FMP Cache</div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>API Usage</span>
@@ -416,18 +416,18 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded p-1.5" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-                    <p className="text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>Cache Size</p>
+                    <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Cache Size</p>
                     <p className="text-xs font-mono text-blue-400">{monitoringStatus.system.fmp.cache_size ?? 0}</p>
                   </div>
                   <div className="rounded p-1.5" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-                    <p className="text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>Remaining</p>
+                    <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Remaining</p>
                     <p className="text-xs font-mono" style={{ color: (monitoringStatus.system.fmp.max_calls - monitoringStatus.system.fmp.calls_today) < 50 ? '#ef4444' : 'var(--color-text-primary)' }}>
                       {((monitoringStatus.system.fmp.max_calls ?? 0) - (monitoringStatus.system.fmp.calls_today ?? 0)).toLocaleString()}
                     </p>
                   </div>
                 </div>
                 {monitoringStatus.system.fmp.last_warm_time && (
-                  <p className="text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
                     Last warm: {formatAge(monitoringStatus.system.fmp.last_warm_time)}
                   </p>
                 )}
@@ -437,13 +437,13 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
           {/* Sync Progress */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Sync Progress</div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Sync Progress</div>
             <div className="space-y-3">
               {/* Quick Update (10min) */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-primary)' }}>Quick Update</span>
-                  <span className="text-[9px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                     {status?.quick_update?.timestamp ? formatAge(status.quick_update.timestamp) : '—'}
                   </span>
                 </div>
@@ -457,7 +457,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                     }}
                   />
                 </div>
-                <div className="flex justify-between text-[9px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                <div className="flex justify-between text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   <span>{status?.quick_update?.updated ?? 0} symbols</span>
                   <span>10min cycle</span>
                 </div>
@@ -466,7 +466,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-primary)' }}>Full Sync</span>
-                  <span className="text-[9px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                     {status?.last_sync_at ? formatAge(status.last_sync_at) : '—'}
                   </span>
                 </div>
@@ -480,7 +480,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                     }}
                   />
                 </div>
-                <div className="flex justify-between text-[9px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                <div className="flex justify-between text-[10px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   <span>{db?.unique_symbols ?? 0} symbols</span>
                   <span>{status ? `${Math.round(status.sync_interval_s / 60)}min` : '—'}</span>
                 </div>
@@ -515,7 +515,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
 
           {/* DB Stats Summary */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Database Cache</div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Database Cache</div>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { label: 'Total Bars', value: db?.total_bars?.toLocaleString() ?? '—' },
@@ -524,7 +524,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                 { label: 'Hourly (1h)', value: db?.by_interval?.['1h']?.toLocaleString() ?? '0' },
               ].map(({ label, value }) => (
                 <div key={label} className="rounded p-1.5" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-                  <p className="text-[9px]" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
+                  <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
                   <p className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>{value}</p>
                 </div>
               ))}
@@ -534,11 +534,11 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
           {/* Sync Log (compact) */}
           {logs.length > 0 && (
             <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">
+              <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">
                 Sync Log {isRunning && <span className="text-amber-400 animate-pulse ml-1">● live</span>}
               </div>
               <div
-                className="rounded p-2 font-mono text-[9px] overflow-y-auto"
+                className="rounded p-2 font-mono text-[10px] overflow-y-auto"
                 style={{ backgroundColor: '#0d1117', maxHeight: '120px', color: '#8b949e' }}
               >
                 {logs.slice(-20).map((line, i) => (
@@ -558,7 +558,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
           {/* Last sync stats */}
           {stats && typeof stats === 'object' && 'daily_fetched' in stats && (
             <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Last Sync Stats</div>
+              <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Last Sync Stats</div>
               <div className="grid grid-cols-3 gap-1.5">
                 {[
                   { label: '1d Fetch', value: stats.daily_fetched, color: 'text-green-400' },

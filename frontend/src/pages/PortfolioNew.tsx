@@ -659,7 +659,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'symbol',
       header: 'Symbol',
       cell: ({ row }) => (
-        <div className="font-mono font-semibold text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer"
+        <div className="font-mono font-semibold text-[13px] text-blue-400 hover:text-blue-300 cursor-pointer"
           onClick={() => navigate(`/portfolio/${encodeURIComponent(row.original.symbol)}`)}>
           {row.original.symbol}
         </div>
@@ -669,7 +669,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'strategy_name',
       header: 'Strategy',
       cell: ({ row }) => (
-        <div className="font-mono text-[10px] text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
+        <div className="font-mono text-[11px] text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || row.original.strategy_id?.slice(0, 8) || '—'}
         </div>
       ),
@@ -702,28 +702,28 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       header: () => <div className="text-right">Invested</div>,
       cell: ({ row }) => {
         const invested = (row.original as any).invested_amount || row.original.quantity * row.original.entry_price;
-        return <div className="text-right font-mono text-[11px]">{formatCurrency(invested)}</div>;
+        return <div className="text-right font-mono text-[13px]">{formatCurrency(invested)}</div>;
       },
     },
     {
       accessorKey: 'entry_price',
       header: () => <div className="text-right">Open</div>,
-      cell: ({ row }) => <div className="text-right font-mono text-[11px]">{formatCurrency(row.original.entry_price)}</div>,
+      cell: ({ row }) => <div className="text-right font-mono text-[13px]">{formatCurrency(row.original.entry_price)}</div>,
     },
     {
       accessorKey: 'current_price',
       header: () => <div className="text-right">Current</div>,
-      cell: ({ row }) => <div className="text-right font-mono text-[11px]">{formatCurrency(row.original.current_price)}</div>,
+      cell: ({ row }) => <div className="text-right font-mono text-[13px]">{formatCurrency(row.original.current_price)}</div>,
     },
     {
       accessorKey: 'unrealized_pnl',
       header: () => <div className="text-right">P&L</div>,
       cell: ({ row }) => (
         <div className="text-right">
-          <div className={cn('font-mono font-semibold text-[11px]', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+          <div className={cn('font-mono font-semibold text-[13px]', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatCurrency(row.original.unrealized_pnl)}
           </div>
-          <div className={cn('text-[9px] font-mono', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+          <div className={cn('text-[10px] font-mono', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatPercentage(row.original.unrealized_pnl_percent || 0)}
           </div>
         </div>
@@ -749,7 +749,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         const totalValue = positions.reduce((sum, p) => sum + Math.abs((p as any).invested_amount || p.current_price * p.quantity), 0);
         const posValue = Math.abs((row.original as any).invested_amount || row.original.current_price * row.original.quantity);
         const pct = totalValue > 0 ? (posValue / totalValue) * 100 : 0;
-        return <div className="text-right font-mono text-[10px] text-muted-foreground">{pct.toFixed(1)}%</div>;
+        return <div className="text-right font-mono text-[11px] text-muted-foreground">{pct.toFixed(1)}%</div>;
       },
     },
     {
@@ -757,7 +757,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       header: 'SL/TP',
       cell: ({ row }) => {
         const { entry_price, current_price, stop_loss, take_profit } = row.original;
-        if (!stop_loss && !take_profit) return <span className="text-[10px] text-muted-foreground">—</span>;
+        if (!stop_loss && !take_profit) return <span className="text-[11px] text-muted-foreground">—</span>;
         const prices = [stop_loss, entry_price, current_price, take_profit].filter((p): p is number => p != null && p > 0);
         const min = Math.min(...prices);
         const max = Math.max(...prices);
@@ -828,13 +828,13 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'symbol',
       header: 'Symbol',
-      cell: ({ row }) => <div className="font-mono font-semibold text-[11px]">{row.original.symbol}</div>,
+      cell: ({ row }) => <div className="font-mono font-semibold text-[13px]">{row.original.symbol}</div>,
     },
     {
       accessorKey: 'strategy_name',
       header: 'Strategy',
       cell: ({ row }) => (
-        <div className="font-mono text-[10px] text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
+        <div className="font-mono text-[11px] text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || '—'}
         </div>
       ),
@@ -844,10 +844,10 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       header: () => <div className="text-right">Realized P&L</div>,
       cell: ({ row }) => (
         <div className="text-right">
-          <div className={cn('font-mono font-semibold text-[11px]', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+          <div className={cn('font-mono font-semibold text-[13px]', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatCurrency(row.original.realized_pnl)}
           </div>
-          <div className={cn('text-[9px] font-mono', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+          <div className={cn('text-[10px] font-mono', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatPercentage(row.original.realized_pnl_percent)}
           </div>
         </div>
@@ -867,12 +867,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'exit_reason',
       header: 'Exit',
-      cell: ({ row }) => <div className="text-[10px] text-muted-foreground">{row.original.exit_reason || 'N/A'}</div>,
+      cell: ({ row }) => <div className="text-[11px] text-muted-foreground">{row.original.exit_reason || 'N/A'}</div>,
     },
     {
       accessorKey: 'closed_at',
       header: () => <div className="text-right">Closed</div>,
-      cell: ({ row }) => <div className="text-right text-[10px] text-muted-foreground whitespace-nowrap font-mono">{formatTimestamp(row.original.closed_at)}</div>,
+      cell: ({ row }) => <div className="text-right text-[11px] text-muted-foreground whitespace-nowrap font-mono">{formatTimestamp(row.original.closed_at)}</div>,
     },
   ];
 
@@ -933,17 +933,17 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--color-dark-border)] bg-[var(--color-dark-bg)]/50">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <Input placeholder="Search..." value={positionSearch} onChange={(e) => setPositionSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-[10px]" />
+            <Input placeholder="Search..." value={positionSearch} onChange={(e) => setPositionSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-[11px]" />
           </div>
           <Select value={positionStrategyFilter} onValueChange={setPositionStrategyFilter}>
-            <SelectTrigger className="w-[110px] h-7 text-[10px]"><SelectValue placeholder="Strategy" /></SelectTrigger>
+            <SelectTrigger className="w-[110px] h-7 text-[11px]"><SelectValue placeholder="Strategy" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Strategies</SelectItem>
               {uniqueStrategies.map(s => <SelectItem key={s} value={s!}>{s?.substring(0, 8)}...</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={positionSideFilter} onValueChange={setPositionSideFilter}>
-            <SelectTrigger className="w-[80px] h-7 text-[10px]"><SelectValue placeholder="Side" /></SelectTrigger>
+            <SelectTrigger className="w-[80px] h-7 text-[11px]"><SelectValue placeholder="Side" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All</SelectItem>
               <SelectItem value="BUY">BUY</SelectItem>
@@ -975,17 +975,17 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--color-dark-border)] bg-[var(--color-dark-bg)]/50">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <Input placeholder="Search..." value={closedSearch} onChange={(e) => setClosedSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-[10px]" />
+            <Input placeholder="Search..." value={closedSearch} onChange={(e) => setClosedSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-[11px]" />
           </div>
           <Select value={closedStrategyFilter} onValueChange={setClosedStrategyFilter}>
-            <SelectTrigger className="w-[110px] h-7 text-[10px]"><SelectValue placeholder="Strategy" /></SelectTrigger>
+            <SelectTrigger className="w-[110px] h-7 text-[11px]"><SelectValue placeholder="Strategy" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Strategies</SelectItem>
               {uniqueStrategies.map(s => <SelectItem key={s} value={s!}>{s?.substring(0, 8)}...</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={closedDateFilter} onValueChange={setClosedDateFilter}>
-            <SelectTrigger className="w-[90px] h-7 text-[10px]"><SelectValue placeholder="Date" /></SelectTrigger>
+            <SelectTrigger className="w-[90px] h-7 text-[11px]"><SelectValue placeholder="Date" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Time</SelectItem>
               <SelectItem value="1d">Last 24h</SelectItem>
@@ -1041,7 +1041,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       return (
         <div className="flex-1 overflow-auto min-h-0 p-2">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               Positions flagged for closure.{pendingClosures.length > 0 && ' Auto-close within 60s.'}
             </p>
             {pendingClosures.length > 0 && (
@@ -1057,7 +1057,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           </div>
           {pendingClosuresLoading && pendingClosures.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-[10px]">Loading...</span>
+              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-[11px]">Loading...</span>
             </div>
           ) : pendingClosures.length > 0 ? (
             <div className="space-y-1.5">
@@ -1069,20 +1069,20 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <span className="font-mono font-semibold text-[11px]">{position.symbol}</span>
-                          <span className={cn('px-1 py-0.5 rounded text-[9px] font-mono font-semibold', position.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{position.side}</span>
-                          <span className="text-[9px] text-muted-foreground font-mono">{formatCurrency((position as any).invested_amount || position.quantity * position.entry_price)}</span>
+                          <span className="font-mono font-semibold text-[13px]">{position.symbol}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono font-semibold', position.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{position.side}</span>
+                          <span className="text-[11px] text-muted-foreground font-mono">{formatCurrency((position as any).invested_amount || position.quantity * position.entry_price)}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          {position.closure_reason && <span className="text-[9px] text-amber-400">{position.closure_reason}</span>}
-                          <span className="flex items-center gap-0.5 text-[9px] text-muted-foreground"><Clock className="h-2.5 w-2.5" />{hoursAgo < 1 ? 'Now' : hoursAgo < 24 ? `${hoursAgo}h` : `${Math.floor(hoursAgo / 24)}d`}</span>
+                          {position.closure_reason && <span className="text-[10px] text-amber-400">{position.closure_reason}</span>}
+                          <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground"><Clock className="h-2.5 w-2.5" />{hoursAgo < 1 ? 'Now' : hoursAgo < 24 ? `${hoursAgo}h` : `${Math.floor(hoursAgo / 24)}d`}</span>
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <div className="text-right mr-1">
-                        <div className={cn('font-mono font-semibold text-[11px]', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(position.unrealized_pnl)}</div>
-                        <div className={cn('text-[9px] font-mono', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(position.unrealized_pnl_percent || 0)}</div>
+                        <div className={cn('font-mono font-semibold text-[13px]', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(position.unrealized_pnl)}</div>
+                        <div className={cn('text-[10px] font-mono', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(position.unrealized_pnl_percent || 0)}</div>
                       </div>
                       <Button size="sm" variant="outline" onClick={() => handleDismissClosure(position.id)} disabled={dismissingId === position.id} className="h-6 text-[10px] px-2">
                         {dismissingId === position.id ? '...' : 'Dismiss'}
@@ -1098,7 +1098,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <AlertTriangle className="h-5 w-5 mx-auto mb-1.5 opacity-30" />
-              <p className="text-[10px]">No positions pending closure</p>
+              <p className="text-[11px]">No positions pending closure</p>
             </div>
           )}
         </div>
@@ -1109,7 +1109,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       return (
         <div className="flex-1 overflow-auto min-h-0 p-2">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] text-muted-foreground">Positions flagged by fundamental exit monitoring.</p>
+            <p className="text-[11px] text-muted-foreground">Positions flagged by fundamental exit monitoring.</p>
             <div className="flex gap-1.5">
               <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="gap-1 h-6 text-[10px] px-2">
                 <RefreshCw className={cn('h-2.5 w-2.5', triggeringCheck && 'animate-spin')} /> {triggeringCheck ? 'Checking...' : 'Run Check'}
@@ -1123,7 +1123,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           </div>
           {fundamentalAlertsLoading && fundamentalAlerts.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-[10px]">Loading...</span>
+              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-[11px]">Loading...</span>
             </div>
           ) : fundamentalAlerts.length > 0 ? (
             <div className="space-y-1.5">
@@ -1139,17 +1139,17 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-mono font-semibold text-[11px]">{alert.symbol}</span>
-                          <span className={cn('px-1 py-0.5 rounded text-[9px] font-mono font-semibold', alert.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{alert.side}</span>
-                          <span className={cn('px-1 py-0.5 rounded text-[9px] font-semibold', reasonColor)}>{flagReason}</span>
+                          <span className="font-mono font-semibold text-[13px]">{alert.symbol}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono font-semibold', alert.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{alert.side}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-[10px] font-semibold', reasonColor)}>{flagReason}</span>
                         </div>
-                        {fundamentalDetail && <div className="mt-0.5 text-[9px] text-orange-300/80 font-mono truncate max-w-xs" title={fundamentalDetail}>{fundamentalDetail}</div>}
+                        {fundamentalDetail && <div className="mt-0.5 text-[10px] text-orange-300/80 font-mono truncate max-w-xs" title={fundamentalDetail}>{fundamentalDetail}</div>}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <div className="text-right mr-1">
-                        <div className={cn('font-mono font-semibold text-[11px]', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(pnl)}</div>
-                        <div className={cn('text-[9px] font-mono', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(pnlPercent)}</div>
+                        <div className={cn('font-mono font-semibold text-[13px]', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(pnl)}</div>
+                        <div className={cn('text-[10px] font-mono', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(pnlPercent)}</div>
                       </div>
                       <Button size="sm" variant="outline" onClick={() => handleDismissAlert(alert.id)} disabled={dismissingAlertId === alert.id} className="h-6 text-[10px] px-2">
                         {dismissingAlertId === alert.id ? '...' : 'Dismiss'}
@@ -1165,7 +1165,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <Activity className="h-5 w-5 mx-auto mb-1.5 opacity-30" />
-              <p className="text-[10px]">No fundamental alerts</p>
+              <p className="text-[11px]">No fundamental alerts</p>
               <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="mt-2 gap-1 h-6 text-[10px] px-2">
                 <RefreshCw className={cn('h-2.5 w-2.5', triggeringCheck && 'animate-spin')} /> {triggeringCheck ? 'Running...' : 'Run Check Now'}
               </Button>
@@ -1186,9 +1186,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     <div className="flex flex-col h-full">
       {/* Panel header row: title + tabs + actions — single 32px bar */}
       <div className="flex items-center justify-between px-2 min-h-[32px] shrink-0 bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]">
-        <div className="flex items-center gap-2 min-w-0">
-          <h3 className="text-[11px] font-semibold text-gray-300 shrink-0">Positions</h3>
-          <div className="h-3 w-px bg-gray-700" />
+        <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide flex-1 min-w-0">
           {tabButtons}
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -1225,7 +1223,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
             <XCircle className="h-3.5 w-3.5 text-[#ef4444] shrink-0" />
             <div>
               <span className="text-[10px] font-semibold text-[#ef4444]">{fetchError.title}</span>
-              <span className="text-[9px] text-muted-foreground ml-1.5">{fetchError.message}</span>
+              <span className="text-[11px] text-muted-foreground ml-1.5">{fetchError.message}</span>
             </div>
           </div>
           {fetchError.retryable && (
@@ -1257,34 +1255,34 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           {/* Key-value pairs — directly in panel, no Card wrapper */}
           <div className="px-2 py-2 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500">Equity</span>
-              <span className="text-[11px] font-mono font-semibold text-gray-100">{formatCurrency(totalPortfolioValue)}</span>
+              <span className="text-[11px] text-gray-500">Equity</span>
+              <span className="text-[13px] font-mono font-semibold text-gray-100">{formatCurrency(totalPortfolioValue)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500">Cash</span>
-              <span className="text-[11px] font-mono font-semibold text-gray-100">{accountInfo ? formatCurrency(accountInfo.buying_power) : '---'}</span>
+              <span className="text-[11px] text-gray-500">Cash</span>
+              <span className="text-[13px] font-mono font-semibold text-gray-100">{accountInfo ? formatCurrency(accountInfo.buying_power) : '---'}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500">Invested</span>
-              <span className="text-[11px] font-mono font-semibold text-gray-100">{formatCurrency(totalPositionValue)}</span>
+              <span className="text-[11px] text-gray-500">Invested</span>
+              <span className="text-[13px] font-mono font-semibold text-gray-100">{formatCurrency(totalPositionValue)}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500">P&L</span>
-              <span className={cn('text-[11px] font-mono font-semibold', totalPnL >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+              <span className="text-[11px] text-gray-500">P&L</span>
+              <span className={cn('text-[13px] font-mono font-semibold', totalPnL >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
                 {totalPnL >= 0 ? '+' : ''}{formatCurrency(totalPnL)} ({formatPercentage(totalPnLPercent)})
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500">Positions</span>
-              <span className="text-[11px] font-mono font-semibold text-gray-100">{positions.length}</span>
+              <span className="text-[11px] text-gray-500">Positions</span>
+              <span className="text-[13px] font-mono font-semibold text-gray-100">{positions.length}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500">Win Rate</span>
-              <span className="text-[11px] font-mono font-semibold text-gray-100">{winRate.toFixed(1)}%</span>
+              <span className="text-[11px] text-gray-500">Win Rate</span>
+              <span className="text-[13px] font-mono font-semibold text-gray-100">{winRate.toFixed(1)}%</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500">Win Rate (Closed)</span>
-              <span className="text-[11px] font-mono font-semibold text-gray-100">{closedWinRate.toFixed(1)}%</span>
+              <span className="text-[11px] text-gray-500">Win Rate (Closed)</span>
+              <span className="text-[13px] font-mono font-semibold text-gray-100">{closedWinRate.toFixed(1)}%</span>
             </div>
           </div>
 
@@ -1293,14 +1291,14 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* By Asset Class — compact list, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">By Asset Class</div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">By Asset Class</div>
             {assetClassSummary.length > 0 ? (
               <div className="space-y-0.5">
                 {assetClassSummary.map((ac) => (
                   <div key={ac.assetClass} className="flex items-center justify-between py-0.5">
                     <div className="flex items-center gap-1">
                       <span className="text-[10px] text-gray-300">{ac.assetClass}</span>
-                      <span className="text-[9px] text-muted-foreground font-mono">({ac.count})</span>
+                      <span className="text-[11px] text-muted-foreground font-mono">({ac.count})</span>
                     </div>
                     <span className={cn('text-[10px] font-mono font-semibold', ac.totalPnl > 0 ? 'text-[#22c55e]' : ac.totalPnl < 0 ? 'text-[#ef4444]' : 'text-gray-400')}>
                       {ac.totalPnl >= 0 ? '+' : ''}{formatCurrency(ac.totalPnl)}
@@ -1309,7 +1307,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                 ))}
               </div>
             ) : (
-              <p className="text-[10px] text-muted-foreground text-center py-2">No open positions</p>
+              <p className="text-[11px] text-muted-foreground text-center py-2">No open positions</p>
             )}
           </div>
 
@@ -1318,7 +1316,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* Sector Exposure Pie Chart — directly rendered, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Sector Exposure</div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Sector Exposure</div>
             {sectorExposure.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={150}>
@@ -1339,13 +1337,13 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                   {sectorExposure.slice(0, 8).map((s, i) => (
                     <div key={s.name} className="flex items-center gap-1">
                       <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                      <span className="text-[9px] text-gray-400 truncate max-w-[70px]">{s.name}</span>
+                      <span className="text-[11px] text-gray-400 truncate max-w-[70px]">{s.name}</span>
                     </div>
                   ))}
                 </div>
               </>
             ) : (
-              <p className="text-[10px] text-muted-foreground text-center py-2">No data</p>
+              <p className="text-[11px] text-muted-foreground text-center py-2">No data</p>
             )}
           </div>
 
@@ -1354,14 +1352,14 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* Allocation Breakdown — directly rendered, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Allocation</div>
+            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Allocation</div>
             {allocationData.length > 0 ? (
               <div className="space-y-1">
                 {allocationData.map((item, i) => (
                   <div key={item.name}>
                     <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-[9px] text-gray-300 truncate max-w-[100px]">{item.name}</span>
-                      <span className="text-[9px] font-mono text-gray-400">{item.pct.toFixed(1)}%</span>
+                      <span className="text-[10px] text-gray-300 truncate max-w-[100px]">{item.name}</span>
+                      <span className="text-[10px] font-mono text-gray-400">{item.pct.toFixed(1)}%</span>
                     </div>
                     <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
                       <div className="h-full rounded-full transition-all" style={{ width: `${item.pct}%`, backgroundColor: COLORS[i % COLORS.length] }} />
@@ -1370,7 +1368,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                 ))}
               </div>
             ) : (
-              <p className="text-[10px] text-muted-foreground text-center py-2">No positions</p>
+              <p className="text-[11px] text-muted-foreground text-center py-2">No positions</p>
             )}
           </div>
         </div>
@@ -1475,7 +1473,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
               </Button>
             </div>
             <div className="mb-3">
-              <label className="block text-[10px] text-muted-foreground mb-1">
+              <label className="block text-[11px] text-muted-foreground mb-1">
                 {modifyingPosition.type === 'sl' ? 'Stop Loss Price' : 'Take Profit Price'}
               </label>
               <Input type="number" step="0.01" value={modifyPrice} onChange={(e) => setModifyPrice(e.target.value)} placeholder="Enter price" autoFocus className="h-8 text-[11px]" />

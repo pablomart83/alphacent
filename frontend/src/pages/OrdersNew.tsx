@@ -1067,7 +1067,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       {/* OrderFlowTimeline hero — top ~40% */}
       <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
         <div className="p-2 h-full">
-          <div className="text-[10px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Order Flow — Last 7 Days</div>
+          <div className="text-[11px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Order Flow — Last 7 Days</div>
               <OrderFlowTimeline
                 orders={orders.map((o) => ({
                   id: o.id,
@@ -1272,7 +1272,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                         {marketStatus.label}
                       </p>
                       {!marketStatus.isOpen && marketStatus.nextOpen && (
-                        <p className="text-[10px] text-gray-400">
+                        <p className="text-[11px] text-gray-400">
                           Next: {format(marketStatus.nextOpen, 'EEE, MMM d h:mm a')} UTC
                         </p>
                       )}
@@ -1315,10 +1315,10 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                             </div>
                             <div className="flex flex-col">
                               <span className="text-xs text-gray-300 font-mono">{formatCurrency(order.quantity)}</span>
-                              <span className="text-[10px] text-gray-500">{order.price ? `@ ${formatCurrency(order.price)}` : 'Market'}</span>
+                              <span className="text-[11px] text-gray-500">{order.price ? `@ ${formatCurrency(order.price)}` : 'Market'}</span>
                             </div>
                             <div className="flex flex-col">
-                              <span className="text-[10px] text-gray-400">Queued {age}</span>
+                              <span className="text-[11px] text-gray-400">Queued {age}</span>
                               <span className={cn(
                                 'text-[10px] px-1 py-0.5 rounded mt-0.5 w-fit',
                                 isWaitingForMarket ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
@@ -1563,25 +1563,25 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
           {/* Execution Quality Mini-Chart (fill rate sparkline) */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Execution Quality</div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Execution Quality</div>
             <div className="grid grid-cols-3 gap-3 mb-3">
               <div className="text-center">
                 <div className={cn('text-lg font-bold font-mono', avgSlippage >= 0 ? 'text-accent-red' : 'text-accent-green')}>
                   {formatPercentage(avgSlippage)}
                 </div>
-                <div className="text-[10px] text-gray-500">Avg Slippage</div>
+                <div className="text-[11px] text-gray-500">Avg Slippage</div>
               </div>
               <div className="text-center">
                 <div className="text-lg font-bold font-mono text-accent-green">
                   {formatPercentage(fillRate)}
                 </div>
-                <div className="text-[10px] text-gray-500">Fill Rate</div>
+                <div className="text-[11px] text-gray-500">Fill Rate</div>
               </div>
               <div className="text-center">
                 <div className="text-lg font-bold font-mono text-blue-400">
                   {avgFillTime.toFixed(1)}s
                 </div>
-                <div className="text-[10px] text-gray-500">Avg Fill Time</div>
+                <div className="text-[11px] text-gray-500">Avg Fill Time</div>
               </div>
             </div>
             {/* Mini fill rate trend chart */}
@@ -1600,13 +1600,13 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="text-center py-4 text-[10px] text-gray-500">No trend data</div>
+              <div className="text-center py-4 text-[11px] text-gray-500">No trend data</div>
             )}
           </div>
 
           {/* Recent Fills List */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3 flex-1 min-h-0">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">
               Recent Fills ({recentFills.length})
             </div>
             {recentFills.length === 0 ? (
@@ -1633,7 +1633,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                       <span className="font-mono text-xs text-gray-300">
                         {formatCurrency(order.quantity)}
                       </span>
-                      <span className="text-[10px] text-gray-500">
+                      <span className="text-[11px] text-gray-500">
                         {formatTimestamp(order.created_at)}
                       </span>
                     </div>
@@ -1645,7 +1645,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
           {/* Order Status Breakdown */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Status Breakdown</div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Status Breakdown</div>
             <div className="space-y-1.5">
               {[
                 { label: 'Executed', count: filledOrders, color: 'text-accent-green', bg: 'bg-accent-green' },

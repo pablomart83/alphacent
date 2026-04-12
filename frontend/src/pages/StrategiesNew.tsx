@@ -1403,7 +1403,6 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     <div className="flex flex-col h-full">
       {/* Single 32px header row: title + inline tabs + actions */}
       <div className="flex items-center px-3 min-h-[32px] max-h-[32px] shrink-0 bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]">
-        <h3 className="text-xs font-semibold text-gray-300 mr-3 shrink-0">Strategies</h3>
         <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide flex-1 min-w-0">
           {strategyTabButtons.map((tab) => (
             <button
@@ -1413,7 +1412,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 if (tab.value === 'retired') fetchRetiredStrategies();
               }}
               className={cn(
-                'px-2 py-1 text-[10px] font-medium rounded whitespace-nowrap transition-colors shrink-0',
+                'px-2.5 py-1 text-[12px] font-medium rounded whitespace-nowrap transition-colors shrink-0',
                 strategiesTab === tab.value
                   ? 'bg-gray-700/60 text-gray-100'
                   : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/40'
@@ -1516,14 +1515,14 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                       <span className="text-[10px] font-mono text-gray-500 w-4">{index + 1}</span>
                       <div className="min-w-0">
                         <div className="text-[11px] font-mono text-gray-200 truncate">{strategy.name}</div>
-                        <div className="text-[9px] text-gray-500 font-mono truncate">{strategy.symbols.join(', ')}</div>
+                        <div className="text-[11px] text-gray-500 font-mono truncate">{strategy.symbols.join(', ')}</div>
                       </div>
                     </div>
                     <div className="text-right shrink-0 ml-2">
                       <div className={cn('text-[11px] font-mono font-bold', (strategy.performance_metrics?.total_return || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                         {formatPercentage((strategy.performance_metrics?.total_return || 0) * 100)}
                       </div>
-                      <div className="text-[9px] text-gray-500 font-mono">S: {formatMetric(strategy.performance_metrics?.sharpe_ratio)}</div>
+                      <div className="text-[11px] text-gray-500 font-mono">S: {formatMetric(strategy.performance_metrics?.sharpe_ratio)}</div>
                     </div>
                   </div>
                 ))}
@@ -1600,7 +1599,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
-                <span className="text-[10px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <span className="text-[11px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
                 <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[10px] px-2">Backtest</Button>
                 {selectedStrategiesInfo.hasBacktested && (
                   <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-accent-green border-accent-green/30">Activate</Button>
@@ -1686,7 +1685,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
-                <span className="text-[10px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <span className="text-[11px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
                 <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[10px] px-2">Re-Backtest</Button>
                 <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-accent-green border-accent-green/30">Activate</Button>
                 <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[10px] px-2">Retire</Button>
@@ -1761,7 +1760,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
-                <span className="text-[10px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <span className="text-[11px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
                 <Button onClick={handleBulkPermanentDelete} variant="destructive" size="sm" className="h-6 text-[10px] px-2">Permanently Delete</Button>
                 <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[10px] px-2 ml-auto">Clear</Button>
               </div>
@@ -1799,9 +1798,9 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           {/* Template Rankings Tab (Task 9.1) */}
           <TabsContent value="rankings" className="p-2">
               {templateRankingsLoading ? (
-                <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">Loading rankings...</div>
+                <div className="flex items-center justify-center h-32 text-[11px] text-gray-500">Loading rankings...</div>
               ) : templateRankings.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">No template ranking data available</div>
+                <div className="flex items-center justify-center h-32 text-[11px] text-gray-500">No template ranking data available</div>
               ) : (
                 <>
                   <FilterBar>
@@ -1859,11 +1858,11 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                           .map((t: any, idx: number) => (
                             <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
                               <td className="py-1.5 px-2 text-gray-200 truncate max-w-[200px] text-[11px]">{t.name || t.template_name || '—'}</td>
-                              <td className={cn('py-1.5 px-2 text-right text-[11px]', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>{t.win_rate != null ? `${(t.win_rate).toFixed(1)}%` : '—'}</td>
-                              <td className="py-1.5 px-2 text-right text-[11px]">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
-                              <td className="py-1.5 px-2 text-right text-[11px]">{t.total_trades ?? '—'}</td>
-                              <td className="py-1.5 px-2 text-right text-[11px]">{t.active_count ?? '—'}</td>
-                              <td className="py-1.5 px-2 text-right text-[10px] text-gray-500">{t.last_proposal_date ? new Date(t.last_proposal_date).toLocaleDateString() : '—'}</td>
+                              <td className={cn('py-1.5 px-2 text-right text-[13px]', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>{t.win_rate != null ? `${(t.win_rate).toFixed(1)}%` : '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-[13px]">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-[13px]">{t.total_trades ?? '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-[13px]">{t.active_count ?? '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-[11px] text-gray-500">{t.last_proposal_date ? new Date(t.last_proposal_date).toLocaleDateString() : '—'}</td>
                             </tr>
                           ))}
                       </tbody>
@@ -1876,7 +1875,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           {/* Blacklists Tab (Task 9.1) */}
           <TabsContent value="blacklists" className="p-2">
               {blacklists.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">No blacklisted combinations</div>
+                <div className="flex items-center justify-center h-32 text-[11px] text-gray-500">No blacklisted combinations</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs font-mono table-dense">
@@ -1894,7 +1893,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
                           <td className="py-1.5 px-2 text-gray-200 truncate max-w-[180px] text-[11px]">{bl.template}</td>
                           <td className="py-1.5 px-2 text-gray-300 text-[11px]">{bl.symbol}</td>
-                          <td className="py-1.5 px-2"><Badge variant="secondary" className="text-[9px]">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
+                          <td className="py-1.5 px-2"><Badge variant="secondary" className="text-[10px]">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
                           <td className="py-1.5 px-2 text-right text-gray-300 text-[11px]">{bl.count}</td>
                           <td className="py-1.5 px-2 text-gray-500 text-[10px]">{bl.timestamp ? new Date(bl.timestamp).toLocaleDateString() : '—'}</td>
                         </tr>
@@ -1908,7 +1907,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           {/* Idle Demotions Tab (Task 9.1) */}
           <TabsContent value="demotions" className="p-2">
               {idleDemotions.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">No recent demotions</div>
+                <div className="flex items-center justify-center h-32 text-[11px] text-gray-500">No recent demotions</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs font-mono table-dense">
@@ -1954,26 +1953,26 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           <div className="border-t border-[var(--color-dark-border)] pt-1.5">
             <SectionLabel>Top 5 Rankings</SectionLabel>
             {templateRankingsLoading ? (
-              <div className="text-center py-3 text-[10px] text-gray-500">Loading...</div>
+              <div className="text-center py-3 text-[11px] text-gray-500">Loading...</div>
             ) : top5Rankings.length === 0 ? (
-              <div className="text-center py-3 text-[10px] text-gray-500">No ranking data</div>
+              <div className="text-center py-3 text-[11px] text-gray-500">No ranking data</div>
             ) : (
               <table className="w-full text-xs font-mono">
                 <thead>
                   <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
-                    <th className="py-1 px-1.5 text-left text-[10px]">Template</th>
-                    <th className="py-1 px-1.5 text-right text-[10px]">WR</th>
-                    <th className="py-1 px-1.5 text-right text-[10px]">Sharpe</th>
+                    <th className="py-1 px-1.5 text-left text-[11px]">Template</th>
+                    <th className="py-1 px-1.5 text-right text-[13px]">WR</th>
+                    <th className="py-1 px-1.5 text-right text-[13px]">Sharpe</th>
                   </tr>
                 </thead>
                 <tbody>
                   {top5Rankings.map((t: any, idx: number) => (
                     <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
-                      <td className="py-1 px-1.5 text-gray-200 truncate max-w-[120px] text-[11px]">{t.name || t.template_name || '—'}</td>
-                      <td className={cn('py-1 px-1.5 text-right text-[11px]', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
+                      <td className="py-1 px-1.5 text-gray-200 truncate max-w-[120px] text-[13px]">{t.name || t.template_name || '—'}</td>
+                      <td className={cn('py-1 px-1.5 text-right text-[13px]', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
                         {t.win_rate != null ? `${t.win_rate.toFixed(1)}%` : '—'}
                       </td>
-                      <td className="py-1 px-1.5 text-right text-[11px]">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
+                      <td className="py-1 px-1.5 text-right text-[13px]">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1985,23 +1984,23 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           <div className="border-t border-[var(--color-dark-border)] pt-1.5">
             <SectionLabel>Recent Events</SectionLabel>
             {recentLifecycleEvents.length === 0 ? (
-              <div className="text-center py-3 text-[10px] text-gray-500">No recent events</div>
+              <div className="text-center py-3 text-[11px] text-gray-500">No recent events</div>
             ) : (
               <div className="space-y-0.5 overflow-auto max-h-[300px]">
                 {recentLifecycleEvents.map((event, idx) => (
                   <div key={idx} className="flex items-center justify-between py-1 px-1.5 rounded hover:bg-gray-800/40">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className={cn(
-                        'text-[9px] font-mono font-semibold px-1 py-0.5 rounded',
+                        'text-[10px] font-mono font-semibold px-1 py-0.5 rounded',
                         event.type === 'Activated' && 'bg-accent-green/20 text-accent-green',
                         event.type === 'Retired' && 'bg-accent-red/20 text-accent-red',
                         event.type === 'Demoted' && 'bg-yellow-400/20 text-yellow-400',
                       )}>
                         {event.type}
                       </span>
-                      <span className="font-mono text-[11px] text-gray-200 truncate">{event.name}</span>
+                      <span className="font-mono text-[13px] text-gray-200 truncate">{event.name}</span>
                     </div>
-                    <span className="text-[9px] text-gray-500 shrink-0 ml-1">{formatTimestamp(event.timestamp)}</span>
+                    <span className="text-[11px] text-gray-500 shrink-0 ml-1">{formatTimestamp(event.timestamp)}</span>
                   </div>
                 ))}
               </div>

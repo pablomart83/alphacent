@@ -105,7 +105,7 @@ export const MetricsBar: FC = memo(() => {
 
       {/* Equity */}
       <div className="flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Equity</span>
+        <span className="text-[11px] text-gray-500 uppercase tracking-wider">Equity</span>
         <FlashWrapper value={data.totalEquity} previousValue={prevDataRef.current.totalEquity}>
           <AnimatedNumber value={data.totalEquity} format="currency" className="text-xs font-mono font-semibold text-gray-100" />
         </FlashWrapper>
@@ -115,12 +115,12 @@ export const MetricsBar: FC = memo(() => {
 
       {/* Daily P&L */}
       <div className="flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">P&L</span>
+        <span className="text-[11px] text-gray-500 uppercase tracking-wider">P&L</span>
         <FlashWrapper value={data.dailyPnl} previousValue={prevDataRef.current.dailyPnl}>
           <AnimatedNumber value={data.dailyPnl} format="currency" showSign className={cn('text-xs font-mono font-semibold', pnlColor)} />
         </FlashWrapper>
-        <span className={cn('text-[10px] font-mono', pnlColor)}>
-          (<AnimatedNumber value={data.dailyPnlPct} format="percentage" showSign className={cn('text-[10px] font-mono', pnlColor)} />)
+        <span className={cn('text-[11px] font-mono', pnlColor)}>
+          (<AnimatedNumber value={data.dailyPnlPct} format="percentage" showSign className={cn('text-[11px] font-mono', pnlColor)} />)
         </span>
       </div>
 
@@ -128,7 +128,7 @@ export const MetricsBar: FC = memo(() => {
 
       {/* Positions */}
       <div className="hidden md:flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Pos</span>
+        <span className="text-[11px] text-gray-500 uppercase tracking-wider">Pos</span>
         <AnimatedNumber value={data.openPositions} format="integer" className="text-xs font-mono font-semibold text-gray-100" />
       </div>
 
@@ -136,7 +136,7 @@ export const MetricsBar: FC = memo(() => {
 
       {/* Strategies */}
       <div className="hidden md:flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Strats</span>
+        <span className="text-[11px] text-gray-500 uppercase tracking-wider">Strats</span>
         <AnimatedNumber value={data.activeStrategies} format="integer" className="text-xs font-mono font-semibold text-gray-100" />
       </div>
 
@@ -144,8 +144,8 @@ export const MetricsBar: FC = memo(() => {
 
       {/* Regime */}
       <div className="hidden md:flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Regime</span>
-        <span className="text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700">
+        <span className="text-[11px] text-gray-500 uppercase tracking-wider">Regime</span>
+        <span className="text-[11px] font-mono font-medium px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700">
           {REGIME_SHORT[data.marketRegime] || data.marketRegime}
         </span>
       </div>
@@ -154,7 +154,7 @@ export const MetricsBar: FC = memo(() => {
 
       {/* Health */}
       <div className="hidden md:flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Health</span>
+        <span className="text-[11px] text-gray-500 uppercase tracking-wider">Health</span>
         <span className="text-xs font-mono font-semibold" style={{ color: getHealthColor(data.healthScore) }}>
           {data.healthScore}
         </span>
@@ -164,18 +164,18 @@ export const MetricsBar: FC = memo(() => {
 
       {/* Last Synced */}
       <div className="hidden lg:flex items-center gap-1 shrink-0">
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Synced</span>
-        <span className="text-[10px] font-mono text-gray-400">{lastSyncedLabel}</span>
+        <span className="text-[11px] text-gray-500 uppercase tracking-wider">Synced</span>
+        <span className="text-[11px] font-mono text-gray-400">{lastSyncedLabel}</span>
       </div>
 
       {/* Condensed Multi-Timeframe at > 1440px */}
       <div className="hidden 2xl:flex items-center gap-1 ml-auto shrink-0">
         <Sep />
-        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Returns</span>
+        <span className="text-[11px] text-gray-500 uppercase tracking-wider">Returns</span>
         {['1D', '1W', '1M', 'YTD'].map(period => (
           <span
             key={period}
-            className="text-[9px] font-mono px-1 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700"
+            className="text-[11px] font-mono px-1 py-0.5 rounded bg-gray-800 text-gray-500 border border-gray-700"
           >
             {period}: —
           </span>

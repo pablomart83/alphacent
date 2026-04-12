@@ -362,7 +362,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
           {/* Multi-Timeframe View */}
           <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
               Performance
             </div>
             <MultiTimeframeView
@@ -374,7 +374,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
           {/* Strategy Pipeline */}
           <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
               Strategy Pipeline
             </div>
             <div className="flex flex-col gap-1.5">
@@ -430,7 +430,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
         <div className="flex flex-col gap-2 p-2">
           {/* Recent Trades */}
           <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
               Recent Trades
             </div>
             {recentTrades.length > 0 ? (
@@ -440,7 +440,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-xs font-mono font-semibold text-gray-200 truncate">{trade.symbol}</span>
                       <span className={cn(
-                        'text-[9px] font-mono px-1 py-0.5 rounded',
+                        'text-[10px] font-mono px-1 py-0.5 rounded',
                         trade.side === 'BUY' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400',
                       )}>
                         {trade.side}
@@ -453,7 +453,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                       )}>
                         {(trade.realized_pnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(trade.realized_pnl ?? 0)}
                       </span>
-                      <span className="text-[9px] text-muted-foreground font-mono">
+                      <span className="text-[10px] text-muted-foreground font-mono">
                         {trade.closed_at ? formatDate(trade.closed_at, 'MMM d') : '—'}
                       </span>
                     </div>
@@ -467,7 +467,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
           {/* Position Summary by Asset Class */}
           <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+            <div className="text-[11px] font-medium text-gray-500 uppercase tracking-wider mb-1.5">
               Positions by Asset Class
             </div>
             {assetClassSummary.length > 0 ? (
@@ -476,7 +476,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                   <div key={ac.assetClass} className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-gray-200">{ac.assetClass}</span>
-                      <span className="text-[10px] text-muted-foreground font-mono">({ac.count})</span>
+                      <span className="text-[11px] text-muted-foreground font-mono">({ac.count})</span>
                     </div>
                     <span className={cn(
                       'text-xs font-mono font-semibold',

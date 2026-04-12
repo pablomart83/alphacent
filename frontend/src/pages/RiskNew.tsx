@@ -405,7 +405,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
       {/* CorrelationHeatmap hero — top ~50% */}
       <div className="shrink-0" style={{ height: '50%', minHeight: '200px' }}>
         <div className="p-2 h-full overflow-auto">
-          <div className="text-[10px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Position Correlations</div>
+          <div className="text-[11px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Position Correlations</div>
           {correlationMatrix.length > 0 ? (
             <CorrelationHeatmap
               data={correlationMatrix.map((cell: any) => ({
@@ -544,7 +544,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                             {alert.severity === 'info' && <Activity className="h-3.5 w-3.5 text-blue-400 flex-shrink-0 mt-0.5" />}
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-semibold">{alert.title}</p>
-                              <p className="text-[10px] text-muted-foreground">{alert.message}</p>
+                              <p className="text-[11px] text-muted-foreground">{alert.message}</p>
                             </div>
                           </div>
                         </div>
@@ -593,16 +593,16 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 <TabsContent value="advanced" className="space-y-2 mt-2">
                   {/* VaR Section */}
                   <SectionLabel>Value at Risk (VaR)</SectionLabel>
-                  <p className="text-[10px] text-muted-foreground mb-2">
+                  <p className="text-[11px] text-muted-foreground mb-2">
                     Historical simulation using {advancedRisk?.var?.trading_days_used || 252} trading days
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5">
-                      <p className="text-[10px] text-muted-foreground mb-1">95% VaR (Daily)</p>
+                      <p className="text-[11px] text-muted-foreground mb-1">95% VaR (Daily)</p>
                       <p className="text-xl font-bold font-mono text-yellow-400">{formatCurrency(advancedRisk?.var?.var_95 || 0)}</p>
                     </div>
                     <div className="p-3 rounded-lg border border-accent-red/30 bg-accent-red/5">
-                      <p className="text-[10px] text-muted-foreground mb-1">99% VaR (Daily)</p>
+                      <p className="text-[11px] text-muted-foreground mb-1">99% VaR (Daily)</p>
                       <p className="text-xl font-bold font-mono text-accent-red">{formatCurrency(advancedRisk?.var?.var_99 || 0)}</p>
                     </div>
                   </div>
@@ -622,10 +622,10 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                               -{formatPercentage(scenario.estimated_loss_pct)}
                             </span>
                           </div>
-                          <p className="text-[10px] text-muted-foreground mb-1">{scenario.description}</p>
+                          <p className="text-[11px] text-muted-foreground mb-1">{scenario.description}</p>
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-mono font-semibold text-accent-red">-{formatCurrency(scenario.estimated_loss)}</span>
-                            <span className="text-[10px] text-muted-foreground">{scenario.affected_positions} affected</span>
+                            <span className="text-[11px] text-muted-foreground">{scenario.affected_positions} affected</span>
                           </div>
                         </div>
                       ))}
@@ -644,19 +644,19 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                       <div className="space-y-3">
                         <div className="grid grid-cols-2 gap-3">
                           <div className="p-2 rounded border border-[var(--color-dark-border)]">
-                            <p className="text-[10px] text-muted-foreground mb-0.5">Gross Exposure</p>
+                            <p className="text-[11px] text-muted-foreground mb-0.5">Gross Exposure</p>
                             <p className="text-sm font-bold font-mono">{formatCurrency(cioRisk.gross_exposure)}</p>
                           </div>
                           <div className="p-2 rounded border border-[var(--color-dark-border)]">
-                            <p className="text-[10px] text-muted-foreground mb-0.5">Net Exposure</p>
+                            <p className="text-[11px] text-muted-foreground mb-0.5">Net Exposure</p>
                             <p className={cn('text-sm font-bold font-mono', cioRisk.net_exposure >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(cioRisk.net_exposure)}</p>
                           </div>
                           <div className="p-2 rounded border border-[var(--color-dark-border)]">
-                            <p className="text-[10px] text-muted-foreground mb-0.5">CVaR (95%)</p>
+                            <p className="text-[11px] text-muted-foreground mb-0.5">CVaR (95%)</p>
                             <p className="text-sm font-bold font-mono text-accent-red">{formatCurrency(cioRisk.cvar_95)}</p>
                           </div>
                           <div className="p-2 rounded border border-[var(--color-dark-border)]">
-                            <p className="text-[10px] text-muted-foreground mb-0.5">CVaR (99%)</p>
+                            <p className="text-[11px] text-muted-foreground mb-0.5">CVaR (99%)</p>
                             <p className="text-sm font-bold font-mono text-accent-red">{formatCurrency(cioRisk.cvar_99)}</p>
                           </div>
                         </div>
@@ -788,7 +788,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
           {/* Sector Exposure Pie */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Sector Exposure</div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Sector Exposure</div>
             {sectorPieData.length > 0 ? (
               <>
                 <ResponsiveContainer width="100%" height={180}>
@@ -821,13 +821,13 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 </div>
               </>
             ) : (
-              <div className="text-center py-6 text-[10px] text-gray-500">No position data</div>
+              <div className="text-center py-6 text-[11px] text-gray-500">No position data</div>
             )}
           </div>
 
           {/* Risk Contribution Top 5 Bar */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3 flex-1 min-h-0">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">
               Risk Contribution — Top 5
             </div>
             {riskContribTop5.length > 0 ? (
@@ -844,13 +844,13 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="text-center py-6 text-[10px] text-gray-500">No position data</div>
+              <div className="text-center py-6 text-[11px] text-gray-500">No position data</div>
             )}
           </div>
 
           {/* Portfolio Risk Summary */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wide font-semibold mb-2">Portfolio Summary</div>
+            <div className="text-[11px] text-gray-500 uppercase tracking-wider font-medium mb-2">Portfolio Summary</div>
             <div className="space-y-1.5">
               {[
                 { label: 'Total Exposure', value: formatCurrency(riskMetrics?.total_exposure || 0), color: 'text-gray-200' },
@@ -859,7 +859,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 { label: 'Margin Util.', value: formatPercentage(riskMetrics?.margin_utilization || 0), color: (riskMetrics?.margin_utilization || 0) > 50 ? 'text-yellow-400' : 'text-gray-200' },
               ].map(item => (
                 <div key={item.label} className="flex items-center justify-between">
-                  <span className="text-[10px] text-gray-400">{item.label}</span>
+                  <span className="text-[11px] text-gray-400">{item.label}</span>
                   <span className={cn('text-xs font-mono font-semibold', item.color)}>{item.value}</span>
                 </div>
               ))}

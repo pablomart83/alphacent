@@ -886,7 +886,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Research Filters — flat inline row */}
               <div className="flex flex-wrap items-center gap-3 py-2 border-b border-[var(--color-dark-border)]">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-gray-500 uppercase tracking-wide">Assets:</span>
+                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">Assets:</span>
                   <div className="flex flex-wrap gap-1">
                     {['stock', 'etf', 'crypto', 'forex', 'index', 'commodity'].map(ac => (
                       <button key={ac} onClick={() => {
@@ -894,7 +894,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         next.has(ac) ? next.delete(ac) : next.add(ac);
                         setCycleAssetClasses(next);
                       }} className={cn(
-                        'px-2 py-0.5 rounded text-[10px] font-medium border transition-colors',
+                        'px-2 py-0.5 rounded text-[11px] font-medium border transition-colors',
                         cycleAssetClasses.has(ac)
                           ? 'bg-blue-500/20 border-blue-500 text-blue-400'
                           : 'border-gray-700 text-gray-500 hover:border-blue-500/50'
@@ -903,7 +903,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-gray-500 uppercase tracking-wide">TF:</span>
+                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">TF:</span>
                   <div className="flex gap-1">
                     {[{ key: '1d', label: 'Daily' }, { key: '1h', label: '1H' }, { key: '4h', label: '4H' }].map(({ key, label }) => (
                       <button key={key} onClick={() => {
@@ -911,7 +911,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         next.has(key) ? next.delete(key) : next.add(key);
                         setCycleIntervals(next);
                       }} className={cn(
-                        'px-2 py-0.5 rounded text-[10px] font-medium border transition-colors',
+                        'px-2 py-0.5 rounded text-[11px] font-medium border transition-colors',
                         cycleIntervals.has(key)
                           ? 'bg-[#22c55e]/20 border-[#22c55e] text-[#22c55e]'
                           : 'border-gray-700 text-gray-500 hover:border-[#22c55e]/50'
@@ -920,7 +920,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-gray-500 uppercase tracking-wide">Type:</span>
+                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">Type:</span>
                   <div className="flex gap-1">
                     {[{ key: 'dsl', label: 'DSL' }, { key: 'alpha_edge', label: 'AE' }].map(({ key, label }) => (
                       <button key={key} onClick={() => {
@@ -928,7 +928,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         next.has(key) ? next.delete(key) : next.add(key);
                         setCycleStrategyTypes(next);
                       }} className={cn(
-                        'px-2 py-0.5 rounded text-[10px] font-medium border transition-colors',
+                        'px-2 py-0.5 rounded text-[11px] font-medium border transition-colors',
                         cycleStrategyTypes.has(key)
                           ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
                           : 'border-gray-700 text-gray-500 hover:border-yellow-500/50'
@@ -1064,7 +1064,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                         {/* Frequency */}
                         <div className="space-y-1">
-                          <label className="text-[10px] text-muted-foreground">Frequency</label>
+                          <label className="text-[11px] text-muted-foreground">Frequency</label>
                           <div className="flex gap-1">
                             {['daily', 'weekly'].map((freq) => (
                               <button key={freq} onClick={() => {
@@ -1086,7 +1086,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         {/* Day of week (weekly only) */}
                         {editFrequency === 'weekly' && (
                           <div className="space-y-1">
-                            <label className="text-[10px] text-muted-foreground">Day</label>
+                            <label className="text-[11px] text-muted-foreground">Day</label>
                             <select value={editDay} onChange={(e) => setEditDay(e.target.value)}
                               className="w-full bg-background border border-border rounded-md px-2 py-1 text-xs">
                               {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => (
@@ -1098,7 +1098,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                         {/* Time picker */}
                         <div className="space-y-1">
-                          <label className="text-[10px] text-muted-foreground">Time (UTC)</label>
+                          <label className="text-[11px] text-muted-foreground">Time (UTC)</label>
                           <div className="flex gap-1 items-center">
                             <select value={editHour} onChange={(e) => setEditHour(parseInt(e.target.value))}
                               className="bg-background border border-border rounded-md px-1.5 py-0.5 text-xs w-14">
@@ -1113,7 +1113,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                                 <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
                               ))}
                             </select>
-                            <span className="text-[10px] text-muted-foreground">UTC</span>
+                            <span className="text-[11px] text-muted-foreground">UTC</span>
                           </div>
                         </div>
 
@@ -1133,7 +1133,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           <div className="bg-muted/50 rounded-lg p-2 flex items-center gap-2">
                             <Clock className="h-3 w-3 text-blue-400 flex-shrink-0" />
                             <div>
-                              <div className="text-[10px] text-muted-foreground">Next Run</div>
+                              <div className="text-[11px] text-muted-foreground">Next Run</div>
                               <div className="text-xs font-mono text-blue-400">
                                 {new Date(nextScheduledRun).toLocaleString('en-US', {
                                   weekday: 'short', month: 'short', day: 'numeric',
@@ -1144,7 +1144,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           </div>
                         )}
                         {lastScheduledRun && (
-                          <div className="text-[10px] text-muted-foreground">
+                          <div className="text-[11px] text-muted-foreground">
                             Last run: {formatTimestamp(lastScheduledRun)}
                           </div>
                         )}
@@ -1197,7 +1197,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
               {/* Filters + table — flat, no PanelHeader wrapper */}
               <div className="flex items-center gap-2 py-1">
-                <span className="text-[10px] text-gray-500">{filteredStrategies.length} of {strategies.length}</span>
+                <span className="text-[11px] text-gray-500">{filteredStrategies.length} of {strategies.length}</span>
                 <div className="relative ml-auto">
                   <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
                   <Input placeholder="Search..." value={strategySearch}
@@ -1230,7 +1230,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             <TabsContent value="activity" className="space-y-2 p-2">
               {/* Filters — flat inline row */}
               <div className="flex items-center gap-2 py-1">
-                <span className="text-[10px] text-gray-500">Last 50 orders · {filteredOrders.length} of {orders.length}</span>
+                <span className="text-[11px] text-gray-500">Last 50 orders · {filteredOrders.length} of {orders.length}</span>
                 <div className="relative ml-auto">
                   <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
                   <Input placeholder="Search symbol..." value={orderSearch}
@@ -1282,7 +1282,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     { label: 'Accept Rate', value: `${signalData?.summary.acceptance_rate ?? 0}%`, color: 'text-blue-400' },
                   ].map((m, i) => (
                     <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                      <div className="text-[10px] text-gray-500 uppercase tracking-wide">{m.label}</div>
+                      <div className="text-[11px] text-gray-500 uppercase tracking-wider">{m.label}</div>
                       <div className={cn('text-[13px] font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                     </div>
                   ))}
@@ -1348,23 +1348,23 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           .slice(0, 50)
                           .map((s) => (
                           <tr key={s.id} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/30">
-                            <td className="py-1 pr-2 text-[10px] text-gray-500 whitespace-nowrap">
+                            <td className="py-1 pr-2 text-[11px] text-gray-500 whitespace-nowrap">
                               {utcToLocal(s.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td className="py-1 pr-2 font-semibold text-gray-200">{s.symbol}</td>
                             <td className="py-1 pr-2">
-                              <span className={cn('px-1 py-0.5 rounded text-[9px]',
+                              <span className={cn('px-1 py-0.5 rounded text-[10px]',
                                 s.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>
                                 {s.side}
                               </span>
                             </td>
                             <td className="py-1 pr-2">
-                              <span className={cn('px-1 py-0.5 rounded text-[9px] font-semibold',
+                              <span className={cn('px-1 py-0.5 rounded text-[10px] font-semibold',
                                 s.decision === 'ACCEPTED' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>
                                 {s.decision}
                               </span>
                             </td>
-                            <td className="py-1 text-[10px] text-gray-500 truncate max-w-[150px]" title={s.rejection_reason || ''}>
+                            <td className="py-1 text-[11px] text-gray-500 truncate max-w-[150px]" title={s.rejection_reason || ''}>
                               {s.rejection_reason || '—'}
                             </td>
                           </tr>
@@ -1394,7 +1394,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   { label: 'Ret. Rate', value: `${retirementRate.toFixed(1)}%`, color: 'text-[#ef4444]' },
                 ].map((m, i) => (
                   <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                    <div className="text-[10px] text-gray-500 uppercase tracking-wide">{m.label}</div>
+                    <div className="text-[11px] text-gray-500 uppercase tracking-wider">{m.label}</div>
                     <div className={cn('text-[13px] font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                   </div>
                 ))}
@@ -1415,7 +1415,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           )} style={{ width: `${template.success_rate * 100}%` }} />
                         </div>
                         <span className="text-[11px] font-mono text-gray-400 w-[40px] text-right shrink-0">{(template.success_rate * 100).toFixed(0)}%</span>
-                        <span className="text-[9px] text-gray-600 w-[30px] text-right shrink-0">{template.usage_count}×</span>
+                        <span className="text-[10px] text-gray-600 w-[30px] text-right shrink-0">{template.usage_count}×</span>
                       </div>
                     ))}
                   </div>
@@ -1434,7 +1434,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       { label: 'Min Trades', value: '20' },
                     ].map((t, i) => (
                       <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                        <span className="text-[10px] text-gray-500">{t.label}</span>
+                        <span className="text-[11px] text-gray-500">{t.label}</span>
                         <span className="text-[12px] font-mono font-semibold text-gray-200">{t.value}</span>
                       </div>
                     ))}
@@ -1450,7 +1450,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       { label: 'Min Trades', value: '30' },
                     ].map((t, i) => (
                       <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                        <span className="text-[10px] text-gray-500">{t.label}</span>
+                        <span className="text-[11px] text-gray-500">{t.label}</span>
                         <span className="text-[12px] font-mono font-semibold text-gray-200">{t.value}</span>
                       </div>
                     ))}
@@ -1466,7 +1466,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 <div>
                   <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Cycle History</div>
                   {walkForwardLoading ? (
-                    <div className="flex items-center justify-center h-24 text-[10px] text-gray-500">Loading...</div>
+                    <div className="flex items-center justify-center h-24 text-[11px] text-gray-500">Loading...</div>
                   ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
                     <div className="overflow-x-auto max-h-[300px]">
                       <table className="w-full text-[10px] font-mono">
@@ -1495,7 +1495,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       </table>
                     </div>
                   ) : (
-                    <div className="text-center py-6 text-[10px] text-gray-500">No walk-forward data</div>
+                    <div className="text-center py-6 text-[11px] text-gray-500">No walk-forward data</div>
                   )}
                 </div>
 
@@ -1519,7 +1519,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
                     />
                   ) : (
-                    <div className="text-center py-6 text-[10px] text-gray-500">No pass rate history</div>
+                    <div className="text-center py-6 text-[11px] text-gray-500">No pass rate history</div>
                   )}
                 </div>
               </div>
@@ -1596,7 +1596,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                             </div>
                           );
                         })}
-                        <div className="flex flex-wrap gap-2 mt-3 text-[10px] text-muted-foreground">
+                        <div className="flex flex-wrap gap-2 mt-3 text-[11px] text-muted-foreground">
                           {factors.map((f) => (
                             <span key={f} className="flex items-center gap-1">
                               <span className="w-2.5 h-2.5 rounded" style={{ backgroundColor: factorColors[f] }} />
@@ -1646,7 +1646,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {lastCycleData && (
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <div>
-                    <div className="text-[10px] text-muted-foreground">Duration</div>
+                    <div className="text-[11px] text-muted-foreground">Duration</div>
                     <div className="text-xs font-mono font-semibold">
                       {lastCycleData.duration_seconds != null
                         ? lastCycleData.duration_seconds < 60
@@ -1656,11 +1656,11 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     </div>
                   </div>
                   <div>
-                    <div className="text-[10px] text-muted-foreground">Proposals</div>
+                    <div className="text-[11px] text-muted-foreground">Proposals</div>
                     <div className="text-xs font-mono font-semibold text-blue-400">{lastCycleData.proposals_generated}</div>
                   </div>
                   <div>
-                    <div className="text-[10px] text-muted-foreground">BT Pass Rate</div>
+                    <div className="text-[11px] text-muted-foreground">BT Pass Rate</div>
                     <div className="text-xs font-mono font-semibold text-purple-400">
                       {lastCycleData.backtested > 0
                         ? `${((lastCycleData.backtest_passed / lastCycleData.backtested) * 100).toFixed(0)}%`
@@ -1668,7 +1668,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     </div>
                   </div>
                   <div>
-                    <div className="text-[10px] text-muted-foreground">Net Activations</div>
+                    <div className="text-[11px] text-muted-foreground">Net Activations</div>
                     <div className={cn('text-xs font-mono font-semibold',
                       (lastCycleData.activated - lastCycleData.strategies_retired) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                       {lastCycleData.activated - lastCycleData.strategies_retired >= 0 ? '+' : ''}{lastCycleData.activated - lastCycleData.strategies_retired}
@@ -1695,7 +1695,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 />
               </div>
             ) : (
-              <div className="bg-muted rounded-lg p-3 text-center text-[10px] text-muted-foreground">
+              <div className="bg-muted rounded-lg p-3 text-center text-[11px] text-muted-foreground">
                 No pass rate history
               </div>
             )}
@@ -1714,7 +1714,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 )}>
                   {getRegimeIcon(autonomousStatus.market_regime)} {autonomousStatus.market_regime}
                 </div>
-                <div className="text-[10px] text-muted-foreground mt-1">
+                <div className="text-[11px] text-muted-foreground mt-1">
                   Confidence: <span className={getConfidenceLabel(autonomousStatus.market_confidence).color}>
                     {getConfidenceLabel(autonomousStatus.market_confidence).label}
                   </span> ({(autonomousStatus.market_confidence * 100).toFixed(0)}%)
@@ -1734,7 +1734,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   <div key={idx} className="bg-muted rounded-lg p-2 flex items-center justify-between">
                     <div className="min-w-0">
                       <div className="text-[10px] font-mono text-gray-300 truncate">{r.rejected_name || '—'}</div>
-                      <div className="text-[9px] text-muted-foreground truncate">vs {r.existing_name || '—'}</div>
+                      <div className="text-[11px] text-muted-foreground truncate">vs {r.existing_name || '—'}</div>
                     </div>
                     <span className="text-[10px] font-mono font-semibold text-accent-red shrink-0 ml-2">
                       {r.similarity != null ? `${(r.similarity * 100).toFixed(0)}%` : '—'}
@@ -1743,7 +1743,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 ))}
               </div>
             ) : (
-              <div className="bg-muted rounded-lg p-3 text-center text-[10px] text-muted-foreground">
+              <div className="bg-muted rounded-lg p-3 text-center text-[11px] text-muted-foreground">
                 No similarity rejections
               </div>
             )}
@@ -1757,19 +1757,19 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-[10px] text-muted-foreground">Last Cycle</div>
+                  <div className="text-[11px] text-muted-foreground">Last Cycle</div>
                   <div className="text-[10px] font-mono font-semibold text-gray-200">
                     {autonomousStatus.last_cycle_time ? formatTimestamp(autonomousStatus.last_cycle_time) : '—'}
                   </div>
                 </div>
                 <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-[10px] text-muted-foreground">Activated</div>
+                  <div className="text-[11px] text-muted-foreground">Activated</div>
                   <div className="text-lg font-mono font-semibold text-accent-green">
                     {autonomousStatus.cycle_stats.activated_count}
                   </div>
                 </div>
                 <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-[10px] text-muted-foreground">Retired</div>
+                  <div className="text-[11px] text-muted-foreground">Retired</div>
                   <div className="text-lg font-mono font-semibold text-accent-red">
                     {autonomousStatus.cycle_stats.retired_count}
                   </div>

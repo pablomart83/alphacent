@@ -419,11 +419,11 @@ export const TemplateManager: FC<TemplateManagerProps> = ({ category = 'all' }) 
                       <td className="px-3 py-2 text-center">
                         <div className="flex flex-wrap gap-0.5 justify-center">
                           {t.market_regimes.slice(0, 3).map(r => (
-                            <span key={r} className="text-[9px] px-1 py-0.5 rounded bg-dark-bg text-gray-500 border border-dark-border/50">
+                            <span key={r} className="text-[10px] px-1 py-0.5 rounded bg-dark-bg text-gray-500 border border-dark-border/50">
                               {r.replace('_', ' ').replace('ranging ', '').replace('trending ', '').slice(0, 8)}
                             </span>
                           ))}
-                          {t.market_regimes.length > 3 && <span className="text-[9px] text-gray-600">+{t.market_regimes.length - 3}</span>}
+                          {t.market_regimes.length > 3 && <span className="text-[10px] text-gray-600">+{t.market_regimes.length - 3}</span>}
                         </div>
                       </td>
                     </tr>
