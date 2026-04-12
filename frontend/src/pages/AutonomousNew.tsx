@@ -843,7 +843,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   // ── Main Panel (65%) — All existing tabs ───────────────────────────────
   const mainPanel = (
     <div className="flex flex-col h-full">
-      <PanelHeader title="Autonomous" panelId="autonomous-main" onRefresh={fetchData}>
+      <PanelHeader title="Control & Activity" panelId="autonomous-main" onRefresh={fetchData}>
         <div className="flex-1 p-2">
           <RefreshIndicator visible={pollingRefreshing || refreshing} />
 

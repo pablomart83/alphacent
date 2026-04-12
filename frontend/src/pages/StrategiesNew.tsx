@@ -78,6 +78,9 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
   const [blacklists, setBlacklists] = useState<any[]>([]);
   const [idleDemotions, setIdleDemotions] = useState<any[]>([]);
 
+  // Tab state for main panel
+  const [strategiesTab, setStrategiesTab] = useState('overview');
+
   // Fetch strategies
   const fetchStrategies = useCallback(async () => {
     if (!tradingMode) return;
@@ -1381,9 +1384,6 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
       </DashboardLayout>
     );
   }
-
-  // ── Tab state for main panel ──
-  const [strategiesTab, setStrategiesTab] = useState('overview');
 
   // ── Main Panel (65%) ─────────────────────────────────────────────────
   const strategyTabButtons = [

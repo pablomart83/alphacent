@@ -121,7 +121,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
   // ── Main Panel (60%) — 24h Event Timeline Hero + Service Status Cards ──
   const mainPanel = (
     <div className="flex flex-col h-full">
-      <PanelHeader title="System" panelId="syshealth-main" onRefresh={fetch}>
+      <PanelHeader title="Services" panelId="syshealth-main" onRefresh={fetch}>
         <div className="flex flex-col gap-2 p-2 h-full">
           {/* Alert Banner */}
           {(hasOpenCB || hasStaleMonitoring) && (

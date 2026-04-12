@@ -404,7 +404,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
   const mainPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader
-        title="Risk"
+        title="Analysis"
         panelId="risk-main"
         onRefresh={refresh}
       >
