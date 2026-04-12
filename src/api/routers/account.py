@@ -133,6 +133,8 @@ class PositionResponse(BaseModel):
     closed_at: Optional[str] = None
     etoro_position_id: str
     closure_reason: Optional[str] = None
+    invested_amount: Optional[float] = None
+    pending_closure: Optional[bool] = False
 
 
 class PositionsResponse(BaseModel):

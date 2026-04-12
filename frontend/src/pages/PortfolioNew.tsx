@@ -32,6 +32,12 @@ interface PortfolioNewProps {
   onLogout: () => void;
 }
 
+/** Get invested amount — prefer invested_amount field, fall back to quantity * entry_price */
+function getInvested(p: any): number {
+  if (p.invested_amount != null && p.invested_amount > 0) return p.invested_amount;
+  return (p.quantity || 0) * (p.entry_price || 0);
+}
+
 // Closed position type (for Tab 3)
 interface ClosedPosition {
   id: string;
@@ -182,7 +188,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           const closedAt = new Date(p.closed_at!);
           const holdingTimeHours = (closedAt.getTime() - openedAt.getTime()) / (1000 * 60 * 60);
           const realizedPnl = p.realized_pnl ?? 0;
-          const invested = (p as any).invested_amount || 0;
+          const invested = getInvested(p);
           const pnlPercent = invested > 0 && realizedPnl !== 0
             ? (realizedPnl / invested) * 100 
             : 0;
@@ -311,10 +317,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
   // Prepare allocation chart data
   const pieChartData = positions.reduce((acc, position) => {
-    const value = Math.abs(
-      (position as any).invested_amount ||
-      0
-    );
+    const value = Math.abs(getInvested(position));
     if (value === 0) return acc;
     const symbolName = position.symbol || 'Unknown';
     const existing = acc.find(item => item.name === symbolName);
@@ -348,10 +351,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     const map = new Map<string, number>();
     positions.forEach(p => {
       const sector = (p as any).sector || (p as any).asset_class || 'Other';
-      const value = Math.abs(
-        (p as any).invested_amount ||
-        0
-      );
+      const value = Math.abs(getInvested(p));
       map.set(sector, (map.get(sector) || 0) + value);
     });
     return Array.from(map.entries())
@@ -699,7 +699,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'quantity',
       header: () => <div className="text-right">Invested</div>,
       cell: ({ row }) => {
-        const invested = (row.original as any).invested_amount || 0;
+        const invested = getInvested(row.original);
         return <div className="text-right font-mono text-[13px]">{formatCurrency(invested)}</div>;
       },
     },
@@ -744,8 +744,8 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       id: 'portfolioPct',
       header: () => <div className="text-right">%Port</div>,
       cell: ({ row }) => {
-        const totalValue = positions.reduce((sum, p) => sum + Math.abs((p as any).invested_amount || 0), 0);
-        const posValue = Math.abs((row.original as any).invested_amount || 0);
+        const totalValue = positions.reduce((sum, p) => sum + Math.abs(getInvested(p)), 0);
+        const posValue = Math.abs(getInvested(row.original));
         const pct = totalValue > 0 ? (posValue / totalValue) * 100 : 0;
         return <div className="text-right font-mono text-[11px] text-muted-foreground">{pct.toFixed(1)}%</div>;
       },
@@ -1069,7 +1069,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono font-semibold text-[13px]">{position.symbol}</span>
                           <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono font-semibold', position.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{position.side}</span>
-                          <span className="text-[11px] text-muted-foreground font-mono">{formatCurrency((position as any).invested_amount || 0)}</span>
+                          <span className="text-[11px] text-muted-foreground font-mono">{formatCurrency(getInvested(position))}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           {position.closure_reason && <span className="text-[10px] text-amber-400">{position.closure_reason}</span>}
@@ -1406,7 +1406,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       >
         <div className="space-y-1.5 text-[11px] font-mono">
           <div className="flex justify-between"><span className="text-muted-foreground">Symbol</span><span>{confirmClosePosition?.symbol}</span></div>
-          <div className="flex justify-between"><span className="text-muted-foreground">Invested</span><span>{formatCurrency((confirmClosePosition as any)?.invested_amount || 0)}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Invested</span><span>{formatCurrency(getInvested(confirmClosePosition || {}))}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">P&L</span><span className={cn(
             (confirmClosePosition?.unrealized_pnl || 0) >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'
           )}>{formatCurrency(confirmClosePosition?.unrealized_pnl || 0)}</span></div>
