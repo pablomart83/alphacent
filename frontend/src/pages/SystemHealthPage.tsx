@@ -122,7 +122,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
   const mainPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="System" panelId="syshealth-main" onRefresh={fetch}>
-        <div className="flex flex-col gap-3 p-3 h-full">
+        <div className="flex flex-col gap-2 p-2 h-full">
           {/* Alert Banner */}
           {(hasOpenCB || hasStaleMonitoring) && (
             <div className="rounded-lg border p-3" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
@@ -293,7 +293,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
   const sidePanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Alerts" panelId="syshealth-side" onRefresh={fetch}>
-        <div className="flex flex-col gap-3 p-3 h-full">
+        <div className="flex flex-col gap-2 p-2 h-full">
           {/* CompactMetricRow: uptime, error rate, response, cache hit */}
           <CompactMetricRow metrics={sideMetrics} />
 
@@ -382,7 +382,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
   if (loading && !data) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="System Health" description="Backend services, circuit breakers, and API health" actions={headerActions}>
+        <PageTemplate title="System Health" description="Backend services, circuit breakers, and API health" actions={headerActions} compact={true}>
           <PageSkeleton />
         </PageTemplate>
       </DashboardLayout>
@@ -395,6 +395,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
         title="System Health"
         description="Backend services, circuit breakers, and API health"
         actions={headerActions}
+        compact={true}
       >
         <motion.div
           initial={{ opacity: 0 }}

@@ -345,7 +345,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
         panelId="data-side"
         onRefresh={fetchStatus}
       >
-        <div className="flex flex-col gap-3 p-3 h-full">
+        <div className="flex flex-col gap-2 p-2 h-full">
           {/* CompactMetricRow: healthy/degraded/stale counts + avg score */}
           <CompactMetricRow metrics={sideMetrics} />
 
@@ -582,7 +582,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
   if (loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="📊 Data Management" description="Market data sync, DB cache, and data freshness" actions={headerActions}>
+        <PageTemplate title="📊 Data Management" description="Market data sync, DB cache, and data freshness" actions={headerActions} compact={true}>
           <PageSkeleton />
         </PageTemplate>
       </DashboardLayout>
@@ -595,6 +595,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
         title="📊 Data Management"
         description="Market data sync, DB cache, and data freshness"
         actions={headerActions}
+        compact={true}
       >
         <motion.div
           initial={{ opacity: 0 }}

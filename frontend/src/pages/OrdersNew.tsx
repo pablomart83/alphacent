@@ -1093,7 +1093,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
           {/* Orders DenseTable with tabs — bottom ~60% */}
           <div className="flex-1 min-h-0 border-t border-[var(--color-dark-border)]">
             <Tabs defaultValue="all" className="flex flex-col h-full">
-              <div className="shrink-0 px-3 pt-2">
+              <div className="shrink-0 px-2 pt-1">
                 <TabsList className="w-full overflow-x-auto">
                   <TabsTrigger value="all">
                     All ({filteredOrders.length})
@@ -1111,7 +1111,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               </div>
 
               {/* All Orders Tab */}
-              <TabsContent value="all" className="flex-1 min-h-0 overflow-hidden px-3 pb-2">
+              <TabsContent value="all" className="flex-1 min-h-0 overflow-hidden px-2 pb-2">
                 <div className="flex flex-col h-full gap-2">
                   {/* Filters row */}
                   <div className="flex flex-wrap gap-2 shrink-0">
@@ -1261,7 +1261,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               </TabsContent>
 
               {/* Order Queue Tab */}
-              <TabsContent value="queue" className="flex-1 min-h-0 overflow-auto px-3 pb-2">
+              <TabsContent value="queue" className="flex-1 min-h-0 overflow-auto px-2 pb-2">
                 {/* Market Status Banner */}
                 <div className={cn(
                   'flex items-center justify-between p-3 rounded-lg border mb-3',
@@ -1351,7 +1351,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               </TabsContent>
 
               {/* Pending Closures Tab */}
-              <TabsContent value="pending-closures" className="flex-1 min-h-0 overflow-auto px-3 pb-2">
+              <TabsContent value="pending-closures" className="flex-1 min-h-0 overflow-auto px-2 pb-2">
                 {pendingClosures.length === 0 ? (
                   <div className="text-center py-8">
                     <div className="text-gray-400 font-mono text-sm mb-1">No pending closures</div>
@@ -1452,7 +1452,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               </TabsContent>
 
               {/* Execution Analytics Tab */}
-              <TabsContent value="analytics" className="flex-1 min-h-0 overflow-auto px-3 pb-2 space-y-4">
+              <TabsContent value="analytics" className="flex-1 min-h-0 overflow-auto px-2 pb-2 space-y-2">
                 {/* Period Selector */}
                 <div className="flex justify-end">
                   <div className="flex gap-1">
@@ -1567,7 +1567,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         panelId="orders-side"
         onRefresh={fetchExecutionQuality}
       >
-        <div className="flex flex-col gap-3 p-3 h-full">
+        <div className="flex flex-col gap-2 p-2 h-full">
           {/* CompactMetricRow: total orders, fill rate, avg slippage, pending */}
           <CompactMetricRow metrics={sideMetrics} />
 
@@ -1685,6 +1685,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         title="◆ Orders"
         description={tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading'}
         actions={headerActions}
+        compact={true}
       >
         <motion.div
           initial={{ opacity: 0 }}

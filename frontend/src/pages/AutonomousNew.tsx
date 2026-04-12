@@ -816,7 +816,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="🤖 Autonomous" description="Autonomous trading system">
+        <PageTemplate title="🤖 Autonomous" description="Autonomous trading system" compact={true}>
           <PageSkeleton />
         </PageTemplate>
       </DashboardLayout>
@@ -844,10 +844,10 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   const mainPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Autonomous" panelId="autonomous-main" onRefresh={fetchData}>
-        <div className="flex-1 p-3">
+        <div className="flex-1 p-2">
           <RefreshIndicator visible={pollingRefreshing || refreshing} />
 
-          <Tabs defaultValue="control" className="space-y-4">
+          <Tabs defaultValue="control" className="space-y-2">
             <TabsList className="w-full overflow-x-auto">
               <TabsTrigger value="control">Control & Status</TabsTrigger>
               <TabsTrigger value="lifecycle">
@@ -863,7 +863,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsList>
 
             {/* Tab 1: Control & Status */}
-            <TabsContent value="control" className="space-y-4">
+            <TabsContent value="control" className="space-y-2">
               {/* Status Badges */}
               <div className="flex items-center justify-between">
                 <div className="flex gap-3 flex-wrap">
@@ -970,7 +970,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <TradingCyclePipeline cycleRunning={triggering || (cycleProgress > 0 && cycleProgress < 100)} />
 
               {/* Controls + System — 2-column grid */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
                 {/* Left Column - Controls */}
                 <PanelHeader title="Controls" panelId="autonomous-controls">
                   <div className="p-3 space-y-4">
@@ -1204,7 +1204,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 2: Strategy Lifecycle */}
-            <TabsContent value="lifecycle" className="space-y-4">
+            <TabsContent value="lifecycle" className="space-y-2">
               {/* Lifecycle Visualization */}
               <PanelHeader title="Strategy Lifecycle Flow" panelId="autonomous-lifecycle-flow">
                 <div className="p-3">
@@ -1287,7 +1287,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 3: Recent Activity */}
-            <TabsContent value="activity" className="space-y-4">
+            <TabsContent value="activity" className="space-y-2">
               <PanelHeader title="Recent Autonomous Orders" panelId="autonomous-orders">
                 <div className="p-3">
                   <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
@@ -1339,7 +1339,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 4: Signal Activity */}
-            <TabsContent value="signals" className="space-y-4">
+            <TabsContent value="signals" className="space-y-2">
               <div className="flex items-center justify-between mb-2">
                 <div />
                 <Button variant="outline" size="sm" onClick={handleRefreshSignals} disabled={signalRefreshing} className="gap-2 h-7 text-xs">
@@ -1450,7 +1450,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 5: Performance */}
-            <TabsContent value="performance" className="space-y-4">
+            <TabsContent value="performance" className="space-y-2">
               <PanelHeader title="Performance Summary" panelId="autonomous-perf-summary">
                 <div className="p-3">
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -1568,7 +1568,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 6: Walk-Forward Analytics */}
-            <TabsContent value="walkforward" className="space-y-4">
+            <TabsContent value="walkforward" className="space-y-2">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <PanelHeader title="Walk-Forward Analytics" panelId="autonomous-wf-analytics">
                   <div className="p-3">
@@ -1660,7 +1660,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             </TabsContent>
 
             {/* Tab 7: Conviction Score */}
-            <TabsContent value="conviction" className="space-y-4">
+            <TabsContent value="conviction" className="space-y-2">
               <PanelHeader title="Conviction Score Decomposition" panelId="autonomous-conviction">
                 <div className="p-3">
                   {(() => {
@@ -1728,7 +1728,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   const sidePanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Cycle Intelligence" panelId="autonomous-side" onRefresh={fetchData}>
-        <div className="flex flex-col gap-3 p-3">
+        <div className="flex flex-col gap-2 p-2">
           {/* Compact Metric Row */}
           <CompactMetricRow metrics={sideMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
 
@@ -1900,6 +1900,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
         title="🤖 Autonomous"
         description="Monitor and control the autonomous trading system"
         actions={headerActions}
+        compact={true}
       >
         <motion.div
           initial={{ opacity: 0 }}

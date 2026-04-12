@@ -411,7 +411,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
         <div className="flex flex-col h-full">
           {/* CorrelationHeatmap hero — top ~50% */}
           <div className="shrink-0" style={{ height: '50%', minHeight: '200px' }}>
-            <div className="p-3 h-full overflow-auto">
+            <div className="p-2 h-full overflow-auto">
               <div className="text-[10px] text-gray-500 mb-1 font-semibold uppercase tracking-wide">Position Correlations</div>
               {correlationMatrix.length > 0 ? (
                 <CorrelationHeatmap
@@ -436,7 +436,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
           {/* Tabs below — bottom ~50% */}
           <div className="flex-1 min-h-0 border-t border-[var(--color-dark-border)]">
             <Tabs defaultValue="overview" className="flex flex-col h-full">
-              <div className="shrink-0 px-3 pt-2">
+              <div className="shrink-0 px-2 pt-1">
                 <TabsList className="w-full overflow-x-auto">
                   <TabsTrigger value="overview">Overview</TabsTrigger>
                   <TabsTrigger value="positions">Positions ({filteredPositions.length})</TabsTrigger>
@@ -446,9 +446,9 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 </TabsList>
               </div>
 
-              <div className="flex-1 min-h-0 overflow-auto px-3 pb-3">
+              <div className="flex-1 min-h-0 overflow-auto px-2 pb-2">
                 {/* Overview Tab */}
-                <TabsContent value="overview" className="space-y-4 mt-3">
+                <TabsContent value="overview" className="space-y-2 mt-2">
                   {/* Risk Status Banner */}
                   <PanelHeader title="Risk Status" panelId="risk-status-card">
                     <div className={cn(
@@ -492,7 +492,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                   </PanelHeader>
 
                   {/* Risk Metrics Grid */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-2">
                     <MetricCard label="VaR (95%)" value={riskMetrics?.var_95 || 0} format="currency" icon={TrendingDown} tooltip="Value at Risk at 95% confidence level" />
                     <MetricCard label="Max Drawdown" value={riskMetrics?.max_drawdown || 0} format="percentage" icon={TrendingDown} tooltip="Maximum peak-to-trough decline" />
                     <MetricCard label="Current Drawdown" value={riskMetrics?.current_drawdown || 0} format="percentage" trend={riskMetrics && riskMetrics.current_drawdown > 5 ? 'down' : 'neutral'} icon={Activity} tooltip="Current drawdown from peak" />
@@ -571,7 +571,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 </TabsContent>
 
                 {/* Positions Tab */}
-                <TabsContent value="positions" className="space-y-3 mt-3">
+                <TabsContent value="positions" className="space-y-2 mt-2">
                   <PanelHeader title="Position Risk Analysis" panelId="risk-positions-card">
                     <div className="p-3">
                       <div className="flex flex-col sm:flex-row gap-2 mb-3">
@@ -605,7 +605,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 </TabsContent>
 
                 {/* Advanced Tab */}
-                <TabsContent value="advanced" className="space-y-4 mt-3">
+                <TabsContent value="advanced" className="space-y-2 mt-2">
                   {/* VaR Section */}
                   <PanelHeader title="Value at Risk (VaR)" panelId="risk-var-card">
                     <div className="p-3">
@@ -701,7 +701,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 </TabsContent>
 
                 {/* History Tab */}
-                <TabsContent value="history" className="space-y-4 mt-3">
+                <TabsContent value="history" className="space-y-2 mt-2">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs text-muted-foreground">Historical risk metrics</span>
                     <Select value={timePeriod} onValueChange={(v) => setTimePeriod(v as typeof timePeriod)}>
@@ -757,7 +757,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 </TabsContent>
 
                 {/* Exposure Tab */}
-                <TabsContent value="exposure" className="space-y-4 mt-3">
+                <TabsContent value="exposure" className="space-y-2 mt-2">
                   <PanelHeader title="Sector Exposure" panelId="risk-sector-exposure-tab">
                     <div className="p-3">
                       {sectorPieData.length > 0 ? (
@@ -816,8 +816,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
         panelId="risk-side"
         onRefresh={refresh}
       >
-        <div className="flex flex-col gap-3 p-3 h-full">
-          {/* CompactMetricRow: VaR, max sector exposure, long/short ratio, beta */}
+        <div className="flex flex-col gap-2 p-2 h-full">
           <CompactMetricRow metrics={sideMetrics} />
 
           {/* Sector Exposure Pie */}
@@ -908,7 +907,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="⚠️ Risk Management" description="Loading...">
+        <PageTemplate title="⚠️ Risk Management" description="Loading..." compact={true}>
           <PageSkeleton />
         </PageTemplate>
       </DashboardLayout>
@@ -919,7 +918,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
   if (fetchError && !riskMetrics) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="⚠️ Risk Management" description="Error loading data">
+        <PageTemplate title="⚠️ Risk Management" description="Error loading data" compact={true}>
           <div className="flex flex-col items-center justify-center h-64 gap-4">
             <AlertCircle className="h-12 w-12 text-accent-red" />
             <h2 className="text-lg font-semibold text-accent-red">{fetchError.title}</h2>
@@ -942,6 +941,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
         title="⚠️ Risk Management"
         description={tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading'}
         actions={headerActions}
+        compact={true}
       >
         <motion.div
           initial={{ opacity: 0 }}

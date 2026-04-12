@@ -1,9 +1,8 @@
 import { type FC, useEffect, useState, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { 
-  TrendingUp, Target, Activity, BarChart3, Search,
+  Target, Activity, Search,
   MoreVertical, Eye, Pause, Trash2, PlayCircle, RefreshCw,
-  Layers, Ban, ArrowDownCircle, Trophy,
 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { DashboardLayout } from '../components/DashboardLayout';
@@ -11,11 +10,9 @@ import { PageTemplate } from '../components/PageTemplate';
 import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
 import { PanelHeader } from '../components/layout/PanelHeader';
 import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
-import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
 import { TemplateManager } from '../components/trading/TemplateManager';
 import { SymbolManager } from '../components/trading/SymbolManager';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Input } from '../components/ui/Input';
@@ -1385,900 +1382,574 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     );
   }
 
+  // ── Tab state for main panel ──
+  const [strategiesTab, setStrategiesTab] = useState('overview');
+
   // ── Main Panel (65%) ─────────────────────────────────────────────────
+  const strategyTabButtons = [
+    { value: 'overview', label: 'Overview' },
+    { value: 'active', label: `Active (${filteredActiveStrategies.length})` },
+    { value: 'backtested', label: `Backtested (${filteredBacktestedStrategies.length})` },
+    { value: 'retired', label: `Retired (${filteredRetiredStrategies.length})` },
+    { value: 'templates', label: 'Templates' },
+    { value: 'ae-templates', label: 'AE Templates' },
+    { value: 'symbols', label: 'Symbols' },
+    { value: 'rankings', label: 'Rankings' },
+    { value: 'blacklists', label: `Blacklists (${blacklists.length})` },
+    { value: 'demotions', label: `Demotions (${idleDemotions.length})` },
+  ];
+
   const mainPanel = (
     <div className="flex flex-col h-full">
-      <PanelHeader
-        title="Strategies"
-        panelId="strategies-main"
-        onRefresh={fetchStrategies}
-      >
-        <div className="flex flex-col h-full">
+      {/* Single 32px header row: title + inline tabs + actions */}
+      <div className="flex items-center px-3 min-h-[32px] max-h-[32px] shrink-0 bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]">
+        <h3 className="text-xs font-semibold text-gray-300 mr-3 shrink-0">Strategies</h3>
+        <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide flex-1 min-w-0">
+          {strategyTabButtons.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => {
+                setStrategiesTab(tab.value);
+                if (tab.value === 'retired') fetchRetiredStrategies();
+              }}
+              className={cn(
+                'px-2 py-1 text-[10px] font-medium rounded whitespace-nowrap transition-colors shrink-0',
+                strategiesTab === tab.value
+                  ? 'bg-gray-700/60 text-gray-100'
+                  : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/40'
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1 shrink-0 ml-2">
+          <button
+            onClick={fetchStrategies}
+            className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={12} className={cn(refreshing && 'animate-spin')} />
+          </button>
+        </div>
+      </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="overview" className="flex flex-col h-full">
-          <div className="shrink-0 px-3 pt-2">
-            <TabsList className="w-full overflow-x-auto">
-              <TabsTrigger value="overview" className="gap-2">
-                <BarChart3 className="h-4 w-4" />
-                Overview
-              </TabsTrigger>
-              <TabsTrigger value="active" className="gap-2">
-                <TrendingUp className="h-4 w-4" />
-                Active ({filteredActiveStrategies.length})
-              </TabsTrigger>
-              <TabsTrigger value="backtested" className="gap-2">
-                <Activity className="h-4 w-4" />
-                Backtested ({filteredBacktestedStrategies.length})
-              </TabsTrigger>
-              <TabsTrigger value="retired" onClick={fetchRetiredStrategies} className="gap-2">
-                <Trash2 className="h-4 w-4" />
-                Retired ({filteredRetiredStrategies.length})
-              </TabsTrigger>
-              <TabsTrigger value="templates" className="gap-2">
-                <Layers className="h-4 w-4" />
-                DSL Templates
-              </TabsTrigger>
-              <TabsTrigger value="ae-templates" className="gap-2">
-                <Layers className="h-4 w-4" />
-                AE Templates
-              </TabsTrigger>
-              <TabsTrigger value="symbols" className="gap-2">
-                <Target className="h-4 w-4" />
-                Symbols
-              </TabsTrigger>
-              <TabsTrigger value="rankings" className="gap-2">
-                <Trophy className="h-4 w-4" />
-                Rankings
-              </TabsTrigger>
-              <TabsTrigger value="blacklists" className="gap-2">
-                <Ban className="h-4 w-4" />
-                Blacklists ({blacklists.length})
-              </TabsTrigger>
-              <TabsTrigger value="demotions" className="gap-2">
-                <ArrowDownCircle className="h-4 w-4" />
-                Demotions ({idleDemotions.length})
-              </TabsTrigger>
-            </TabsList>
-          </div>
+      {/* Tab content */}
+      <div className="flex-1 min-h-0 overflow-auto">
+        <Tabs value={strategiesTab} onValueChange={(v) => { setStrategiesTab(v); if (v === 'retired') fetchRetiredStrategies(); }} className="flex flex-col h-full">
+          {/* Hidden TabsList — we use custom buttons above */}
+          <TabsList className="hidden">
+            {strategyTabButtons.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value}>{tab.label}</TabsTrigger>
+            ))}
+          </TabsList>
 
-          <div className="flex-1 min-h-0 overflow-auto px-3 pb-2">
+          <div className="flex-1 min-h-0 overflow-auto">
 
           {/* Overview Tab */}
-          <TabsContent value="overview" className="space-y-4">
-            {/* Summary Metrics */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <MetricCard
-                label="Total Active"
-                value={summaryMetrics.active.toString()}
-                icon={TrendingUp}
-                trend="neutral"
-              />
-              <MetricCard
-                label="Total Backtested"
-                value={summaryMetrics.backtested.toString()}
-                icon={Activity}
-                trend="neutral"
-              />
-              <MetricCard
-                label="Avg Performance"
-                value={formatPercentage(summaryMetrics.avgPerformance * 100)}
-                icon={BarChart3}
-                trend={summaryMetrics.avgPerformance >= 0 ? 'up' : 'down'}
-              />
-              <MetricCard
-                label="Success Rate"
-                value={formatPercentage(summaryMetrics.successRate)}
-                icon={Target}
-                trend={summaryMetrics.successRate >= 50 ? 'up' : 'down'}
-              />
+          <TabsContent value="overview" className="p-2 space-y-2">
+            {/* Summary Metrics — simple inline grid, no Card wrappers */}
+            <div className="grid grid-cols-4 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
+              {[
+                { label: 'Active', value: summaryMetrics.active, color: summaryMetrics.active > 0 ? 'text-accent-green' : 'text-gray-300' },
+                { label: 'Backtested', value: summaryMetrics.backtested, color: 'text-gray-300' },
+                { label: 'Avg Perf', value: formatPercentage(summaryMetrics.avgPerformance * 100), color: summaryMetrics.avgPerformance >= 0 ? 'text-accent-green' : 'text-accent-red' },
+                { label: 'Success Rate', value: formatPercentage(summaryMetrics.successRate), color: summaryMetrics.successRate >= 50 ? 'text-accent-green' : 'text-accent-red' },
+              ].map((m, i) => (
+                <div key={i} className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[9px] text-gray-500 uppercase tracking-wide">{m.label}</div>
+                  <div className={cn('text-sm font-mono font-bold', m.color)}>{m.value}</div>
+                </div>
+              ))}
             </div>
 
-            {/* Template Distribution */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5" />
-                  Template Distribution
-                </CardTitle>
-                <CardDescription>Active strategies by template</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {templateDistribution.map(({ name, count }) => (
-                    <div key={name} className="flex items-center justify-between">
-                      <span className="text-sm font-mono text-gray-300">{name}</span>
-                      <div className="flex items-center gap-3">
-                        <div className="w-32 h-2 bg-dark-surface rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-accent-green"
-                            style={{ width: `${(count / activeStrategies.length) * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-sm font-mono text-gray-400 w-12 text-right">{count}</span>
-                      </div>
+            {/* Template Distribution — simple bars, no Card */}
+            <div className="border-t border-[var(--color-dark-border)] pt-2">
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">Template Distribution</div>
+              <div className="space-y-1">
+                {templateDistribution.map(({ name, count }) => (
+                  <div key={name} className="flex items-center gap-2 px-1">
+                    <span className="text-[11px] font-mono text-gray-400 w-28 truncate">{name}</span>
+                    <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-accent-green" style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
                     </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Strategy Distribution Charts */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Category Distribution */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Target className="h-5 w-5" />
-                    Category Distribution
-                  </CardTitle>
-                  <CardDescription>Active strategies by category</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {categoryDistribution.map(({ name, count }) => (
-                      <div key={name} className="flex items-center justify-between">
-                        <span className="text-sm font-mono text-gray-300">{name}</span>
-                        <div className="flex items-center gap-3">
-                          <div className="w-32 h-2 bg-dark-surface rounded-full overflow-hidden">
-                            <div 
-                              className={cn(
-                                "h-full",
-                                name === 'Alpha Edge' && "bg-purple-500",
-                                name === 'Template-Based' && "bg-blue-500",
-                                name === 'Manual' && "bg-gray-500"
-                              )}
-                              style={{ width: `${(count / activeStrategies.length) * 100}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-mono text-gray-400 w-12 text-right">{count}</span>
-                        </div>
-                      </div>
-                    ))}
-                    {categoryDistribution.length === 0 && (
-                      <div className="text-center text-gray-500 text-sm py-4">
-                        No active strategies
-                      </div>
-                    )}
+                    <span className="text-[10px] font-mono text-gray-500 w-6 text-right">{count}</span>
                   </div>
-                </CardContent>
-              </Card>
-
-              {/* Type Distribution */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5" />
-                    Type Distribution
-                  </CardTitle>
-                  <CardDescription>Active strategies by type</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {typeDistribution.map(({ name, count }) => (
-                      <div key={name} className="flex items-center justify-between">
-                        <span className="text-sm font-mono text-gray-300">{name}</span>
-                        <div className="flex items-center gap-3">
-                          <div className="w-32 h-2 bg-dark-surface rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-accent-green"
-                              style={{ width: `${(count / activeStrategies.length) * 100}%` }}
-                            />
-                          </div>
-                          <span className="text-sm font-mono text-gray-400 w-12 text-right">{count}</span>
-                        </div>
-                      </div>
-                    ))}
-                    {typeDistribution.length === 0 && (
-                      <div className="text-center text-gray-500 text-sm py-4">
-                        No template-based strategies
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+                ))}
+              </div>
             </div>
 
-            {/* Top Performing Strategies */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5" />
-                  Top Performing Strategies
-                </CardTitle>
-                <CardDescription>Top 5 strategies by return</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {topPerformingStrategies.map((strategy, index) => (
-                    <div key={strategy.id} className="flex items-center justify-between p-3 bg-dark-surface rounded-lg border border-dark-border">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-accent-green/20 text-accent-green font-mono font-bold text-sm">
-                          {index + 1}
-                        </div>
-                        <div>
-                          <div className="font-mono font-semibold text-sm text-gray-200">{strategy.name}</div>
-                          <div className="text-xs text-gray-500 font-mono">{strategy.symbols.join(', ')}</div>
-                        </div>
+            {/* Category + Type Distribution — side by side, no Card */}
+            <div className="grid grid-cols-2 gap-2 border-t border-[var(--color-dark-border)] pt-2">
+              <div>
+                <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">By Category</div>
+                <div className="space-y-1">
+                  {categoryDistribution.map(({ name, count }) => (
+                    <div key={name} className="flex items-center gap-2 px-1">
+                      <span className="text-[11px] font-mono text-gray-400 w-24 truncate">{name}</span>
+                      <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                        <div className={cn("h-full", name === 'Alpha Edge' ? "bg-purple-500" : name === 'Template-Based' ? "bg-blue-500" : "bg-gray-500")}
+                          style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
                       </div>
-                      <div className="text-right">
-                        <div className={cn(
-                          'font-mono font-bold text-sm',
-                          (strategy.performance_metrics?.total_return || 0) >= 0 ? 'text-accent-green' : 'text-accent-red'
-                        )}>
-                          {formatPercentage((strategy.performance_metrics?.total_return || 0) * 100)}
-                        </div>
-                        <div className="text-xs text-gray-500 font-mono">
-                          Sharpe: {formatMetric(strategy.performance_metrics?.sharpe_ratio)}
-                        </div>
-                      </div>
+                      <span className="text-[10px] font-mono text-gray-500 w-6 text-right">{count}</span>
                     </div>
                   ))}
-                  {topPerformingStrategies.length === 0 && (
-                    <div className="text-center text-gray-500 text-sm py-8">
-                      No active strategies with performance data
-                    </div>
-                  )}
+                  {categoryDistribution.length === 0 && <div className="text-[10px] text-gray-600 px-1">No data</div>}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+              <div>
+                <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">By Type</div>
+                <div className="space-y-1">
+                  {typeDistribution.map(({ name, count }) => (
+                    <div key={name} className="flex items-center gap-2 px-1">
+                      <span className="text-[11px] font-mono text-gray-400 w-24 truncate">{name}</span>
+                      <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-accent-green" style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
+                      </div>
+                      <span className="text-[10px] font-mono text-gray-500 w-6 text-right">{count}</span>
+                    </div>
+                  ))}
+                  {typeDistribution.length === 0 && <div className="text-[10px] text-gray-600 px-1">No data</div>}
+                </div>
+              </div>
+            </div>
+
+            {/* Top Performing — simple list, no Card */}
+            <div className="border-t border-[var(--color-dark-border)] pt-2">
+              <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">Top 5 by Return</div>
+              <div className="space-y-0.5">
+                {topPerformingStrategies.map((strategy, index) => (
+                  <div key={strategy.id} className="flex items-center justify-between px-2 py-1.5 hover:bg-gray-800/40 rounded">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[10px] font-mono text-gray-500 w-4">{index + 1}</span>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-mono text-gray-200 truncate">{strategy.name}</div>
+                        <div className="text-[9px] text-gray-500 font-mono truncate">{strategy.symbols.join(', ')}</div>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 ml-2">
+                      <div className={cn('text-[11px] font-mono font-bold', (strategy.performance_metrics?.total_return || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                        {formatPercentage((strategy.performance_metrics?.total_return || 0) * 100)}
+                      </div>
+                      <div className="text-[9px] text-gray-500 font-mono">S: {formatMetric(strategy.performance_metrics?.sharpe_ratio)}</div>
+                    </div>
+                  </div>
+                ))}
+                {topPerformingStrategies.length === 0 && (
+                  <div className="text-center text-gray-600 text-[10px] py-4">No active strategies</div>
+                )}
+              </div>
+            </div>
           </TabsContent>
 
           {/* Active Strategies Tab */}
-          <TabsContent value="active" className="space-y-4">
-            {/* Filters */}
-            <PanelHeader title="Filters" panelId="strategies-active-filters">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  <div className="relative xl:col-span-2">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-                    <Input
-                      placeholder="Search by name or symbol..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                  
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="BACKTESTED">Backtested</SelectItem>
-                      <SelectItem value="DEMO">Demo</SelectItem>
-                      <SelectItem value="LIVE">Live</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      <SelectItem value="alpha_edge">Alpha Edge</SelectItem>
-                      <SelectItem value="template_based">Template-Based</SelectItem>
-                      <SelectItem value="manual">Manual</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={typeFilter} onValueChange={setTypeFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Types</SelectItem>
-                      {availableTypes.map(type => (
-                        <SelectItem key={type} value={type}>
-                          {type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={templateFilter} onValueChange={setTemplateFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Template" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Templates</SelectItem>
-                      {availableTemplates.map(template => (
-                        <SelectItem key={template} value={template}>{template}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={regimeFilter} onValueChange={setRegimeFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Regime" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Regimes</SelectItem>
-                      {availableRegimes.map(regime => (
-                        <SelectItem key={regime} value={regime}>{regime}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Sources</SelectItem>
-                      <SelectItem value="TEMPLATE">Autonomous</SelectItem>
-                      <SelectItem value="USER">Manual</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Bulk Actions */}
-                {selectedStrategies.size > 0 && (
-                  <div className="flex items-center gap-3 pt-4 border-t border-dark-border">
-                    <span className="text-xs text-gray-500 font-mono">
-                      {selectedStrategies.size} selected
-                    </span>
-                    <Button
-                      onClick={handleBulkBacktest}
-                      variant="outline"
-                      size="sm"
-                    >
-                      <Activity className="h-4 w-4 mr-2" />
-                      Backtest Selected
-                    </Button>
-                    {selectedStrategiesInfo.hasBacktested && (
-                      <Button
-                        onClick={handleBulkActivate}
-                        variant="outline"
-                        size="sm"
-                        className="text-accent-green border-accent-green/30 hover:bg-accent-green/10"
-                      >
-                        <PlayCircle className="h-4 w-4 mr-2" />
-                        Activate Selected
-                      </Button>
-                    )}
-                    {selectedStrategiesInfo.hasActive && (
-                      <Button
-                        onClick={handleBulkDeactivate}
-                        variant="outline"
-                        size="sm"
-                        className="text-yellow-500 border-yellow-500/30 hover:bg-yellow-500/10"
-                      >
-                        <Pause className="h-4 w-4 mr-2" />
-                        Deactivate Selected
-                      </Button>
-                    )}
-                    <Button
-                      onClick={handleBulkRetire}
-                      variant="destructive"
-                      size="sm"
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Retire Selected
-                    </Button>
-                    {selectedStrategies.size === 2 && (
-                      <Button
-                        onClick={() => {
-                          const selected = Array.from(selectedStrategies)
-                            .map(id => strategies.find(s => s.id === id))
-                            .filter(Boolean) as Strategy[];
-                          if (selected.length === 2) {
-                            setComparedStrategies([selected[0], selected[1]]);
-                            setShowComparison(true);
-                          }
-                        }}
-                        variant="outline"
-                        size="sm"
-                        className="text-blue-400 border-blue-400/30 hover:bg-blue-400/10"
-                      >
-                        <BarChart3 className="h-4 w-4 mr-2" />
-                        Compare Selected
-                      </Button>
-                    )}
-                    <Button
-                      onClick={() => setSelectedStrategies(new Set())}
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto"
-                    >
-                      Clear Selection
-                    </Button>
-                  </div>
-                )}
-            </PanelHeader>
-
-            {/* Strategies Table */}
-            <PanelHeader title="Active Strategies" panelId="strategies-active-table"
-              actions={<span className="text-[10px] font-mono text-gray-400">
-                {selectedStrategies.size > 0 
-                  ? `${selectedStrategies.size} selected of ${filteredActiveStrategies.length}`
-                  : `${filteredActiveStrategies.length} of ${activeStrategies.length}`
-                }
-              </span>}
-            >
-              <div className="overflow-x-auto p-3">
-                <DataTable
-                  columns={activeStrategyColumns}
-                  data={filteredActiveStrategies}
-                  pageSize={20}
-                  getRowId={(row) => row.id}
-                  rowSelection={Object.fromEntries(
-                    Array.from(selectedStrategies).map(id => [id, true])
-                  )}
-                  onRowSelectionChange={(updaterOrValue) => {
-                    const currentSelection = Object.fromEntries(
-                      Array.from(selectedStrategies).map(id => [id, true])
-                    );
-                    const newSelection = typeof updaterOrValue === 'function' 
-                      ? updaterOrValue(currentSelection)
-                      : updaterOrValue;
-                    setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
-                  }}
-                />
+          <TabsContent value="active" className="p-2 space-y-2">
+            {/* Inline filters row */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
+                <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-7 h-7 text-xs" />
               </div>
-            </PanelHeader>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="BACKTESTED">Backtested</SelectItem>
+                  <SelectItem value="DEMO">Demo</SelectItem>
+                  <SelectItem value="LIVE">Live</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Category" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="alpha_edge">Alpha Edge</SelectItem>
+                  <SelectItem value="template_based">Template-Based</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Type" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {availableTypes.map(type => (
+                    <SelectItem key={type} value={type}>{type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={templateFilter} onValueChange={setTemplateFilter}>
+                <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Template" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Templates</SelectItem>
+                  {availableTemplates.map(template => (
+                    <SelectItem key={template} value={template}>{template}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={regimeFilter} onValueChange={setRegimeFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Regime" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Regimes</SelectItem>
+                  {availableRegimes.map(regime => (
+                    <SelectItem key={regime} value={regime}>{regime}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Source" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sources</SelectItem>
+                  <SelectItem value="TEMPLATE">Autonomous</SelectItem>
+                  <SelectItem value="USER">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Bulk Actions */}
+            {selectedStrategies.size > 0 && (
+              <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
+                <span className="text-[10px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[10px] px-2">Backtest</Button>
+                {selectedStrategiesInfo.hasBacktested && (
+                  <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-accent-green border-accent-green/30">Activate</Button>
+                )}
+                {selectedStrategiesInfo.hasActive && (
+                  <Button onClick={handleBulkDeactivate} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-yellow-500 border-yellow-500/30">Deactivate</Button>
+                )}
+                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[10px] px-2">Retire</Button>
+                {selectedStrategies.size === 2 && (
+                  <Button onClick={() => {
+                    const selected = Array.from(selectedStrategies).map(id => strategies.find(s => s.id === id)).filter(Boolean) as Strategy[];
+                    if (selected.length === 2) { setComparedStrategies([selected[0], selected[1]]); setShowComparison(true); }
+                  }} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-blue-400 border-blue-400/30">Compare</Button>
+                )}
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[10px] px-2 ml-auto">Clear</Button>
+              </div>
+            )}
+
+            {/* Table count + edge-to-edge DataTable */}
+            <div className="text-[10px] font-mono text-gray-500 px-1">
+              {selectedStrategies.size > 0 ? `${selectedStrategies.size} selected of ${filteredActiveStrategies.length}` : `${filteredActiveStrategies.length} of ${activeStrategies.length}`}
+            </div>
+            <DataTable
+              columns={activeStrategyColumns}
+              data={filteredActiveStrategies}
+              pageSize={20}
+              getRowId={(row) => row.id}
+              rowSelection={Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]))}
+              onRowSelectionChange={(updaterOrValue) => {
+                const currentSelection = Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]));
+                const newSelection = typeof updaterOrValue === 'function' ? updaterOrValue(currentSelection) : updaterOrValue;
+                setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
+              }}
+            />
           </TabsContent>
 
           {/* Backtested Strategies Tab */}
-          <TabsContent value="backtested" className="space-y-4">
-            {/* Filters */}
-            <PanelHeader title="Filters" panelId="strategies-backtested-filters">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  <div className="relative xl:col-span-2">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-                    <Input
-                      placeholder="Search by name or symbol..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-
-                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      <SelectItem value="alpha_edge">Alpha Edge</SelectItem>
-                      <SelectItem value="template_based">Template-Based</SelectItem>
-                      <SelectItem value="manual">Manual</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={typeFilter} onValueChange={setTypeFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Types</SelectItem>
-                      {availableTypes.map(type => (
-                        <SelectItem key={type} value={type}>
-                          {type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  
-                  <Select value={templateFilter} onValueChange={setTemplateFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Template" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Templates</SelectItem>
-                      {availableTemplates.map(template => (
-                        <SelectItem key={template} value={template}>{template}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={regimeFilter} onValueChange={setRegimeFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Regime" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Regimes</SelectItem>
-                      {availableRegimes.map(regime => (
-                        <SelectItem key={regime} value={regime}>{regime}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Sources</SelectItem>
-                      <SelectItem value="TEMPLATE">Autonomous</SelectItem>
-                      <SelectItem value="USER">Manual</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Bulk Actions for Backtested */}
-                {selectedStrategies.size > 0 && (
-                  <div className="flex items-center gap-3 pt-4 border-t border-dark-border">
-                    <span className="text-xs text-gray-500 font-mono">
-                      {selectedStrategies.size} selected
-                    </span>
-                    <Button
-                      onClick={handleBulkBacktest}
-                      variant="outline"
-                      size="sm"
-                    >
-                      <Activity className="h-4 w-4 mr-2" />
-                      Re-Backtest Selected
-                    </Button>
-                    <Button
-                      onClick={handleBulkActivate}
-                      variant="outline"
-                      size="sm"
-                      className="text-accent-green border-accent-green/30 hover:bg-accent-green/10"
-                    >
-                      <PlayCircle className="h-4 w-4 mr-2" />
-                      Activate Selected
-                    </Button>
-                    <Button
-                      onClick={handleBulkRetire}
-                      variant="destructive"
-                      size="sm"
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Retire Selected
-                    </Button>
-                    <Button
-                      onClick={() => setSelectedStrategies(new Set())}
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto"
-                    >
-                      Clear Selection
-                    </Button>
-                  </div>
-                )}
-            </PanelHeader>
-
-            {/* Backtested Strategies Table */}
-            <PanelHeader title="Backtested Strategies" panelId="strategies-backtested-table"
-              actions={<span className="text-[10px] font-mono text-gray-400">
-                {filteredBacktestedStrategies.length} of {backtestedStrategies.length}
-              </span>}
-            >
-              <div className="p-3">
-                <DataTable
-                  columns={backtestedStrategyColumns}
-                  data={filteredBacktestedStrategies}
-                  pageSize={20}
-                  getRowId={(row) => row.id}
-                  rowSelection={Object.fromEntries(
-                    Array.from(selectedStrategies).map(id => [id, true])
-                  )}
-                  onRowSelectionChange={(updaterOrValue) => {
-                    const currentSelection = Object.fromEntries(
-                      Array.from(selectedStrategies).map(id => [id, true])
-                    );
-                    const newSelection = typeof updaterOrValue === 'function' 
-                      ? updaterOrValue(currentSelection)
-                      : updaterOrValue;
-                    setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
-                  }}
-                />
+          <TabsContent value="backtested" className="p-2 space-y-2">
+            {/* Inline filters */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
+                <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-7 h-7 text-xs" />
               </div>
-            </PanelHeader>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Category" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="alpha_edge">Alpha Edge</SelectItem>
+                  <SelectItem value="template_based">Template-Based</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Type" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {availableTypes.map(type => (
+                    <SelectItem key={type} value={type}>{type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={templateFilter} onValueChange={setTemplateFilter}>
+                <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Template" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Templates</SelectItem>
+                  {availableTemplates.map(template => (<SelectItem key={template} value={template}>{template}</SelectItem>))}
+                </SelectContent>
+              </Select>
+              <Select value={regimeFilter} onValueChange={setRegimeFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Regime" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Regimes</SelectItem>
+                  {availableRegimes.map(regime => (<SelectItem key={regime} value={regime}>{regime}</SelectItem>))}
+                </SelectContent>
+              </Select>
+              <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Source" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sources</SelectItem>
+                  <SelectItem value="TEMPLATE">Autonomous</SelectItem>
+                  <SelectItem value="USER">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Bulk Actions */}
+            {selectedStrategies.size > 0 && (
+              <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
+                <span className="text-[10px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[10px] px-2">Re-Backtest</Button>
+                <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-accent-green border-accent-green/30">Activate</Button>
+                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[10px] px-2">Retire</Button>
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[10px] px-2 ml-auto">Clear</Button>
+              </div>
+            )}
+
+            <div className="text-[10px] font-mono text-gray-500 px-1">{filteredBacktestedStrategies.length} of {backtestedStrategies.length}</div>
+            <DataTable
+              columns={backtestedStrategyColumns}
+              data={filteredBacktestedStrategies}
+              pageSize={20}
+              getRowId={(row) => row.id}
+              rowSelection={Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]))}
+              onRowSelectionChange={(updaterOrValue) => {
+                const currentSelection = Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]));
+                const newSelection = typeof updaterOrValue === 'function' ? updaterOrValue(currentSelection) : updaterOrValue;
+                setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
+              }}
+            />
           </TabsContent>
 
           {/* Retired Strategies Tab */}
-          <TabsContent value="retired" className="space-y-4">
-            {/* Filters */}
-            <PanelHeader title="Filters" panelId="strategies-retired-filters">
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  <div className="relative xl:col-span-2">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
-                    <Input
-                      placeholder="Search by name or symbol..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-
-                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      <SelectItem value="alpha_edge">Alpha Edge</SelectItem>
-                      <SelectItem value="template_based">Template-Based</SelectItem>
-                      <SelectItem value="manual">Manual</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={typeFilter} onValueChange={setTypeFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Types</SelectItem>
-                      {availableTypes.map(type => (
-                        <SelectItem key={type} value={type}>
-                          {type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  
-                  <Select value={templateFilter} onValueChange={setTemplateFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Template" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Templates</SelectItem>
-                      {availableTemplates.map(template => (
-                        <SelectItem key={template} value={template}>{template}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={regimeFilter} onValueChange={setRegimeFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Regime" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Regimes</SelectItem>
-                      {availableRegimes.map(regime => (
-                        <SelectItem key={regime} value={regime}>{regime}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Sources</SelectItem>
-                      <SelectItem value="TEMPLATE">Autonomous</SelectItem>
-                      <SelectItem value="USER">Manual</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Bulk Actions for Retired */}
-                {selectedStrategies.size > 0 && (
-                  <div className="flex items-center gap-3 pt-4 border-t border-dark-border">
-                    <span className="text-xs text-gray-500 font-mono">
-                      {selectedStrategies.size} selected
-                    </span>
-                    <Button
-                      onClick={handleBulkPermanentDelete}
-                      variant="destructive"
-                      size="sm"
-                    >
-                      <Trash2 className="h-4 w-4 mr-2" />
-                      Permanently Delete Selected
-                    </Button>
-                    <Button
-                      onClick={() => setSelectedStrategies(new Set())}
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto"
-                    >
-                      Clear Selection
-                    </Button>
-                  </div>
-                )}
-            </PanelHeader>
-
-            {/* Retired Strategies Table */}
-            <PanelHeader title="Retired Strategies" panelId="strategies-retired-table"
-              actions={<span className="text-[10px] font-mono text-gray-400">
-                {filteredRetiredStrategies.length} of {retiredStrategies.length}
-              </span>}
-            >
-              <div className="p-3">
-                <DataTable
-                  columns={retiredStrategyColumns}
-                  data={filteredRetiredStrategies}
-                  pageSize={20}
-                  getRowId={(row) => row.id}
-                  rowSelection={Object.fromEntries(
-                    Array.from(selectedStrategies).map(id => [id, true])
-                  )}
-                  onRowSelectionChange={(updaterOrValue) => {
-                    const currentSelection = Object.fromEntries(
-                      Array.from(selectedStrategies).map(id => [id, true])
-                    );
-                    const newSelection = typeof updaterOrValue === 'function' 
-                      ? updaterOrValue(currentSelection)
-                      : updaterOrValue;
-                    setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
-                  }}
-                />
+          <TabsContent value="retired" className="p-2 space-y-2">
+            {/* Inline filters */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
+                <Input placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-7 h-7 text-xs" />
               </div>
-            </PanelHeader>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Category" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="alpha_edge">Alpha Edge</SelectItem>
+                  <SelectItem value="template_based">Template-Based</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Type" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  {availableTypes.map(type => (
+                    <SelectItem key={type} value={type}>{type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={templateFilter} onValueChange={setTemplateFilter}>
+                <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue placeholder="Template" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Templates</SelectItem>
+                  {availableTemplates.map(template => (<SelectItem key={template} value={template}>{template}</SelectItem>))}
+                </SelectContent>
+              </Select>
+              <Select value={regimeFilter} onValueChange={setRegimeFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Regime" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Regimes</SelectItem>
+                  {availableRegimes.map(regime => (<SelectItem key={regime} value={regime}>{regime}</SelectItem>))}
+                </SelectContent>
+              </Select>
+              <Select value={sourceFilter} onValueChange={setSourceFilter}>
+                <SelectTrigger className="h-7 text-xs w-[110px]"><SelectValue placeholder="Source" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sources</SelectItem>
+                  <SelectItem value="TEMPLATE">Autonomous</SelectItem>
+                  <SelectItem value="USER">Manual</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Bulk Actions */}
+            {selectedStrategies.size > 0 && (
+              <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
+                <span className="text-[10px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <Button onClick={handleBulkPermanentDelete} variant="destructive" size="sm" className="h-6 text-[10px] px-2">Permanently Delete</Button>
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[10px] px-2 ml-auto">Clear</Button>
+              </div>
+            )}
+
+            <div className="text-[10px] font-mono text-gray-500 px-1">{filteredRetiredStrategies.length} of {retiredStrategies.length}</div>
+            <DataTable
+              columns={retiredStrategyColumns}
+              data={filteredRetiredStrategies}
+              pageSize={20}
+              getRowId={(row) => row.id}
+              rowSelection={Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]))}
+              onRowSelectionChange={(updaterOrValue) => {
+                const currentSelection = Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]));
+                const newSelection = typeof updaterOrValue === 'function' ? updaterOrValue(currentSelection) : updaterOrValue;
+                setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
+              }}
+            />
           </TabsContent>
 
           {/* DSL Templates Tab */}
-          <TabsContent value="templates" className="space-y-4">
+          <TabsContent value="templates" className="p-2">
             <TemplateManager category="dsl" />
           </TabsContent>
 
           {/* AE Templates Tab */}
-          <TabsContent value="ae-templates" className="space-y-4">
+          <TabsContent value="ae-templates" className="p-2">
             <TemplateManager category="alpha_edge" />
           </TabsContent>
 
           {/* Symbols Tab */}
-          <TabsContent value="symbols" className="space-y-4">
+          <TabsContent value="symbols" className="p-2">
             <SymbolManager />
           </TabsContent>
 
           {/* Template Rankings Tab (Task 9.1) */}
-          <TabsContent value="rankings" className="space-y-4">
-            <PanelHeader title="Template Rankings" panelId="strategies-rankings">
-              <div className="p-3">
-                {templateRankingsLoading ? (
-                  <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">Loading rankings...</div>
-                ) : templateRankings.length === 0 ? (
-                  <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No template ranking data available</div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3 mb-4">
-                      <Select value={templateRankingFamilyFilter} onValueChange={setTemplateRankingFamilyFilter}>
-                        <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue placeholder="Family" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Families</SelectItem>
-                          {Array.from(new Set(templateRankings.map((t: any) => t.family || t.template_type || 'unknown'))).sort().map((f) => (
-                            <SelectItem key={String(f)} value={String(f)}>{String(f)}</SelectItem>
+          <TabsContent value="rankings" className="p-2">
+              {templateRankingsLoading ? (
+                <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">Loading rankings...</div>
+              ) : templateRankings.length === 0 ? (
+                <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">No template ranking data available</div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Select value={templateRankingFamilyFilter} onValueChange={setTemplateRankingFamilyFilter}>
+                      <SelectTrigger className="w-[140px] h-7 text-xs"><SelectValue placeholder="Family" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Families</SelectItem>
+                        {Array.from(new Set(templateRankings.map((t: any) => t.family || t.template_type || 'unknown'))).sort().map((f) => (
+                          <SelectItem key={String(f)} value={String(f)}>{String(f)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select value={templateRankingTimeframeFilter} onValueChange={setTemplateRankingTimeframeFilter}>
+                      <SelectTrigger className="w-[140px] h-7 text-xs"><SelectValue placeholder="Timeframe" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Timeframes</SelectItem>
+                        {Array.from(new Set(templateRankings.map((t: any) => t.timeframe).filter(Boolean))).sort().map((tf) => (
+                          <SelectItem key={String(tf)} value={String(tf)}>{String(tf)}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs font-mono table-dense">
+                      <thead>
+                        <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
+                          {[
+                            { key: 'name', label: 'Template' },
+                            { key: 'win_rate', label: 'Win Rate' },
+                            { key: 'avg_sharpe', label: 'Avg Sharpe' },
+                            { key: 'total_trades', label: 'Trades' },
+                            { key: 'active_count', label: 'Active' },
+                            { key: 'last_proposal_date', label: 'Last Proposal' },
+                          ].map((col) => (
+                            <th key={col.key} className={cn('py-1.5 px-2 text-left cursor-pointer hover:text-gray-200 text-[10px]', col.key !== 'name' && 'text-right')}
+                              onClick={() => { if (templateRankingSortKey === col.key) { setTemplateRankingSortDir((d) => d === 'asc' ? 'desc' : 'asc'); } else { setTemplateRankingSortKey(col.key); setTemplateRankingSortDir('desc'); } }}>
+                              {col.label} {templateRankingSortKey === col.key ? (templateRankingSortDir === 'desc' ? '↓' : '↑') : ''}
+                            </th>
                           ))}
-                        </SelectContent>
-                      </Select>
-                      <Select value={templateRankingTimeframeFilter} onValueChange={setTemplateRankingTimeframeFilter}>
-                        <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue placeholder="Timeframe" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Timeframes</SelectItem>
-                          {Array.from(new Set(templateRankings.map((t: any) => t.timeframe).filter(Boolean))).sort().map((tf) => (
-                            <SelectItem key={String(tf)} value={String(tf)}>{String(tf)}</SelectItem>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {templateRankings
+                          .filter((t: any) => {
+                            const matchFamily = templateRankingFamilyFilter === 'all' || (t.family || t.template_type || 'unknown') === templateRankingFamilyFilter;
+                            const matchTf = templateRankingTimeframeFilter === 'all' || t.timeframe === templateRankingTimeframeFilter;
+                            return matchFamily && matchTf;
+                          })
+                          .sort((a: any, b: any) => {
+                            const av = a[templateRankingSortKey] ?? 0;
+                            const bv = b[templateRankingSortKey] ?? 0;
+                            if (typeof av === 'string') return templateRankingSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+                            return templateRankingSortDir === 'asc' ? av - bv : bv - av;
+                          })
+                          .map((t: any, idx: number) => (
+                            <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
+                              <td className="py-1.5 px-2 text-gray-200 truncate max-w-[200px] text-[11px]">{t.name || t.template_name || '—'}</td>
+                              <td className={cn('py-1.5 px-2 text-right text-[11px]', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>{t.win_rate != null ? `${(t.win_rate).toFixed(1)}%` : '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-[11px]">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-[11px]">{t.total_trades ?? '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-[11px]">{t.active_count ?? '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-[10px] text-gray-500">{t.last_proposal_date ? new Date(t.last_proposal_date).toLocaleDateString() : '—'}</td>
+                            </tr>
                           ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs font-mono table-dense">
-                        <thead>
-                          <tr className="border-b border-dark-border text-muted-foreground">
-                            {[
-                              { key: 'name', label: 'Template' },
-                              { key: 'win_rate', label: 'Win Rate' },
-                              { key: 'avg_sharpe', label: 'Avg Sharpe' },
-                              { key: 'total_trades', label: 'Trades' },
-                              { key: 'active_count', label: 'Active' },
-                              { key: 'last_proposal_date', label: 'Last Proposal' },
-                            ].map((col) => (
-                              <th
-                                key={col.key}
-                                className={cn('py-2 px-2 text-left cursor-pointer hover:text-gray-200', col.key !== 'name' && 'text-right')}
-                                onClick={() => {
-                                  if (templateRankingSortKey === col.key) {
-                                    setTemplateRankingSortDir((d) => d === 'asc' ? 'desc' : 'asc');
-                                  } else {
-                                    setTemplateRankingSortKey(col.key);
-                                    setTemplateRankingSortDir('desc');
-                                  }
-                                }}
-                              >
-                                {col.label} {templateRankingSortKey === col.key ? (templateRankingSortDir === 'desc' ? '↓' : '↑') : ''}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {templateRankings
-                            .filter((t: any) => {
-                              const matchFamily = templateRankingFamilyFilter === 'all' || (t.family || t.template_type || 'unknown') === templateRankingFamilyFilter;
-                              const matchTf = templateRankingTimeframeFilter === 'all' || t.timeframe === templateRankingTimeframeFilter;
-                              return matchFamily && matchTf;
-                            })
-                            .sort((a: any, b: any) => {
-                              const av = a[templateRankingSortKey] ?? 0;
-                              const bv = b[templateRankingSortKey] ?? 0;
-                              if (typeof av === 'string') return templateRankingSortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-                              return templateRankingSortDir === 'asc' ? av - bv : bv - av;
-                            })
-                            .map((t: any, idx: number) => (
-                              <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
-                                <td className="py-2 px-2 text-gray-200 truncate max-w-[200px]">{t.name || t.template_name || '—'}</td>
-                                <td className={cn('py-2 px-2 text-right', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>{t.win_rate != null ? `${(t.win_rate).toFixed(1)}%` : '—'}</td>
-                                <td className="py-2 px-2 text-right">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
-                                <td className="py-2 px-2 text-right">{t.total_trades ?? '—'}</td>
-                                <td className="py-2 px-2 text-right">{t.active_count ?? '—'}</td>
-                                <td className="py-2 px-2 text-right text-muted-foreground">{t.last_proposal_date ? new Date(t.last_proposal_date).toLocaleDateString() : '—'}</td>
-                              </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                )}
-              </div>
-            </PanelHeader>
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
           </TabsContent>
 
           {/* Blacklists Tab (Task 9.1) */}
-          <TabsContent value="blacklists" className="space-y-4">
-            <PanelHeader title={`Blacklisted Combos (${blacklists.length})`} panelId="strategies-blacklists">
-              <div className="p-3">
-                {blacklists.length === 0 ? (
-                  <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No blacklisted combinations</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs font-mono table-dense">
-                      <thead>
-                        <tr className="border-b border-dark-border text-muted-foreground">
-                          <th className="py-2 px-2 text-left">Template</th>
-                          <th className="py-2 px-2 text-left">Symbol</th>
-                          <th className="py-2 px-2 text-left">Type</th>
-                          <th className="py-2 px-2 text-right">Rejections</th>
-                          <th className="py-2 px-2 text-left">Date</th>
+          <TabsContent value="blacklists" className="p-2">
+              {blacklists.length === 0 ? (
+                <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">No blacklisted combinations</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs font-mono table-dense">
+                    <thead>
+                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[10px]">
+                        <th className="py-1.5 px-2 text-left">Template</th>
+                        <th className="py-1.5 px-2 text-left">Symbol</th>
+                        <th className="py-1.5 px-2 text-left">Type</th>
+                        <th className="py-1.5 px-2 text-right">Rejections</th>
+                        <th className="py-1.5 px-2 text-left">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {blacklists.map((bl: any, idx: number) => (
+                        <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
+                          <td className="py-1.5 px-2 text-gray-200 truncate max-w-[180px] text-[11px]">{bl.template}</td>
+                          <td className="py-1.5 px-2 text-gray-300 text-[11px]">{bl.symbol}</td>
+                          <td className="py-1.5 px-2"><Badge variant="secondary" className="text-[9px]">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
+                          <td className="py-1.5 px-2 text-right text-gray-300 text-[11px]">{bl.count}</td>
+                          <td className="py-1.5 px-2 text-gray-500 text-[10px]">{bl.timestamp ? new Date(bl.timestamp).toLocaleDateString() : '—'}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {blacklists.map((bl: any, idx: number) => (
-                          <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
-                            <td className="py-2 px-2 text-gray-200 truncate max-w-[180px]">{bl.template}</td>
-                            <td className="py-2 px-2 text-gray-300">{bl.symbol}</td>
-                            <td className="py-2 px-2"><Badge variant="secondary" className="text-xs">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
-                            <td className="py-2 px-2 text-right text-gray-300">{bl.count}</td>
-                            <td className="py-2 px-2 text-muted-foreground">{bl.timestamp ? new Date(bl.timestamp).toLocaleDateString() : '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </PanelHeader>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
           </TabsContent>
 
           {/* Idle Demotions Tab (Task 9.1) */}
-          <TabsContent value="demotions" className="space-y-4">
-            <PanelHeader title="Idle Demotions" panelId="strategies-demotions">
-              <div className="p-3">
-                {idleDemotions.length === 0 ? (
-                  <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">No recent demotions</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs font-mono table-dense">
-                      <thead>
-                        <tr className="border-b border-dark-border text-muted-foreground">
-                          <th className="py-2 px-2 text-left">Strategy</th>
-                          <th className="py-2 px-2 text-left">Timestamp</th>
-                          <th className="py-2 px-2 text-left">Reason</th>
+          <TabsContent value="demotions" className="p-2">
+              {idleDemotions.length === 0 ? (
+                <div className="flex items-center justify-center h-32 text-[10px] text-gray-500">No recent demotions</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs font-mono table-dense">
+                    <thead>
+                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[10px]">
+                        <th className="py-1.5 px-2 text-left">Strategy</th>
+                        <th className="py-1.5 px-2 text-left">Timestamp</th>
+                        <th className="py-1.5 px-2 text-left">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {idleDemotions.map((d: any, idx: number) => (
+                        <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
+                          <td className="py-1.5 px-2 text-gray-200 text-[11px]">{d.name}</td>
+                          <td className="py-1.5 px-2 text-gray-500 text-[10px]">{d.timestamp ? formatTimestamp(d.timestamp) : '—'}</td>
+                          <td className="py-1.5 px-2 text-gray-500 text-[11px]">{d.reason}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {idleDemotions.map((d: any, idx: number) => (
-                          <tr key={idx} className="border-b border-dark-border/30 hover:bg-dark-hover/50">
-                            <td className="py-2 px-2 text-gray-200">{d.name}</td>
-                            <td className="py-2 px-2 text-muted-foreground">{d.timestamp ? formatTimestamp(d.timestamp) : '—'}</td>
-                            <td className="py-2 px-2 text-muted-foreground">{d.reason}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </PanelHeader>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
           </TabsContent>
           </div>
         </Tabs>
-
-        </div>
-      </PanelHeader>
+      </div>
     </div>
   );
 
@@ -2290,76 +1961,67 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
         panelId="strategies-side"
         onRefresh={fetchStrategies}
       >
-        <div className="flex flex-col gap-3 p-3 h-full">
-          {/* CompactMetricRow: active, backtested, avg Sharpe, avg win rate */}
+        <div className="flex flex-col gap-2 p-2 h-full">
+          {/* CompactMetricRow */}
           <CompactMetricRow metrics={sideMetrics} />
 
-          {/* Top 5 Template Rankings Mini-Table */}
-          <PanelHeader title="Top 5 Template Rankings" panelId="strategies-side-rankings">
-            <div className="p-3">
-              {templateRankingsLoading ? (
-                <div className="text-center py-4 text-[10px] text-gray-500">Loading...</div>
-              ) : top5Rankings.length === 0 ? (
-                <div className="text-center py-4 text-[10px] text-gray-500">No ranking data</div>
-              ) : (
-                <table className="w-full text-xs font-mono table-dense">
-                  <thead>
-                    <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
-                      <th className="py-1 px-2 text-left text-[11px]">Template</th>
-                      <th className="py-1 px-2 text-right text-[11px]">Win Rate</th>
-                      <th className="py-1 px-2 text-right text-[11px]">Sharpe</th>
+          {/* Top 5 Rankings — direct table, no nested PanelHeader */}
+          <div className="border-t border-[var(--color-dark-border)] pt-1.5">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">Top 5 Rankings</div>
+            {templateRankingsLoading ? (
+              <div className="text-center py-3 text-[10px] text-gray-500">Loading...</div>
+            ) : top5Rankings.length === 0 ? (
+              <div className="text-center py-3 text-[10px] text-gray-500">No ranking data</div>
+            ) : (
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
+                    <th className="py-1 px-1.5 text-left text-[10px]">Template</th>
+                    <th className="py-1 px-1.5 text-right text-[10px]">WR</th>
+                    <th className="py-1 px-1.5 text-right text-[10px]">Sharpe</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {top5Rankings.map((t: any, idx: number) => (
+                    <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
+                      <td className="py-1 px-1.5 text-gray-200 truncate max-w-[120px] text-[11px]">{t.name || t.template_name || '—'}</td>
+                      <td className={cn('py-1 px-1.5 text-right text-[11px]', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
+                        {t.win_rate != null ? `${t.win_rate.toFixed(1)}%` : '—'}
+                      </td>
+                      <td className="py-1 px-1.5 text-right text-[11px]">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {top5Rankings.map((t: any, idx: number) => (
-                      <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-[var(--color-dark-hover)]/50">
-                        <td className="py-1 px-2 text-gray-200 truncate max-w-[140px]">{t.name || t.template_name || '—'}</td>
-                        <td className={cn('py-1 px-2 text-right', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>
-                          {t.win_rate != null ? `${t.win_rate.toFixed(1)}%` : '—'}
-                        </td>
-                        <td className="py-1 px-2 text-right">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </PanelHeader>
-
-          {/* Recent Lifecycle Events */}
-          <PanelHeader title="Recent Lifecycle Events" panelId="strategies-side-events">
-            <div className="p-3">
-              {recentLifecycleEvents.length === 0 ? (
-                <div className="text-center py-4 text-[10px] text-gray-500">No recent events</div>
-              ) : (
-                <div className="space-y-1.5 overflow-auto max-h-[300px]">
-                  {recentLifecycleEvents.map((event, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between py-1.5 px-2 rounded bg-[var(--color-dark-surface)] hover:bg-[var(--color-dark-surface)]/80 transition-colors"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={cn(
-                          'text-[10px] font-mono font-semibold px-1 py-0.5 rounded',
-                          event.type === 'Activated' && 'bg-accent-green/20 text-accent-green',
-                          event.type === 'Retired' && 'bg-accent-red/20 text-accent-red',
-                          event.type === 'Demoted' && 'bg-yellow-400/20 text-yellow-400',
-                        )}>
-                          {event.type}
-                        </span>
-                        <span className="font-mono text-xs text-gray-200 truncate">
-                          {event.name}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-gray-500 shrink-0 ml-2">
-                        {formatTimestamp(event.timestamp)}
-                      </span>
-                    </div>
                   ))}
-                </div>
-              )}
-            </div>
-          </PanelHeader>
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Recent Lifecycle Events — direct list, no nested PanelHeader */}
+          <div className="border-t border-[var(--color-dark-border)] pt-1.5">
+            <div className="text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">Recent Events</div>
+            {recentLifecycleEvents.length === 0 ? (
+              <div className="text-center py-3 text-[10px] text-gray-500">No recent events</div>
+            ) : (
+              <div className="space-y-0.5 overflow-auto max-h-[300px]">
+                {recentLifecycleEvents.map((event, idx) => (
+                  <div key={idx} className="flex items-center justify-between py-1 px-1.5 rounded hover:bg-gray-800/40">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={cn(
+                        'text-[9px] font-mono font-semibold px-1 py-0.5 rounded',
+                        event.type === 'Activated' && 'bg-accent-green/20 text-accent-green',
+                        event.type === 'Retired' && 'bg-accent-red/20 text-accent-red',
+                        event.type === 'Demoted' && 'bg-yellow-400/20 text-yellow-400',
+                      )}>
+                        {event.type}
+                      </span>
+                      <span className="font-mono text-[11px] text-gray-200 truncate">{event.name}</span>
+                    </div>
+                    <span className="text-[9px] text-gray-500 shrink-0 ml-1">{formatTimestamp(event.timestamp)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </PanelHeader>
     </div>
@@ -2372,6 +2034,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
         title="◆ Strategies"
         description={tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading'}
         actions={headerActions}
+        compact={true}
       >
         <motion.div
           initial={{ opacity: 0 }}

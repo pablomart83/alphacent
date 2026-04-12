@@ -732,7 +732,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
   if (loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="◆ Settings" description="Configure trading mode, API credentials, risk parameters, and preferences">
+        <PageTemplate title="◆ Settings" description="Configure trading mode, API credentials, risk parameters, and preferences" compact={true}>
           <div className="flex items-center justify-center h-64">
             <div className="text-gray-400 font-mono">Loading configuration...</div>
           </div>
@@ -758,11 +758,12 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         title="◆ Settings"
         description="Configure trading mode, API credentials, risk parameters, and preferences"
         actions={headerActions}
+        compact={true}
       >
-      <div className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto">
+      <div className="p-2 sm:p-3 lg:p-4 max-w-[1800px] mx-auto">
 
         {/* Tabs */}
-        <Tabs defaultValue="trading-mode" className="space-y-6">
+        <Tabs defaultValue="trading-mode" className="space-y-2">
           <TabsList className="w-full overflow-x-auto">
             <TabsTrigger value="trading-mode" className="flex items-center gap-2">
               <Activity className="h-4 w-4" />

@@ -321,7 +321,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
   const sidePanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Summary" panelId="audit-side" onRefresh={fetch}>
-        <div className="flex flex-col gap-3 p-3 h-full">
+        <div className="flex flex-col gap-2 p-2 h-full">
           {/* CompactMetricRow: events today, warnings, errors, rejections */}
           <CompactMetricRow metrics={sideMetrics} />
 
@@ -454,7 +454,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
   if (loading && entries.length === 0) {
     return (
       <DashboardLayout onLogout={onLogout}>
-        <PageTemplate title="Audit Log" description="Decision trail and trade lifecycle events" actions={headerActions}>
+        <PageTemplate title="Audit Log" description="Decision trail and trade lifecycle events" actions={headerActions} compact={true}>
           <PageSkeleton />
         </PageTemplate>
       </DashboardLayout>
@@ -467,6 +467,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
         title="Audit Log"
         description={`Decision trail and trade lifecycle events — ${totalCount.toLocaleString()} total entries`}
         actions={headerActions}
+        compact={true}
       >
         <motion.div
           initial={{ opacity: 0 }}

@@ -9,11 +9,8 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
 import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
 import { PanelHeader } from '../components/layout/PanelHeader';
-import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataTable } from '../components/trading/DataTable';
-import { Card, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Input } from '../components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
@@ -92,22 +89,25 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
   const [dismissingId, setDismissingId] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState(false);
 
-  // Fundamental alerts state (Task 11.10.3)
+  // Fundamental alerts state
   const [fundamentalAlerts, setFundamentalAlerts] = useState<FundamentalAlert[]>([]);
   const [dismissingAlertId, setDismissingAlertId] = useState<string | null>(null);
   const [closingAlertId, setClosingAlertId] = useState<string | null>(null);
   const [closingAllAlerts, setClosingAllAlerts] = useState(false);
   const [triggeringCheck, setTriggeringCheck] = useState(false);
 
-  // Confirmation dialog state (Task 4.1)
+  // Confirmation dialog state
   const [confirmClosePosition, setConfirmClosePosition] = useState<Position | null>(null);
   const [showBulkCloseConfirm, setShowBulkCloseConfirm] = useState(false);
 
-  // Data freshness and error state (Task 4.2)
+  // Data freshness and error state
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [fetchError, setFetchError] = useState<ClassifiedError | null>(null);
   const [pendingClosuresLoading, setPendingClosuresLoading] = useState(false);
   const [fundamentalAlertsLoading, setFundamentalAlertsLoading] = useState(false);
+
+  // Active tab state — controlled so we can render tabs in PanelHeader
+  const [activeTab, setActiveTab] = useState<string>('open');
 
   // Fetch pending closures
   const fetchPendingClosures = useCallback(async () => {
@@ -123,7 +123,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
   }, [tradingMode]);
 
-  // Fetch fundamental alerts (Task 11.10.3)
+  // Fetch fundamental alerts
   const fetchFundamentalAlerts = useCallback(async () => {
     if (!tradingMode) return;
     try {
@@ -144,7 +144,6 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     try {
       setRefreshing(true);
       setFetchError(null);
-      // Core data — fast DB queries, must complete before page renders
       const [account, positionsData, closedPositionsData] = await Promise.all([
         apiClient.getAccountInfo(tradingMode),
         apiClient.getPositions(tradingMode),
@@ -157,7 +156,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       setAccountInfo(account);
       setPositions(positionsData);
 
-      // Secondary data — can be slow, load in background without blocking page render
+      // Secondary data — load in background
       setPendingClosuresLoading(true);
       apiClient.getPendingClosures(tradingMode).then(data => {
         setPendingClosures(data);
@@ -176,15 +175,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         setFundamentalAlertsLoading(false);
       });
       
-      // Convert closed positions to ClosedPosition format
       const closed: ClosedPosition[] = closedPositionsData
-        .filter(p => p.closed_at) // Only positions that are actually closed
+        .filter(p => p.closed_at)
         .map(p => {
           const openedAt = new Date(p.opened_at);
           const closedAt = new Date(p.closed_at!);
           const holdingTimeHours = (closedAt.getTime() - openedAt.getTime()) / (1000 * 60 * 60);
-          
-          // Calculate realized P&L percent from invested amount
           const realizedPnl = p.realized_pnl ?? 0;
           const invested = (p as any).invested_amount || p.quantity * (p.entry_price || 1);
           const pnlPercent = invested > 0 && realizedPnl !== 0
@@ -197,7 +193,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
             side: p.side,
             quantity: p.quantity,
             entry_price: p.entry_price,
-            exit_price: p.current_price, // Last known price when closed
+            exit_price: p.current_price,
             realized_pnl: realizedPnl,
             realized_pnl_percent: pnlPercent,
             strategy_id: p.strategy_id,
@@ -227,7 +223,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
   }, [tradingMode]);
 
-  // Polling for data refresh (Task 4.2) — skip REST polling when WS connected
+  // Polling
   const { refresh, isRefreshing: pollingRefreshing } = usePolling({
     fetchFn: fetchData,
     intervalMs: 15000,
@@ -255,7 +251,6 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       });
     });
 
-    // Subscribe to pending closure events
     const unsubscribePendingClosure = wsManager.on('pending_closure', () => {
       fetchPendingClosures();
     });
@@ -269,17 +264,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
   // Calculate metrics
   const totalPnL = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
-  // Use equity for P&L percent (equity = balance + unrealized, gives accurate %)
   const totalPnLPercent = accountInfo ? (totalPnL / accountInfo.balance) * 100 : 0;
-  // Position value = margin_used (actual capital deployed), not leveraged notional
   const totalPositionValue = accountInfo?.margin_used || 0;
-  // Total portfolio = equity (balance + unrealized P&L)
   const totalPortfolioValue = accountInfo?.equity || (accountInfo?.balance || 0);
   
   const winningPositions = positions.filter(p => p.unrealized_pnl > 0).length;
   const winRate = positions.length > 0 ? (winningPositions / positions.length) * 100 : 0;
-
-  // Win Rate from closed positions (Task 4.2)
   const closedWins = closedPositions.filter(p => p.realized_pnl > 0).length;
   const closedWinRate = closedPositions.length > 0 ? (closedWins / closedPositions.length) * 100 : 0;
 
@@ -310,15 +300,9 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       const daysDiff = (now.getTime() - closedDate.getTime()) / (1000 * 60 * 60 * 24);
       
       switch (closedDateFilter) {
-        case '1d':
-          matchesDate = daysDiff <= 1;
-          break;
-        case '7d':
-          matchesDate = daysDiff <= 7;
-          break;
-        case '30d':
-          matchesDate = daysDiff <= 30;
-          break;
+        case '1d': matchesDate = daysDiff <= 1; break;
+        case '7d': matchesDate = daysDiff <= 7; break;
+        case '30d': matchesDate = daysDiff <= 30; break;
       }
     }
     
@@ -327,13 +311,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
   // Prepare allocation chart data
   const pieChartData = positions.reduce((acc, position) => {
-    // Try invested_amount first, then calculate from quantity * current_price, then entry_price
     const value = Math.abs(
       (position as any).invested_amount ||
       (position.quantity * (position.current_price || position.entry_price || 0)) ||
       0
     );
-    if (value === 0) return acc; // Skip zero-value positions
+    if (value === 0) return acc;
     const symbolName = position.symbol || 'Unknown';
     const existing = acc.find(item => item.name === symbolName);
     if (existing) {
@@ -346,7 +329,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
 
-  // Asset class summary for side panel
+  // Asset class summary
   const assetClassSummary = useMemo(() => {
     const map = new Map<string, { count: number; totalPnl: number }>();
     positions.forEach(p => {
@@ -361,7 +344,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       .sort((a, b) => b.count - a.count);
   }, [positions]);
 
-  // Sector exposure for pie chart in side panel
+  // Sector exposure
   const sectorExposure = useMemo(() => {
     const map = new Map<string, number>();
     positions.forEach(p => {
@@ -378,7 +361,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       .sort((a, b) => b.value - a.value);
   }, [positions]);
 
-  // Allocation breakdown for bar chart in side panel
+  // Allocation breakdown
   const allocationData = useMemo(() => {
     const totalValue = pieChartData.reduce((sum, d) => sum + d.value, 0);
     return pieChartData
@@ -391,16 +374,16 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       }));
   }, [pieChartData]);
 
-  // Handle position actions
+  // ── Action handlers (all preserved from original) ──────────────────
+
   const handleClosePosition = async (positionId: string) => {
     if (!tradingMode) return;
-    
     try {
       setClosingPositionId(positionId);
       await apiClient.closePosition(positionId, tradingMode);
       toast.success('Position closed successfully');
       setPositions(prev => prev.filter(p => p.id !== positionId));
-      fetchData(); // Refresh to update closed positions
+      fetchData();
     } catch (error) {
       console.error('Failed to close position:', error);
       toast.error('Failed to close position');
@@ -411,13 +394,8 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
   const handleModifyStopLoss = async () => {
     if (!modifyingPosition || !modifyPrice || !tradingMode) return;
-    
     const price = parseFloat(modifyPrice);
-    if (isNaN(price) || price <= 0) {
-      toast.error('Please enter a valid price');
-      return;
-    }
-
+    if (isNaN(price) || price <= 0) { toast.error('Please enter a valid price'); return; }
     try {
       await apiClient.modifyStopLoss(modifyingPosition.id, price, tradingMode);
       toast.success('Stop loss updated successfully');
@@ -432,13 +410,8 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
   const handleModifyTakeProfit = async () => {
     if (!modifyingPosition || !modifyPrice || !tradingMode) return;
-    
     const price = parseFloat(modifyPrice);
-    if (isNaN(price) || price <= 0) {
-      toast.error('Please enter a valid price');
-      return;
-    }
-
+    if (isNaN(price) || price <= 0) { toast.error('Please enter a valid price'); return; }
     try {
       await apiClient.modifyTakeProfit(modifyingPosition.id, price, tradingMode);
       toast.success('Take profit updated successfully');
@@ -452,14 +425,10 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
   };
 
   const handleModifySubmit = () => {
-    if (modifyingPosition?.type === 'sl') {
-      handleModifyStopLoss();
-    } else {
-      handleModifyTakeProfit();
-    }
+    if (modifyingPosition?.type === 'sl') handleModifyStopLoss();
+    else handleModifyTakeProfit();
   };
 
-  // Handle pending closure actions
   const handleApproveClosure = async (positionId: string) => {
     if (!tradingMode) return;
     try {
@@ -508,7 +477,6 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
   };
 
-  // Fundamental alert handlers (Task 11.10.3)
   const handleDismissAlert = async (positionId: string) => {
     if (!tradingMode) return;
     try {
@@ -516,7 +484,6 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       await apiClient.dismissFundamentalAlert(positionId, tradingMode);
       toast.success('Alert dismissed — position will remain open');
       setFundamentalAlerts(prev => prev.filter(a => a.id !== positionId));
-      // Also refresh pending closures since the position was unflagged
       fetchPendingClosures();
     } catch (error) {
       console.error('Failed to dismiss alert:', error);
@@ -565,7 +532,6 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       setTriggeringCheck(true);
       const result = await apiClient.triggerFundamentalCheck(tradingMode);
       toast.success(result.message);
-      // Refresh alerts after the check
       fetchFundamentalAlerts();
       fetchPendingClosures();
     } catch (error) {
@@ -576,28 +542,20 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
   };
 
-  // Handle position selection
   const handleTogglePosition = (positionId: string) => {
     setSelectedPositions(prev => {
       const next = new Set(prev);
-      if (next.has(positionId)) {
-        next.delete(positionId);
-      } else {
-        next.add(positionId);
-      }
+      if (next.has(positionId)) next.delete(positionId);
+      else next.add(positionId);
       return next;
     });
   };
 
   const handleSelectAll = () => {
-    if (selectedPositions.size === filteredPositions.length) {
-      setSelectedPositions(new Set());
-    } else {
-      setSelectedPositions(new Set(filteredPositions.map(p => p.id)));
-    }
+    if (selectedPositions.size === filteredPositions.length) setSelectedPositions(new Set());
+    else setSelectedPositions(new Set(filteredPositions.map(p => p.id)));
   };
 
-  // Handle close selected positions
   const handleCloseSelected = async () => {
     if (!tradingMode || selectedPositions.size === 0) return;
     try {
@@ -614,7 +572,6 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
   };
 
-  // Handle close all positions
   const handleCloseAllPositions = async () => {
     if (!tradingMode) return;
     try {
@@ -632,7 +589,6 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
   };
 
-  // Handle sync positions with eToro
   const handleSyncPositions = async () => {
     if (!tradingMode) return;
     try {
@@ -648,15 +604,9 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
   };
 
-  // Export to CSV
   const exportToCSV = (data: Position[] | ClosedPosition[], filename: string) => {
-    if (data.length === 0) {
-      toast.error('No data to export');
-      return;
-    }
-
+    if (data.length === 0) { toast.error('No data to export'); return; }
     const isClosedPosition = (item: any): item is ClosedPosition => 'exit_price' in item;
-    
     let csvContent = '';
     if (isClosedPosition(data[0])) {
       csvContent = 'Symbol,Side,Quantity,Entry Price,Exit Price,Realized P&L,P&L %,Opened At,Closed At,Holding Time (hours),Exit Reason\n';
@@ -669,7 +619,6 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         csvContent += `${pos.symbol},${pos.side},${pos.quantity},${pos.entry_price},${pos.current_price},${pos.unrealized_pnl},${pos.unrealized_pnl_percent.toFixed(2)},${pos.opened_at}\n`;
       });
     }
-
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -682,46 +631,36 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     toast.success('Data exported successfully');
   };
 
-  // Helper: get display status for eToro terminology
   const getPositionStatus = (position: Position): string => {
     if (position.pending_closure) return 'Pending Close';
     return 'Open';
   };
 
-  // Table columns for open positions
+  // ── Table columns ──────────────────────────────────────────────────
+
   const positionColumns: ColumnDef<Position>[] = [
     {
       id: 'select',
       header: () => (
         <div className="flex items-center justify-center">
-          <input
-            type="checkbox"
-            checked={filteredPositions.length > 0 && selectedPositions.size === filteredPositions.length}
-            onChange={handleSelectAll}
-            className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
-          />
+          <input type="checkbox" checked={filteredPositions.length > 0 && selectedPositions.size === filteredPositions.length}
+            onChange={handleSelectAll} className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
         </div>
       ),
       cell: ({ row }) => (
         <div className="flex items-center justify-center">
-          <input
-            type="checkbox"
-            checked={selectedPositions.has(row.original.id)}
-            onChange={() => handleTogglePosition(row.original.id)}
-            className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
-          />
+          <input type="checkbox" checked={selectedPositions.has(row.original.id)}
+            onChange={() => handleTogglePosition(row.original.id)} className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
         </div>
       ),
-      size: 40,
+      size: 32,
     },
     {
       accessorKey: 'symbol',
       header: 'Symbol',
       cell: ({ row }) => (
-        <div
-          className="font-mono font-semibold text-sm text-blue-400 hover:text-blue-300 cursor-pointer"
-          onClick={() => navigate(`/portfolio/${encodeURIComponent(row.original.symbol)}`)}
-        >
+        <div className="font-mono font-semibold text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer"
+          onClick={() => navigate(`/portfolio/${encodeURIComponent(row.original.symbol)}`)}>
           {row.original.symbol}
         </div>
       ),
@@ -730,7 +669,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'strategy_name',
       header: 'Strategy',
       cell: ({ row }) => (
-        <div className="font-mono text-xs text-muted-foreground truncate max-w-[180px]" title={row.original.strategy_name || row.original.strategy_id}>
+        <div className="font-mono text-[10px] text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || row.original.strategy_id?.slice(0, 8) || '—'}
         </div>
       ),
@@ -739,11 +678,9 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'side',
       header: 'Side',
       cell: ({ row }) => (
-        <span className={cn(
-          'px-2 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
-          row.original.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red'
-        )}>
-          {row.original.side === 'BUY' ? 'BUY' : 'SELL'}
+        <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap',
+          row.original.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red')}>
+          {row.original.side}
         </span>
       ),
     },
@@ -753,10 +690,8 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       cell: ({ row }) => {
         const status = getPositionStatus(row.original);
         return (
-          <span className={cn(
-            'px-2 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
-            status === 'Open' ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'
-          )}>
+          <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap',
+            status === 'Open' ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400')}>
             {status}
           </span>
         );
@@ -767,46 +702,28 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       header: () => <div className="text-right">Invested</div>,
       cell: ({ row }) => {
         const invested = (row.original as any).invested_amount || row.original.quantity * row.original.entry_price;
-        return (
-          <div className="text-right">
-            <span className="font-mono text-sm">{formatCurrency(invested)}</span>
-          </div>
-        );
+        return <div className="text-right font-mono text-[11px]">{formatCurrency(invested)}</div>;
       },
     },
     {
       accessorKey: 'entry_price',
-      header: () => <div className="text-right">Open Rate</div>,
-      cell: ({ row }) => (
-        <div className="text-right">
-          <span className="font-mono text-sm">{formatCurrency(row.original.entry_price)}</span>
-        </div>
-      ),
+      header: () => <div className="text-right">Open</div>,
+      cell: ({ row }) => <div className="text-right font-mono text-[11px]">{formatCurrency(row.original.entry_price)}</div>,
     },
     {
       accessorKey: 'current_price',
-      header: () => <div className="text-right">Current Rate</div>,
-      cell: ({ row }) => (
-        <div className="text-right">
-          <span className="font-mono text-sm">{formatCurrency(row.original.current_price)}</span>
-        </div>
-      ),
+      header: () => <div className="text-right">Current</div>,
+      cell: ({ row }) => <div className="text-right font-mono text-[11px]">{formatCurrency(row.original.current_price)}</div>,
     },
     {
       accessorKey: 'unrealized_pnl',
-      header: () => <div className="text-right">P&L <span className="text-[10px] text-muted-foreground">(vs balance)</span></div>,
+      header: () => <div className="text-right">P&L</div>,
       cell: ({ row }) => (
         <div className="text-right">
-          <div className={cn(
-            'font-mono font-semibold text-sm',
-            row.original.unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'
-          )}>
+          <div className={cn('font-mono font-semibold text-[11px]', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatCurrency(row.original.unrealized_pnl)}
           </div>
-          <div className={cn(
-            'text-xs font-mono',
-            row.original.unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'
-          )}>
+          <div className={cn('text-[9px] font-mono', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatPercentage(row.original.unrealized_pnl_percent || 0)}
           </div>
         </div>
@@ -814,108 +731,64 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     },
     {
       id: 'holding',
-      header: 'Holding',
+      header: 'Hold',
       cell: ({ row }) => {
-        const openedAt = new Date(row.original.opened_at);
-        const now = new Date();
-        const days = Math.floor((now.getTime() - openedAt.getTime()) / (1000 * 60 * 60 * 24));
-        const color = days < 7 ? 'text-accent-green' : days <= 30 ? 'text-amber-400' : 'text-accent-red';
-        const bg = days < 7 ? 'bg-accent-green/10' : days <= 30 ? 'bg-amber-400/10' : 'bg-accent-red/10';
-        return (
-          <span className={cn('px-2 py-0.5 rounded text-xs font-mono font-semibold', color, bg)}>
-            {days}d
-          </span>
-        );
+        const days = Math.floor((Date.now() - new Date(row.original.opened_at).getTime()) / (1000 * 60 * 60 * 24));
+        const color = days < 7 ? 'text-[#22c55e]' : days <= 30 ? 'text-amber-400' : 'text-[#ef4444]';
+        const bg = days < 7 ? 'bg-[#22c55e]/10' : days <= 30 ? 'bg-amber-400/10' : 'bg-[#ef4444]/10';
+        return <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold', color, bg)}>{days}d</span>;
       },
       sortingFn: (rowA, rowB) => {
-        const daysA = new Date().getTime() - new Date(rowA.original.opened_at).getTime();
-        const daysB = new Date().getTime() - new Date(rowB.original.opened_at).getTime();
-        return daysA - daysB;
+        return new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime();
       },
     },
     {
       id: 'portfolioPct',
-      header: () => <div className="text-right">% Port</div>,
+      header: () => <div className="text-right">%Port</div>,
       cell: ({ row }) => {
         const totalValue = positions.reduce((sum, p) => sum + Math.abs((p as any).invested_amount || p.current_price * p.quantity), 0);
         const posValue = Math.abs((row.original as any).invested_amount || row.original.current_price * row.original.quantity);
         const pct = totalValue > 0 ? (posValue / totalValue) * 100 : 0;
-        return (
-          <div className="text-right">
-            <span className="font-mono text-xs text-muted-foreground">{pct.toFixed(1)}%</span>
-          </div>
-        );
+        return <div className="text-right font-mono text-[10px] text-muted-foreground">{pct.toFixed(1)}%</div>;
       },
     },
     {
       id: 'stopTp',
-      header: 'Stop/TP',
+      header: 'SL/TP',
       cell: ({ row }) => {
         const { entry_price, current_price, stop_loss, take_profit } = row.original;
-        if (!stop_loss && !take_profit) return <span className="text-xs text-muted-foreground">—</span>;
+        if (!stop_loss && !take_profit) return <span className="text-[10px] text-muted-foreground">—</span>;
         const prices = [stop_loss, entry_price, current_price, take_profit].filter((p): p is number => p != null && p > 0);
         const min = Math.min(...prices);
         const max = Math.max(...prices);
         const range = max - min || 1;
         const toPos = (v: number) => ((v - min) / range) * 100;
         return (
-          <div className="w-24 h-4 relative bg-gray-800 rounded overflow-hidden" title={`SL: ${stop_loss?.toFixed(2) ?? '—'} | TP: ${take_profit?.toFixed(2) ?? '—'}`}>
-            {stop_loss != null && stop_loss > 0 && (
-              <div className="absolute top-0 bottom-0 w-0.5 bg-accent-red" style={{ left: `${toPos(stop_loss)}%` }} />
-            )}
+          <div className="w-20 h-3 relative bg-gray-800 rounded overflow-hidden" title={`SL: ${stop_loss?.toFixed(2) ?? '—'} | TP: ${take_profit?.toFixed(2) ?? '—'}`}>
+            {stop_loss != null && stop_loss > 0 && <div className="absolute top-0 bottom-0 w-0.5 bg-[#ef4444]" style={{ left: `${toPos(stop_loss)}%` }} />}
             <div className="absolute top-0 bottom-0 w-0.5 bg-blue-400" style={{ left: `${toPos(entry_price)}%` }} />
-            {take_profit != null && take_profit > 0 && (
-              <div className="absolute top-0 bottom-0 w-0.5 bg-accent-green" style={{ left: `${toPos(take_profit)}%` }} />
-            )}
-            <div className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-white border border-gray-600" style={{ left: `calc(${toPos(current_price)}% - 4px)` }} />
+            {take_profit != null && take_profit > 0 && <div className="absolute top-0 bottom-0 w-0.5 bg-[#22c55e]" style={{ left: `${toPos(take_profit)}%` }} />}
+            <div className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-white border border-gray-600" style={{ left: `calc(${toPos(current_price)}% - 3px)` }} />
           </div>
         );
       },
     },
     {
-      id: 'strategy',
-      header: 'Strategy',
-      cell: ({ row }) => {
-        const sid = row.original.strategy_id;
-        if (!sid) return <span className="text-xs text-muted-foreground">—</span>;
-        const isAlphaEdge = sid.toLowerCase().includes('alpha_edge') || sid.toLowerCase().includes('earnings') || sid.toLowerCase().includes('sector_rotation') || sid.toLowerCase().includes('mean_reversion');
-        return (
-          <span className={cn(
-            'px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap',
-            isAlphaEdge ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400'
-          )}>
-            {isAlphaEdge ? 'Alpha Edge' : 'Template'}
-          </span>
-        );
-      },
-    },
-    {
       id: 'actions',
-      header: () => <div className="text-right">Actions</div>,
+      header: '',
       cell: ({ row }) => (
         <div className="flex justify-end">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <MoreVertical className="h-4 w-4" />
+              <Button variant="ghost" size="sm" className="h-6 w-6 p-0">
+                <MoreVertical className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={() => setModifyingPosition({ id: row.original.id, type: 'sl' })}
-              >
-                Modify Stop Loss
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setModifyingPosition({ id: row.original.id, type: 'tp' })}
-              >
-                Modify Take Profit
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => setConfirmClosePosition(row.original)}
-                className="text-accent-red"
-                disabled={closingPositionId === row.original.id}
-              >
+              <DropdownMenuItem onClick={() => setModifyingPosition({ id: row.original.id, type: 'sl' })}>Modify Stop Loss</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setModifyingPosition({ id: row.original.id, type: 'tp' })}>Modify Take Profit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setConfirmClosePosition(row.original)} className="text-[#ef4444]"
+                disabled={closingPositionId === row.original.id}>
                 {closingPositionId === row.original.id ? 'Closing...' : 'Close Position'}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -925,60 +798,43 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     },
   ];
 
-  // Table columns for closed positions
   const closedPositionColumns: ColumnDef<ClosedPosition>[] = [
     {
       id: 'select',
       header: () => (
         <div className="flex items-center justify-center">
-          <input
-            type="checkbox"
-            checked={filteredClosedPositions.length > 0 && selectedClosedPositions.size === filteredClosedPositions.length}
+          <input type="checkbox" checked={filteredClosedPositions.length > 0 && selectedClosedPositions.size === filteredClosedPositions.length}
             onChange={() => {
-              if (selectedClosedPositions.size === filteredClosedPositions.length) {
-                setSelectedClosedPositions(new Set());
-              } else {
-                setSelectedClosedPositions(new Set(filteredClosedPositions.map(p => p.id)));
-              }
-            }}
-            className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
-          />
+              if (selectedClosedPositions.size === filteredClosedPositions.length) setSelectedClosedPositions(new Set());
+              else setSelectedClosedPositions(new Set(filteredClosedPositions.map(p => p.id)));
+            }} className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
         </div>
       ),
       cell: ({ row }) => (
         <div className="flex items-center justify-center">
-          <input
-            type="checkbox"
-            checked={selectedClosedPositions.has(row.original.id)}
+          <input type="checkbox" checked={selectedClosedPositions.has(row.original.id)}
             onChange={() => {
               setSelectedClosedPositions(prev => {
                 const next = new Set(prev);
-                if (next.has(row.original.id)) {
-                  next.delete(row.original.id);
-                } else {
-                  next.add(row.original.id);
-                }
+                if (next.has(row.original.id)) next.delete(row.original.id);
+                else next.add(row.original.id);
                 return next;
               });
-            }}
-            className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
-          />
+            }} className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
         </div>
       ),
-      size: 40,
+      size: 32,
     },
     {
       accessorKey: 'symbol',
       header: 'Symbol',
-      cell: ({ row }) => (
-        <div className="font-mono font-semibold text-sm">{row.original.symbol}</div>
-      ),
+      cell: ({ row }) => <div className="font-mono font-semibold text-[11px]">{row.original.symbol}</div>,
     },
     {
       accessorKey: 'strategy_name',
       header: 'Strategy',
       cell: ({ row }) => (
-        <div className="font-mono text-xs text-muted-foreground truncate max-w-[180px]" title={row.original.strategy_name || row.original.strategy_id}>
+        <div className="font-mono text-[10px] text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || '—'}
         </div>
       ),
@@ -988,16 +844,10 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       header: () => <div className="text-right">Realized P&L</div>,
       cell: ({ row }) => (
         <div className="text-right">
-          <div className={cn(
-            'font-mono font-semibold text-sm',
-            row.original.realized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'
-          )}>
+          <div className={cn('font-mono font-semibold text-[11px]', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatCurrency(row.original.realized_pnl)}
           </div>
-          <div className={cn(
-            'text-xs font-mono',
-            row.original.realized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'
-          )}>
+          <div className={cn('text-[9px] font-mono', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatPercentage(row.original.realized_pnl_percent)}
           </div>
         </div>
@@ -1005,35 +855,28 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     },
     {
       accessorKey: 'holding_time_hours',
-      header: () => <div className="text-right">Holding Time</div>,
+      header: () => <div className="text-right">Hold</div>,
       cell: ({ row }) => (
-        <div className="text-right text-sm text-muted-foreground">
+        <div className="text-right text-[11px] text-muted-foreground font-mono">
           {row.original.holding_time_hours < 24 
             ? `${row.original.holding_time_hours.toFixed(1)}h`
-            : `${(row.original.holding_time_hours / 24).toFixed(1)}d`
-          }
+            : `${(row.original.holding_time_hours / 24).toFixed(1)}d`}
         </div>
       ),
     },
     {
       accessorKey: 'exit_reason',
-      header: 'Exit Reason',
-      cell: ({ row }) => (
-        <div className="text-sm text-muted-foreground">
-          {row.original.exit_reason || 'N/A'}
-        </div>
-      ),
+      header: 'Exit',
+      cell: ({ row }) => <div className="text-[10px] text-muted-foreground">{row.original.exit_reason || 'N/A'}</div>,
     },
     {
       accessorKey: 'closed_at',
-      header: () => <div className="text-right">Closed At</div>,
-      cell: ({ row }) => (
-        <div className="text-right text-xs text-muted-foreground whitespace-nowrap">
-          {formatTimestamp(row.original.closed_at)}
-        </div>
-      ),
+      header: () => <div className="text-right">Closed</div>,
+      cell: ({ row }) => <div className="text-right text-[10px] text-muted-foreground whitespace-nowrap font-mono">{formatTimestamp(row.original.closed_at)}</div>,
     },
   ];
+
+  // ── Loading state ──────────────────────────────────────────────────
 
   if (tradingModeLoading || loading) {
     return (
@@ -1043,491 +886,487 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     );
   }
 
-  // ── Header actions for PageTemplate ──────────────────────────────────
+  // ── Header actions (compact — just refresh + freshness) ────────────
   const headerActions = (
     <div className="flex items-center gap-2">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={refresh}
-        disabled={refreshing || pollingRefreshing}
-        className="gap-2"
-      >
-        <RefreshCw className={cn('h-4 w-4', (refreshing || pollingRefreshing) && 'animate-spin')} />
+      <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing || pollingRefreshing} className="gap-1.5 h-7 text-[11px]">
+        <RefreshCw className={cn('h-3.5 w-3.5', (refreshing || pollingRefreshing) && 'animate-spin')} />
         Refresh
       </Button>
     </div>
   );
 
-  // ── Main Panel (70%) — Positions with tabs ─────────────────────────
+  // ── Tab buttons for PanelHeader ────────────────────────────────────
+  const tabButtons = (
+    <div className="flex items-center gap-0 border-b-0">
+      {[
+        { id: 'open', label: `Open (${filteredPositions.length})` },
+        { id: 'closed', label: `Closed (${filteredClosedPositions.length})` },
+        { id: 'pending', label: `Pending${pendingClosures.length > 0 ? ` (${pendingClosures.length})` : ''}`, highlight: pendingClosures.length > 0 ? 'text-amber-400' : '' },
+        { id: 'alerts', label: `Alerts${fundamentalAlerts.length > 0 ? ` (${fundamentalAlerts.length})` : ''}`, highlight: fundamentalAlerts.length > 0 ? 'text-orange-400' : '' },
+      ].map(tab => (
+        <button
+          key={tab.id}
+          onClick={() => setActiveTab(tab.id)}
+          className={cn(
+            'px-3 py-1 text-[11px] font-medium transition-colors relative',
+            activeTab === tab.id
+              ? 'text-[#10b981] after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-[#10b981]'
+              : cn('text-gray-500 hover:text-gray-300', tab.highlight)
+          )}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  // ── Filter controls for the active tab (rendered inline in header area) ──
+  const renderFilters = () => {
+    if (activeTab === 'open') {
+      return (
+        <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--color-dark-border)] bg-[var(--color-dark-bg)]/50">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            <Input placeholder="Search..." value={positionSearch} onChange={(e) => setPositionSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-[10px]" />
+          </div>
+          <Select value={positionStrategyFilter} onValueChange={setPositionStrategyFilter}>
+            <SelectTrigger className="w-[110px] h-7 text-[10px]"><SelectValue placeholder="Strategy" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Strategies</SelectItem>
+              {uniqueStrategies.map(s => <SelectItem key={s} value={s!}>{s?.substring(0, 8)}...</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={positionSideFilter} onValueChange={setPositionSideFilter}>
+            <SelectTrigger className="w-[80px] h-7 text-[10px]"><SelectValue placeholder="Side" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="BUY">BUY</SelectItem>
+              <SelectItem value="SELL">SELL</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={handleSyncPositions} disabled={syncing} className="gap-1 h-7 text-[10px] px-2" title="Sync with eToro">
+            <RefreshCw className={cn('h-3 w-3', syncing && 'animate-spin')} />
+            Sync
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredPositions, 'open-positions.csv')} className="gap-1 h-7 text-[10px] px-2">
+            <Download className="h-3 w-3" />
+          </Button>
+          {selectedPositions.size > 0 && (
+            <Button size="sm" variant="destructive" onClick={() => setShowBulkCloseConfirm(true)} disabled={closingSelected} className="gap-1 h-7 text-[10px] px-2 ml-auto">
+              <X className="h-3 w-3" /> Close ({selectedPositions.size})
+            </Button>
+          )}
+          {positions.length > 0 && selectedPositions.size === 0 && (
+            <Button size="sm" variant="outline" onClick={() => setShowCloseAllConfirm(true)} className="gap-1 h-7 text-[10px] px-2 ml-auto border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
+              <XCircle className="h-3 w-3" /> Close All
+            </Button>
+          )}
+        </div>
+      );
+    }
+    if (activeTab === 'closed') {
+      return (
+        <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--color-dark-border)] bg-[var(--color-dark-bg)]/50">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+            <Input placeholder="Search..." value={closedSearch} onChange={(e) => setClosedSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-[10px]" />
+          </div>
+          <Select value={closedStrategyFilter} onValueChange={setClosedStrategyFilter}>
+            <SelectTrigger className="w-[110px] h-7 text-[10px]"><SelectValue placeholder="Strategy" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Strategies</SelectItem>
+              {uniqueStrategies.map(s => <SelectItem key={s} value={s!}>{s?.substring(0, 8)}...</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={closedDateFilter} onValueChange={setClosedDateFilter}>
+            <SelectTrigger className="w-[90px] h-7 text-[10px]"><SelectValue placeholder="Date" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Time</SelectItem>
+              <SelectItem value="1d">Last 24h</SelectItem>
+              <SelectItem value="7d">Last 7d</SelectItem>
+              <SelectItem value="30d">Last 30d</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredClosedPositions, 'closed-positions.csv')} className="gap-1 h-7 text-[10px] px-2">
+            <Download className="h-3 w-3" />
+          </Button>
+          {selectedClosedPositions.size > 0 && (
+            <Button size="sm" variant="destructive" onClick={async () => {
+              if (!tradingMode) return;
+              try { setDeletingClosedPositions(true); await apiClient.deleteClosedPositions(Array.from(selectedClosedPositions), tradingMode); toast.success(`Deleted ${selectedClosedPositions.size} closed position(s)`); setSelectedClosedPositions(new Set()); fetchData(); } catch { toast.error('Failed to delete closed positions'); } finally { setDeletingClosedPositions(false); }
+            }} disabled={deletingClosedPositions} className="gap-1 h-7 text-[10px] px-2 ml-auto">
+              <Trash2 className="h-3 w-3" /> Delete ({selectedClosedPositions.size})
+            </Button>
+          )}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  // ── Tab content rendering ──────────────────────────────────────────
+
+  const renderTabContent = () => {
+    if (activeTab === 'open') {
+      return filteredPositions.length > 0 ? (
+        <div className="flex-1 overflow-auto min-h-0">
+          <DataTable columns={positionColumns} data={filteredPositions} pageSize={50} showPagination={filteredPositions.length > 50} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
+        </div>
+      ) : (
+        <div className="flex items-center justify-center h-32 text-muted-foreground text-[11px]">
+          {positionSearch || positionStrategyFilter !== 'all' || positionSideFilter !== 'all' ? 'No positions match filters' : 'No open positions'}
+        </div>
+      );
+    }
+
+    if (activeTab === 'closed') {
+      return filteredClosedPositions.length > 0 ? (
+        <div className="flex-1 overflow-auto min-h-0">
+          <DataTable columns={closedPositionColumns} data={filteredClosedPositions} pageSize={50} showPagination={filteredClosedPositions.length > 50} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
+        </div>
+      ) : (
+        <div className="flex items-center justify-center h-32 text-muted-foreground text-[11px]">
+          {closedSearch || closedStrategyFilter !== 'all' || closedDateFilter !== 'all' ? 'No closed positions match filters' : 'No closed positions'}
+        </div>
+      );
+    }
+
+    if (activeTab === 'pending') {
+      return (
+        <div className="flex-1 overflow-auto min-h-0 p-2">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] text-muted-foreground">
+              Positions flagged for closure.{pendingClosures.length > 0 && ' Auto-close within 60s.'}
+            </p>
+            {pendingClosures.length > 0 && (
+              <div className="flex gap-1.5">
+                <Button variant="outline" size="sm" onClick={fetchPendingClosures} className="gap-1 h-6 text-[10px] px-2">
+                  <RefreshCw className="h-2.5 w-2.5" /> Refresh
+                </Button>
+                <Button size="sm" onClick={handleApproveAll} disabled={approvingAll} className="gap-1 h-6 text-[10px] px-2 bg-amber-600 hover:bg-amber-700 text-white">
+                  <Check className="h-2.5 w-2.5" /> {approvingAll ? 'Closing...' : `Approve All (${pendingClosures.length})`}
+                </Button>
+              </div>
+            )}
+          </div>
+          {pendingClosuresLoading && pendingClosures.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-[10px]">Loading...</span>
+            </div>
+          ) : pendingClosures.length > 0 ? (
+            <div className="space-y-1.5">
+              {pendingClosures.map((position) => {
+                const hoursAgo = Math.floor((Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60 * 60));
+                return (
+                  <motion.div key={position.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center justify-between px-2 py-1.5 rounded border border-amber-500/20 bg-amber-500/5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-semibold text-[11px]">{position.symbol}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-[9px] font-mono font-semibold', position.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{position.side}</span>
+                          <span className="text-[9px] text-muted-foreground font-mono">{formatCurrency((position as any).invested_amount || position.quantity * position.entry_price)}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {position.closure_reason && <span className="text-[9px] text-amber-400">{position.closure_reason}</span>}
+                          <span className="flex items-center gap-0.5 text-[9px] text-muted-foreground"><Clock className="h-2.5 w-2.5" />{hoursAgo < 1 ? 'Now' : hoursAgo < 24 ? `${hoursAgo}h` : `${Math.floor(hoursAgo / 24)}d`}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="text-right mr-1">
+                        <div className={cn('font-mono font-semibold text-[11px]', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(position.unrealized_pnl)}</div>
+                        <div className={cn('text-[9px] font-mono', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(position.unrealized_pnl_percent || 0)}</div>
+                      </div>
+                      <Button size="sm" variant="outline" onClick={() => handleDismissClosure(position.id)} disabled={dismissingId === position.id} className="h-6 text-[10px] px-2">
+                        {dismissingId === position.id ? '...' : 'Dismiss'}
+                      </Button>
+                      <Button size="sm" onClick={() => handleApproveClosure(position.id)} disabled={approvingId === position.id} className="h-6 text-[10px] px-2 bg-amber-600 hover:bg-amber-700 text-white">
+                        {approvingId === position.id ? '...' : 'Approve'}
+                      </Button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <AlertTriangle className="h-5 w-5 mx-auto mb-1.5 opacity-30" />
+              <p className="text-[10px]">No positions pending closure</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (activeTab === 'alerts') {
+      return (
+        <div className="flex-1 overflow-auto min-h-0 p-2">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] text-muted-foreground">Positions flagged by fundamental exit monitoring.</p>
+            <div className="flex gap-1.5">
+              <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="gap-1 h-6 text-[10px] px-2">
+                <RefreshCw className={cn('h-2.5 w-2.5', triggeringCheck && 'animate-spin')} /> {triggeringCheck ? 'Checking...' : 'Run Check'}
+              </Button>
+              {fundamentalAlerts.length > 0 && (
+                <Button size="sm" onClick={handleCloseAllAlerts} disabled={closingAllAlerts} className="gap-1 h-6 text-[10px] px-2 bg-orange-600 hover:bg-orange-700 text-white">
+                  <XCircle className="h-2.5 w-2.5" /> {closingAllAlerts ? 'Closing...' : `Close All (${fundamentalAlerts.length})`}
+                </Button>
+              )}
+            </div>
+          </div>
+          {fundamentalAlertsLoading && fundamentalAlerts.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-[10px]">Loading...</span>
+            </div>
+          ) : fundamentalAlerts.length > 0 ? (
+            <div className="space-y-1.5">
+              {fundamentalAlerts.map((alert) => {
+                const pnl = alert.unrealized_pnl || 0;
+                const pnlPercent = alert.unrealized_pnl_percent || 0;
+                const flagReason = alert.flag_reason || 'Fundamental Exit';
+                const fundamentalDetail = alert.fundamental_detail || alert.closure_reason || '';
+                const reasonColor = flagReason === 'Earnings Miss' ? 'bg-red-500/20 text-red-400' : flagReason === 'Revenue Decline' ? 'bg-amber-500/20 text-amber-400' : flagReason === 'Sector Rotation' ? 'bg-blue-500/20 text-blue-400' : 'bg-orange-500/20 text-orange-400';
+                return (
+                  <motion.div key={alert.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center justify-between px-2 py-1.5 rounded border border-orange-500/20 bg-orange-500/5">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono font-semibold text-[11px]">{alert.symbol}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-[9px] font-mono font-semibold', alert.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{alert.side}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-[9px] font-semibold', reasonColor)}>{flagReason}</span>
+                        </div>
+                        {fundamentalDetail && <div className="mt-0.5 text-[9px] text-orange-300/80 font-mono truncate max-w-xs" title={fundamentalDetail}>{fundamentalDetail}</div>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="text-right mr-1">
+                        <div className={cn('font-mono font-semibold text-[11px]', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(pnl)}</div>
+                        <div className={cn('text-[9px] font-mono', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(pnlPercent)}</div>
+                      </div>
+                      <Button size="sm" variant="outline" onClick={() => handleDismissAlert(alert.id)} disabled={dismissingAlertId === alert.id} className="h-6 text-[10px] px-2">
+                        {dismissingAlertId === alert.id ? '...' : 'Dismiss'}
+                      </Button>
+                      <Button size="sm" onClick={() => handleCloseAlertPosition(alert.id)} disabled={closingAlertId === alert.id} className="h-6 text-[10px] px-2 bg-orange-600 hover:bg-orange-700 text-white">
+                        {closingAlertId === alert.id ? '...' : 'Close'}
+                      </Button>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-muted-foreground">
+              <Activity className="h-5 w-5 mx-auto mb-1.5 opacity-30" />
+              <p className="text-[10px]">No fundamental alerts</p>
+              <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="mt-2 gap-1 h-6 text-[10px] px-2">
+                <RefreshCw className={cn('h-2.5 w-2.5', triggeringCheck && 'animate-spin')} /> {triggeringCheck ? 'Running...' : 'Run Check Now'}
+              </Button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  // ── Main Panel (70%) — Positions ───────────────────────────────────
+  // PanelHeader has: title "Positions" on left, tabs inline, filter controls on right — ALL IN ONE 32px ROW
+  // Below: immediately the data table, edge-to-edge, no padding, no card wrapper
+
   const mainPanel = (
     <div className="flex flex-col h-full">
-      <PanelHeader title="Positions" panelId="portfolio-positions" onRefresh={refresh}>
-        <div className="flex-1 min-h-0 p-3">
-          <RefreshIndicator visible={pollingRefreshing} />
-
-          {/* Error state */}
-          {fetchError && !loading && positions.length === 0 && (
-            <Card className="mb-4 border-accent-red/50 bg-accent-red/5">
-              <CardContent className="py-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <XCircle className="h-5 w-5 text-accent-red shrink-0" />
-                    <div>
-                      <p className="text-sm font-semibold text-accent-red">{fetchError.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{fetchError.message}</p>
-                    </div>
-                  </div>
-                  {fetchError.retryable && (
-                    <Button variant="outline" size="sm" onClick={refresh} className="border-accent-red/30 text-accent-red hover:bg-accent-red/10">
-                      Retry
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Pending Closures Alert Banner */}
-          {pendingClosures.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-3">
-              <Card className="border-amber-500/50 bg-amber-500/5">
-                <CardContent className="py-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-                      <p className="text-xs font-semibold text-amber-400">
-                        {pendingClosures.length} pending closure{pendingClosures.length !== 1 ? 's' : ''}
-                      </p>
-                    </div>
-                    <Button variant="outline" size="sm" className="border-amber-500/30 text-amber-400 hover:bg-amber-500/10 text-xs h-7"
-                      onClick={() => { const el = document.getElementById('pending-closures-tab'); if (el) el.click(); }}>
-                      Review
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
-
-          {/* Fundamental Alerts Banner */}
-          {fundamentalAlerts.length > 0 && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="mb-3">
-              <Card className="border-orange-500/50 bg-orange-500/5">
-                <CardContent className="py-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Activity className="h-4 w-4 text-orange-500 shrink-0" />
-                      <p className="text-xs font-semibold text-orange-400">
-                        {fundamentalAlerts.length} position{fundamentalAlerts.length !== 1 ? 's' : ''} flagged
-                      </p>
-                    </div>
-                    <Button variant="outline" size="sm" className="border-orange-500/30 text-orange-400 hover:bg-orange-500/10 text-xs h-7"
-                      onClick={() => { const el = document.getElementById('fundamental-alerts-tab'); if (el) el.click(); }}>
-                      Review
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          )}
-
-          {/* Tabs */}
-          <Tabs defaultValue="open" className="space-y-3">
-            <TabsList className="w-full overflow-x-auto">
-              <TabsTrigger value="open">Open ({filteredPositions.length})</TabsTrigger>
-              <TabsTrigger value="closed">Closed ({filteredClosedPositions.length})</TabsTrigger>
-              <TabsTrigger value="pending" id="pending-closures-tab" className={pendingClosures.length > 0 ? 'text-amber-400' : ''}>
-                Pending {pendingClosures.length > 0 && `(${pendingClosures.length})`}
-              </TabsTrigger>
-              <TabsTrigger value="fundamental-alerts" id="fundamental-alerts-tab" className={fundamentalAlerts.length > 0 ? 'text-orange-400' : ''}>
-                Alerts {fundamentalAlerts.length > 0 && `(${fundamentalAlerts.length})`}
-              </TabsTrigger>
-            </TabsList>
-
-            {/* Open Positions Tab */}
-            <TabsContent value="open" className="space-y-3">
-              {/* Filters */}
-              <div className="flex flex-wrap gap-2 items-center">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input placeholder="Search..." value={positionSearch} onChange={(e) => setPositionSearch(e.target.value)} className="pl-8 h-8 w-[160px] text-xs" />
-                </div>
-                <Select value={positionStrategyFilter} onValueChange={setPositionStrategyFilter}>
-                  <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Strategy" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Strategies</SelectItem>
-                    {uniqueStrategies.map(s => <SelectItem key={s} value={s!}>{s?.substring(0, 8)}...</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={positionSideFilter} onValueChange={setPositionSideFilter}>
-                  <SelectTrigger className="w-[100px] h-8 text-xs"><SelectValue placeholder="Side" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="BUY">BUY</SelectItem>
-                    <SelectItem value="SELL">SELL</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" size="sm" onClick={handleSyncPositions} disabled={syncing} className="gap-1 h-8 text-xs" title="Sync with eToro">
-                  <RefreshCw className={cn('h-3.5 w-3.5', syncing && 'animate-spin')} />
-                  {syncing ? 'Syncing...' : 'Sync'}
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredPositions, 'open-positions.csv')} className="gap-1 h-8 text-xs">
-                  <Download className="h-3.5 w-3.5" /> Export
-                </Button>
-              </div>
-              {/* Bulk actions */}
-              {(selectedPositions.size > 0 || positions.length > 0) && (
-                <div className="flex gap-2">
-                  {selectedPositions.size > 0 && (
-                    <Button size="sm" variant="destructive" onClick={() => setShowBulkCloseConfirm(true)} disabled={closingSelected} className="gap-1 h-7 text-xs">
-                      <X className="h-3.5 w-3.5" />
-                      {closingSelected ? 'Closing...' : `Close Selected (${selectedPositions.size})`}
-                    </Button>
-                  )}
-                  {positions.length > 0 && (
-                    <Button size="sm" variant="outline" onClick={() => setShowCloseAllConfirm(true)} className="gap-1 h-7 text-xs border-accent-red/30 text-accent-red hover:bg-accent-red/10">
-                      <XCircle className="h-3.5 w-3.5" /> Close All
-                    </Button>
-                  )}
-                </div>
-              )}
-              {/* Table */}
-              {filteredPositions.length > 0 ? (
-                <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 380px)' }}>
-                  <DataTable columns={positionColumns} data={filteredPositions} pageSize={20} showPagination={true} className="[&_table]:table-dense" />
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground text-sm">
-                  {positionSearch || positionStrategyFilter !== 'all' || positionSideFilter !== 'all' ? 'No positions match your filters' : 'No open positions'}
-                </div>
-              )}
-            </TabsContent>
-
-            {/* Closed Positions Tab */}
-            <TabsContent value="closed" className="space-y-3">
-              <div className="flex flex-wrap gap-2 items-center">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input placeholder="Search..." value={closedSearch} onChange={(e) => setClosedSearch(e.target.value)} className="pl-8 h-8 w-[160px] text-xs" />
-                </div>
-                <Select value={closedStrategyFilter} onValueChange={setClosedStrategyFilter}>
-                  <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Strategy" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Strategies</SelectItem>
-                    {uniqueStrategies.map(s => <SelectItem key={s} value={s!}>{s?.substring(0, 8)}...</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={closedDateFilter} onValueChange={setClosedDateFilter}>
-                  <SelectTrigger className="w-[110px] h-8 text-xs"><SelectValue placeholder="Date" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Time</SelectItem>
-                    <SelectItem value="1d">Last 24h</SelectItem>
-                    <SelectItem value="7d">Last 7 days</SelectItem>
-                    <SelectItem value="30d">Last 30 days</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredClosedPositions, 'closed-positions.csv')} className="gap-1 h-8 text-xs">
-                  <Download className="h-3.5 w-3.5" /> Export
-                </Button>
-              </div>
-              {selectedClosedPositions.size > 0 && (
-                <div className="flex gap-2">
-                  <Button size="sm" variant="destructive" onClick={async () => {
-                    if (!tradingMode) return;
-                    try { setDeletingClosedPositions(true); await apiClient.deleteClosedPositions(Array.from(selectedClosedPositions), tradingMode); toast.success(`Deleted ${selectedClosedPositions.size} closed position(s)`); setSelectedClosedPositions(new Set()); fetchData(); } catch { toast.error('Failed to delete closed positions'); } finally { setDeletingClosedPositions(false); }
-                  }} disabled={deletingClosedPositions} className="gap-1 h-7 text-xs">
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {deletingClosedPositions ? 'Deleting...' : `Delete Selected (${selectedClosedPositions.size})`}
-                  </Button>
-                </div>
-              )}
-              {filteredClosedPositions.length > 0 ? (
-                <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 380px)' }}>
-                  <DataTable columns={closedPositionColumns} data={filteredClosedPositions} pageSize={20} showPagination={true} className="[&_table]:table-dense" />
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground text-sm">
-                  {closedSearch || closedStrategyFilter !== 'all' || closedDateFilter !== 'all' ? 'No closed positions match your filters' : 'No closed positions'}
-                </div>
-              )}
-            </TabsContent>
-
-            {/* Pending Closures Tab */}
-            <TabsContent value="pending" className="space-y-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-muted-foreground">
-                  Positions flagged for closure.{pendingClosures.length > 0 && ' Auto-close within 60s.'}
-                </p>
-                {pendingClosures.length > 0 && (
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={fetchPendingClosures} className="gap-1 h-7 text-xs">
-                      <RefreshCw className="h-3 w-3" /> Refresh
-                    </Button>
-                    <Button size="sm" onClick={handleApproveAll} disabled={approvingAll} className="gap-1 h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white">
-                      <Check className="h-3 w-3" /> {approvingAll ? 'Closing...' : `Approve All (${pendingClosures.length})`}
-                    </Button>
-                  </div>
-                )}
-              </div>
-              {pendingClosuresLoading && pendingClosures.length === 0 ? (
-                <div className="flex items-center justify-center py-8 text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin mr-2" /><span className="text-xs">Loading...</span>
-                </div>
-              ) : pendingClosures.length > 0 ? (
-                <div className="space-y-2">
-                  {pendingClosures.map((position) => {
-                    const hoursAgo = Math.floor((Date.now() - new Date(position.opened_at).getTime()) / (1000 * 60 * 60));
-                    return (
-                      <motion.div key={position.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
-                        className="flex items-center justify-between p-3 rounded-lg border border-amber-500/20 bg-amber-500/5">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-mono font-semibold text-xs">{position.symbol}</span>
-                              <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold', position.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red')}>{position.side}</span>
-                              <span className="text-[10px] text-muted-foreground font-mono">{formatCurrency((position as any).invested_amount || position.quantity * position.entry_price)}</span>
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              {position.closure_reason && <span className="text-[10px] text-amber-400">{position.closure_reason}</span>}
-                              <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><Clock className="h-2.5 w-2.5" />{hoursAgo < 1 ? 'Now' : hoursAgo < 24 ? `${hoursAgo}h` : `${Math.floor(hoursAgo / 24)}d`}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right mr-1">
-                            <div className={cn('font-mono font-semibold text-xs', position.unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(position.unrealized_pnl)}</div>
-                            <div className={cn('text-[10px] font-mono', position.unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatPercentage(position.unrealized_pnl_percent || 0)}</div>
-                          </div>
-                          <Button size="sm" variant="outline" onClick={() => handleDismissClosure(position.id)} disabled={dismissingId === position.id} className="h-7 text-xs">
-                            {dismissingId === position.id ? '...' : 'Dismiss'}
-                          </Button>
-                          <Button size="sm" onClick={() => handleApproveClosure(position.id)} disabled={approvingId === position.id} className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white">
-                            {approvingId === position.id ? '...' : 'Approve'}
-                          </Button>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <AlertTriangle className="h-6 w-6 mx-auto mb-2 opacity-30" />
-                  <p className="text-xs">No positions pending closure</p>
-                </div>
-              )}
-            </TabsContent>
-
-            {/* Fundamental Alerts Tab */}
-            <TabsContent value="fundamental-alerts" className="space-y-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-muted-foreground">Positions flagged by fundamental exit monitoring.</p>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="gap-1 h-7 text-xs">
-                    <RefreshCw className={cn('h-3 w-3', triggeringCheck && 'animate-spin')} /> {triggeringCheck ? 'Checking...' : 'Run Check'}
-                  </Button>
-                  {fundamentalAlerts.length > 0 && (
-                    <Button size="sm" onClick={handleCloseAllAlerts} disabled={closingAllAlerts} className="gap-1 h-7 text-xs bg-orange-600 hover:bg-orange-700 text-white">
-                      <XCircle className="h-3 w-3" /> {closingAllAlerts ? 'Closing...' : `Close All (${fundamentalAlerts.length})`}
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {fundamentalAlertsLoading && fundamentalAlerts.length === 0 ? (
-                <div className="flex items-center justify-center py-8 text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin mr-2" /><span className="text-xs">Loading...</span>
-                </div>
-              ) : fundamentalAlerts.length > 0 ? (
-                <div className="space-y-2">
-                  {fundamentalAlerts.map((alert) => {
-                    const pnl = alert.unrealized_pnl || 0;
-                    const pnlPercent = alert.unrealized_pnl_percent || 0;
-                    const flagReason = alert.flag_reason || 'Fundamental Exit';
-                    const fundamentalDetail = alert.fundamental_detail || alert.closure_reason || '';
-                    const reasonColor = flagReason === 'Earnings Miss' ? 'bg-red-500/20 text-red-400' : flagReason === 'Revenue Decline' ? 'bg-amber-500/20 text-amber-400' : flagReason === 'Sector Rotation' ? 'bg-blue-500/20 text-blue-400' : 'bg-orange-500/20 text-orange-400';
-                    return (
-                      <motion.div key={alert.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
-                        className="flex items-center justify-between p-3 rounded-lg border border-orange-500/20 bg-orange-500/5">
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-mono font-semibold text-xs">{alert.symbol}</span>
-                              <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold', alert.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red')}>{alert.side}</span>
-                              <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-semibold', reasonColor)}>{flagReason}</span>
-                            </div>
-                            {fundamentalDetail && <div className="mt-1 text-[10px] text-orange-300/80 font-mono truncate max-w-xs" title={fundamentalDetail}>{fundamentalDetail}</div>}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right mr-1">
-                            <div className={cn('font-mono font-semibold text-xs', pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(pnl)}</div>
-                            <div className={cn('text-[10px] font-mono', pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatPercentage(pnlPercent)}</div>
-                          </div>
-                          <Button size="sm" variant="outline" onClick={() => handleDismissAlert(alert.id)} disabled={dismissingAlertId === alert.id} className="h-7 text-xs">
-                            {dismissingAlertId === alert.id ? '...' : 'Dismiss'}
-                          </Button>
-                          <Button size="sm" onClick={() => handleCloseAlertPosition(alert.id)} disabled={closingAlertId === alert.id} className="h-7 text-xs bg-orange-600 hover:bg-orange-700 text-white">
-                            {closingAlertId === alert.id ? '...' : 'Close'}
-                          </Button>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Activity className="h-6 w-6 mx-auto mb-2 opacity-30" />
-                  <p className="text-xs">No fundamental alerts</p>
-                  <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="mt-3 gap-1 h-7 text-xs">
-                    <RefreshCw className={cn('h-3 w-3', triggeringCheck && 'animate-spin')} /> {triggeringCheck ? 'Running...' : 'Run Check Now'}
-                  </Button>
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
+      {/* Panel header row: title + tabs + actions — single 32px bar */}
+      <div className="flex items-center justify-between px-2 min-h-[32px] shrink-0 bg-[var(--color-dark-bg)] border-b border-[var(--color-dark-border)]">
+        <div className="flex items-center gap-2 min-w-0">
+          <h3 className="text-[11px] font-semibold text-gray-300 shrink-0">Positions</h3>
+          <div className="h-3 w-px bg-gray-700" />
+          {tabButtons}
         </div>
-      </PanelHeader>
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={refresh} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Refresh">
+            <RefreshCw size={11} className={cn((refreshing || pollingRefreshing) && 'animate-spin')} />
+          </button>
+        </div>
+      </div>
+
+      {/* Alert banners — simple colored divs, no Card wrapper */}
+      {pendingClosures.length > 0 && activeTab !== 'pending' && (
+        <div className="flex items-center justify-between px-2 py-1 bg-amber-500/5 border-b border-amber-500/20">
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
+            <span className="text-[10px] font-semibold text-amber-400">{pendingClosures.length} pending closure{pendingClosures.length !== 1 ? 's' : ''}</span>
+          </div>
+          <button onClick={() => setActiveTab('pending')} className="text-[10px] text-amber-400 hover:text-amber-300 underline">Review</button>
+        </div>
+      )}
+      {fundamentalAlerts.length > 0 && activeTab !== 'alerts' && (
+        <div className="flex items-center justify-between px-2 py-1 bg-orange-500/5 border-b border-orange-500/20">
+          <div className="flex items-center gap-1.5">
+            <Activity className="h-3 w-3 text-orange-500 shrink-0" />
+            <span className="text-[10px] font-semibold text-orange-400">{fundamentalAlerts.length} flagged position{fundamentalAlerts.length !== 1 ? 's' : ''}</span>
+          </div>
+          <button onClick={() => setActiveTab('alerts')} className="text-[10px] text-orange-400 hover:text-orange-300 underline">Review</button>
+        </div>
+      )}
+
+      {/* Error state — simple div, no Card */}
+      {fetchError && !loading && positions.length === 0 && (
+        <div className="flex items-center justify-between px-2 py-1.5 bg-[#ef4444]/5 border-b border-[#ef4444]/20">
+          <div className="flex items-center gap-1.5">
+            <XCircle className="h-3.5 w-3.5 text-[#ef4444] shrink-0" />
+            <div>
+              <span className="text-[10px] font-semibold text-[#ef4444]">{fetchError.title}</span>
+              <span className="text-[9px] text-muted-foreground ml-1.5">{fetchError.message}</span>
+            </div>
+          </div>
+          {fetchError.retryable && (
+            <button onClick={refresh} className="text-[10px] text-[#ef4444] hover:text-red-300 underline">Retry</button>
+          )}
+        </div>
+      )}
+
+      <RefreshIndicator visible={pollingRefreshing} />
+
+      {/* Filter row — simple inline, no Card wrapper */}
+      {renderFilters()}
+
+      {/* Tab content — edge-to-edge, fills remaining space */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {renderTabContent()}
+      </div>
     </div>
   );
 
   // ── Side Panel (30%) — Summary ─────────────────────────────────────
-  const portfolioMetrics: CompactMetric[] = [
-    { label: 'Equity', value: formatCurrency(totalPortfolioValue) },
-    { label: 'P&L', value: formatCurrency(totalPnL), trend: totalPnL > 0 ? 'up' : totalPnL < 0 ? 'down' : 'neutral' },
-    { label: 'Positions', value: String(positions.length) },
-    { label: 'Win Rate', value: `${winRate.toFixed(1)}%` },
-  ];
+  // Direct key-value pairs, no Card wrappers, no "Account" sub-header
+  // Compact, every pixel shows data
 
   const sidePanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Summary" panelId="portfolio-summary">
-        <div className="flex-1 min-h-0 p-3 space-y-4">
-          {/* Compact Metric Row */}
-          <CompactMetricRow metrics={portfolioMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
-
-          {/* Account Overview */}
-          <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Account</div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">Equity</span>
-                <span className="text-xs font-mono font-semibold text-gray-200">{formatCurrency(totalPortfolioValue)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">Cash</span>
-                <span className="text-xs font-mono font-semibold text-gray-200">{accountInfo ? formatCurrency(accountInfo.buying_power) : '---'}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">Invested</span>
-                <span className="text-xs font-mono font-semibold text-gray-200">{formatCurrency(totalPositionValue)}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">Unrealized P&L</span>
-                <span className={cn('text-xs font-mono font-semibold', totalPnL >= 0 ? 'text-accent-green' : 'text-accent-red')}>
-                  {formatCurrency(totalPnL)} ({formatPercentage(totalPnLPercent)})
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">Positions</span>
-                <span className="text-xs font-mono font-semibold text-gray-200">{positions.length}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">Win Rate (Open)</span>
-                <span className="text-xs font-mono font-semibold text-gray-200">{winRate.toFixed(1)}%</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-400">Win Rate (Closed)</span>
-                <span className="text-xs font-mono font-semibold text-gray-200">{closedWinRate.toFixed(1)}%</span>
-              </div>
+        <div className="flex-1 min-h-0 overflow-auto">
+          {/* Key-value pairs — directly in panel, no Card wrapper */}
+          <div className="px-2 py-2 space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500">Equity</span>
+              <span className="text-[11px] font-mono font-semibold text-gray-100">{formatCurrency(totalPortfolioValue)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500">Cash</span>
+              <span className="text-[11px] font-mono font-semibold text-gray-100">{accountInfo ? formatCurrency(accountInfo.buying_power) : '---'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500">Invested</span>
+              <span className="text-[11px] font-mono font-semibold text-gray-100">{formatCurrency(totalPositionValue)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500">P&L</span>
+              <span className={cn('text-[11px] font-mono font-semibold', totalPnL >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+                {totalPnL >= 0 ? '+' : ''}{formatCurrency(totalPnL)} ({formatPercentage(totalPnLPercent)})
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500">Positions</span>
+              <span className="text-[11px] font-mono font-semibold text-gray-100">{positions.length}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500">Win Rate</span>
+              <span className="text-[11px] font-mono font-semibold text-gray-100">{winRate.toFixed(1)}%</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500">Win Rate (Closed)</span>
+              <span className="text-[11px] font-mono font-semibold text-gray-100">{closedWinRate.toFixed(1)}%</span>
             </div>
           </div>
 
-          {/* Position Summary by Asset Class */}
-          <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">By Asset Class</div>
+          {/* Thin separator */}
+          <div className="h-px bg-[var(--color-dark-border)] mx-2" />
+
+          {/* By Asset Class — compact list, no Card */}
+          <div className="px-2 py-2">
+            <div className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">By Asset Class</div>
             {assetClassSummary.length > 0 ? (
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {assetClassSummary.map((ac) => (
-                  <div key={ac.assetClass} className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-gray-200">{ac.assetClass}</span>
-                      <span className="text-[10px] text-muted-foreground font-mono">({ac.count})</span>
+                  <div key={ac.assetClass} className="flex items-center justify-between py-0.5">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-gray-300">{ac.assetClass}</span>
+                      <span className="text-[9px] text-muted-foreground font-mono">({ac.count})</span>
                     </div>
-                    <span className={cn('text-xs font-mono font-semibold', ac.totalPnl > 0 ? 'text-accent-green' : ac.totalPnl < 0 ? 'text-accent-red' : 'text-gray-400')}>
+                    <span className={cn('text-[10px] font-mono font-semibold', ac.totalPnl > 0 ? 'text-[#22c55e]' : ac.totalPnl < 0 ? 'text-[#ef4444]' : 'text-gray-400')}>
                       {ac.totalPnl >= 0 ? '+' : ''}{formatCurrency(ac.totalPnl)}
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground text-center py-3">No open positions</p>
+              <p className="text-[10px] text-muted-foreground text-center py-2">No open positions</p>
             )}
           </div>
 
-          {/* Sector Exposure Pie Chart */}
-          <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Sector Exposure</div>
+          {/* Thin separator */}
+          <div className="h-px bg-[var(--color-dark-border)] mx-2" />
+
+          {/* Sector Exposure Pie Chart — directly rendered, no Card */}
+          <div className="px-2 py-2">
+            <div className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Sector Exposure</div>
             {sectorExposure.length > 0 ? (
-              <ResponsiveContainer width="100%" height={180}>
-                <PieChart>
-                  <Pie
-                    data={sectorExposure}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={70}
-                    innerRadius={35}
-                    paddingAngle={2}
-                    stroke="none"
-                  >
-                    {sectorExposure.map((_, index) => (
-                      <Cell key={`sector-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: number | undefined) => [formatCurrency(value ?? 0), 'Exposure']}
-                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.5rem', fontSize: '11px' }}
-                    labelStyle={{ color: '#d1d5db' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
+              <>
+                <ResponsiveContainer width="100%" height={150}>
+                  <PieChart>
+                    <Pie data={sectorExposure} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={58} innerRadius={28} paddingAngle={2} stroke="none">
+                      {sectorExposure.map((_, index) => (
+                        <Cell key={`sector-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: number | undefined) => [formatCurrency(value ?? 0), 'Exposure']}
+                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.375rem', fontSize: '10px' }}
+                      labelStyle={{ color: '#d1d5db' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
+                  {sectorExposure.slice(0, 8).map((s, i) => (
+                    <div key={s.name} className="flex items-center gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                      <span className="text-[9px] text-gray-400 truncate max-w-[70px]">{s.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
             ) : (
-              <p className="text-xs text-muted-foreground text-center py-3">No data</p>
-            )}
-            {/* Legend */}
-            {sectorExposure.length > 0 && (
-              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1">
-                {sectorExposure.slice(0, 8).map((s, i) => (
-                  <div key={s.name} className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                    <span className="text-[10px] text-gray-400 truncate max-w-[80px]">{s.name}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="text-[10px] text-muted-foreground text-center py-2">No data</p>
             )}
           </div>
 
-          {/* Allocation Breakdown Bar */}
-          <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Allocation</div>
+          {/* Thin separator */}
+          <div className="h-px bg-[var(--color-dark-border)] mx-2" />
+
+          {/* Allocation Breakdown — directly rendered, no Card */}
+          <div className="px-2 py-2">
+            <div className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Allocation</div>
             {allocationData.length > 0 ? (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {allocationData.map((item, i) => (
                   <div key={item.name}>
                     <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-[10px] text-gray-300 truncate max-w-[120px]">{item.name}</span>
-                      <span className="text-[10px] font-mono text-gray-400">{item.pct.toFixed(1)}%</span>
+                      <span className="text-[9px] text-gray-300 truncate max-w-[100px]">{item.name}</span>
+                      <span className="text-[9px] font-mono text-gray-400">{item.pct.toFixed(1)}%</span>
                     </div>
-                    <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
                       <div className="h-full rounded-full transition-all" style={{ width: `${item.pct}%`, backgroundColor: COLORS[i % COLORS.length] }} />
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground text-center py-3">No positions</p>
+              <p className="text-[10px] text-muted-foreground text-center py-2">No positions</p>
             )}
           </div>
         </div>
@@ -1535,36 +1374,21 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     </div>
   );
 
-  // ── Return: 2-panel layout ─────────────────────────────────────────
+  // ── Return: compact PageTemplate + 2-panel layout ──────────────────
   return (
     <DashboardLayout onLogout={onLogout}>
       <PageTemplate
-        title="◆ Portfolio"
-        description={tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading'}
+        title="Portfolio"
+        compact={true}
         actions={headerActions}
       >
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3 }}
-          className="h-full"
-        >
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }} className="h-full">
           <ResizablePanelLayout
             layoutId="portfolio-panels"
             direction="horizontal"
             panels={[
-              {
-                id: 'portfolio-main',
-                defaultSize: 70,
-                minSize: 400,
-                content: mainPanel,
-              },
-              {
-                id: 'portfolio-side',
-                defaultSize: 30,
-                minSize: 250,
-                content: sidePanel,
-              },
+              { id: 'portfolio-main', defaultSize: 70, minSize: 400, content: mainPanel },
+              { id: 'portfolio-side', defaultSize: 30, minSize: 250, content: sidePanel },
             ]}
           />
         </motion.div>
@@ -1580,10 +1404,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         confirmVariant="destructive"
         onConfirm={() => handleClosePosition(confirmClosePosition!.id)}
       >
-        <div className="space-y-2 text-sm">
-          <div>Symbol: {confirmClosePosition?.symbol}</div>
-          <div>Invested: {formatCurrency((confirmClosePosition as any)?.invested_amount || (confirmClosePosition?.quantity || 0) * (confirmClosePosition?.entry_price || 0))}</div>
-          <div>P&L: {formatCurrency(confirmClosePosition?.unrealized_pnl || 0)}</div>
+        <div className="space-y-1.5 text-[11px] font-mono">
+          <div className="flex justify-between"><span className="text-muted-foreground">Symbol</span><span>{confirmClosePosition?.symbol}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">Invested</span><span>{formatCurrency((confirmClosePosition as any)?.invested_amount || (confirmClosePosition?.quantity || 0) * (confirmClosePosition?.entry_price || 0))}</span></div>
+          <div className="flex justify-between"><span className="text-muted-foreground">P&L</span><span className={cn(
+            (confirmClosePosition?.unrealized_pnl || 0) >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'
+          )}>{formatCurrency(confirmClosePosition?.unrealized_pnl || 0)}</span></div>
         </div>
       </ConfirmDialog>
 
@@ -1597,16 +1423,16 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         confirmVariant="destructive"
         onConfirm={handleCloseSelected}
       >
-        <div className="space-y-2 text-sm max-h-48 overflow-y-auto">
+        <div className="space-y-1 text-[11px] font-mono max-h-48 overflow-y-auto">
           {positions.filter(p => selectedPositions.has(p.id)).map(p => (
-            <div key={p.id} className="flex justify-between font-mono">
+            <div key={p.id} className="flex justify-between">
               <span>{p.symbol}</span>
-              <span className={cn(p.unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(p.unrealized_pnl)}</span>
+              <span className={cn(p.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(p.unrealized_pnl)}</span>
             </div>
           ))}
-          <div className="pt-2 border-t border-border flex justify-between font-semibold">
+          <div className="pt-1.5 border-t border-[var(--color-dark-border)] flex justify-between font-semibold">
             <span>Total P&L Impact</span>
-            <span className={cn(positions.filter(p => selectedPositions.has(p.id)).reduce((sum, p) => sum + p.unrealized_pnl, 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+            <span className={cn(positions.filter(p => selectedPositions.has(p.id)).reduce((sum, p) => sum + p.unrealized_pnl, 0) >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
               {formatCurrency(positions.filter(p => selectedPositions.has(p.id)).reduce((sum, p) => sum + p.unrealized_pnl, 0))}
             </span>
           </div>
@@ -1623,11 +1449,11 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         confirmVariant="destructive"
         onConfirm={handleCloseAllPositions}
       >
-        <div className="text-sm text-muted-foreground">
-          <div className="flex justify-between font-mono"><span>Total Positions</span><span>{positions.length}</span></div>
-          <div className="flex justify-between font-mono mt-1">
+        <div className="text-[11px] font-mono text-muted-foreground space-y-1">
+          <div className="flex justify-between"><span>Total Positions</span><span>{positions.length}</span></div>
+          <div className="flex justify-between">
             <span>Total Unrealized P&L</span>
-            <span className={cn(totalPnL >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(totalPnL)}</span>
+            <span className={cn(totalPnL >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(totalPnL)}</span>
           </div>
         </div>
       </ConfirmDialog>
@@ -1635,24 +1461,24 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       {/* Modify Position Modal */}
       {modifyingPosition && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-card border border-border rounded-lg p-6 max-w-md w-full mx-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground font-mono">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-card border border-border rounded-lg p-4 max-w-sm w-full mx-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-foreground font-mono">
                 Modify {modifyingPosition.type === 'sl' ? 'Stop Loss' : 'Take Profit'}
               </h3>
-              <Button variant="ghost" size="sm" onClick={() => { setModifyingPosition(null); setModifyPrice(''); }} className="h-8 w-8 p-0">
-                <X className="h-4 w-4" />
+              <Button variant="ghost" size="sm" onClick={() => { setModifyingPosition(null); setModifyPrice(''); }} className="h-6 w-6 p-0">
+                <X className="h-3.5 w-3.5" />
               </Button>
             </div>
-            <div className="mb-4">
-              <label className="block text-sm text-muted-foreground mb-2">
+            <div className="mb-3">
+              <label className="block text-[10px] text-muted-foreground mb-1">
                 {modifyingPosition.type === 'sl' ? 'Stop Loss Price' : 'Take Profit Price'}
               </label>
-              <Input type="number" step="0.01" value={modifyPrice} onChange={(e) => setModifyPrice(e.target.value)} placeholder="Enter price" autoFocus />
+              <Input type="number" step="0.01" value={modifyPrice} onChange={(e) => setModifyPrice(e.target.value)} placeholder="Enter price" autoFocus className="h-8 text-[11px]" />
             </div>
-            <div className="flex gap-3">
-              <Button onClick={handleModifySubmit} disabled={!modifyPrice} className="flex-1">Confirm</Button>
-              <Button variant="outline" onClick={() => { setModifyingPosition(null); setModifyPrice(''); }} className="flex-1">Cancel</Button>
+            <div className="flex gap-2">
+              <Button onClick={handleModifySubmit} disabled={!modifyPrice} className="flex-1 h-8 text-[11px]">Confirm</Button>
+              <Button variant="outline" onClick={() => { setModifyingPosition(null); setModifyPrice(''); }} className="flex-1 h-8 text-[11px]">Cancel</Button>
             </div>
           </motion.div>
         </div>

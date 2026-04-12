@@ -875,15 +875,16 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
         title="◆ Analytics"
         description={tradingMode === 'DEMO' ? 'Demo Mode' : 'Live Trading'}
         actions={headerActions}
+        compact={true}
       >
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}
-          className="p-4 sm:p-6 lg:p-8 max-w-[1800px] mx-auto relative">
+          className="p-2 max-w-[1800px] mx-auto relative">
           <RefreshIndicator visible={pollingRefreshing && !loading} />
 
           {/* CompactMetricRow: total return, Sharpe, max DD, win rate, profit factor, trades */}
-          <CompactMetricRow metrics={compactMetrics} className="mb-4" />
+          <CompactMetricRow metrics={compactMetrics} className="mb-2" />
 
-        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-2">
           <TabsList className="w-full overflow-x-auto">
             <TabsTrigger value="performance" className="gap-2">
               <TrendingUp className="h-4 w-4" />
@@ -927,110 +928,83 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="performance" className="space-y-6">
-            {/* Key Metrics Row */}
-            <PanelHeader title="Key Metrics" panelId="analytics-key-metrics">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }} className="grid grid-cols-2 md:grid-cols-4 gap-4 p-3">
-              <MetricCard label="Total Return" value={Number(performanceMetrics?.total_return) || 0}
-                format="percentage" trend={performanceMetrics && performanceMetrics.total_return >= 0 ? 'up' : 'down'}
-                icon={TrendingUp} tooltip="Total portfolio return for selected period" />
-              <MetricCard label="Sharpe Ratio" value={Number(performanceMetrics?.sharpe_ratio) || 0}
-                format="number" icon={Target} tooltip="Risk-adjusted return metric" />
-              <MetricCard label="Max Drawdown" value={Number(performanceMetrics?.max_drawdown) || 0}
-                format="percentage" icon={Activity} tooltip="Largest peak-to-trough decline" />
-              <MetricCard label="Win Rate" value={Number(performanceMetrics?.win_rate) || 0}
-                format="percentage" icon={Zap} tooltip="Percentage of winning trades" />
-            </motion.div>
-            </PanelHeader>
+          <TabsContent value="performance" className="space-y-2">
+            {/* Key Metrics — simple 4-col grid, no Card/MetricCard wrappers */}
+            <div className="grid grid-cols-4 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
+              {[
+                { label: 'Total Return', value: formatPercentage(performanceMetrics?.total_return || 0), color: (performanceMetrics?.total_return ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red' },
+                { label: 'Sharpe Ratio', value: (performanceMetrics?.sharpe_ratio ?? 0).toFixed(2), color: 'text-gray-100' },
+                { label: 'Max Drawdown', value: formatPercentage(performanceMetrics?.max_drawdown || 0), color: 'text-accent-red' },
+                { label: 'Win Rate', value: formatPercentage(performanceMetrics?.win_rate || 0), color: (performanceMetrics?.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red' },
+              ].map((m, i) => (
+                <div key={i} className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[9px] text-gray-500 uppercase tracking-wide">{m.label}</div>
+                  <div className={cn('text-sm font-mono font-bold', m.color)}>{m.value}</div>
+                </div>
+              ))}
+            </div>
 
-            {/* CIO Metrics Row — Calmar, CAGR, Information Ratio */}
+            {/* CIO Metrics — simple 4-col grid, no Card wrappers */}
             {cioDashboard && (
-              <PanelHeader title="CIO Metrics" panelId="analytics-cio-metrics">
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.03 }} className="grid grid-cols-2 md:grid-cols-4 gap-4 p-3">
-                <Card>
-                  <CardContent className="pt-4 pb-3">
-                    <p className="text-xs text-muted-foreground mb-1">CAGR</p>
-                    <p className={cn('text-2xl font-bold font-mono', cioDashboard.cagr >= 0 ? 'text-accent-green' : 'text-accent-red')}>
-                      {cioDashboard.cagr >= 0 ? '+' : ''}{cioDashboard.cagr.toFixed(1)}%
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4 pb-3">
-                    <p className="text-xs text-muted-foreground mb-1">Calmar Ratio</p>
-                    <p className={cn('text-2xl font-bold font-mono', cioDashboard.calmar_ratio >= 1 ? 'text-accent-green' : cioDashboard.calmar_ratio >= 0.5 ? 'text-yellow-400' : 'text-accent-red')}>
-                      {cioDashboard.calmar_ratio.toFixed(2)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">CAGR / Max DD</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4 pb-3">
-                    <p className="text-xs text-muted-foreground mb-1">Information Ratio</p>
-                    <p className={cn('text-2xl font-bold font-mono', cioDashboard.information_ratio >= 0.5 ? 'text-accent-green' : cioDashboard.information_ratio >= 0 ? 'text-yellow-400' : 'text-accent-red')}>
-                      {cioDashboard.information_ratio.toFixed(2)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">vs risk-free</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-4 pb-3">
-                    <p className="text-xs text-muted-foreground mb-1">Drawdown Duration</p>
-                    <p className={cn('text-2xl font-bold font-mono', cioDashboard.drawdown_duration_days <= 7 ? 'text-accent-green' : cioDashboard.drawdown_duration_days <= 30 ? 'text-yellow-400' : 'text-accent-red')}>
-                      {cioDashboard.drawdown_duration_days}d
-                    </p>
-                    <p className="text-xs text-muted-foreground">since equity high</p>
-                  </CardContent>
-                </Card>
-              </motion.div>
-              </PanelHeader>
+              <div className="grid grid-cols-4 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
+                <div className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[9px] text-gray-500 uppercase tracking-wide">CAGR</div>
+                  <div className={cn('text-sm font-mono font-bold', cioDashboard.cagr >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                    {cioDashboard.cagr >= 0 ? '+' : ''}{cioDashboard.cagr.toFixed(1)}%
+                  </div>
+                </div>
+                <div className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[9px] text-gray-500 uppercase tracking-wide">Calmar</div>
+                  <div className={cn('text-sm font-mono font-bold', cioDashboard.calmar_ratio >= 1 ? 'text-accent-green' : cioDashboard.calmar_ratio >= 0.5 ? 'text-yellow-400' : 'text-accent-red')}>
+                    {cioDashboard.calmar_ratio.toFixed(2)}
+                  </div>
+                </div>
+                <div className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[9px] text-gray-500 uppercase tracking-wide">Info Ratio</div>
+                  <div className={cn('text-sm font-mono font-bold', cioDashboard.information_ratio >= 0.5 ? 'text-accent-green' : cioDashboard.information_ratio >= 0 ? 'text-yellow-400' : 'text-accent-red')}>
+                    {cioDashboard.information_ratio.toFixed(2)}
+                  </div>
+                </div>
+                <div className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[9px] text-gray-500 uppercase tracking-wide">DD Duration</div>
+                  <div className={cn('text-sm font-mono font-bold', cioDashboard.drawdown_duration_days <= 7 ? 'text-accent-green' : cioDashboard.drawdown_duration_days <= 30 ? 'text-yellow-400' : 'text-accent-red')}>
+                    {cioDashboard.drawdown_duration_days}d
+                  </div>
+                </div>
+              </div>
             )}
 
-            {/* Realized vs Unrealized P&L + Streak + Slippage */}
+            {/* P&L + Streaks + Execution — 3-col grid with border separators, no Card wrappers */}
             {cioDashboard && (
-              <PanelHeader title="P&L & Execution" panelId="analytics-pnl-execution">
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.3, delay: 0.04 }} className="grid grid-cols-1 md:grid-cols-3 gap-4 p-3">
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">P&L Breakdown</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 text-sm font-mono">
-                      <div className="flex justify-between"><span className="text-muted-foreground">Realized</span><span className={cioDashboard.total_realized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(cioDashboard.total_realized_pnl)}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Unrealized</span><span className={cioDashboard.total_unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(cioDashboard.total_unrealized_pnl)}</span></div>
-                      <div className="flex justify-between border-t border-border pt-2"><span className="font-semibold">Total</span><span className={cn('font-semibold', cioDashboard.total_pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(cioDashboard.total_pnl)}</span></div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Win/Loss Streaks</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 text-sm font-mono">
-                      <div className="flex justify-between"><span className="text-muted-foreground">Current</span><span className={cioDashboard.current_streak >= 0 ? 'text-accent-green' : 'text-accent-red'}>{cioDashboard.current_streak > 0 ? `+${cioDashboard.current_streak} wins` : cioDashboard.current_streak < 0 ? `${cioDashboard.current_streak} losses` : 'neutral'}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Best Streak</span><span className="text-accent-green">{cioDashboard.longest_win_streak} wins</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Worst Streak</span><span className="text-accent-red">{cioDashboard.longest_loss_streak} losses</span></div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">Execution Quality</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2 text-sm font-mono">
-                      <div className="flex justify-between"><span className="text-muted-foreground">Entry Slippage</span><span>{cioDashboard.avg_entry_slippage_pct.toFixed(3)}%</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Exit Slippage</span><span>{cioDashboard.avg_exit_slippage_pct.toFixed(3)}%</span></div>
-                      <div className="flex justify-between border-t border-border pt-2"><span className="text-muted-foreground">Total Cost</span><span className="text-accent-red">{formatCurrency(cioDashboard.total_slippage_cost)}</span></div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-              </PanelHeader>
+              <div className="grid grid-cols-3 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
+                {/* P&L Breakdown */}
+                <div className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1.5">P&L Breakdown</div>
+                  <div className="space-y-1 text-[11px] font-mono">
+                    <div className="flex justify-between"><span className="text-gray-500">Realized</span><span className={cioDashboard.total_realized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(cioDashboard.total_realized_pnl)}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Unrealized</span><span className={cioDashboard.total_unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(cioDashboard.total_unrealized_pnl)}</span></div>
+                    <div className="flex justify-between border-t border-[var(--color-dark-border)] pt-1"><span className="font-semibold text-gray-300">Total</span><span className={cn('font-semibold', cioDashboard.total_pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(cioDashboard.total_pnl)}</span></div>
+                  </div>
+                </div>
+                {/* Win/Loss Streaks */}
+                <div className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1.5">Streaks</div>
+                  <div className="space-y-1 text-[11px] font-mono">
+                    <div className="flex justify-between"><span className="text-gray-500">Current</span><span className={cioDashboard.current_streak >= 0 ? 'text-accent-green' : 'text-accent-red'}>{cioDashboard.current_streak > 0 ? `+${cioDashboard.current_streak}W` : cioDashboard.current_streak < 0 ? `${cioDashboard.current_streak}L` : '—'}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Best</span><span className="text-accent-green">{cioDashboard.longest_win_streak}W</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Worst</span><span className="text-accent-red">{cioDashboard.longest_loss_streak}L</span></div>
+                  </div>
+                </div>
+                {/* Execution Quality */}
+                <div className="bg-[var(--color-dark-surface)] px-3 py-2">
+                  <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1.5">Execution</div>
+                  <div className="space-y-1 text-[11px] font-mono">
+                    <div className="flex justify-between"><span className="text-gray-500">Entry Slip</span><span>{cioDashboard.avg_entry_slippage_pct.toFixed(3)}%</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Exit Slip</span><span>{cioDashboard.avg_exit_slippage_pct.toFixed(3)}%</span></div>
+                    <div className="flex justify-between border-t border-[var(--color-dark-border)] pt-1"><span className="text-gray-500">Total Cost</span><span className="text-accent-red">{formatCurrency(cioDashboard.total_slippage_cost)}</span></div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Strategy Lifecycle + Trade Quality + Closure Analysis */}
@@ -1483,7 +1457,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             </PanelHeader>
           </TabsContent>
 
-          <TabsContent value="attribution" className="space-y-6">
+          <TabsContent value="attribution" className="space-y-2">
             <PanelHeader title="Strategy Contribution" panelId="analytics-strategy-contribution">
             <Card>
               <CardHeader>
@@ -1577,7 +1551,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             </PanelHeader>
           </TabsContent>
 
-          <TabsContent value="trades" className="space-y-6">
+          <TabsContent value="trades" className="space-y-2">
             <PanelHeader title="Trade Metrics" panelId="analytics-trade-metrics">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3 }} className="grid grid-cols-2 md:grid-cols-3 gap-4 p-3">
@@ -1592,7 +1566,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
             <PanelHeader title="Trade Distribution" panelId="analytics-trade-distribution">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 gap-6 p-3">
+              transition={{ duration: 0.3, delay: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 gap-2 p-3">
               <Card>
                 <CardHeader>
                   <CardTitle>Win/Loss Distribution</CardTitle>
@@ -1691,7 +1665,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             </PanelHeader>
           </TabsContent>
 
-          <TabsContent value="regime" className="space-y-6">
+          <TabsContent value="regime" className="space-y-2">
             {/* Current Regimes by Asset Class */}
             {regimeAnalysis?.current_regimes && Object.keys(regimeAnalysis.current_regimes).length > 0 && (
               <PanelHeader title="Current Market Regimes" panelId="analytics-current-regimes">
@@ -1759,7 +1733,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
             {/* Crypto Cycle + Forex Carry */}
             <PanelHeader title="Crypto Cycle & Forex Carry" panelId="analytics-crypto-forex">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-3">
               {regimeAnalysis?.crypto_cycle && regimeAnalysis.crypto_cycle.phase && (
                 <Card>
                   <CardHeader>
@@ -1922,10 +1896,10 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             </PanelHeader>
           </TabsContent>
 
-          <TabsContent value="alpha-edge" className="space-y-6">
+          <TabsContent value="alpha-edge" className="space-y-2">
             <PanelHeader title="Filter Statistics" panelId="analytics-filter-stats">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }} className="grid grid-cols-1 md:grid-cols-2 gap-6 p-3">
+              transition={{ duration: 0.3 }} className="grid grid-cols-1 md:grid-cols-2 gap-2 p-3">
               
               {/* Fundamental Filter Statistics */}
               <Card>
@@ -2227,7 +2201,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             </PanelHeader>
           </TabsContent>
 
-          <TabsContent value="trade-journal" className="space-y-6">
+          <TabsContent value="trade-journal" className="space-y-2">
             {/* Trade Journal Table with Filters */}
             <PanelHeader title="Trade Journal" panelId="analytics-trade-journal">
             <Card>
@@ -2610,7 +2584,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             </motion.div>
             </PanelHeader>
           </TabsContent>
-          <TabsContent value="rolling-statistics" className="space-y-6">
+          <TabsContent value="rolling-statistics" className="space-y-2">
             <RollingStatisticsTab
               data={rollingStats}
               loading={rollingStatsLoading}
@@ -2623,7 +2597,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           </TabsContent>
 
           {/* ── Performance Attribution Tab ── */}
-          <TabsContent value="perf-attribution" className="space-y-6">
+          <TabsContent value="perf-attribution" className="space-y-2">
             <PerformanceAttributionTab
               data={perfAttribution}
               loading={perfAttributionLoading}
@@ -2636,7 +2610,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           </TabsContent>
 
           {/* ── Tear Sheet Tab ── */}
-          <TabsContent value="tear-sheet" className="space-y-6">
+          <TabsContent value="tear-sheet" className="space-y-2">
             <TearSheetTab
               data={tearSheet}
               loading={tearSheetLoading}
@@ -2646,7 +2620,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           </TabsContent>
 
           {/* ── TCA Tab ── */}
-          <TabsContent value="tca" className="space-y-6">
+          <TabsContent value="tca" className="space-y-2">
             <TCATab
               data={tcaData}
               loading={tcaLoading}
