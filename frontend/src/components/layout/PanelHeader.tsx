@@ -72,7 +72,7 @@ export const PanelHeader: FC<PanelHeaderProps> = ({
           >
             {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
           </button>
-          <h3 className="text-xs font-semibold text-gray-300 truncate">{title}</h3>
+          <h3 className="text-[13px] font-semibold text-gray-200 truncate">{title}</h3>
         </div>
 
         <div className="flex items-center gap-1 shrink-0">

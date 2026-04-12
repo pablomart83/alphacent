@@ -958,7 +958,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {/* Left Column - Controls */}
                 <div className="space-y-3">
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Controls</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Controls</div>
 
                     {/* Trading State Warning */}
                     {systemStatus && systemStatus.state !== 'ACTIVE' && lifecycleCounts.active > 0 && (
@@ -1039,7 +1039,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                 {/* Right Column - Schedule */}
                 <div className="space-y-3">
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Scheduled Execution</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Scheduled Execution</div>
                     {scheduleConfig ? (
                       <>
                         {/* Enable/Disable toggle */}
@@ -1282,8 +1282,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     { label: 'Accept Rate', value: `${signalData?.summary.acceptance_rate ?? 0}%`, color: 'text-blue-400' },
                   ].map((m, i) => (
                     <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                      <div className="text-[9px] text-gray-500 uppercase tracking-wide">{m.label}</div>
-                      <div className={cn('text-sm font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
+                      <div className="text-[10px] text-gray-500 uppercase tracking-wide">{m.label}</div>
+                      <div className={cn('text-[13px] font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                     </div>
                   ))}
                 </div>
@@ -1296,7 +1296,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {/* Rejection Reasons — flat section */}
                 <div>
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Rejection Reasons</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Rejection Reasons</div>
                   {signalData?.summary.rejection_reasons && signalData.summary.rejection_reasons.length > 0 ? (
                     <div className="space-y-1.5">
                       {signalData.summary.rejection_reasons.map((r) => (
@@ -1319,7 +1319,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 {/* Recent Signals Table — flat */}
                 <div className="lg:col-span-2">
                   <div className="flex items-center justify-between mb-1.5">
-                    <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">Recent Signals</div>
+                    <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Recent Signals</div>
                     <Select value={signalFilter} onValueChange={setSignalFilter}>
                       <SelectTrigger className="w-[90px] h-6 text-[10px]">
                         <SelectValue placeholder="Filter" />
@@ -1394,8 +1394,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   { label: 'Ret. Rate', value: `${retirementRate.toFixed(1)}%`, color: 'text-[#ef4444]' },
                 ].map((m, i) => (
                   <div key={i} className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                    <div className="text-[9px] text-gray-500 uppercase tracking-wide">{m.label}</div>
-                    <div className={cn('text-sm font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
+                    <div className="text-[10px] text-gray-500 uppercase tracking-wide">{m.label}</div>
+                    <div className={cn('text-[13px] font-mono font-bold mt-0.5', m.color)}>{m.value}</div>
                   </div>
                 ))}
               </div>
@@ -1403,18 +1403,18 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Template Performance — inline bars, no nested panel */}
               {autonomousStatus && autonomousStatus.template_stats.length > 0 && (
                 <div>
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Template Success Rates</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Template Success Rates</div>
                   <div className="space-y-1">
                     {autonomousStatus.template_stats.map((template) => (
                       <div key={template.name} className="flex items-center gap-2 py-1 border-b border-[var(--color-dark-border)]/30 last:border-0">
-                        <span className="text-[11px] font-mono text-gray-300 truncate w-[180px] shrink-0">{template.name}</span>
+                        <span className="text-[12px] font-mono text-gray-300 truncate w-[180px] shrink-0">{template.name}</span>
                         <div className="flex-1 bg-gray-800 rounded-full h-1.5 overflow-hidden">
                           <div className={cn('h-full',
                             template.success_rate >= 0.6 ? 'bg-[#22c55e]' :
                             template.success_rate >= 0.4 ? 'bg-yellow-400' : 'bg-[#ef4444]'
                           )} style={{ width: `${template.success_rate * 100}%` }} />
                         </div>
-                        <span className="text-[10px] font-mono text-gray-400 w-[40px] text-right shrink-0">{(template.success_rate * 100).toFixed(0)}%</span>
+                        <span className="text-[11px] font-mono text-gray-400 w-[40px] text-right shrink-0">{(template.success_rate * 100).toFixed(0)}%</span>
                         <span className="text-[9px] text-gray-600 w-[30px] text-right shrink-0">{template.usage_count}×</span>
                       </div>
                     ))}
@@ -1425,7 +1425,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Thresholds — compact inline grid, no nested panel */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 <div>
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Activation Thresholds</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Activation Thresholds</div>
                   <div className="grid grid-cols-4 gap-1.5">
                     {[
                       { label: 'Min Sharpe', value: '1.5' },
@@ -1434,14 +1434,14 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       { label: 'Min Trades', value: '20' },
                     ].map((t, i) => (
                       <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                        <span className="text-[9px] text-gray-500">{t.label}</span>
-                        <span className="text-[11px] font-mono font-semibold text-gray-200">{t.value}</span>
+                        <span className="text-[10px] text-gray-500">{t.label}</span>
+                        <span className="text-[12px] font-mono font-semibold text-gray-200">{t.value}</span>
                       </div>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Retirement Triggers</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Retirement Triggers</div>
                   <div className="grid grid-cols-4 gap-1.5">
                     {[
                       { label: 'Max Sharpe', value: '0.5' },
@@ -1450,8 +1450,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       { label: 'Min Trades', value: '30' },
                     ].map((t, i) => (
                       <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                        <span className="text-[9px] text-gray-500">{t.label}</span>
-                        <span className="text-[11px] font-mono font-semibold text-gray-200">{t.value}</span>
+                        <span className="text-[10px] text-gray-500">{t.label}</span>
+                        <span className="text-[12px] font-mono font-semibold text-gray-200">{t.value}</span>
                       </div>
                     ))}
                   </div>
@@ -1464,7 +1464,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {/* Cycle History Table */}
                 <div>
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Cycle History</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Cycle History</div>
                   {walkForwardLoading ? (
                     <div className="flex items-center justify-center h-24 text-[10px] text-gray-500">Loading...</div>
                   ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
@@ -1501,7 +1501,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                 {/* Pass Rate Trend Chart */}
                 <div>
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Pass Rate Trend</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Pass Rate Trend</div>
                   {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
                     <InteractiveChart
                       data={walkForwardData.pass_rate_history}
@@ -1527,7 +1527,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Similarity Rejections — flat table */}
               {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 && (
                 <div>
-                  <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Similarity Rejections</div>
+                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Similarity Rejections</div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-[10px] font-mono">
                       <thead>
@@ -1554,7 +1554,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
             {/* Tab 7: Conviction Score */}
             <TabsContent value="conviction" className="space-y-3 p-2">
-              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1">Conviction Score Decomposition</div>
+              <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Conviction Score Decomposition</div>
                   {(() => {
                     const activeWithConviction = strategies.filter(
                       (s) => (s.status === 'DEMO' || s.status === 'LIVE') && s.metadata?.conviction_score
@@ -1623,7 +1623,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
           {/* Cycle Progress Indicator */}
           <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+            <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
               Cycle Progress
             </div>
             <div className="bg-muted rounded-lg p-3">
@@ -1681,7 +1681,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
           {/* WF Pass Rate Sparkline */}
           <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+            <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
               WF Pass Rate Trend
             </div>
             {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
@@ -1704,7 +1704,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
           {/* System Status Summary */}
           {autonomousStatus && (
             <div>
-              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
                 Market Regime
               </div>
               <div className="bg-muted rounded-lg p-3">
@@ -1725,7 +1725,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
           {/* Recent Similarity Rejections */}
           <div>
-            <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+            <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
               Recent Similarity Rejections
             </div>
             {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 ? (
@@ -1752,7 +1752,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
           {/* Cumulative Stats */}
           {autonomousStatus && (
             <div>
-              <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
                 Cumulative Stats
               </div>
               <div className="grid grid-cols-3 gap-2">

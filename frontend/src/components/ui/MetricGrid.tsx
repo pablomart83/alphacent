@@ -41,8 +41,8 @@ export const MetricGrid: FC<MetricGridProps> = ({ items, cols, className }) => {
           key={i}
           className="rounded-md p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]"
         >
-          <div className="text-[9px] text-gray-500 uppercase tracking-wide">{item.label}</div>
-          <div className={cn('text-sm font-mono font-bold mt-0.5', item.color || 'text-gray-200')}>
+          <div className="text-[10px] text-gray-500 uppercase tracking-wide">{item.label}</div>
+          <div className={cn('text-[13px] font-mono font-bold mt-0.5', item.color || 'text-gray-200')}>
             {item.value}
           </div>
           {item.sub && (
