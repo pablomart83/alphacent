@@ -1,21 +1,5 @@
-import { type FC, useMemo } from 'react';
-import {
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Line,
-  ComposedChart,
-  Bar,
-} from 'recharts';
+import { type FC, useMemo, useState, useRef, useCallback } from 'react';
 import { Badge } from '../ui/Badge';
-import {
-  chartAxisProps,
-  chartGridProps,
-  chartTooltipStyle,
-  chartTheme,
-} from '../../lib/design-tokens';
 
 interface ReturnDistributionProps {
   data: Array<{ bin: number; count: number }>;
@@ -32,7 +16,6 @@ function computeNormalOverlay(
 ): Array<{ bin: number; count: number; normal: number }> {
   if (data.length === 0) return [];
 
-  // Compute mean and std from bin midpoints weighted by count
   const totalCount = data.reduce((s, d) => s + d.count, 0);
   if (totalCount === 0) return data.map((d) => ({ ...d, normal: 0 }));
 
@@ -41,7 +24,6 @@ function computeNormalOverlay(
     data.reduce((s, d) => s + d.count * (d.bin - mean) ** 2, 0) / totalCount;
   const std = Math.sqrt(variance) || 1;
 
-  // Bin width (assume uniform spacing)
   const binWidth =
     data.length > 1 ? Math.abs(data[1].bin - data[0].bin) : 1;
 
@@ -53,6 +35,14 @@ function computeNormalOverlay(
   });
 }
 
+interface TooltipState {
+  x: number;
+  y: number;
+  bin: number;
+  count: number;
+  normal: number;
+}
+
 export const ReturnDistribution: FC<ReturnDistributionProps> = ({
   data,
   skew,
@@ -60,6 +50,30 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
   height = 300,
 }) => {
   const chartData = useMemo(() => computeNormalOverlay(data), [data]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+
+  const maxCount = useMemo(
+    () => Math.max(...chartData.map((d) => Math.max(d.count, d.normal)), 1),
+    [chartData],
+  );
+
+  const handleMouseEnter = useCallback(
+    (d: (typeof chartData)[0], rect: SVGRectElement) => {
+      const container = containerRef.current;
+      if (!container) return;
+      const cr = container.getBoundingClientRect();
+      const rr = rect.getBoundingClientRect();
+      setTooltip({
+        x: rr.left - cr.left + rr.width / 2,
+        y: rr.top - cr.top - 8,
+        bin: d.bin,
+        count: d.count,
+        normal: d.normal,
+      });
+    },
+    [],
+  );
 
   if (!data || data.length === 0) {
     return (
@@ -68,6 +82,20 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
       </div>
     );
   }
+
+  const margin = { top: 10, right: 10, bottom: 30, left: 40 };
+  const svgW = 500;
+  const chartW = svgW - margin.left - margin.right;
+  const chartH = height - margin.top - margin.bottom;
+
+  // Build normal curve path
+  const normalPath = chartData
+    .map((d, i) => {
+      const x = margin.left + (i / chartData.length) * chartW + chartW / chartData.length / 2;
+      const y = margin.top + chartH - (d.normal / maxCount) * chartH;
+      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+    })
+    .join(' ');
 
   return (
     <div>
@@ -79,46 +107,71 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
           <span className="font-mono text-xs">Kurtosis: {kurtosis.toFixed(2)}</span>
         </Badge>
       </div>
-      <div className="min-h-[200px]">
-      <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={chartData}>
-          <CartesianGrid {...chartGridProps} />
-          <XAxis
-            dataKey="bin"
-            {...chartAxisProps}
-            tickFormatter={(v: number) => `${v.toFixed(1)}%`}
-          />
-          <YAxis {...chartAxisProps} />
-          <Tooltip
-            contentStyle={{
-              ...chartTooltipStyle,
-              fontFamily: chartTheme.fontFamily,
-              fontSize: 11,
-            }}
-            cursor={{ fill: 'rgba(59,130,246,0.1)' }}
-            formatter={((value: number | undefined, name: string) => [
-              name === 'normal' ? (value ?? 0).toFixed(1) : String(value ?? 0),
-              name === 'normal' ? 'Normal Dist.' : 'Count',
-            ]) as never}
-            labelFormatter={((label: unknown) => `Return: ${Number(label).toFixed(2)}%`) as never}
-            labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-          />
-          <Bar
-            dataKey="count"
-            fill="#3b82f6"
-            fillOpacity={0.7}
-            radius={[2, 2, 0, 0]}
-          />
-          <Line
-            type="monotone"
-            dataKey="normal"
-            stroke="#eab308"
-            strokeWidth={2}
-            dot={false}
-            strokeDasharray="4 2"
-          />
-        </ComposedChart>
-      </ResponsiveContainer>
+      <div ref={containerRef} className="relative min-h-[200px] w-full" style={{ height }}>
+        <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${height}`} preserveAspectRatio="none">
+          {/* Grid lines */}
+          {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
+            const y = margin.top + (1 - frac) * chartH;
+            const val = frac * maxCount;
+            return (
+              <g key={frac}>
+                <line x1={margin.left} y1={y} x2={svgW - margin.right} y2={y} stroke="#1f2937" strokeDasharray="3 3" />
+                <text x={margin.left - 4} y={y + 3} textAnchor="end" fill="#9ca3af" fontSize={9} fontFamily="monospace">
+                  {val.toFixed(0)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Bars */}
+          {chartData.map((d, i) => {
+            const barW = Math.max(2, chartW / chartData.length - 2);
+            const x = margin.left + (i / chartData.length) * chartW + 1;
+            const barH = (d.count / maxCount) * chartH;
+            const y = margin.top + chartH - barH;
+
+            return (
+              <g key={i}>
+                <rect
+                  x={x}
+                  y={y}
+                  width={barW}
+                  height={Math.max(0, barH)}
+                  rx={2}
+                  fill="#3b82f6"
+                  fillOpacity={0.7}
+                  onMouseEnter={(e) => handleMouseEnter(d, e.currentTarget)}
+                  onMouseLeave={() => setTooltip(null)}
+                  className="cursor-pointer"
+                />
+                <text
+                  x={x + barW / 2}
+                  y={height - margin.bottom + 14}
+                  textAnchor="middle"
+                  fill="#9ca3af"
+                  fontSize={Math.min(9, svgW / chartData.length / 5)}
+                  fontFamily="monospace"
+                >
+                  {d.bin.toFixed(1)}%
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Normal curve overlay */}
+          <path d={normalPath} fill="none" stroke="#eab308" strokeWidth={2} strokeDasharray="4 2" />
+        </svg>
+
+        {tooltip && (
+          <div
+            className="absolute pointer-events-none z-50 px-2 py-1 rounded text-xs font-mono bg-[#1f2937] border border-[#374151] text-gray-200 whitespace-nowrap"
+            style={{ left: tooltip.x, top: tooltip.y, transform: 'translate(-50%, -100%)' }}
+          >
+            <div className="text-gray-400 mb-0.5">Return: {tooltip.bin.toFixed(2)}%</div>
+            <div>Count: {tooltip.count}</div>
+            <div>Normal Dist.: {tooltip.normal.toFixed(1)}</div>
+          </div>
+        )}
       </div>
     </div>
   );

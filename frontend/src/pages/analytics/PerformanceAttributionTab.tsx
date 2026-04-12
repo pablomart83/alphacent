@@ -1,19 +1,10 @@
 import { type FC, useEffect, useMemo } from 'react';
 import { Activity } from 'lucide-react';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Legend,
-} from 'recharts';
 import { SectionLabel } from '../../components/ui/SectionLabel';
-import { InteractiveChart } from '../../components/charts/InteractiveChart';
+import { TvChart } from '../../components/charts/TvChart';
+import { SVGStackedBarChart } from '../../components/charts/SVGStackedBarChart';
 import { DataSection, ChartSkeleton, TableSkeleton } from '../../components/ui/loading-skeletons';
 import { cn, formatPercentage } from '../../lib/utils';
-import {
-  chartAxisProps,
-  chartGridProps,
-  chartTooltipStyle,
-  chartTheme,
-} from '../../lib/design-tokens';
 import type { AttributionData } from '../../types/analytics';
 
 interface PerformanceAttributionTabProps {
@@ -94,22 +85,17 @@ export const PerformanceAttributionTab: FC<PerformanceAttributionTabProps> = ({
           {/* Stacked bar chart */}
           <div className="border border-border rounded-md p-4">
             <SectionLabel>Attribution Effects by {groupBy === 'sector' ? 'Sector' : 'Asset Class'}</SectionLabel>
-            <ResponsiveContainer width="100%" height={350}>
-              <BarChart data={stackedBarData}>
-                <CartesianGrid {...chartGridProps} />
-                <XAxis dataKey="sector" {...chartAxisProps} />
-                <YAxis {...chartAxisProps} tickFormatter={(v: number) => `${v.toFixed(1)}%`} />
-                <Tooltip
-                  contentStyle={{ ...chartTooltipStyle, fontFamily: chartTheme.fontFamily, fontSize: 11 }}
-                  formatter={((value: number | undefined, name: string) => [`${(value ?? 0).toFixed(3)}%`, name.charAt(0).toUpperCase() + name.slice(1)]) as never}
-                  labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-                />
-                <Legend />
-                <Bar dataKey="allocation" stackId="a" fill="#3b82f6" name="Allocation" />
-                <Bar dataKey="selection" stackId="a" fill="#22c55e" name="Selection" />
-                <Bar dataKey="interaction" stackId="a" fill="#eab308" name="Interaction" />
-              </BarChart>
-            </ResponsiveContainer>
+            <SVGStackedBarChart
+              data={stackedBarData}
+              categoryKey="sector"
+              series={[
+                { key: 'allocation', color: '#3b82f6', label: 'Allocation' },
+                { key: 'selection', color: '#22c55e', label: 'Selection' },
+                { key: 'interaction', color: '#eab308', label: 'Interaction' },
+              ]}
+              height={350}
+              formatValue={(v) => `${v.toFixed(3)}%`}
+            />
           </div>
 
           {/* Attribution summary table */}
@@ -147,17 +133,31 @@ export const PerformanceAttributionTab: FC<PerformanceAttributionTabProps> = ({
           {data.cumulative_effects.length > 0 && (
             <div className="border border-border rounded-md p-4">
               <SectionLabel>Cumulative Attribution Effects</SectionLabel>
-              <InteractiveChart
-                data={data.cumulative_effects}
-                dataKeys={[
-                  { key: 'allocation', color: '#3b82f6', type: 'line' },
-                  { key: 'selection', color: '#22c55e', type: 'line' },
-                  { key: 'interaction', color: '#eab308', type: 'line' },
-                ]}
-                xAxisKey="date"
+              <TvChart
                 height={300}
-                showZoom
-                tooltipFormatter={(v: number, name: string) => [`${v.toFixed(3)}%`, name.charAt(0).toUpperCase() + name.slice(1)]}
+                series={[
+                  {
+                    id: 'allocation',
+                    type: 'line',
+                    data: data.cumulative_effects.map((d: any) => ({ time: d.date, value: d.allocation })),
+                    color: '#3b82f6',
+                    lineWidth: 2,
+                  },
+                  {
+                    id: 'selection',
+                    type: 'line',
+                    data: data.cumulative_effects.map((d: any) => ({ time: d.date, value: d.selection })),
+                    color: '#22c55e',
+                    lineWidth: 2,
+                  },
+                  {
+                    id: 'interaction',
+                    type: 'line',
+                    data: data.cumulative_effects.map((d: any) => ({ time: d.date, value: d.interaction })),
+                    color: '#eab308',
+                    lineWidth: 2,
+                  },
+                ]}
               />
             </div>
           )}

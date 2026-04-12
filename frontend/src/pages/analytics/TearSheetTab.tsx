@@ -1,22 +1,13 @@
 import { type FC } from 'react';
 import { motion } from 'framer-motion';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Cell,
-} from 'recharts';
 import { SectionLabel } from '../../components/ui/SectionLabel';
 import { UnderwaterPlot } from '../../components/charts/UnderwaterPlot';
 import { ReturnDistribution } from '../../components/charts/ReturnDistribution';
 import { MonthlyReturnsHeatmap } from '../../components/charts/MonthlyReturnsHeatmap';
+import { SVGBarChart } from '../../components/charts/SVGBarChart';
 import { DataSection, ChartSkeleton, TableSkeleton, HeatmapSkeleton } from '../../components/ui/loading-skeletons';
 import { cn, formatPercentage } from '../../lib/utils';
-import {
-  chartAxisProps,
-  chartGridProps,
-  chartTooltipStyle,
-  chartTheme,
-  colors,
-} from '../../lib/design-tokens';
+import { colors } from '../../lib/design-tokens';
 import type { TearSheetData } from '../../types/analytics';
 
 interface TearSheetTabProps {
@@ -110,23 +101,15 @@ export const TearSheetTab: FC<TearSheetTabProps> = ({
               transition={{ duration: 0.3, delay: 0.15 }}>
               <div className="border border-border rounded-md p-4">
                 <SectionLabel>Cumulative Returns by Year</SectionLabel>
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={data.annual_returns}>
-                    <CartesianGrid {...chartGridProps} />
-                    <XAxis dataKey="year" {...chartAxisProps} />
-                    <YAxis {...chartAxisProps} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-                    <Tooltip
-                      contentStyle={{ ...chartTooltipStyle, fontFamily: chartTheme.fontFamily, fontSize: 11 }}
-                      formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(2)}%`, 'Return']}
-                      labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-                    />
-                    <Bar dataKey="return_pct" radius={[4, 4, 0, 0]}>
-                      {data.annual_returns.map((entry, idx) => (
-                        <Cell key={idx} fill={entry.return_pct >= 0 ? colors.green : colors.red} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <SVGBarChart
+                  data={data.annual_returns.map((entry) => ({
+                    label: String(entry.year),
+                    value: entry.return_pct,
+                    color: entry.return_pct >= 0 ? colors.green : colors.red,
+                  }))}
+                  height={250}
+                  formatValue={(v: number) => `${v.toFixed(2)}%`}
+                />
               </div>
             </motion.div>
           )}

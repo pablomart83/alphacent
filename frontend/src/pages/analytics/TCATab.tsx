@@ -1,22 +1,13 @@
 import { type FC, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { AlertTriangle } from 'lucide-react';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Cell,
-} from 'recharts';
 import { SectionLabel } from '../../components/ui/SectionLabel';
 import { MetricCard } from '../../components/trading/MetricCard';
-import { InteractiveChart } from '../../components/charts/InteractiveChart';
+import { TvChart } from '../../components/charts/TvChart';
+import { SVGBarChart } from '../../components/charts/SVGBarChart';
 import { DataSection, ChartSkeleton, MetricGridSkeleton, TableSkeleton, HeatmapSkeleton } from '../../components/ui/loading-skeletons';
 import { cn, formatCurrency } from '../../lib/utils';
-import {
-  chartAxisProps,
-  chartGridProps,
-  chartTooltipStyle,
-  chartTheme,
-  colors,
-} from '../../lib/design-tokens';
+import { colors } from '../../lib/design-tokens';
 import {
   Tooltip as UITooltip,
   TooltipContent,
@@ -115,23 +106,16 @@ export const TCATab: FC<TCATabProps> = ({
             <div className="border border-border rounded-md p-4">
               <SectionLabel>Slippage by Symbol</SectionLabel>
               <p className="text-[10px] font-mono text-muted-foreground mb-2">Red &gt; 0.5%, Yellow 0.1-0.5%</p>
-              <ResponsiveContainer width="100%" height={Math.max(250, data.slippage_by_symbol.length * 28)}>
-                <BarChart data={data.slippage_by_symbol} layout="vertical">
-                  <CartesianGrid {...chartGridProps} />
-                  <XAxis type="number" {...chartAxisProps} tickFormatter={(v: number) => `${v.toFixed(2)}%`} />
-                  <YAxis type="category" dataKey="symbol" {...chartAxisProps} width={80} />
-                  <Tooltip
-                    contentStyle={{ ...chartTooltipStyle, fontFamily: chartTheme.fontFamily, fontSize: 11 }}
-                    formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(3)}%`, 'Avg Slippage']}
-                    labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-                  />
-                  <Bar dataKey="avg_slippage_pct" radius={[0, 4, 4, 0]}>
-                    {data.slippage_by_symbol.map((entry, idx) => (
-                      <Cell key={idx} fill={slippageColor(entry.avg_slippage_pct)} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <SVGBarChart
+                data={data.slippage_by_symbol.map((entry) => ({
+                  label: entry.symbol,
+                  value: entry.avg_slippage_pct,
+                  color: slippageColor(entry.avg_slippage_pct),
+                }))}
+                height={Math.max(250, data.slippage_by_symbol.length * 28)}
+                horizontal
+                formatValue={(v: number) => `${v.toFixed(3)}%`}
+              />
             </div>
           </motion.div>
 
@@ -192,22 +176,15 @@ export const TCATab: FC<TCATabProps> = ({
             transition={{ duration: 0.3, delay: 0.15 }}>
             <div className="border border-border rounded-md p-4">
               <SectionLabel>Slippage by Order Size</SectionLabel>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={data.slippage_by_size}>
-                  <CartesianGrid {...chartGridProps} />
-                  <XAxis dataKey="bucket" {...chartAxisProps} />
-                  <YAxis {...chartAxisProps} tickFormatter={(v: number) => `${v.toFixed(2)}%`} />
-                  <Tooltip
-                    contentStyle={{ ...chartTooltipStyle, fontFamily: chartTheme.fontFamily, fontSize: 11 }}
-                    formatter={((value: number | undefined, name: string) => {
-                      if (name === 'avg_slippage') return [`${(value ?? 0).toFixed(3)}%`, 'Avg Slippage'];
-                      return [String(value ?? 0), name];
-                    }) as never}
-                    labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-                  />
-                  <Bar dataKey="avg_slippage" fill={colors.blue} radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <SVGBarChart
+                data={data.slippage_by_size.map((entry) => ({
+                  label: entry.bucket,
+                  value: entry.avg_slippage,
+                }))}
+                height={250}
+                color={colors.blue}
+                formatValue={(v: number) => `${v.toFixed(3)}%`}
+              />
             </div>
           </motion.div>
 
@@ -249,22 +226,15 @@ export const TCATab: FC<TCATabProps> = ({
               transition={{ duration: 0.3, delay: 0.25 }}>
               <div className="border border-border rounded-md p-4">
                 <SectionLabel>Fill Rate Analysis</SectionLabel>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={data.fill_rate_buckets.map(b => ({
+                <SVGBarChart
+                  data={data.fill_rate_buckets.map(b => ({
                     label: b.within_seconds < 60 ? `${b.within_seconds}s` : `${Math.round(b.within_seconds / 60)}min`,
-                    percentage: b.percentage,
-                  }))}>
-                    <CartesianGrid {...chartGridProps} />
-                    <XAxis dataKey="label" {...chartAxisProps} />
-                    <YAxis {...chartAxisProps} tickFormatter={(v: number) => `${v}%`} />
-                    <Tooltip
-                      contentStyle={{ ...chartTooltipStyle, fontFamily: chartTheme.fontFamily, fontSize: 11 }}
-                      formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(1)}%`, 'Fill Rate']}
-                      labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-                    />
-                    <Bar dataKey="percentage" fill={colors.blue} radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                    value: b.percentage,
+                  }))}
+                  height={220}
+                  color={colors.blue}
+                  formatValue={(v: number) => `${v.toFixed(1)}%`}
+                />
               </div>
             </motion.div>
           )}
@@ -275,13 +245,18 @@ export const TCATab: FC<TCATabProps> = ({
               transition={{ duration: 0.3, delay: 0.3 }}>
               <div className="border border-border rounded-md p-4">
                 <SectionLabel>Execution Quality Trend</SectionLabel>
-                <InteractiveChart
-                  data={data.execution_quality_trend}
-                  dataKeys={[{ key: 'avg_slippage', color: chartTheme.series.drawdown, type: 'line' }]}
-                  xAxisKey="date"
+                <TvChart
                   height={250}
-                  showZoom
-                  tooltipFormatter={(v: number) => [`${v.toFixed(4)}%`, 'Avg Slippage']}
+                  series={[{
+                    id: 'avgSlippage',
+                    type: 'line',
+                    data: data.execution_quality_trend.map((d: any) => ({
+                      time: d.date,
+                      value: d.avg_slippage,
+                    })),
+                    color: '#ef4444',
+                    lineWidth: 2,
+                  }]}
                 />
               </div>
             </motion.div>

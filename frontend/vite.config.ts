@@ -22,10 +22,6 @@ export default defineConfig({
           if (id.includes('node_modules/@radix-ui')) {
             return 'ui-vendor';
           }
-          // Charts
-          if (id.includes('node_modules/recharts')) {
-            return 'chart-vendor';
-          }
           // Tables
           if (id.includes('node_modules/@tanstack/react-table')) {
             return 'table-vendor';

@@ -1,5 +1,8 @@
 export { InteractiveChart, filterDataByPeriod, periodStartDate } from './InteractiveChart';
 export type { InteractiveChartProps, DataKeyConfig } from './InteractiveChart';
+export { SVGBarChart } from './SVGBarChart';
+export { SVGStackedBarChart } from './SVGStackedBarChart';
+export { SVGPieChart } from './SVGPieChart';
 export { PeriodSelector } from './PeriodSelector';
 export { EquityCurveChart, normalizeToBase100, computeDrawdown } from './EquityCurveChart';
 export type { EquityCurveChartProps } from './EquityCurveChart';
@@ -17,3 +20,7 @@ export { OrderFlowTimeline } from './OrderFlowTimeline';
 export type { OrderFlowTimelineProps, OrderEvent } from './OrderFlowTimeline';
 export { AssetPlot } from './AssetPlot';
 export type { AssetPlotProps, PricePoint, OrderAnnotation } from './AssetPlot';
+export { TvChart } from './TvChart';
+export type { TvChartProps, TvSeriesConfig, TvDataPoint, TvChartType } from './TvChart';
+export { TvPeriodSelector } from './TvPeriodSelector';
+export type { TvPeriod } from './TvPeriodSelector';

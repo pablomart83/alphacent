@@ -1,24 +1,9 @@
 import { type FC, useMemo } from 'react';
-import {
-  ComposedChart,
-  Line,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from 'recharts';
-import { InteractiveChart, filterDataByPeriod } from './InteractiveChart';
-import { PeriodSelector } from './PeriodSelector';
+import { TvChart, type TvSeriesConfig } from './TvChart';
+import { TvPeriodSelector } from './TvPeriodSelector';
+import { filterDataByPeriod } from '../../lib/chart-utils';
 import { Badge } from '../ui/Badge';
-import {
-  chartTheme,
-  chartAxisProps,
-  chartGridProps,
-  chartTooltipStyle,
-} from '../../lib/design-tokens';
+import { chartTheme } from '../../lib/design-tokens';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -60,16 +45,14 @@ function computeDrawdown(
   });
 }
 
-/**
- * Merge normalized portfolio, SPY, and alpha data into a single array
- * for the main chart.
- */
-function buildChartData(
+// ── Series builders ────────────────────────────────────────────────────────
+
+function buildSeries(
   equityData: Array<{ date: string; equity: number }>,
   spyData: Array<{ date: string; close: number }> | undefined,
   period: string,
 ) {
-  // Filter equity data by period first
+  // Filter equity data by period
   const filteredEquity = filterDataByPeriod(
     equityData.map((d) => ({ ...d })),
     'date',
@@ -81,135 +64,94 @@ function buildChartData(
     filteredEquity.map((d) => ({ date: d.date, value: d.equity })),
   );
 
-  const hasSpy = spyData && spyData.length > 0;
+  const hasSpy = !!spyData && spyData.length > 0;
 
-  if (!hasSpy) {
-    // No SPY — return portfolio-only data
-    const mainData = normPortfolio.map((d) => ({
-      date: d.date,
-      portfolio: d.value,
-      spy: null as number | null,
-      alpha: null as number | null,
-      alphaPositive: null as number | null,
-      alphaNegative: null as number | null,
-    }));
+  // Build SPY-aligned normalized data
+  let normSpyMap = new Map<string, number>();
+  if (hasSpy) {
+    const spyMap = new Map<string, number>();
+    for (const s of spyData!) spyMap.set(s.date, s.close);
 
-    const drawdownData = computeDrawdown(
-      filteredEquity.map((d) => ({ date: d.date, value: d.equity })),
-    );
-
-    return { mainData, drawdownData, hasSpy: false };
-  }
-
-  // Build a date→spy map for alignment
-  const spyMap = new Map<string, number>();
-  for (const s of spyData) {
-    spyMap.set(s.date, s.close);
-  }
-
-  // Filter SPY to match equity dates within the period
-  const alignedSpy: Array<{ date: string; value: number }> = [];
-  for (const d of filteredEquity) {
-    const spyVal = spyMap.get(d.date);
-    if (spyVal !== undefined) {
-      alignedSpy.push({ date: d.date, value: spyVal });
+    const alignedSpy: Array<{ date: string; value: number }> = [];
+    for (const d of filteredEquity) {
+      const spyVal = spyMap.get(d.date);
+      if (spyVal !== undefined) alignedSpy.push({ date: d.date, value: spyVal });
     }
+    const normSpy = normalizeToBase100(alignedSpy);
+    for (const s of normSpy) normSpyMap.set(s.date, s.value);
   }
 
-  const normSpy = normalizeToBase100(alignedSpy);
-  const spyNormMap = new Map<string, number>();
-  for (const s of normSpy) {
-    spyNormMap.set(s.date, s.value);
+  // ── Main chart series ──
+  const mainSeries: TvSeriesConfig[] = [];
+
+  // Alpha baseline series (green above SPY, red below)
+  if (hasSpy) {
+    // Compute alpha = portfolio - spy for each date, centered on 0
+    const alphaData = normPortfolio
+      .filter((d) => normSpyMap.has(d.date))
+      .map((d) => ({
+        time: d.date,
+        value: d.value - (normSpyMap.get(d.date) ?? 0),
+      }));
+
+    mainSeries.push({
+      id: 'alpha',
+      type: 'baseline',
+      data: alphaData,
+      baseValue: 0,
+      topFillColor1: 'rgba(34, 197, 94, 0.18)',
+      topFillColor2: 'rgba(34, 197, 94, 0.02)',
+      bottomFillColor1: 'rgba(239, 68, 68, 0.02)',
+      bottomFillColor2: 'rgba(239, 68, 68, 0.18)',
+      topLineColor: 'transparent',
+      bottomLineColor: 'transparent',
+      lineWidth: 0,
+      priceScaleId: 'alpha',
+    });
+
+    // SPY benchmark — gray dashed line
+    mainSeries.push({
+      id: 'spy',
+      type: 'line',
+      data: normPortfolio
+        .filter((d) => normSpyMap.has(d.date))
+        .map((d) => ({ time: d.date, value: normSpyMap.get(d.date)! })),
+      color: chartTheme.series.benchmark,
+      lineWidth: 1,
+      dashed: true,
+    });
   }
 
-  const mainData = normPortfolio.map((d) => {
-    const spyVal = spyNormMap.get(d.date) ?? null;
-    const alphaVal =
-      spyVal !== null ? d.value - spyVal : null;
-    return {
-      date: d.date,
-      portfolio: d.value,
-      spy: spyVal,
-      alpha: alphaVal,
-      // Split alpha into positive/negative for conditional fill
-      alphaPositive: alphaVal !== null && alphaVal >= 0 ? alphaVal : null,
-      alphaNegative: alphaVal !== null && alphaVal < 0 ? alphaVal : null,
-    };
+  // Portfolio — blue area series (on top)
+  mainSeries.push({
+    id: 'portfolio',
+    type: 'area',
+    data: normPortfolio.map((d) => ({ time: d.date, value: d.value })),
+    lineColor: chartTheme.series.portfolio,
+    topColor: 'rgba(59, 130, 246, 0.18)',
+    bottomColor: 'transparent',
+    lineWidth: 2,
   });
 
-  const drawdownData = computeDrawdown(
+  // ── Drawdown sub-chart series ──
+  const drawdownRaw = computeDrawdown(
     filteredEquity.map((d) => ({ date: d.date, value: d.equity })),
   );
 
-  return { mainData, drawdownData, hasSpy: true };
+  const drawdownSeries: TvSeriesConfig[] = [
+    {
+      id: 'drawdown',
+      type: 'area',
+      data: drawdownRaw.map((d) => ({ time: d.date, value: d.drawdown })),
+      lineColor: chartTheme.series.drawdown,
+      topColor: 'rgba(239, 68, 68, 0.4)',
+      bottomColor: 'rgba(239, 68, 68, 0.05)',
+      lineWidth: 1,
+    },
+  ];
+
+  return { mainSeries, drawdownSeries, hasSpy };
 }
-
-// ── Custom Tooltip ─────────────────────────────────────────────────────────
-
-interface TooltipPayloadEntry {
-  dataKey: string;
-  value: number | null;
-  color: string;
-}
-
-interface CustomTooltipProps {
-  active?: boolean;
-  payload?: TooltipPayloadEntry[];
-  label?: string;
-  hasSpy: boolean;
-}
-
-const EquityCurveTooltip: FC<CustomTooltipProps> = ({
-  active,
-  payload,
-  label,
-  hasSpy,
-}) => {
-  if (!active || !payload || payload.length === 0) return null;
-
-  const portfolioEntry = payload.find((p) => p.dataKey === 'portfolio');
-  const spyEntry = payload.find((p) => p.dataKey === 'spy');
-
-  const portfolioVal = portfolioEntry?.value ?? null;
-  const spyVal = spyEntry?.value ?? null;
-  const alpha =
-    portfolioVal !== null && spyVal !== null
-      ? portfolioVal - spyVal
-      : null;
-
-  return (
-    <div
-      style={{
-        ...chartTooltipStyle,
-        padding: '8px 12px',
-        fontFamily: chartTheme.fontFamily,
-        fontSize: 11,
-      }}
-    >
-      <p style={{ color: '#f3f4f6', marginBottom: 4 }}>{label}</p>
-      {portfolioVal !== null && (
-        <p style={{ color: chartTheme.series.portfolio }}>
-          Portfolio: {portfolioVal.toFixed(2)}
-        </p>
-      )}
-      {hasSpy && spyVal !== null && (
-        <p style={{ color: chartTheme.series.benchmark }}>
-          SPY: {spyVal.toFixed(2)}
-        </p>
-      )}
-      {hasSpy && alpha !== null && (
-        <p
-          style={{
-            color: alpha >= 0 ? chartTheme.series.alpha : chartTheme.series.drawdown,
-          }}
-        >
-          Alpha: {alpha >= 0 ? '+' : ''}
-          {alpha.toFixed(2)}%
-        </p>
-      )}
-    </div>
-  );
-};
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
@@ -222,12 +164,13 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
   onPeriodChange,
   height = 400,
 }) => {
-  const { mainData, drawdownData, hasSpy } = useMemo(
-    () => buildChartData(equityData, spyData, period),
+  const { mainSeries, drawdownSeries } = useMemo(
+    () => buildSeries(equityData, spyData, period),
     [equityData, spyData, period],
   );
 
   const numericHeight = typeof height === 'number' ? height : 400;
+  const mainHeight = Math.round(numericHeight * 2 / 3);
   const drawdownHeight = Math.round(numericHeight / 3);
   const benchmarkUnavailable = !spyData || spyData.length === 0;
   const fillParent = height === '100%';
@@ -236,7 +179,7 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
     <div className={fillParent ? 'w-full h-full flex flex-col' : 'w-full'}>
       {/* Header: Period selector + benchmark badge */}
       <div className="flex items-center justify-between mb-1 shrink-0">
-        <PeriodSelector
+        <TvPeriodSelector
           periods={PERIODS}
           activePeriod={period}
           onPeriodChange={onPeriodChange}
@@ -248,106 +191,22 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
 
       {/* Main equity curve chart */}
       <div className={fillParent ? 'flex-1 min-h-0' : ''}>
-        <InteractiveChart
-          data={mainData}
-          dataKeys={[]}
-          xAxisKey="date"
-          height={fillParent ? '100%' : numericHeight}
-          showCrosshair={false}
-          showZoom={true}
-          showGrid={true}
-        >
-        {/* Alpha shading — positive (green) */}
-        <Area
-          type="monotone"
-          dataKey="alphaPositive"
-          stroke="none"
-          fill={chartTheme.series.alpha}
-          fillOpacity={0.15}
-          baseLine={0}
-          dot={false}
-          activeDot={false}
-          isAnimationActive={false}
+        <TvChart
+          series={mainSeries}
+          height={fillParent ? mainHeight : mainHeight}
+          showTimeScale={false}
+          autoResize
         />
-        {/* Alpha shading — negative (red) */}
-        <Area
-          type="monotone"
-          dataKey="alphaNegative"
-          stroke="none"
-          fill={chartTheme.series.drawdown}
-          fillOpacity={0.15}
-          baseLine={0}
-          dot={false}
-          activeDot={false}
-          isAnimationActive={false}
-        />
-        {/* SPY benchmark line (dashed gray) */}
-        {hasSpy && (
-          <Line
-            type="monotone"
-            dataKey="spy"
-            stroke={chartTheme.series.benchmark}
-            strokeWidth={1.5}
-            strokeDasharray="6 3"
-            dot={false}
-            activeDot={{ r: 3, fill: chartTheme.series.benchmark }}
-            isAnimationActive={false}
-          />
-        )}
-        {/* Portfolio equity line (solid blue) */}
-        <Line
-          type="monotone"
-          dataKey="portfolio"
-          stroke={chartTheme.series.portfolio}
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 3, fill: chartTheme.series.portfolio }}
-          isAnimationActive={false}
-        />
-        {/* Custom tooltip with alpha display */}
-        <Tooltip
-          content={<EquityCurveTooltip hasSpy={hasSpy} />}
-          cursor={{ stroke: '#9ca3af', strokeDasharray: '3 3' }}
-        />
-      </InteractiveChart>
       </div>
 
       {/* Drawdown sub-chart */}
-      <div className="mt-1 shrink-0">
-        <ResponsiveContainer width="100%" height={fillParent ? 80 : drawdownHeight}>
-          <ComposedChart data={drawdownData}>
-            <CartesianGrid {...chartGridProps} />
-            <XAxis
-              dataKey="date"
-              {...chartAxisProps}
-            />
-            <YAxis
-              {...chartAxisProps}
-              tickFormatter={(v: number) => `${v.toFixed(0)}%`}
-            />
-            <Tooltip
-              contentStyle={{
-                ...chartTooltipStyle,
-                fontFamily: chartTheme.fontFamily,
-                fontSize: 11,
-              }}
-              cursor={{ stroke: '#9ca3af', strokeDasharray: '3 3' }}
-              formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(2)}%`, 'Drawdown']}
-              labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-            />
-            <ReferenceLine y={0} stroke={chartTheme.grid} strokeDasharray="3 3" />
-            <Area
-              type="monotone"
-              dataKey="drawdown"
-              stroke={chartTheme.series.drawdown}
-              fill={chartTheme.series.drawdown}
-              fillOpacity={0.4}
-              strokeWidth={1}
-              dot={false}
-              isAnimationActive={false}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
+      <div className="shrink-0">
+        <TvChart
+          series={drawdownSeries}
+          height={fillParent ? 80 : drawdownHeight}
+          showTimeScale
+          autoResize
+        />
       </div>
     </div>
   );

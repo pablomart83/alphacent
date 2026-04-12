@@ -22,11 +22,8 @@ import { classifyError } from '../lib/errors';
 import type { TradeJournalPattern } from '../types';
 import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
-import {
-  BarChart, Bar, AreaChart, Area,
-  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
-  Cell, Line
-} from 'recharts';
+import { SVGBarChart } from '../components/charts/SVGBarChart';
+import { TvChart } from '../components/charts/TvChart';
 import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
@@ -1131,23 +1128,21 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <SectionLabel>Equity Curve</SectionLabel>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.1 }}>
-              <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={perfStats?.equity_curve || performanceMetrics?.equity_curve || []}>
-                  <defs>
-                    <linearGradient id="colorPortfolio" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '11px' }} />
-                  <YAxis stroke="#9ca3af" style={{ fontSize: '11px' }} tickFormatter={(v) => `${v}`} />
-                  <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', fontSize: '12px' }}
-                    formatter={(value: any) => [formatCurrency(value), undefined]} />
-                  <Legend />
-                  <Area type="monotone" dataKey="portfolio" stroke="#10b981" fillOpacity={1} fill="url(#colorPortfolio)" name="Portfolio" />
-                </AreaChart>
-              </ResponsiveContainer>
+              <TvChart
+                height={300}
+                series={[{
+                  id: 'portfolio',
+                  type: 'area',
+                  data: (perfStats?.equity_curve || performanceMetrics?.equity_curve || []).map((d: any) => ({
+                    time: d.date,
+                    value: d.portfolio ?? d.value ?? 0,
+                  })),
+                  lineColor: '#10b981',
+                  topColor: 'rgba(16, 185, 129, 0.3)',
+                  bottomColor: 'rgba(16, 185, 129, 0)',
+                  lineWidth: 2,
+                }]}
+              />
             </motion.div>
 
             {/* Monthly Returns Heatmap */}
@@ -1213,37 +1208,27 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               transition={{ duration: 0.3, delay: 0.2 }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                 <div className="text-xs text-gray-500 tracking-wide mb-2">Win Rate by Day of Week</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={Object.entries(perfStats?.win_rate_by_day || {}).map(([day, rate]) => ({ day: day.slice(0, 3), rate }))}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="day" stroke="#9ca3af" style={{ fontSize: '11px' }} />
-                    <YAxis stroke="#9ca3af" style={{ fontSize: '11px' }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', fontSize: '12px' }}
-                      formatter={(value: any) => [`${value.toFixed(1)}%`, 'Win Rate']} />
-                    <Bar dataKey="rate" name="Win Rate %">
-                      {Object.entries(perfStats?.win_rate_by_day || {}).map(([, rate], i) => (
-                        <Cell key={i} fill={rate >= 50 ? '#10b981' : '#ef4444'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <SVGBarChart
+                  data={Object.entries(perfStats?.win_rate_by_day || {}).map(([day, rate]) => ({
+                    label: day.slice(0, 3),
+                    value: rate,
+                    color: rate >= 50 ? '#10b981' : '#ef4444',
+                  }))}
+                  height={220}
+                  formatValue={(v) => `${v.toFixed(1)}%`}
+                />
               </div>
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                 <div className="text-xs text-gray-500 tracking-wide mb-2">Win Rate by Hour of Day</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={Object.entries(perfStats?.win_rate_by_hour || {}).map(([hour, rate]) => ({ hour: `${hour}:00`, rate }))}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="hour" stroke="#9ca3af" style={{ fontSize: '10px' }} />
-                    <YAxis stroke="#9ca3af" style={{ fontSize: '11px' }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', fontSize: '12px' }}
-                      formatter={(value: any) => [`${value.toFixed(1)}%`, 'Win Rate']} />
-                    <Bar dataKey="rate" name="Win Rate %">
-                      {Object.entries(perfStats?.win_rate_by_hour || {}).map(([, rate], i) => (
-                        <Cell key={i} fill={rate >= 50 ? '#10b981' : '#ef4444'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <SVGBarChart
+                  data={Object.entries(perfStats?.win_rate_by_hour || {}).map(([hour, rate]) => ({
+                    label: `${hour}:00`,
+                    value: rate,
+                    color: rate >= 50 ? '#10b981' : '#ef4444',
+                  }))}
+                  height={220}
+                  formatValue={(v) => `${v.toFixed(1)}%`}
+                />
               </div>
             </motion.div>
 
@@ -1289,33 +1274,33 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               transition={{ duration: 0.3, delay: 0.3 }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                 <div className="text-xs text-gray-500 tracking-wide mb-2">Drawdown Chart</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={performanceMetrics?.drawdown_curve || []}>
-                    <defs>
-                      <linearGradient id="colorDrawdown" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '10px' }} />
-                    <YAxis stroke="#9ca3af" style={{ fontSize: '11px' }} />
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', fontSize: '12px' }} />
-                    <Area type="monotone" dataKey="drawdown" stroke="#ef4444" fillOpacity={1} fill="url(#colorDrawdown)" name="Drawdown %" />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <TvChart
+                  height={220}
+                  series={[{
+                    id: 'drawdown',
+                    type: 'area',
+                    data: (performanceMetrics?.drawdown_curve || []).map((d: any) => ({
+                      time: d.date,
+                      value: d.drawdown ?? 0,
+                    })),
+                    lineColor: '#ef4444',
+                    topColor: 'rgba(239, 68, 68, 0.3)',
+                    bottomColor: 'rgba(239, 68, 68, 0)',
+                    lineWidth: 2,
+                  }]}
+                />
               </div>
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                 <div className="text-xs text-gray-500 tracking-wide mb-2">Returns Distribution</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={performanceMetrics?.returns_distribution || []}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="range" stroke="#9ca3af" style={{ fontSize: '10px' }} />
-                    <YAxis stroke="#9ca3af" style={{ fontSize: '11px' }} />
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', fontSize: '12px' }} />
-                    <Bar dataKey="count" fill="#3b82f6" name="Trades" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <SVGBarChart
+                  data={(performanceMetrics?.returns_distribution || []).map((d) => ({
+                    label: d.range,
+                    value: d.count,
+                  }))}
+                  height={220}
+                  color="#3b82f6"
+                  formatValue={(v) => String(Math.round(v))}
+                />
               </div>
             </motion.div>
           </TabsContent>
@@ -1386,15 +1371,16 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <SectionLabel>Performance by Strategy</SectionLabel>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.1 }}>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={filteredStrategies.slice(0, 10)} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis type="number" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                  <YAxis dataKey="strategy_name" type="category" stroke="#9ca3af" style={{ fontSize: '11px' }} width={120} />
-                  <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                  <Bar dataKey="contribution_percent" fill="#10b981" name="Contribution %" />
-                </BarChart>
-              </ResponsiveContainer>
+              <SVGBarChart
+                data={filteredStrategies.slice(0, 10).map((s) => ({
+                  label: s.strategy_name,
+                  value: s.contribution_percent,
+                }))}
+                height={300}
+                color="#10b981"
+                horizontal
+                formatValue={(v) => `${v.toFixed(2)}%`}
+              />
             </motion.div>
           </TabsContent>
 
@@ -1414,45 +1400,44 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               transition={{ duration: 0.3, delay: 0.1 }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                 <div className="text-xs text-gray-500 tracking-wide mb-2">Win/Loss Distribution</div>
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={tradeAnalytics?.win_loss_distribution || []}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="type" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <YAxis stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                    <Legend />
-                    <Bar dataKey="count" fill="#3b82f6" name="Count" />
-                    <Bar dataKey="value" fill="#10b981" name="Value" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <SVGBarChart
+                  data={(tradeAnalytics?.win_loss_distribution || []).map((d) => ({
+                    label: d.type,
+                    value: d.count,
+                  }))}
+                  height={250}
+                  color="#3b82f6"
+                  formatValue={(v) => String(Math.round(v))}
+                />
               </div>
 
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                 <div className="text-xs text-gray-500 tracking-wide mb-2">Holding Periods</div>
-                <ResponsiveContainer width="100%" height={250}>
-                  <BarChart data={tradeAnalytics?.holding_periods || []}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                    <XAxis dataKey="range" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <YAxis stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                    <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                    <Bar dataKey="count" fill="#8b5cf6" name="Trades" />
-                  </BarChart>
-                </ResponsiveContainer>
+                <SVGBarChart
+                  data={(tradeAnalytics?.holding_periods || []).map((d) => ({
+                    label: d.range,
+                    value: d.count,
+                  }))}
+                  height={250}
+                  color="#8b5cf6"
+                  formatValue={(v) => String(Math.round(v))}
+                />
               </div>
             </motion.div>
 
             <SectionLabel>P&L by Day of Week</SectionLabel>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.2 }}>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={tradeAnalytics?.pnl_by_day || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="day" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                  <YAxis stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                  <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                  <Bar dataKey="pnl" fill="#f59e0b" name="P&L" />
-                </BarChart>
-              </ResponsiveContainer>
+              <SVGBarChart
+                data={(tradeAnalytics?.pnl_by_day || []).map((d) => ({
+                  label: d.day,
+                  value: d.pnl,
+                  color: d.pnl >= 0 ? '#10b981' : '#ef4444',
+                }))}
+                height={250}
+                color="#f59e0b"
+                formatValue={(v) => `$${v.toFixed(0)}`}
+              />
             </motion.div>
 
             <SectionLabel>Trade Statistics</SectionLabel>
@@ -1781,17 +1766,15 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     { label: 'Min', value: convictionDistribution.min_score?.toFixed(1) || '0' },
                     { label: 'Max', value: convictionDistribution.max_score?.toFixed(1) || '0' },
                   ]} cols={4} />
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={convictionDistribution.score_ranges || []}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                      <XAxis dataKey="range" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                      <YAxis stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                      <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                      <Legend />
-                      <Bar dataKey="count" fill="#8b5cf6" name="Count" />
-                      <Bar dataKey="avg_return" fill="#10b981" name="Avg Return %" />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <SVGBarChart
+                    data={(convictionDistribution.score_ranges || []).map((d: any) => ({
+                      label: d.range,
+                      value: d.count,
+                    }))}
+                    height={250}
+                    color="#8b5cf6"
+                    formatValue={(v) => String(Math.round(v))}
+                  />
                 </div>
               ) : (
                 <div className="text-center py-12 text-gray-500 text-[10px]">No data available</div>
@@ -1865,18 +1848,15 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     </div>
                   </div>
                   <div className="pt-3 border-t border-[var(--color-dark-border)]">
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={[
-                        { period: 'Before', costs: costSavings.before_costs || 0 },
-                        { period: 'After', costs: costSavings.after_costs || 0 }
-                      ]}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis dataKey="period" stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                        <YAxis stroke="#9ca3af" style={{ fontSize: '12px' }} />
-                        <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                        <Bar dataKey="costs" fill="#3b82f6" name="Transaction Costs" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <SVGBarChart
+                      data={[
+                        { label: 'Before', value: costSavings.before_costs || 0 },
+                        { label: 'After', value: costSavings.after_costs || 0 },
+                      ]}
+                      height={200}
+                      color="#3b82f6"
+                      formatValue={(v) => `$${v.toFixed(0)}`}
+                    />
                   </div>
                 </div>
               ) : (
@@ -2080,51 +2060,35 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <SectionLabel>MAE vs MFE Analysis</SectionLabel>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.1 }}>
-              <ResponsiveContainer width="100%" height={350}>
-                <AreaChart data={[]}>
-                  <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }} />
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis 
-                    dataKey="max_adverse_excursion" 
-                    type="number"
-                    stroke="#9ca3af" 
-                    style={{ fontSize: '12px' }}
-                    label={{ value: 'MAE (%)', position: 'insideBottom', offset: -5 }}
-                  />
-                  <YAxis 
-                    dataKey="max_favorable_excursion"
-                    type="number"
-                    stroke="#9ca3af" 
-                    style={{ fontSize: '12px' }}
-                    label={{ value: 'MFE (%)', angle: -90, position: 'insideLeft' }}
-                  />
-                  <RechartsTooltip 
-                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151' }}
-                    formatter={(value: any) => `${value?.toFixed(2)}%`}
-                  />
-                  <Legend />
-                  <Line
-                    data={tradeJournalEntries.filter(t => t.max_adverse_excursion && t.max_favorable_excursion)}
-                    type="monotone"
-                    dataKey="max_favorable_excursion"
-                    stroke="none"
-                    dot={(props: any) => {
-                      const { cx, cy, payload } = props;
-                      const isWin = payload.pnl && payload.pnl > 0;
-                      return (
-                        <circle
-                          cx={cx}
-                          cy={cy}
-                          r={4}
-                          fill={isWin ? '#10b981' : '#ef4444'}
-                          fillOpacity={0.6}
-                        />
-                      );
-                    }}
-                    name="Trades"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {(() => {
+                const scatterData = tradeJournalEntries.filter(t => t.max_adverse_excursion && t.max_favorable_excursion);
+                if (scatterData.length === 0) {
+                  return <div className="text-center py-12 text-gray-500 text-xs font-mono">No MAE/MFE data available</div>;
+                }
+                const maxMAE = Math.max(...scatterData.map(t => Math.abs(t.max_adverse_excursion || 0)), 1);
+                const maxMFE = Math.max(...scatterData.map(t => Math.abs(t.max_favorable_excursion || 0)), 1);
+                const svgW = 500;
+                const svgH = 350;
+                const m = { top: 20, right: 20, bottom: 40, left: 50 };
+                const cW = svgW - m.left - m.right;
+                const cH = svgH - m.top - m.bottom;
+                return (
+                  <div className="relative w-full" style={{ height: svgH }}>
+                    <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${svgH}`} preserveAspectRatio="xMidYMid meet">
+                      <line x1={m.left} y1={m.top} x2={m.left} y2={svgH - m.bottom} stroke="#374151" />
+                      <line x1={m.left} y1={svgH - m.bottom} x2={svgW - m.right} y2={svgH - m.bottom} stroke="#374151" />
+                      <text x={svgW / 2} y={svgH - 5} textAnchor="middle" fill="#9ca3af" fontSize={10} fontFamily="monospace">MAE (%)</text>
+                      <text x={12} y={svgH / 2} textAnchor="middle" fill="#9ca3af" fontSize={10} fontFamily="monospace" transform={`rotate(-90, 12, ${svgH / 2})`}>MFE (%)</text>
+                      {scatterData.map((t, i) => {
+                        const x = m.left + (Math.abs(t.max_adverse_excursion || 0) / maxMAE) * cW;
+                        const y = m.top + cH - (Math.abs(t.max_favorable_excursion || 0) / maxMFE) * cH;
+                        const isWin = t.pnl && t.pnl > 0;
+                        return <circle key={i} cx={x} cy={y} r={4} fill={isWin ? '#10b981' : '#ef4444'} fillOpacity={0.6} />;
+                      })}
+                    </svg>
+                  </div>
+                );
+              })()}
               <div className="flex items-center justify-center gap-6 mt-2">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-accent-green" />

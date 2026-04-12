@@ -5,7 +5,9 @@ import {
   RefreshCw, AlertCircle, Settings as SettingsIcon,
   Zap,
 } from 'lucide-react';
-import { ResponsiveContainer, LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Cell, BarChart, Bar, PieChart, Pie } from 'recharts';
+import { SVGPieChart } from '../components/charts/SVGPieChart';
+import { SVGBarChart } from '../components/charts/SVGBarChart';
+import { TvChart } from '../components/charts/TvChart';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
 import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
@@ -29,8 +31,7 @@ import { cn, formatCurrency, formatPercentage } from '../lib/utils';
 import { utcToLocal } from '../lib/date-utils';
 import { classifyError, type ClassifiedError } from '../lib/errors';
 import { CorrelationHeatmap } from '../components/charts/CorrelationHeatmap';
-import { InteractiveChart } from '../components/charts/InteractiveChart';
-import { chartTheme, colors as designColors } from '../lib/design-tokens';
+import { colors as designColors } from '../lib/design-tokens';
 import type { Position, RiskParams } from '../types';
 import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
@@ -730,26 +731,30 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                   {riskHistory.length > 0 ? (
                     <>
                       <SectionLabel>VaR Over Time</SectionLabel>
-                      <ResponsiveContainer width="100%" height={180}>
-                        <LineChart data={riskHistoryData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                          <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '10px' }} />
-                          <YAxis stroke="#9ca3af" style={{ fontSize: '10px' }} tickFormatter={(value) => `${(value / 1000).toFixed(1)}k`} />
-                          <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', fontSize: '11px' }} formatter={(value: number | undefined) => value !== undefined ? [`${(value ?? 0).toFixed(0)}`, 'VaR'] : ['', 'VaR']} />
-                          <Line type="monotone" dataKey="var_95" stroke="#ef4444" strokeWidth={2} dot={false} />
-                        </LineChart>
-                      </ResponsiveContainer>
+                      <TvChart
+                        height={180}
+                        series={[{
+                          id: 'var95',
+                          type: 'line',
+                          data: riskHistoryData.map(d => ({ time: d.date, value: d.var_95 })),
+                          color: '#ef4444',
+                          lineWidth: 2,
+                        }]}
+                      />
 
                       <SectionLabel>Drawdown Over Time</SectionLabel>
-                      <ResponsiveContainer width="100%" height={180}>
-                        <AreaChart data={riskHistoryData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                          <XAxis dataKey="date" stroke="#9ca3af" style={{ fontSize: '10px' }} />
-                          <YAxis stroke="#9ca3af" style={{ fontSize: '10px' }} tickFormatter={(value) => `${(value ?? 0).toFixed(1)}%`} />
-                          <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px', fontSize: '11px' }} formatter={(value: number | undefined) => value !== undefined ? [`${(value ?? 0).toFixed(2)}%`, 'Drawdown'] : ['', 'Drawdown']} />
-                          <Area type="monotone" dataKey="drawdown" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.3} strokeWidth={2} />
-                        </AreaChart>
-                      </ResponsiveContainer>
+                      <TvChart
+                        height={180}
+                        series={[{
+                          id: 'drawdown',
+                          type: 'area',
+                          data: riskHistoryData.map(d => ({ time: d.date, value: d.drawdown })),
+                          lineColor: '#f59e0b',
+                          topColor: 'rgba(245, 158, 11, 0.3)',
+                          bottomColor: 'transparent',
+                          lineWidth: 2,
+                        }]}
+                      />
                     </>
                   ) : (
                     <div className="border border-dashed border-muted-foreground/30 rounded-lg p-6 text-center">
@@ -766,16 +771,13 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 <TabsContent value="exposure" className="space-y-2 mt-2">
                   <SectionLabel>Sector Exposure</SectionLabel>
                   {sectorPieData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={220}>
-                      <PieChart>
-                        <Pie data={sectorPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                          {sectorPieData.map((_, idx) => (
-                            <Cell key={idx} fill={SECTOR_COLORS[idx % SECTOR_COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip contentStyle={{ ...chartTheme.tooltip, fontFamily: chartTheme.fontFamily, fontSize: 11 }} formatter={(value: number | undefined) => [`${(value ?? 0).toFixed(0)}`, 'Invested']} />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <SVGPieChart
+                      data={sectorPieData}
+                      height={220}
+                      colors={SECTOR_COLORS}
+                      showLabels
+                      formatValue={(v) => v.toFixed(0)}
+                    />
                   ) : (
                     <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No position data</div>
                   )}
@@ -783,18 +785,34 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                   {/* Long/Short Exposure */}
                   <SectionLabel>Long/Short Exposure</SectionLabel>
                   {riskHistory.length > 0 ? (
-                    <InteractiveChart
-                      data={riskHistory.map((h: any) => ({
-                        date: h.date,
-                        long: Math.abs(h.exposure || 0) * 0.7,
-                        short: -(Math.abs(h.exposure || 0) * 0.3),
-                      }))}
-                      dataKeys={[
-                        { key: 'long', color: designColors.green, type: 'area' },
-                        { key: 'short', color: designColors.red, type: 'area' },
-                      ]}
-                      xAxisKey="date"
+                    <TvChart
                       height={200}
+                      series={[
+                        {
+                          id: 'long',
+                          type: 'area',
+                          data: riskHistory.map((h: any) => ({
+                            time: h.date,
+                            value: Math.abs(h.exposure || 0) * 0.7,
+                          })),
+                          lineColor: designColors.green,
+                          topColor: `${designColors.green}33`,
+                          bottomColor: 'transparent',
+                          lineWidth: 2,
+                        },
+                        {
+                          id: 'short',
+                          type: 'area',
+                          data: riskHistory.map((h: any) => ({
+                            time: h.date,
+                            value: -(Math.abs(h.exposure || 0) * 0.3),
+                          })),
+                          lineColor: designColors.red,
+                          topColor: 'transparent',
+                          bottomColor: `${designColors.red}33`,
+                          lineWidth: 2,
+                        },
+                      ]}
                     />
                   ) : (
                     <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No exposure history data</div>
@@ -822,22 +840,13 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
             <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">Sector Exposure</div>
             {sectorPieData.length > 0 ? (
               <>
-                <ResponsiveContainer width="100%" height={180}>
-                  <PieChart>
-                    <Pie data={sectorPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                      {sectorPieData.map((_, idx) => (
-                        <Cell key={idx} fill={SECTOR_COLORS[idx % SECTOR_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip
-                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.375rem', fontSize: 10 }}
-                      formatter={(value: number | string | undefined) => {
-                        if (typeof value === 'number') return [formatCurrency(value), 'Invested'];
-                        return [value, 'Invested'];
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                <SVGPieChart
+                  data={sectorPieData}
+                  height={180}
+                  colors={SECTOR_COLORS}
+                  showLabels
+                  formatValue={(v) => formatCurrency(v)}
+                />
                 {/* Sector legend */}
                 <div className="space-y-1 mt-2">
                   {sectorPieData.slice(0, 5).map((sector, idx) => (
@@ -862,18 +871,16 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
               Risk Contribution — Top 5
             </div>
             {riskContribTop5.length > 0 ? (
-              <ResponsiveContainer width="100%" height={Math.max(120, riskContribTop5.length * 24)}>
-                <BarChart data={riskContribTop5} layout="vertical" margin={{ left: 40, right: 10, top: 5, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-                  <XAxis type="number" tick={{ fill: chartTheme.axis, fontSize: 9, fontFamily: chartTheme.fontFamily }} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-                  <YAxis type="category" dataKey="symbol" tick={{ fill: chartTheme.axis, fontSize: 9, fontFamily: chartTheme.fontFamily }} width={38} />
-                  <RechartsTooltip
-                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.375rem', fontSize: 10 }}
-                    formatter={(v: number | undefined) => [`${(v ?? 0).toFixed(1)}%`, 'Risk Contribution']}
-                  />
-                  <Bar dataKey="contribution" fill={designColors.blue} fillOpacity={0.8} />
-                </BarChart>
-              </ResponsiveContainer>
+              <SVGBarChart
+                data={riskContribTop5.map((d) => ({
+                  label: d.symbol,
+                  value: d.contribution,
+                }))}
+                height={Math.max(120, riskContribTop5.length * 24)}
+                color={designColors.blue}
+                horizontal
+                formatValue={(v) => `${v.toFixed(1)}%`}
+              />
             ) : (
               <div className="text-center py-6 text-[11px] text-gray-500">No position data</div>
             )}

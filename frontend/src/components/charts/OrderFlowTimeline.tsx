@@ -1,16 +1,6 @@
 import { type FC, useMemo } from 'react';
-import {
-  ScatterChart,
-  Scatter,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from 'recharts';
-import { chartAxisProps, chartGridProps, chartTooltipStyle, chartTheme, colors } from '../../lib/design-tokens';
 import { format, subDays } from 'date-fns';
+import { colors } from '../../lib/design-tokens';
 
 export interface OrderEvent {
   id: string;
@@ -42,8 +32,11 @@ const STATUS_Y: Record<string, number> = {
   REJECTED: 0,
 };
 
+const Y_LABELS = ['Rejected', 'Cancelled', 'Pending', 'Filled'];
+
 export const OrderFlowTimeline: FC<OrderFlowTimelineProps> = ({ orders, days = 7 }) => {
   const cutoff = subDays(new Date(), days).getTime();
+  const now = Date.now();
 
   const data = useMemo(() => {
     return orders
@@ -67,48 +60,88 @@ export const OrderFlowTimeline: FC<OrderFlowTimelineProps> = ({ orders, days = 7
     );
   }
 
-  const yLabels = ['Rejected', 'Cancelled', 'Pending', 'Filled'];
+  // SVG dimensions
+  const width = 600;
+  const height = 200;
+  const padding = { top: 15, right: 20, bottom: 30, left: 75 };
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+
+  // Scales
+  const xScale = (t: number) =>
+    padding.left + ((t - cutoff) / (now - cutoff)) * plotW;
+  const yScale = (y: number) =>
+    padding.top + plotH - (y / 3) * plotH;
+
+  // X-axis ticks (evenly spaced dates)
+  const tickCount = Math.min(days, 7);
+  const xTicks = Array.from({ length: tickCount }, (_, i) => {
+    const t = cutoff + ((i + 1) / tickCount) * (now - cutoff);
+    return { t, label: format(new Date(t), 'MMM dd') };
+  });
 
   return (
     <div className="min-h-[200px]">
-    <ResponsiveContainer width="100%" height={200}>
-      <ScatterChart margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
-        <CartesianGrid {...chartGridProps} />
-        <XAxis
-          dataKey="x"
-          type="number"
-          domain={[cutoff, Date.now()]}
-          tickFormatter={(v: number) => format(new Date(v), 'MMM dd')}
-          {...chartAxisProps}
-        />
-        <YAxis
-          dataKey="y"
-          type="number"
-          domain={[-0.5, 3.5]}
-          ticks={[0, 1, 2, 3]}
-          tickFormatter={(v: number) => yLabels[v] || ''}
-          {...chartAxisProps}
-          width={70}
-        />
-        <Tooltip
-          contentStyle={{
-            ...chartTooltipStyle,
-            fontFamily: chartTheme.fontFamily,
-            fontSize: 11,
-          }}
-          formatter={(_: unknown, __: unknown, props: any) => {
-            const p = props.payload;
-            return [`${p.symbol} ${p.side} ${p.quantity}`, p.status];
-          }}
-          labelFormatter={(v: unknown) => format(new Date(Number(v)), 'MMM dd HH:mm')}
-        />
-        <Scatter data={data} shape="circle">
-          {data.map((entry, idx) => (
-            <Cell key={idx} fill={STATUS_COLORS[entry.status] || '#6b7280'} r={5} />
-          ))}
-        </Scatter>
-      </ScatterChart>
-    </ResponsiveContainer>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        className="w-full h-auto"
+        style={{ fontFamily: "'JetBrains Mono', 'Courier New', monospace" }}
+      >
+        {/* Grid lines */}
+        {[0, 1, 2, 3].map((y) => (
+          <line
+            key={`grid-${y}`}
+            x1={padding.left}
+            x2={width - padding.right}
+            y1={yScale(y)}
+            y2={yScale(y)}
+            stroke="#1f2937"
+            strokeDasharray="3 3"
+          />
+        ))}
+
+        {/* Y-axis labels */}
+        {Y_LABELS.map((label, i) => (
+          <text
+            key={label}
+            x={padding.left - 8}
+            y={yScale(i) + 3}
+            textAnchor="end"
+            fill="#9ca3af"
+            fontSize={10}
+          >
+            {label}
+          </text>
+        ))}
+
+        {/* X-axis ticks */}
+        {xTicks.map(({ t, label }) => (
+          <text
+            key={t}
+            x={xScale(t)}
+            y={height - 8}
+            textAnchor="middle"
+            fill="#9ca3af"
+            fontSize={10}
+          >
+            {label}
+          </text>
+        ))}
+
+        {/* Data points */}
+        {data.map((d, i) => (
+          <circle
+            key={i}
+            cx={xScale(d.x)}
+            cy={yScale(d.y)}
+            r={5}
+            fill={STATUS_COLORS[d.status] || '#6b7280'}
+            opacity={0.85}
+          >
+            <title>{`${d.time} — ${d.symbol} ${d.side} ${d.quantity} (${d.status})`}</title>
+          </circle>
+        ))}
+      </svg>
     </div>
   );
 };

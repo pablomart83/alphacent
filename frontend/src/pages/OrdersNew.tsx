@@ -27,7 +27,9 @@ import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
 import { format, subDays, startOfDay, endOfDay, formatDistanceToNow } from 'date-fns';
 import { utcToLocal } from '../lib/date-utils';
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from 'recharts';
+import { SVGBarChart } from '../components/charts/SVGBarChart';
+import { SVGPieChart } from '../components/charts/SVGPieChart';
+import { TvChart } from '../components/charts/TvChart';
 import { OrderFlowTimeline } from '../components/charts/OrderFlowTimeline';
 import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
@@ -1489,22 +1491,16 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                 <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
                   <div className="text-xs font-semibold text-gray-300 mb-2">Slippage by Strategy</div>
                   {slippageByStrategy.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={180}>
-                      <BarChart data={slippageByStrategy} layout="vertical">
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis type="number" stroke="#9ca3af" tick={{ fontSize: 10 }} />
-                        <YAxis type="category" dataKey="strategy" stroke="#9ca3af" tick={{ fontSize: 10 }} width={60} />
-                        <RechartsTooltip
-                          contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.5rem' }}
-                          formatter={(value: number | string | undefined) => {
-                            if (value === undefined || value === null) return 'N/A';
-                            if (typeof value === 'number') return `${value.toFixed(4)}%`;
-                            return value;
-                          }}
-                        />
-                        <Bar dataKey="slippage" fill="#f59e0b" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <SVGBarChart
+                      data={slippageByStrategy.map((d) => ({
+                        label: d.strategy,
+                        value: d.slippage as number,
+                      }))}
+                      height={180}
+                      color="#f59e0b"
+                      horizontal
+                      formatValue={(v) => `${v.toFixed(4)}%`}
+                    />
                   ) : (
                     <div className="text-center py-6 text-muted-foreground text-xs">No slippage data</div>
                   )}
@@ -1514,22 +1510,16 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                 <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
                   <div className="text-xs font-semibold text-gray-300 mb-2">Fill Rate Trend</div>
                   {fillRateTrend.some(d => d.fillRate > 0) ? (
-                    <ResponsiveContainer width="100%" height={180}>
-                      <LineChart data={fillRateTrend}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                        <XAxis dataKey="date" stroke="#9ca3af" tick={{ fontSize: 10 }} />
-                        <YAxis stroke="#9ca3af" tick={{ fontSize: 10 }} domain={[0, 100]} />
-                        <RechartsTooltip
-                          contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.5rem' }}
-                          formatter={(value: number | string | undefined) => {
-                            if (value === undefined || value === null) return 'N/A';
-                            if (typeof value === 'number') return `${value.toFixed(1)}%`;
-                            return value;
-                          }}
-                        />
-                        <Line type="monotone" dataKey="fillRate" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 3 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
+                    <TvChart
+                      height={180}
+                      series={[{
+                        id: 'fillRate',
+                        type: 'line',
+                        data: fillRateTrend.map(d => ({ time: d.date, value: d.fillRate })),
+                        color: '#10b981',
+                        lineWidth: 2,
+                      }]}
+                    />
                   ) : (
                     <div className="text-center py-6 text-muted-foreground text-xs">No fill rate data</div>
                   )}
@@ -1540,16 +1530,12 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                   <div className="text-xs font-semibold text-gray-300 mb-2">Rejection Reasons</div>
                   {rejectionData.length > 0 ? (
                     <div className="grid grid-cols-2 gap-3">
-                      <ResponsiveContainer width="100%" height={150}>
-                        <PieChart>
-                          <Pie data={rejectionData} cx="50%" cy="50%" labelLine={false} label={false} outerRadius={55} fill="#8884d8" dataKey="value">
-                            {rejectionData.map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.5rem' }} />
-                        </PieChart>
-                      </ResponsiveContainer>
+                      <SVGPieChart
+                        data={rejectionData.map((d) => ({ name: d.name, value: d.value as number }))}
+                        height={150}
+                        colors={COLORS}
+                        formatValue={(v) => String(Math.round(v))}
+                      />
                       <div className="space-y-1.5">
                         {rejectionData.map((item, index) => (
                           <div key={item.name} className="flex items-center justify-between text-xs">
@@ -1609,19 +1595,18 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
             </div>
             {/* Mini fill rate trend chart */}
             {fillRateTrend.some(d => d.fillRate > 0) ? (
-              <ResponsiveContainer width="100%" height={80}>
-                <LineChart data={fillRateTrend}>
-                  <Line type="monotone" dataKey="fillRate" stroke="#10b981" strokeWidth={1.5} dot={false} />
-                  <YAxis domain={[0, 100]} hide />
-                  <RechartsTooltip
-                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.375rem', fontSize: 10 }}
-                    formatter={(value: number | string | undefined) => {
-                      if (typeof value === 'number') return `${value.toFixed(1)}%`;
-                      return value;
-                    }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              <TvChart
+                height={80}
+                showTimeScale={false}
+                showPriceScale={false}
+                series={[{
+                  id: 'fillRateMini',
+                  type: 'line',
+                  data: fillRateTrend.map(d => ({ time: d.date, value: d.fillRate })),
+                  color: '#10b981',
+                  lineWidth: 1.5,
+                }]}
+              />
             ) : (
               <div className="text-center py-4 text-[11px] text-gray-500">No trend data</div>
             )}

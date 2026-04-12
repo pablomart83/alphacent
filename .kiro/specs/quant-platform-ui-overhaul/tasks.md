@@ -521,33 +521,33 @@ This phase transforms the AlphaCent layout from a sidebar + vertical-scroll patt
 
 This phase replaces Recharts with TradingView Lightweight Charts for all time-series visualizations, adds real-time price streaming via WebSocket, and implements saved workspace presets. Recharts is fully removed after migration.
 
-- [ ] 25. TradingView Lightweight Charts Migration
-  - [ ] 25.1 Install lightweight-charts and build TvChart wrapper component
+- [x] 25. TradingView Lightweight Charts Migration
+  - [x] 25.1 Install lightweight-charts and build TvChart wrapper component
     - Run `npm install lightweight-charts` in `frontend/`
     - Create `frontend/src/components/charts/TvChart.tsx` — reusable wrapper around TradingView Lightweight Charts API. Supports: area, line, candlestick, histogram series. Props: data, chartType, theme (AlphaCent dark: bg #0a0e1a, grid #1f2937, up #22c55e, down #ef4444, crosshair #9ca3af, text #f3f4f6), height, onCrosshairMove, timeRange. Handles chart creation, resize via ResizeObserver, cleanup on unmount.
     - Create `frontend/src/components/charts/TvPeriodSelector.tsx` — PeriodSelector that integrates with TvChart's time range API (setVisibleRange) instead of filtering data client-side.
     - _Requirements: 31.1, 31.4, 31.5_
 
-  - [ ] 25.2 Migrate EquityCurveChart to TradingView
+  - [x] 25.2 Migrate EquityCurveChart to TradingView
     - Rewrite `frontend/src/components/charts/EquityCurveChart.tsx` using TvChart: portfolio as area series (blue), SPY as line series (gray dashed), alpha shading between them. Crosshair tooltip showing portfolio value, SPY value, alpha. Synchronized drawdown sub-chart below (separate TvChart instance sharing time range). "Benchmark unavailable" badge when SPY missing. PeriodSelector via TvPeriodSelector.
     - _Requirements: 31.2_
 
-  - [ ] 25.3 Migrate AssetPlot to TradingView candlestick chart
+  - [x] 25.3 Migrate AssetPlot to TradingView candlestick chart
     - Rewrite `frontend/src/components/charts/AssetPlot.tsx` using TvChart: candlestick series for price data, volume histogram sub-chart, buy/sell markers (green ↑ / red ↓ at order dates/prices). Timeframe selector (5m, 15m, 1h, 4h, 1D) that fetches appropriate granularity data from backend.
     - Backend: extend `GET /account/positions/:symbol/detail` to accept `interval` param (5m/15m/1h/4h/1d) and return OHLCV data at that granularity from historical_price_cache or eToro API.
     - _Requirements: 31.3_
 
-  - [ ] 25.4 Migrate all remaining time-series charts to TradingView
+  - [x] 25.4 Migrate all remaining time-series charts to TradingView
     - Migrate InteractiveChart usages across all pages to TvChart: rolling statistics charts (Analytics), equity trend charts (Strategies sparklines can stay as simple SVG), execution quality trend (TCA), walk-forward pass rate (Autonomous), portfolio turnover (Risk), long/short exposure (Risk), order flow timeline (Orders), 24h event timeline (System Health).
     - For each migration: replace Recharts ResponsiveContainer + Line/Area/Bar with TvChart, preserve existing data flow and PeriodSelector behavior.
     - _Requirements: 31.1, 31.4_
 
-  - [ ] 25.5 Implement non-time-series chart alternatives
+  - [x] 25.5 Implement non-time-series chart alternatives
     - Verify that non-time-series visualizations remain functional without Recharts: CorrelationHeatmap (custom Canvas/SVG), ReturnDistribution histogram (custom SVG or lightweight bar renderer), MonthlyReturnsHeatmap (custom grid), sector exposure pie (custom SVG), stacked bar charts (custom SVG).
     - Where these currently use Recharts BarChart/PieChart, replace with lightweight custom SVG components or a minimal utility like `d3-shape` for path generation only (no full D3 dependency).
     - _Requirements: 31.8_
 
-  - [ ] 25.6 Remove Recharts dependency
+  - [x] 25.6 Remove Recharts dependency
     - Remove `recharts` from `package.json`
     - Run `npm uninstall recharts`
     - Verify `npm run build` succeeds with zero Recharts imports remaining

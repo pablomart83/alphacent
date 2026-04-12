@@ -26,7 +26,7 @@ import { classifyError, type ClassifiedError } from '../lib/errors';
 import type { AccountInfo, Position, FundamentalAlert } from '../types';
 import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
-import { Cell, PieChart, Pie, ResponsiveContainer, Tooltip } from 'recharts';
+import { SVGPieChart } from '../components/charts/SVGPieChart';
 
 interface PortfolioNewProps {
   onLogout: () => void;
@@ -1317,20 +1317,13 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
             <div className="text-[10px] font-semibold text-gray-500 tracking-wide mb-1">Sector Exposure</div>
             {sectorExposure.length > 0 ? (
               <>
-                <ResponsiveContainer width="100%" height={150}>
-                  <PieChart>
-                    <Pie data={sectorExposure} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={58} innerRadius={28} paddingAngle={2} stroke="none">
-                      {sectorExposure.map((_, index) => (
-                        <Cell key={`sector-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value: number | undefined) => [formatCurrency(value ?? 0), 'Exposure']}
-                      contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '0.375rem', fontSize: '10px' }}
-                      labelStyle={{ color: '#d1d5db' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                <SVGPieChart
+                  data={sectorExposure}
+                  height={150}
+                  colors={COLORS}
+                  innerRadius={28}
+                  formatValue={(v) => formatCurrency(v)}
+                />
                 <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1">
                   {sectorExposure.slice(0, 8).map((s, i) => (
                     <div key={s.name} className="flex items-center gap-1">

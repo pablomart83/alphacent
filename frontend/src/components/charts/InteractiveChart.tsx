@@ -6,26 +6,10 @@ import {
   useMemo,
   useRef,
 } from 'react';
-import {
-  ComposedChart,
-  Line,
-  Area,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ReferenceArea,
-  ResponsiveContainer,
-} from 'recharts';
-import { subWeeks, subMonths, subYears, parseISO, isAfter } from 'date-fns';
 import { PeriodSelector } from './PeriodSelector';
-import {
-  chartAxisProps,
-  chartGridProps,
-  chartTooltipStyle,
-  chartTheme,
-} from '../../lib/design-tokens';
+
+// Re-export utilities so existing imports still work
+export { filterDataByPeriod, periodStartDate } from '../../lib/chart-utils';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -55,51 +39,15 @@ export interface InteractiveChartProps {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/**
- * Compute the start-date cutoff for a given period string relative to an
- * anchor date (typically the last data point).
- */
-export function periodStartDate(period: string, anchor: Date): Date | null {
-  switch (period) {
-    case '1W':
-      return subWeeks(anchor, 1);
-    case '1M':
-      return subMonths(anchor, 1);
-    case '3M':
-      return subMonths(anchor, 3);
-    case '6M':
-      return subMonths(anchor, 6);
-    case '1Y':
-      return subYears(anchor, 1);
-    case 'ALL':
-    default:
-      return null; // no filtering
-  }
-}
+import { filterDataByPeriod } from '../../lib/chart-utils';
 
-/**
- * Filter data array by period. Returns the full array when period is ALL or
- * when the data has no parseable dates.
- */
-export function filterDataByPeriod<T extends Record<string, unknown>>(
-  data: T[],
-  xAxisKey: string,
-  period: string,
-): T[] {
-  if (period === 'ALL' || data.length === 0) return data;
+// ── Tooltip ────────────────────────────────────────────────────────────────
 
-  const lastDateStr = String(data[data.length - 1][xAxisKey]);
-  const anchor = parseISO(lastDateStr);
-  if (isNaN(anchor.getTime())) return data;
-
-  const start = periodStartDate(period, anchor);
-  if (!start) return data;
-
-  return data.filter((d) => {
-    const dateStr = String(d[xAxisKey]);
-    const date = parseISO(dateStr);
-    return !isNaN(date.getTime()) && isAfter(date, start);
-  });
+interface TooltipState {
+  x: number;
+  y: number;
+  label: string;
+  values: Array<{ name: string; value: string; color: string }>;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -112,286 +60,238 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
   defaultPeriod = 'ALL',
   onPeriodChange,
   height = 300,
-  showCrosshair = true,
-  showZoom = true,
   showGrid = true,
   tooltipFormatter,
   xAxisFormatter,
   yAxisFormatter,
-  children,
 }) => {
-  // ── Period state ───────────────────────────────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null);
   const [activePeriod, setActivePeriod] = useState(defaultPeriod);
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
   const handlePeriodChange = useCallback(
     (period: string) => {
       setActivePeriod(period);
-      // Reset zoom when period changes
-      setZoomLeft(null);
-      setZoomRight(null);
-      setZoomedData(null);
       onPeriodChange?.(period);
     },
     [onPeriodChange],
   );
 
-  // ── Period-filtered data ───────────────────────────────────────────────
   const periodData = useMemo(
     () => filterDataByPeriod(data, xAxisKey, activePeriod),
     [data, xAxisKey, activePeriod],
   );
 
-  // ── Zoom state ─────────────────────────────────────────────────────────
-  const [refAreaLeft, setRefAreaLeft] = useState<string | null>(null);
-  const [refAreaRight, setRefAreaRight] = useState<string | null>(null);
-  const [zoomedData, setZoomedData] = useState<Array<Record<string, unknown>> | null>(null);
-  const [zoomLeft, setZoomLeft] = useState<string | null>(null);
-  const [zoomRight, setZoomRight] = useState<string | null>(null);
+  const displayData = periodData;
 
-  // ── Pan state ──────────────────────────────────────────────────────────
-  const isPanning = useRef(false);
-  const panStartX = useRef<number>(0);
-
-  const isZoomed = zoomedData !== null;
-  const displayData = zoomedData ?? periodData;
-
-  // ── Recharts handler param type ─────────────────────────────────────────
-  type ChartMouseEvent = {
-    activeLabel?: string | number;
-    activeCoordinate?: { x: number; y: number };
-    chartX?: number;
-  };
-
-  // ── Zoom handlers ──────────────────────────────────────────────────────
-  const handleMouseDown = useCallback(
-    (e: ChartMouseEvent) => {
-      if (!showZoom) return;
-      if (e?.activeLabel == null) return;
-      const label = String(e.activeLabel);
-
-      if (isZoomed) {
-        // Start panning
-        isPanning.current = true;
-        panStartX.current = e.chartX ?? 0;
-        return;
+  // Compute Y range across all series
+  const { yMin, yMax } = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    for (const d of displayData) {
+      for (const dk of dataKeys) {
+        const v = Number(d[dk.key]);
+        if (!isNaN(v)) {
+          min = Math.min(min, v);
+          max = Math.max(max, v);
+        }
       }
+    }
+    if (!isFinite(min)) min = 0;
+    if (!isFinite(max)) max = 1;
+    const pad = (max - min) * 0.1 || 0.1;
+    return { yMin: min - pad, yMax: max + pad };
+  }, [displayData, dataKeys]);
 
-      setRefAreaLeft(label);
-      setRefAreaRight(label);
-    },
-    [showZoom, isZoomed],
-  );
+  const numH = typeof height === 'number' ? height : 300;
+  const margin = { top: 10, right: 10, bottom: 30, left: 50 };
+  const svgW = 600;
+  const chartW = svgW - margin.left - margin.right;
+  const chartH = numH - margin.top - margin.bottom;
+  const yRange = yMax - yMin || 1;
+
+  const toX = (i: number) => margin.left + (i / Math.max(displayData.length - 1, 1)) * chartW;
+  const toY = (v: number) => margin.top + (1 - (v - yMin) / yRange) * chartH;
 
   const handleMouseMove = useCallback(
-    (e: ChartMouseEvent) => {
-      if (e?.activeLabel == null) return;
-      const label = String(e.activeLabel);
+    (e: React.MouseEvent<SVGSVGElement>) => {
+      const container = containerRef.current;
+      if (!container || displayData.length === 0) return;
+      const svgRect = e.currentTarget.getBoundingClientRect();
+      const mouseX = ((e.clientX - svgRect.left) / svgRect.width) * svgW;
+      const idx = Math.round(((mouseX - margin.left) / chartW) * (displayData.length - 1));
+      const clampedIdx = Math.max(0, Math.min(displayData.length - 1, idx));
+      const d = displayData[clampedIdx];
+      if (!d) return;
 
-      // Panning while zoomed
-      if (isPanning.current && isZoomed) {
-        const dx = (e.chartX ?? 0) - panStartX.current;
-        if (Math.abs(dx) < 5) return; // dead zone
+      const label = xAxisFormatter
+        ? xAxisFormatter(String(d[xAxisKey]))
+        : String(d[xAxisKey]);
 
-        const source = periodData;
-        const currentStart = source.findIndex(
-          (d) => String(d[xAxisKey]) === zoomLeft,
-        );
-        const currentEnd = source.findIndex(
-          (d) => String(d[xAxisKey]) === zoomRight,
-        );
-        if (currentStart === -1 || currentEnd === -1) return;
+      const values = dataKeys.map((dk) => {
+        const raw = Number(d[dk.key]) || 0;
+        const [formatted, name] = tooltipFormatter
+          ? tooltipFormatter(raw, dk.key)
+          : [yAxisFormatter ? yAxisFormatter(raw) : raw.toFixed(2), dk.key];
+        return { name, value: formatted, color: dk.color };
+      });
 
-        const windowSize = currentEnd - currentStart;
-        const shift = dx < 0 ? 1 : -1; // drag left → shift right in data
-
-        const newStart = Math.max(0, Math.min(currentStart + shift, source.length - windowSize - 1));
-        const newEnd = newStart + windowSize;
-
-        if (newEnd < source.length) {
-          const newLeft = String(source[newStart][xAxisKey]);
-          const newRight = String(source[newEnd][xAxisKey]);
-          setZoomLeft(newLeft);
-          setZoomRight(newRight);
-          setZoomedData(source.slice(newStart, newEnd + 1));
-          panStartX.current = e.chartX ?? 0;
-        }
-        return;
-      }
-
-      // Drag-to-zoom selection
-      if (refAreaLeft) {
-        setRefAreaRight(label);
-      }
+      const cr = container.getBoundingClientRect();
+      setTooltip({
+        x: e.clientX - cr.left,
+        y: e.clientY - cr.top - 12,
+        label,
+        values,
+      });
     },
-    [refAreaLeft, isZoomed, periodData, xAxisKey, zoomLeft, zoomRight],
+    [displayData, dataKeys, xAxisKey, xAxisFormatter, yAxisFormatter, tooltipFormatter, chartW, svgW],
   );
 
-  const handleMouseUp = useCallback(() => {
-    if (isPanning.current) {
-      isPanning.current = false;
-      return;
-    }
-
-    if (!refAreaLeft || !refAreaRight || refAreaLeft === refAreaRight) {
-      setRefAreaLeft(null);
-      setRefAreaRight(null);
-      return;
-    }
-
-    // Determine left/right boundaries
-    const source = periodData;
-    const idxLeft = source.findIndex((d) => String(d[xAxisKey]) === refAreaLeft);
-    const idxRight = source.findIndex((d) => String(d[xAxisKey]) === refAreaRight);
-
-    if (idxLeft === -1 || idxRight === -1) {
-      setRefAreaLeft(null);
-      setRefAreaRight(null);
-      return;
-    }
-
-    const startIdx = Math.min(idxLeft, idxRight);
-    const endIdx = Math.max(idxLeft, idxRight);
-
-    if (endIdx - startIdx < 1) {
-      setRefAreaLeft(null);
-      setRefAreaRight(null);
-      return;
-    }
-
-    const sliced = source.slice(startIdx, endIdx + 1);
-    setZoomedData(sliced);
-    setZoomLeft(String(source[startIdx][xAxisKey]));
-    setZoomRight(String(source[endIdx][xAxisKey]));
-    setRefAreaLeft(null);
-    setRefAreaRight(null);
-  }, [refAreaLeft, refAreaRight, periodData, xAxisKey]);
-
-  const handleResetZoom = useCallback(() => {
-    setZoomedData(null);
-    setZoomLeft(null);
-    setZoomRight(null);
-  }, []);
+  const handleMouseLeave = useCallback(() => setTooltip(null), []);
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="w-full">
-      {/* Header row: period selector + reset zoom */}
-      <div className="flex items-center justify-between mb-2">
-        {periods ? (
+      {periods && (
+        <div className="flex items-center justify-between mb-2">
           <PeriodSelector
             periods={periods}
             activePeriod={activePeriod}
             onPeriodChange={handlePeriodChange}
           />
-        ) : (
-          <div />
-        )}
+        </div>
+      )}
 
-        {isZoomed && (
-          <button
-            type="button"
-            onClick={handleResetZoom}
-            className="px-2 py-0.5 text-xs font-mono rounded bg-dark-hover text-text-secondary hover:text-text-primary transition-colors"
-          >
-            Reset Zoom
-          </button>
-        )}
-      </div>
-
-      {/* Chart */}
-      <div className={height === '100%' ? 'h-full min-h-[200px]' : 'min-h-[200px]'}>
-      <ResponsiveContainer width="100%" height={height === '100%' ? '100%' : (typeof height === 'number' ? height : 300)}>
-        <ComposedChart
-          data={displayData}
-          onMouseDown={handleMouseDown as never}
-          onMouseMove={handleMouseMove as never}
-          onMouseUp={handleMouseUp as never}
-          style={{ cursor: isZoomed ? 'grab' : showZoom ? 'crosshair' : 'default' }}
+      <div ref={containerRef} className="relative min-h-[200px] w-full" style={{ height: numH }}>
+        <svg
+          width="100%"
+          height="100%"
+          viewBox={`0 0 ${svgW} ${numH}`}
+          preserveAspectRatio="none"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
         >
-          {showGrid && <CartesianGrid {...chartGridProps} />}
+          {/* Grid */}
+          {showGrid &&
+            [0, 0.25, 0.5, 0.75, 1].map((frac) => {
+              const y = margin.top + (1 - frac) * chartH;
+              const val = yMin + frac * yRange;
+              return (
+                <g key={frac}>
+                  <line x1={margin.left} y1={y} x2={svgW - margin.right} y2={y} stroke="#1f2937" strokeDasharray="3 3" />
+                  <text x={margin.left - 4} y={y + 3} textAnchor="end" fill="#9ca3af" fontSize={9} fontFamily="monospace">
+                    {yAxisFormatter ? yAxisFormatter(val) : val.toFixed(2)}
+                  </text>
+                </g>
+              );
+            })}
 
-          <XAxis
-            dataKey={xAxisKey}
-            {...chartAxisProps}
-            tickFormatter={xAxisFormatter}
-          />
-          <YAxis
-            {...chartAxisProps}
-            tickFormatter={yAxisFormatter}
-          />
-
-          {showCrosshair && (
-            <Tooltip
-              contentStyle={{
-                ...chartTooltipStyle,
-                fontFamily: chartTheme.fontFamily,
-                fontSize: chartTheme.axisFontSize + 1,
-              }}
-              cursor={{ stroke: '#9ca3af', strokeDasharray: '3 3' }}
-              formatter={tooltipFormatter as never}
-              labelStyle={{ color: '#f3f4f6', marginBottom: 4 }}
-            />
-          )}
-
-          {/* Dynamic series rendering */}
+          {/* Series */}
           {dataKeys.map((dk) => {
-            switch (dk.type) {
-              case 'line':
-                return (
-                  <Line
-                    key={dk.key}
-                    type="monotone"
-                    dataKey={dk.key}
-                    stroke={dk.color}
-                    strokeWidth={1.5}
-                    strokeDasharray={dk.strokeDasharray}
-                    dot={false}
-                    activeDot={{ r: 3, fill: dk.color }}
-                  />
-                );
-              case 'area':
-                return (
-                  <Area
-                    key={dk.key}
-                    type="monotone"
-                    dataKey={dk.key}
-                    stroke={dk.color}
-                    fill={dk.color}
-                    fillOpacity={0.15}
-                    strokeWidth={1.5}
-                    dot={false}
-                    activeDot={{ r: 3, fill: dk.color }}
-                  />
-                );
-              case 'bar':
-                return (
-                  <Bar
-                    key={dk.key}
-                    dataKey={dk.key}
-                    fill={dk.color}
-                    fillOpacity={0.8}
-                  />
-                );
-              default:
-                return null;
+            const points = displayData
+              .map((d, i) => {
+                const v = Number(d[dk.key]);
+                if (isNaN(v)) return null;
+                return { x: toX(i), y: toY(v) };
+              })
+              .filter(Boolean) as Array<{ x: number; y: number }>;
+
+            if (points.length === 0) return null;
+
+            const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+
+            if (dk.type === 'bar') {
+              const barW = Math.max(2, chartW / displayData.length - 2);
+              return (
+                <g key={dk.key}>
+                  {displayData.map((d, i) => {
+                    const v = Number(d[dk.key]);
+                    if (isNaN(v)) return null;
+                    const barH = Math.abs(((v - yMin) / yRange) * chartH);
+                    const barY = toY(Math.max(v, 0));
+                    return (
+                      <rect
+                        key={i}
+                        x={toX(i) - barW / 2}
+                        y={barY}
+                        width={barW}
+                        height={Math.max(0, barH)}
+                        fill={dk.color}
+                        fillOpacity={0.8}
+                        rx={1}
+                      />
+                    );
+                  })}
+                </g>
+              );
             }
+
+            if (dk.type === 'area') {
+              const areaD = `${pathD} L ${points[points.length - 1].x} ${margin.top + chartH} L ${points[0].x} ${margin.top + chartH} Z`;
+              return (
+                <g key={dk.key}>
+                  <path d={areaD} fill={dk.color} fillOpacity={0.15} />
+                  <path d={pathD} fill="none" stroke={dk.color} strokeWidth={1.5} />
+                </g>
+              );
+            }
+
+            // line
+            return (
+              <path
+                key={dk.key}
+                d={pathD}
+                fill="none"
+                stroke={dk.color}
+                strokeWidth={1.5}
+                strokeDasharray={dk.strokeDasharray}
+              />
+            );
           })}
 
-          {/* Zoom selection overlay */}
-          {refAreaLeft && refAreaRight && refAreaLeft !== refAreaRight && (
-            <ReferenceArea
-              x1={refAreaLeft}
-              x2={refAreaRight}
-              strokeOpacity={0.3}
-              fill="#3b82f6"
-              fillOpacity={0.15}
-            />
-          )}
+          {/* X-axis labels */}
+          {displayData.length > 0 &&
+            displayData
+              .filter((_, i) => {
+                const step = Math.max(1, Math.floor(displayData.length / 8));
+                return i % step === 0 || i === displayData.length - 1;
+              })
+              .map((d, _) => {
+                const idx = displayData.indexOf(d);
+                const x = toX(idx);
+                const label = xAxisFormatter
+                  ? xAxisFormatter(String(d[xAxisKey]))
+                  : String(d[xAxisKey]);
+                return (
+                  <text
+                    key={idx}
+                    x={x}
+                    y={numH - margin.bottom + 14}
+                    textAnchor="middle"
+                    fill="#9ca3af"
+                    fontSize={8}
+                    fontFamily="monospace"
+                  >
+                    {label.length > 10 ? label.slice(5, 10) : label}
+                  </text>
+                );
+              })}
+        </svg>
 
-          {/* Custom children (ReferenceLine, ReferenceArea, etc.) */}
-          {children}
-        </ComposedChart>
-      </ResponsiveContainer>
+        {tooltip && (
+          <div
+            className="absolute pointer-events-none z-50 px-2 py-1.5 rounded text-xs font-mono bg-[#1f2937] border border-[#374151] text-gray-200 whitespace-nowrap"
+            style={{ left: tooltip.x, top: tooltip.y, transform: 'translate(-50%, -100%)' }}
+          >
+            <div className="text-gray-400 mb-0.5">{tooltip.label}</div>
+            {tooltip.values.map((v) => (
+              <div key={v.name} className="flex items-center gap-1.5">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: v.color }} />
+                <span>{v.name}: {v.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

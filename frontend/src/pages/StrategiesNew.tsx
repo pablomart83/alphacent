@@ -4,7 +4,7 @@ import {
   Target, Activity,
   MoreVertical, Eye, Pause, Trash2, PlayCircle, RefreshCw,
 } from 'lucide-react';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
+
 import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
 import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
@@ -671,13 +671,18 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
         const lastVal = sampled[sampled.length - 1]?.equity ?? 0;
         const firstVal = sampled[0]?.equity ?? 0;
         const color = lastVal >= firstVal ? '#22c55e' : '#ef4444';
+        const values = sampled.map((d: any) => d.equity ?? 0);
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const range = max - min || 1;
+        const points = values.map((v: number, i: number) =>
+          `${(i / (values.length - 1)) * 60},${24 - ((v - min) / range) * 24}`
+        ).join(' ');
         return (
           <div className="w-[60px] h-[24px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={sampled}>
-                <Line type="monotone" dataKey="equity" stroke={color} strokeWidth={1.5} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
+            <svg width="60" height="24" viewBox="0 0 60 24">
+              <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} />
+            </svg>
           </div>
         );
       },
