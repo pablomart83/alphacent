@@ -6,12 +6,12 @@ import { motion } from 'framer-motion';
 import { 
   Settings as SettingsIcon, Shield, Bell, Key, Activity,
   Save, RotateCcw, Eye, EyeOff, CheckCircle, RefreshCw,
-  AlertTriangle, Info, Target, TrendingUp, Keyboard, Users,
-  UserPlus, Trash2, RotateCw, Lock
+  AlertTriangle, Info, Target, Keyboard, Users,
+  UserPlus, Trash2, RotateCw
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
+import { SectionLabel } from '../components/ui/SectionLabel';
 import { Button } from '../components/ui/Button';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { Input } from '../components/ui/Input';
@@ -281,7 +281,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     try {
       setLoading(true);
       
-      // Fire ALL config requests in parallel instead of sequentially
       const [
         _appConfig,
         riskConfig,
@@ -298,7 +297,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         apiClient.getAlertConfig().catch(() => null),
       ]);
 
-      // Apply risk config
       if (riskConfig) {
         riskForm.reset({
           max_position_size_pct: (riskConfig.max_position_size_pct || 0.1) * 100,
@@ -337,7 +335,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         });
       }
 
-      // Apply autonomous config
       if (autonomousConfig) {
         autonomousForm.reset({
           enabled: autonomousConfig.enabled,
@@ -362,7 +359,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         });
       }
 
-      // Apply alpha edge settings
       if (alphaEdgeSettings) {
         alphaEdgeForm.reset({
           fundamental_filters_enabled: alphaEdgeSettings.fundamental_filters_enabled,
@@ -381,12 +377,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         });
       }
 
-      // Apply API usage
       if (apiUsageData) {
         setApiUsage(apiUsageData);
       }
 
-      // Apply alert config
       if (alertConfigData) {
         setAlertConfig(prev => ({ ...prev, ...alertConfigData }));
       }
@@ -397,8 +391,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
       toast.error('Failed to load configuration');
     } finally {
       setLoading(false);
-      // Check connection status in background — don't block page render
-      // This hits eToro's live API and can take 3-5+ seconds
       if (contextTradingMode) {
         checkConnection(contextTradingMode);
       }
@@ -456,7 +448,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     }
 
     try {
-      // Convert percentages to decimals for backend
       const payload = {
         mode: contextTradingMode,
         max_position_size_pct: data.max_position_size_pct / 100,
@@ -496,13 +487,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     }
 
     try {
-      // Get current risk config to preserve existing values
       const currentRiskConfig: any = await apiClient.getRiskConfig(contextTradingMode);
       
-      // Convert percentages to decimals for backend
       const payload = {
         mode: contextTradingMode,
-        // Include existing risk limit fields (required)
         max_position_size_pct: currentRiskConfig.max_position_size_pct,
         max_exposure_pct: currentRiskConfig.max_exposure_pct,
         max_daily_loss_pct: currentRiskConfig.max_daily_loss_pct,
@@ -510,7 +498,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         position_risk_pct: currentRiskConfig.position_risk_pct,
         stop_loss_pct: currentRiskConfig.stop_loss_pct,
         take_profit_pct: currentRiskConfig.take_profit_pct,
-        // Add position management fields
         trailing_stop_enabled: formData.trailing_stop_enabled,
         trailing_stop_activation_pct: formData.trailing_stop_activation_pct / 100,
         trailing_stop_distance_pct: formData.trailing_stop_distance_pct / 100,
@@ -545,7 +532,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         fundamental_min_checks_passed: formData.fundamental_min_checks_passed,
         fundamental_checks: formData.fundamental_checks,
         ml_filter_enabled: formData.ml_filter_enabled,
-        ml_min_confidence: formData.ml_min_confidence / 100, // Convert to decimal
+        ml_min_confidence: formData.ml_min_confidence / 100,
         ml_retrain_frequency_days: formData.ml_retrain_frequency_days,
         max_active_strategies: formData.max_active_strategies,
         min_conviction_score: formData.min_conviction_score,
@@ -559,7 +546,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
       toast.success('Alpha Edge settings saved successfully');
       setLastUpdated(new Date());
       
-      // Reload API usage
       try {
         const usage = await apiClient.getAlphaEdgeApiUsage();
         setApiUsage(usage);
@@ -594,7 +580,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     }
   };
 
-  // Save alert config to backend
   const saveAlertConfig = async () => {
     setAlertConfigLoading(true);
     try {
@@ -607,7 +592,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     }
   };
 
-  // Request browser push notification permission
   const requestPushPermission = async () => {
     if (!('Notification' in window)) {
       toast.error('Browser notifications not supported');
@@ -622,7 +606,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     }
   };
 
-  // User management functions
   const loadUsers = async () => {
     if (!isAdmin) return;
     setUserListLoading(true);
@@ -726,8 +709,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     }
   };
 
-
-
   if (loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
@@ -803,18 +784,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
           </div>
 
           {/* Trading Mode Tab */}
-          <TabsContent value="trading-mode" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-blue-500" />
-                  Trading Mode
-                </CardTitle>
-                <CardDescription>
-                  Switch between demo (paper trading) and live (real money) trading modes
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
+          <TabsContent value="trading-mode" className="space-y-4">
+            <SectionLabel>Trading Mode</SectionLabel>
+            <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Demo Mode */}
                   <motion.button
@@ -845,8 +817,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           )} />
                         </div>
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-100">Demo Mode</h3>
-                          <p className="text-sm text-gray-400">Paper trading with simulated funds</p>
+                          <h3 className="text-[12px] font-semibold text-gray-100">Demo Mode</h3>
+                          <p className="text-[10px] text-gray-400">Paper trading with simulated funds</p>
                         </div>
                       </div>
                       {contextTradingMode === TradingMode.DEMO && (
@@ -855,7 +827,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         </span>
                       )}
                     </div>
-                    <div className="space-y-2 text-sm text-gray-400">
+                    <div className="space-y-2 text-[11px] text-gray-400">
                       <div className="flex items-center gap-2">
                         <CheckCircle className="h-4 w-4 text-green-500" />
                         <span>No real money at risk</span>
@@ -900,8 +872,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           )} />
                         </div>
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-100">Live Mode</h3>
-                          <p className="text-sm text-gray-400">Real trading with actual funds</p>
+                          <h3 className="text-[12px] font-semibold text-gray-100">Live Mode</h3>
+                          <p className="text-[10px] text-gray-400">Real trading with actual funds</p>
                         </div>
                       </div>
                       {contextTradingMode === TradingMode.LIVE && (
@@ -910,7 +882,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         </span>
                       )}
                     </div>
-                    <div className="space-y-2 text-sm text-gray-400">
+                    <div className="space-y-2 text-[11px] text-gray-400">
                       <div className="flex items-center gap-2">
                         <AlertTriangle className="h-4 w-4 text-red-500" />
                         <span>Real money at risk</span>
@@ -932,8 +904,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="p-4 bg-yellow-900/20 border border-yellow-700 rounded-lg flex items-start gap-3">
                     <Info className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <div className="text-yellow-400 font-semibold mb-1">Demo Mode Active</div>
-                      <div className="text-sm text-gray-400">
+                      <div className="text-yellow-400 font-semibold text-[11px] mb-1">Demo Mode Active</div>
+                      <div className="text-[10px] text-gray-400">
                         All trades are simulated. No real money is at risk. Use this mode to test strategies safely.
                       </div>
                     </div>
@@ -944,33 +916,23 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="p-4 bg-red-900/20 border border-red-700 rounded-lg flex items-start gap-3">
                     <AlertTriangle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <div className="text-red-400 font-semibold mb-1">Live Mode Active</div>
-                      <div className="text-sm text-gray-400">
+                      <div className="text-red-400 font-semibold text-[11px] mb-1">Live Mode Active</div>
+                      <div className="text-[10px] text-gray-400">
                         Trading with real money. All orders will be executed on your live eToro account. Ensure risk parameters are properly configured.
                       </div>
                     </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+            </div>
           </TabsContent>
 
           {/* API Configuration Tab */}
-          <TabsContent value="api" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Key className="h-5 w-5 text-blue-500" />
-                  API Configuration
-                </CardTitle>
-                <CardDescription>
-                  Configure your eToro API credentials for {contextTradingMode} mode
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="api" className="space-y-4">
+            <SectionLabel>API Configuration</SectionLabel>
+            <p className="text-[10px] text-gray-500 mb-2">Configure your eToro API credentials for {contextTradingMode} mode</p>
                 <form onSubmit={apiForm.handleSubmit(onApiConfigSubmit)} className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="publicKey">eToro Public Key</Label>
+                    <Label htmlFor="publicKey" className="text-[11px]">eToro Public Key</Label>
                     <div className="relative">
                       <Input
                         id="publicKey"
@@ -988,12 +950,12 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       </button>
                     </div>
                     {apiForm.formState.errors.publicKey && (
-                      <p className="text-sm text-red-500">{apiForm.formState.errors.publicKey.message}</p>
+                      <p className="text-[10px] text-red-500">{apiForm.formState.errors.publicKey.message}</p>
                     )}
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="userKey">eToro User Key</Label>
+                    <Label htmlFor="userKey" className="text-[11px]">eToro User Key</Label>
                     <Input
                       id="userKey"
                       type={showKeys ? 'text' : 'password'}
@@ -1001,17 +963,17 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       {...apiForm.register('userKey')}
                     />
                     {apiForm.formState.errors.userKey && (
-                      <p className="text-sm text-red-500">{apiForm.formState.errors.userKey.message}</p>
+                      <p className="text-[10px] text-red-500">{apiForm.formState.errors.userKey.message}</p>
                     )}
                   </div>
 
                   {/* Connection Status */}
                   <div className="p-4 bg-dark-bg border border-dark-border rounded-lg">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm text-gray-400">Credentials Status:</span>
+                      <span className="text-[11px] text-gray-400">Credentials Status:</span>
                       <div className="flex items-center gap-2">
                         {checkingConnection ? (
-                          <span className="text-sm text-gray-400">Checking...</span>
+                          <span className="text-[11px] text-gray-400">Checking...</span>
                         ) : connectionStatus ? (
                           <>
                             <span className={cn(
@@ -1023,7 +985,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                 : 'bg-green-500'
                             )} />
                             <span className={cn(
-                              "text-sm",
+                              "text-[11px]",
                               connectionStatus.connected 
                                 ? 'text-green-400' 
                                 : connectionStatus.message.includes('No credentials') 
@@ -1038,12 +1000,12 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             </span>
                           </>
                         ) : (
-                          <span className="text-sm text-gray-500">Unknown</span>
+                          <span className="text-[11px] text-gray-500">Unknown</span>
                         )}
                       </div>
                     </div>
                     {connectionStatus && (
-                      <p className="text-xs text-gray-500">{connectionStatus.message}</p>
+                      <p className="text-[10px] text-gray-500">{connectionStatus.message}</p>
                     )}
                   </div>
 
@@ -1062,34 +1024,22 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
 
-                  <div className="text-xs text-gray-500 space-y-1 pt-2">
+                  <div className="text-[10px] text-gray-500 space-y-1 pt-2">
                     <p>• Get your API keys from eToro's developer portal</p>
                     <p>• Keys are encrypted before storage</p>
                     <p>• Separate keys for Demo and Live modes</p>
                     <p>• Input fields are always empty for security (saved keys are never displayed)</p>
                   </div>
                 </form>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           {/* Risk Limits Tab */}
-          <TabsContent value="risk" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5 text-blue-500" />
-                  Risk Limits
-                </CardTitle>
-                <CardDescription>
-                  Configure risk management parameters to protect your capital
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="risk" className="space-y-4">
+            <SectionLabel>Risk Limits</SectionLabel>
                 <form onSubmit={riskForm.handleSubmit(onRiskLimitsSubmit)} className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                      <Label htmlFor="max_position_size_pct">Max Position Size (%)</Label>
+                      <Label htmlFor="max_position_size_pct" className="text-[11px]">Max Position Size (%)</Label>
                       <Input
                         id="max_position_size_pct"
                         type="number"
@@ -1098,14 +1048,14 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('max_position_size_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-xs text-gray-500">Maximum size of a single position as % of portfolio</p>
+                      <p className="text-[10px] text-gray-500">Maximum size of a single position as % of portfolio</p>
                       {riskForm.formState.errors.max_position_size_pct && (
-                        <p className="text-sm text-red-500">{riskForm.formState.errors.max_position_size_pct.message}</p>
+                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.max_position_size_pct.message}</p>
                       )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="max_exposure_pct">Max Portfolio Exposure (%)</Label>
+                      <Label htmlFor="max_exposure_pct" className="text-[11px]">Max Portfolio Exposure (%)</Label>
                       <Input
                         id="max_exposure_pct"
                         type="number"
@@ -1114,14 +1064,14 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('max_exposure_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-xs text-gray-500">Maximum total exposure across all positions</p>
+                      <p className="text-[10px] text-gray-500">Maximum total exposure across all positions</p>
                       {riskForm.formState.errors.max_exposure_pct && (
-                        <p className="text-sm text-red-500">{riskForm.formState.errors.max_exposure_pct.message}</p>
+                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.max_exposure_pct.message}</p>
                       )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="max_daily_loss_pct">Max Daily Loss (%)</Label>
+                      <Label htmlFor="max_daily_loss_pct" className="text-[11px]">Max Daily Loss (%)</Label>
                       <Input
                         id="max_daily_loss_pct"
                         type="number"
@@ -1130,14 +1080,14 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('max_daily_loss_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-xs text-gray-500">Circuit breaker activates at this loss threshold</p>
+                      <p className="text-[10px] text-gray-500">Circuit breaker activates at this loss threshold</p>
                       {riskForm.formState.errors.max_daily_loss_pct && (
-                        <p className="text-sm text-red-500">{riskForm.formState.errors.max_daily_loss_pct.message}</p>
+                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.max_daily_loss_pct.message}</p>
                       )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="max_drawdown_pct">Max Drawdown (%)</Label>
+                      <Label htmlFor="max_drawdown_pct" className="text-[11px]">Max Drawdown (%)</Label>
                       <Input
                         id="max_drawdown_pct"
                         type="number"
@@ -1146,14 +1096,14 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('max_drawdown_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-xs text-gray-500">Maximum acceptable drawdown</p>
+                      <p className="text-[10px] text-gray-500">Maximum acceptable drawdown</p>
                       {riskForm.formState.errors.max_drawdown_pct && (
-                        <p className="text-sm text-red-500">{riskForm.formState.errors.max_drawdown_pct.message}</p>
+                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.max_drawdown_pct.message}</p>
                       )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="position_risk_pct">Risk Per Trade (%)</Label>
+                      <Label htmlFor="position_risk_pct" className="text-[11px]">Risk Per Trade (%)</Label>
                       <Input
                         id="position_risk_pct"
                         type="number"
@@ -1162,14 +1112,14 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('position_risk_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-xs text-gray-500">Maximum risk per individual trade</p>
+                      <p className="text-[10px] text-gray-500">Maximum risk per individual trade</p>
                       {riskForm.formState.errors.position_risk_pct && (
-                        <p className="text-sm text-red-500">{riskForm.formState.errors.position_risk_pct.message}</p>
+                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.position_risk_pct.message}</p>
                       )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="stop_loss_pct">Stop Loss (%)</Label>
+                      <Label htmlFor="stop_loss_pct" className="text-[11px]">Stop Loss (%)</Label>
                       <Input
                         id="stop_loss_pct"
                         type="number"
@@ -1178,14 +1128,14 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('stop_loss_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-xs text-gray-500">Default stop loss percentage</p>
+                      <p className="text-[10px] text-gray-500">Default stop loss percentage</p>
                       {riskForm.formState.errors.stop_loss_pct && (
-                        <p className="text-sm text-red-500">{riskForm.formState.errors.stop_loss_pct.message}</p>
+                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.stop_loss_pct.message}</p>
                       )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="take_profit_pct">Take Profit (%)</Label>
+                      <Label htmlFor="take_profit_pct" className="text-[11px]">Take Profit (%)</Label>
                       <Input
                         id="take_profit_pct"
                         type="number"
@@ -1194,9 +1144,9 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         max="100"
                         {...riskForm.register('take_profit_pct', { valueAsNumber: true })}
                       />
-                      <p className="text-xs text-gray-500">Default take profit percentage</p>
+                      <p className="text-[10px] text-gray-500">Default take profit percentage</p>
                       {riskForm.formState.errors.take_profit_pct && (
-                        <p className="text-sm text-red-500">{riskForm.formState.errors.take_profit_pct.message}</p>
+                        <p className="text-[10px] text-red-500">{riskForm.formState.errors.take_profit_pct.message}</p>
                       )}
                     </div>
                   </div>
@@ -1216,31 +1166,19 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
                 </form>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           {/* Position Management Tab */}
-          <TabsContent value="position-management" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="h-5 w-5 text-blue-500" />
-                  Position Management
-                </CardTitle>
-                <CardDescription>
-                  Configure advanced position management features including trailing stops, partial exits, and dynamic sizing
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="position-management" className="space-y-4">
+            <SectionLabel>Position Management</SectionLabel>
                 <form onSubmit={positionManagementForm.handleSubmit(onPositionManagementSubmit)} className="space-y-8">
                   
                   {/* Trailing Stops Section */}
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
-                        <Label htmlFor="trailing-stop-enabled" className="text-base">Enable Trailing Stops</Label>
-                        <p className="text-sm text-gray-500">Automatically move stop-loss up as positions become profitable</p>
+                        <Label htmlFor="trailing-stop-enabled" className="text-[11px]">Enable Trailing Stops</Label>
+                        <p className="text-[10px] text-gray-500">Automatically move stop-loss up as positions become profitable</p>
                       </div>
                       <Switch
                         id="trailing-stop-enabled"
@@ -1252,7 +1190,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     {positionManagementForm.watch('trailing_stop_enabled') && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-4">
                         <div className="space-y-2">
-                          <Label htmlFor="trailing_stop_activation_pct">Activation Profit (%)</Label>
+                          <Label htmlFor="trailing_stop_activation_pct" className="text-[11px]">Activation Profit (%)</Label>
                           <Input
                             id="trailing_stop_activation_pct"
                             type="number"
@@ -1261,11 +1199,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="100"
                             {...positionManagementForm.register('trailing_stop_activation_pct', { valueAsNumber: true })}
                           />
-                          <p className="text-xs text-gray-500">Start trailing after this profit level (e.g., 5% = activate at 5% profit)</p>
+                          <p className="text-[10px] text-gray-500">Start trailing after this profit level (e.g., 5% = activate at 5% profit)</p>
                         </div>
 
                         <div className="space-y-2">
-                          <Label htmlFor="trailing_stop_distance_pct">Trailing Distance (%)</Label>
+                          <Label htmlFor="trailing_stop_distance_pct" className="text-[11px]">Trailing Distance (%)</Label>
                           <Input
                             id="trailing_stop_distance_pct"
                             type="number"
@@ -1274,7 +1212,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="100"
                             {...positionManagementForm.register('trailing_stop_distance_pct', { valueAsNumber: true })}
                           />
-                          <p className="text-xs text-gray-500">Distance below current price (e.g., 3% = trail 3% below peak)</p>
+                          <p className="text-[10px] text-gray-500">Distance below current price (e.g., 3% = trail 3% below peak)</p>
                         </div>
                       </div>
                     )}
@@ -1284,8 +1222,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
-                        <Label htmlFor="partial-exit-enabled" className="text-base">Enable Partial Exits</Label>
-                        <p className="text-sm text-gray-500">Take profits incrementally at predefined levels</p>
+                        <Label htmlFor="partial-exit-enabled" className="text-[11px]">Enable Partial Exits</Label>
+                        <p className="text-[10px] text-gray-500">Take profits incrementally at predefined levels</p>
                       </div>
                       <Switch
                         id="partial-exit-enabled"
@@ -1296,11 +1234,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                     {positionManagementForm.watch('partial_exit_enabled') && (
                       <div className="space-y-3 pl-4">
-                        <Label className="text-sm font-semibold text-gray-300">Exit Levels</Label>
+                        <Label className="text-[11px] font-semibold text-gray-300">Exit Levels</Label>
                         {positionManagementForm.watch('partial_exit_levels').map((_, index) => (
                           <div key={index} className="grid grid-cols-2 gap-4 p-3 bg-dark-bg border border-dark-border rounded">
                             <div className="space-y-2">
-                              <Label htmlFor={`partial_exit_levels.${index}.profit_pct`}>Profit Level (%)</Label>
+                              <Label htmlFor={`partial_exit_levels.${index}.profit_pct`} className="text-[11px]">Profit Level (%)</Label>
                               <Input
                                 id={`partial_exit_levels.${index}.profit_pct`}
                                 type="number"
@@ -1311,7 +1249,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               />
                             </div>
                             <div className="space-y-2">
-                              <Label htmlFor={`partial_exit_levels.${index}.exit_pct`}>Exit Size (%)</Label>
+                              <Label htmlFor={`partial_exit_levels.${index}.exit_pct`} className="text-[11px]">Exit Size (%)</Label>
                               <Input
                                 id={`partial_exit_levels.${index}.exit_pct`}
                                 type="number"
@@ -1323,7 +1261,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             </div>
                           </div>
                         ))}
-                        <p className="text-xs text-gray-500">Example: At 5% profit, exit 50% of position; at 10% profit, exit 25% more</p>
+                        <p className="text-[10px] text-gray-500">Example: At 5% profit, exit 50% of position; at 10% profit, exit 25% more</p>
                       </div>
                     )}
                   </div>
@@ -1332,8 +1270,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
-                        <Label htmlFor="correlation-adjustment-enabled" className="text-base">Enable Correlation Adjustment</Label>
-                        <p className="text-sm text-gray-500">Reduce position sizes for correlated assets to maintain diversification</p>
+                        <Label htmlFor="correlation-adjustment-enabled" className="text-[11px]">Enable Correlation Adjustment</Label>
+                        <p className="text-[10px] text-gray-500">Reduce position sizes for correlated assets to maintain diversification</p>
                       </div>
                       <Switch
                         id="correlation-adjustment-enabled"
@@ -1345,7 +1283,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     {positionManagementForm.watch('correlation_adjustment_enabled') && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-4">
                         <div className="space-y-2">
-                          <Label htmlFor="correlation_threshold">Correlation Threshold</Label>
+                          <Label htmlFor="correlation_threshold" className="text-[11px]">Correlation Threshold</Label>
                           <Input
                             id="correlation_threshold"
                             type="number"
@@ -1354,11 +1292,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="1"
                             {...positionManagementForm.register('correlation_threshold', { valueAsNumber: true })}
                           />
-                          <p className="text-xs text-gray-500">Trigger adjustment when correlation exceeds this (0.7 = 70% correlation)</p>
+                          <p className="text-[10px] text-gray-500">Trigger adjustment when correlation exceeds this (0.7 = 70% correlation)</p>
                         </div>
 
                         <div className="space-y-2">
-                          <Label htmlFor="correlation_reduction_factor">Reduction Factor</Label>
+                          <Label htmlFor="correlation_reduction_factor" className="text-[11px]">Reduction Factor</Label>
                           <Input
                             id="correlation_reduction_factor"
                             type="number"
@@ -1367,7 +1305,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="1"
                             {...positionManagementForm.register('correlation_reduction_factor', { valueAsNumber: true })}
                           />
-                          <p className="text-xs text-gray-500">Size reduction multiplier (0.5 = reduce by 50% of correlation)</p>
+                          <p className="text-[10px] text-gray-500">Size reduction multiplier (0.5 = reduce by 50% of correlation)</p>
                         </div>
                       </div>
                     )}
@@ -1377,8 +1315,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
-                        <Label htmlFor="regime-based-sizing-enabled" className="text-base">Enable Regime-Based Sizing</Label>
-                        <p className="text-sm text-gray-500">Adjust position sizes based on market volatility and regime (advanced)</p>
+                        <Label htmlFor="regime-based-sizing-enabled" className="text-[11px]">Enable Regime-Based Sizing</Label>
+                        <p className="text-[10px] text-gray-500">Adjust position sizes based on market volatility and regime (advanced)</p>
                       </div>
                       <Switch
                         id="regime-based-sizing-enabled"
@@ -1389,10 +1327,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                     {positionManagementForm.watch('regime_based_sizing_enabled') && (
                       <div className="space-y-3 pl-4">
-                        <Label className="text-sm font-semibold text-gray-300">Regime Multipliers</Label>
+                        <Label className="text-[11px] font-semibold text-gray-300">Regime Multipliers</Label>
                         <div className="grid grid-cols-2 gap-4">
                           <div className="space-y-2">
-                            <Label htmlFor="regime_multipliers.high_volatility">High Volatility</Label>
+                            <Label htmlFor="regime_multipliers.high_volatility" className="text-[11px]">High Volatility</Label>
                             <Input
                               id="regime_multipliers.high_volatility"
                               type="number"
@@ -1403,7 +1341,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="regime_multipliers.low_volatility">Low Volatility</Label>
+                            <Label htmlFor="regime_multipliers.low_volatility" className="text-[11px]">Low Volatility</Label>
                             <Input
                               id="regime_multipliers.low_volatility"
                               type="number"
@@ -1414,7 +1352,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="regime_multipliers.trending">Trending Market</Label>
+                            <Label htmlFor="regime_multipliers.trending" className="text-[11px]">Trending Market</Label>
                             <Input
                               id="regime_multipliers.trending"
                               type="number"
@@ -1425,7 +1363,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="regime_multipliers.ranging">Ranging Market</Label>
+                            <Label htmlFor="regime_multipliers.ranging" className="text-[11px]">Ranging Market</Label>
                             <Input
                               id="regime_multipliers.ranging"
                               type="number"
@@ -1436,7 +1374,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             />
                           </div>
                         </div>
-                        <p className="text-xs text-gray-500">Multipliers adjust base position size (1.0 = normal, 0.5 = half size, 1.5 = 50% larger)</p>
+                        <p className="text-[10px] text-gray-500">Multipliers adjust base position size (1.0 = normal, 0.5 = half size, 1.5 = 50% larger)</p>
                       </div>
                     )}
                   </div>
@@ -1445,8 +1383,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
-                        <Label htmlFor="cancel-stale-orders" className="text-base">Cancel Stale Orders</Label>
-                        <p className="text-sm text-gray-500">Automatically cancel pending orders that haven't filled</p>
+                        <Label htmlFor="cancel-stale-orders" className="text-[11px]">Cancel Stale Orders</Label>
+                        <p className="text-[10px] text-gray-500">Automatically cancel pending orders that haven't filled</p>
                       </div>
                       <Switch
                         id="cancel-stale-orders"
@@ -1458,7 +1396,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     {positionManagementForm.watch('cancel_stale_orders') && (
                       <div className="pl-4">
                         <div className="space-y-2">
-                          <Label htmlFor="stale_order_hours">Stale Order Timeout (hours)</Label>
+                          <Label htmlFor="stale_order_hours" className="text-[11px]">Stale Order Timeout (hours)</Label>
                           <Input
                             id="stale_order_hours"
                             type="number"
@@ -1467,7 +1405,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="168"
                             {...positionManagementForm.register('stale_order_hours', { valueAsNumber: true })}
                           />
-                          <p className="text-xs text-gray-500">Cancel orders older than this many hours (24 = 1 day, 168 = 1 week)</p>
+                          <p className="text-[10px] text-gray-500">Cancel orders older than this many hours (24 = 1 day, 168 = 1 week)</p>
                         </div>
                       </div>
                     )}
@@ -1477,8 +1415,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="p-4 bg-yellow-900/20 border border-yellow-700 rounded-lg flex items-start gap-3">
                     <AlertTriangle className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <div className="text-yellow-400 font-semibold mb-1">Advanced Features</div>
-                      <div className="text-sm text-gray-400">
+                      <div className="text-yellow-400 font-semibold text-[11px] mb-1">Advanced Features</div>
+                      <div className="text-[10px] text-gray-400">
                         These settings directly impact trading behavior. Test thoroughly in DEMO mode before enabling in LIVE mode. 
                         Regime-based sizing is an advanced feature - only enable after understanding your strategy's regime sensitivity.
                       </div>
@@ -1500,29 +1438,17 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
                 </form>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           {/* Autonomous Configuration Tab */}
-          <TabsContent value="autonomous" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <SettingsIcon className="h-5 w-5 text-blue-500" />
-                  Autonomous Trading Configuration
-                </CardTitle>
-                <CardDescription>
-                  Configure autonomous strategy generation and management
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="autonomous" className="space-y-4">
+            <SectionLabel>Autonomous Trading Configuration</SectionLabel>
                 <form onSubmit={autonomousForm.handleSubmit(onAutonomousConfigSubmit)} className="space-y-6">
                   {/* Enable/Disable */}
                   <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                     <div className="space-y-0.5">
-                      <Label htmlFor="autonomous-enabled" className="text-base">Enable Autonomous System</Label>
-                      <p className="text-sm text-gray-500">Allow the system to autonomously propose and manage strategies</p>
+                      <Label htmlFor="autonomous-enabled" className="text-[11px]">Enable Autonomous System</Label>
+                      <p className="text-[10px] text-gray-500">Allow the system to autonomously propose and manage strategies</p>
                     </div>
                     <Switch
                       id="autonomous-enabled"
@@ -1533,10 +1459,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                   {/* Strategy Generation */}
                   <div className="space-y-4">
-                    <h3 className="text-sm font-semibold text-gray-300">Strategy Generation</h3>
+                    <h3 className="text-[11px] font-semibold text-gray-300">Strategy Generation</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="proposal_count">Proposal Count</Label>
+                        <Label htmlFor="proposal_count" className="text-[11px]">Proposal Count</Label>
                         <Input
                           id="proposal_count"
                           type="number"
@@ -1544,11 +1470,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="500"
                           {...autonomousForm.register('proposal_count', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Number of strategy proposals per cycle (10-500)</p>
+                        <p className="text-[10px] text-gray-500">Number of strategy proposals per cycle (10-500)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="watchlist_size">Watchlist Size</Label>
+                        <Label htmlFor="watchlist_size" className="text-[11px]">Watchlist Size</Label>
                         <Input
                           id="watchlist_size"
                           type="number"
@@ -1556,11 +1482,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="20"
                           {...autonomousForm.register('watchlist_size', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Number of symbols to watch (1-20)</p>
+                        <p className="text-[10px] text-gray-500">Number of symbols to watch (1-20)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="dynamic_symbol_additions">Dynamic Symbol Additions</Label>
+                        <Label htmlFor="dynamic_symbol_additions" className="text-[11px]">Dynamic Symbol Additions</Label>
                         <Input
                           id="dynamic_symbol_additions"
                           type="number"
@@ -1568,11 +1494,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('dynamic_symbol_additions', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Extra symbols added dynamically per strategy during signal generation (0-50)</p>
+                        <p className="text-[10px] text-gray-500">Extra symbols added dynamically per strategy during signal generation (0-50)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="signal_generation_interval">Signal Interval (minutes)</Label>
+                        <Label htmlFor="signal_generation_interval" className="text-[11px]">Signal Interval (minutes)</Label>
                         <Input
                           id="signal_generation_interval"
                           type="number"
@@ -1581,17 +1507,17 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           value={Math.round(autonomousForm.watch('signal_generation_interval') / 60)}
                           onChange={(e) => autonomousForm.setValue('signal_generation_interval', Number(e.target.value) * 60)}
                         />
-                        <p className="text-xs text-gray-500">Time between signal generation runs (5-60 min)</p>
+                        <p className="text-[10px] text-gray-500">Time between signal generation runs (5-60 min)</p>
                       </div>
                     </div>
                   </div>
 
                   {/* Strategy Limits */}
                   <div className="space-y-4">
-                    <h3 className="text-sm font-semibold text-gray-300">Strategy Limits</h3>
+                    <h3 className="text-[11px] font-semibold text-gray-300">Strategy Limits</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="max_active_strategies">Max Active Strategies</Label>
+                        <Label htmlFor="max_active_strategies" className="text-[11px]">Max Active Strategies</Label>
                         <Input
                           id="max_active_strategies"
                           type="number"
@@ -1599,11 +1525,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="500"
                           {...autonomousForm.register('max_active_strategies', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Maximum strategies to run simultaneously (5-500)</p>
+                        <p className="text-[10px] text-gray-500">Maximum strategies to run simultaneously (5-500)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="min_active_strategies">Min Active Strategies</Label>
+                        <Label htmlFor="min_active_strategies" className="text-[11px]">Min Active Strategies</Label>
                         <Input
                           id="min_active_strategies"
                           type="number"
@@ -1611,13 +1537,13 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="25"
                           {...autonomousForm.register('min_active_strategies', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Minimum strategies to maintain (3-25)</p>
+                        <p className="text-[10px] text-gray-500">Minimum strategies to maintain (3-25)</p>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="backtested_ttl_cycles">Backtested Strategy TTL (signal cycles)</Label>
+                        <Label htmlFor="backtested_ttl_cycles" className="text-[11px]">Backtested Strategy TTL (signal cycles)</Label>
                         <Input
                           id="backtested_ttl_cycles"
                           type="number"
@@ -1625,17 +1551,17 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="200"
                           {...autonomousForm.register('backtested_ttl_cycles', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Retire BACKTESTED strategies after N signal cycles without a trade (6-200, default 48 ≈ 24h)</p>
+                        <p className="text-[10px] text-gray-500">Retire BACKTESTED strategies after N signal cycles without a trade (6-200, default 48 ≈ 24h)</p>
                       </div>
                     </div>
                   </div>
 
                   {/* Activation Thresholds */}
                   <div className="space-y-4">
-                    <h3 className="text-sm font-semibold text-gray-300">Activation Thresholds</h3>
+                    <h3 className="text-[11px] font-semibold text-gray-300">Activation Thresholds</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="min_sharpe">Min Sharpe Ratio (Stocks/ETFs)</Label>
+                        <Label htmlFor="min_sharpe" className="text-[11px]">Min Sharpe Ratio (Stocks/ETFs)</Label>
                         <Input
                           id="min_sharpe"
                           type="number"
@@ -1644,11 +1570,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="3.0"
                           {...autonomousForm.register('min_sharpe', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Minimum Sharpe for stocks, ETFs, forex, indices, commodities (0-3.0)</p>
+                        <p className="text-[10px] text-gray-500">Minimum Sharpe for stocks, ETFs, forex, indices, commodities (0-3.0)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="min_sharpe_crypto">Min Sharpe Ratio (Crypto)</Label>
+                        <Label htmlFor="min_sharpe_crypto" className="text-[11px]">Min Sharpe Ratio (Crypto)</Label>
                         <Input
                           id="min_sharpe_crypto"
                           type="number"
@@ -1657,11 +1583,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="3.0"
                           {...autonomousForm.register('min_sharpe_crypto', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Minimum Sharpe for crypto strategies (0-3.0)</p>
+                        <p className="text-[10px] text-gray-500">Minimum Sharpe for crypto strategies (0-3.0)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="max_drawdown">Max Drawdown (%)</Label>
+                        <Label htmlFor="max_drawdown" className="text-[11px]">Max Drawdown (%)</Label>
                         <Input
                           id="max_drawdown"
                           type="number"
@@ -1670,11 +1596,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('max_drawdown', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Maximum acceptable drawdown (5-50%)</p>
+                        <p className="text-[10px] text-gray-500">Maximum acceptable drawdown (5-50%)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="min_win_rate">Min Win Rate (%)</Label>
+                        <Label htmlFor="min_win_rate" className="text-[11px]">Min Win Rate (%)</Label>
                         <Input
                           id="min_win_rate"
                           type="number"
@@ -1683,11 +1609,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="80"
                           {...autonomousForm.register('min_win_rate', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Minimum win rate for stocks/ETFs (30-80%)</p>
+                        <p className="text-[10px] text-gray-500">Minimum win rate for stocks/ETFs (30-80%)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="min_win_rate_crypto">Min Win Rate Crypto (%)</Label>
+                        <Label htmlFor="min_win_rate_crypto" className="text-[11px]">Min Win Rate Crypto (%)</Label>
                         <Input
                           id="min_win_rate_crypto"
                           type="number"
@@ -1696,11 +1622,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="70"
                           {...autonomousForm.register('min_win_rate_crypto', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Minimum win rate for crypto strategies (20-70%)</p>
+                        <p className="text-[10px] text-gray-500">Minimum win rate for crypto strategies (20-70%)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="min_trades_dsl">Min Trades (DSL)</Label>
+                        <Label htmlFor="min_trades_dsl" className="text-[11px]">Min Trades (DSL)</Label>
                         <Input
                           id="min_trades_dsl"
                           type="number"
@@ -1708,10 +1634,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('min_trades_dsl', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Min trades for technical strategies</p>
+                        <p className="text-[10px] text-gray-500">Min trades for technical strategies</p>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="min_trades_alpha_edge">Min Trades (Alpha Edge)</Label>
+                        <Label htmlFor="min_trades_alpha_edge" className="text-[11px]">Min Trades (Alpha Edge)</Label>
                         <Input
                           id="min_trades_alpha_edge"
                           type="number"
@@ -1719,17 +1645,17 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('min_trades_alpha_edge', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Min trades for fundamental strategies</p>
+                        <p className="text-[10px] text-gray-500">Min trades for fundamental strategies</p>
                       </div>
                     </div>
                   </div>
 
                   {/* Retirement Thresholds */}
                   <div className="space-y-4">
-                    <h3 className="text-sm font-semibold text-gray-300">Retirement Thresholds</h3>
+                    <h3 className="text-[11px] font-semibold text-gray-300">Retirement Thresholds</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="retirement_max_sharpe">Max Sharpe (Retire Below)</Label>
+                        <Label htmlFor="retirement_max_sharpe" className="text-[11px]">Max Sharpe (Retire Below)</Label>
                         <Input
                           id="retirement_max_sharpe"
                           type="number"
@@ -1738,11 +1664,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="2.0"
                           {...autonomousForm.register('retirement_max_sharpe', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Retire if Sharpe falls below this (0-2.0)</p>
+                        <p className="text-[10px] text-gray-500">Retire if Sharpe falls below this (0-2.0)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="retirement_max_drawdown">Max Drawdown (Retire Above) (%)</Label>
+                        <Label htmlFor="retirement_max_drawdown" className="text-[11px]">Max Drawdown (Retire Above) (%)</Label>
                         <Input
                           id="retirement_max_drawdown"
                           type="number"
@@ -1751,11 +1677,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="50"
                           {...autonomousForm.register('retirement_max_drawdown', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Retire if drawdown exceeds this (5-50%)</p>
+                        <p className="text-[10px] text-gray-500">Retire if drawdown exceeds this (5-50%)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="retirement_min_win_rate">Min Win Rate (Retire Below) (%)</Label>
+                        <Label htmlFor="retirement_min_win_rate" className="text-[11px]">Min Win Rate (Retire Below) (%)</Label>
                         <Input
                           id="retirement_min_win_rate"
                           type="number"
@@ -1764,7 +1690,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="60"
                           {...autonomousForm.register('retirement_min_win_rate', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Retire if win rate falls below this (20-60%)</p>
+                        <p className="text-[10px] text-gray-500">Retire if win rate falls below this (20-60%)</p>
                       </div>
                     </div>
                   </div>
@@ -1784,31 +1710,19 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
                 </form>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           {/* Alpha Edge Tab */}
-          <TabsContent value="alpha-edge" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-blue-500" />
-                  Alpha Edge Settings
-                </CardTitle>
-                <CardDescription>
-                  Configure fundamental filters, ML signal filtering, and advanced strategy templates
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="alpha-edge" className="space-y-4">
+            <SectionLabel>Alpha Edge Settings</SectionLabel>
                 <form onSubmit={alphaEdgeForm.handleSubmit(onAlphaEdgeSubmit)} className="space-y-8">
                   
                   {/* Fundamental Filters Section */}
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
-                        <Label htmlFor="fundamental-filters-enabled" className="text-base">Enable Fundamental Filtering</Label>
-                        <p className="text-sm text-gray-500">Filter stocks based on fundamental criteria before trading</p>
+                        <Label htmlFor="fundamental-filters-enabled" className="text-[11px]">Enable Fundamental Filtering</Label>
+                        <p className="text-[10px] text-gray-500">Filter stocks based on fundamental criteria before trading</p>
                       </div>
                       <Switch
                         id="fundamental-filters-enabled"
@@ -1820,7 +1734,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     {alphaEdgeForm.watch('fundamental_filters_enabled') && (
                       <div className="space-y-4 pl-4">
                         <div className="space-y-2">
-                          <Label htmlFor="fundamental_min_checks_passed">Minimum Checks Required</Label>
+                          <Label htmlFor="fundamental_min_checks_passed" className="text-[11px]">Minimum Checks Required</Label>
                           <Input
                             id="fundamental_min_checks_passed"
                             type="number"
@@ -1828,16 +1742,16 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="5"
                             {...alphaEdgeForm.register('fundamental_min_checks_passed', { valueAsNumber: true })}
                           />
-                          <p className="text-xs text-gray-500">Number of fundamental checks that must pass (out of 5)</p>
+                          <p className="text-[10px] text-gray-500">Number of fundamental checks that must pass (out of 5)</p>
                         </div>
 
                         <div className="space-y-3">
-                          <Label className="text-sm font-semibold text-gray-300">Individual Checks</Label>
+                          <Label className="text-[11px] font-semibold text-gray-300">Individual Checks</Label>
                           <div className="space-y-2">
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
-                                <Label htmlFor="check-profitable" className="text-sm">Profitable (EPS &gt; 0)</Label>
-                                <p className="text-xs text-gray-500">Company must be profitable</p>
+                                <Label htmlFor="check-profitable" className="text-[11px]">Profitable (EPS &gt; 0)</Label>
+                                <p className="text-[10px] text-gray-500">Company must be profitable</p>
                               </div>
                               <Checkbox
                                 id="check-profitable"
@@ -1848,8 +1762,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
-                                <Label htmlFor="check-growing" className="text-sm">Growing Revenue</Label>
-                                <p className="text-xs text-gray-500">Revenue growth &gt; 0%</p>
+                                <Label htmlFor="check-growing" className="text-[11px]">Growing Revenue</Label>
+                                <p className="text-[10px] text-gray-500">Revenue growth &gt; 0%</p>
                               </div>
                               <Checkbox
                                 id="check-growing"
@@ -1860,8 +1774,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
-                                <Label htmlFor="check-valuation" className="text-sm">Reasonable Valuation</Label>
-                                <p className="text-xs text-gray-500">P/E ratio within acceptable range</p>
+                                <Label htmlFor="check-valuation" className="text-[11px]">Reasonable Valuation</Label>
+                                <p className="text-[10px] text-gray-500">P/E ratio within acceptable range</p>
                               </div>
                               <Checkbox
                                 id="check-valuation"
@@ -1872,8 +1786,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
-                                <Label htmlFor="check-dilution" className="text-sm">No Excessive Dilution</Label>
-                                <p className="text-xs text-gray-500">Share count change &lt; 10%</p>
+                                <Label htmlFor="check-dilution" className="text-[11px]">No Excessive Dilution</Label>
+                                <p className="text-[10px] text-gray-500">Share count change &lt; 10%</p>
                               </div>
                               <Checkbox
                                 id="check-dilution"
@@ -1884,8 +1798,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                             <div className="flex items-center justify-between p-3 bg-dark-bg border border-dark-border rounded">
                               <div>
-                                <Label htmlFor="check-insider" className="text-sm">Insider Buying</Label>
-                                <p className="text-xs text-gray-500">Net insider buying &gt; 0</p>
+                                <Label htmlFor="check-insider" className="text-[11px]">Insider Buying</Label>
+                                <p className="text-[10px] text-gray-500">Net insider buying &gt; 0</p>
                               </div>
                               <Checkbox
                                 id="check-insider"
@@ -1903,8 +1817,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                       <div className="space-y-0.5">
-                        <Label htmlFor="ml-filter-enabled" className="text-base">Enable ML Signal Filtering</Label>
-                        <p className="text-sm text-gray-500">Use machine learning to filter trading signals</p>
+                        <Label htmlFor="ml-filter-enabled" className="text-[11px]">Enable ML Signal Filtering</Label>
+                        <p className="text-[10px] text-gray-500">Use machine learning to filter trading signals</p>
                       </div>
                       <Switch
                         id="ml-filter-enabled"
@@ -1916,7 +1830,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     {alphaEdgeForm.watch('ml_filter_enabled') && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-4">
                         <div className="space-y-2">
-                          <Label htmlFor="ml_min_confidence">Minimum Confidence (%)</Label>
+                          <Label htmlFor="ml_min_confidence" className="text-[11px]">Minimum Confidence (%)</Label>
                           <Input
                             id="ml_min_confidence"
                             type="number"
@@ -1925,11 +1839,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="95"
                             {...alphaEdgeForm.register('ml_min_confidence', { valueAsNumber: true })}
                           />
-                          <p className="text-xs text-gray-500">Only trade signals with ML confidence above this threshold</p>
+                          <p className="text-[10px] text-gray-500">Only trade signals with ML confidence above this threshold</p>
                         </div>
 
                         <div className="space-y-2">
-                          <Label htmlFor="ml_retrain_frequency_days">Retrain Frequency (days)</Label>
+                          <Label htmlFor="ml_retrain_frequency_days" className="text-[11px]">Retrain Frequency (days)</Label>
                           <Input
                             id="ml_retrain_frequency_days"
                             type="number"
@@ -1938,7 +1852,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                             max="90"
                             {...alphaEdgeForm.register('ml_retrain_frequency_days', { valueAsNumber: true })}
                           />
-                          <p className="text-xs text-gray-500">How often to retrain the ML model with new data</p>
+                          <p className="text-[10px] text-gray-500">How often to retrain the ML model with new data</p>
                         </div>
                       </div>
                     )}
@@ -1946,10 +1860,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                   {/* Trading Frequency Section */}
                   <div className="space-y-4">
-                    <h3 className="text-sm font-semibold text-gray-300">Trading Frequency Controls</h3>
+                    <h3 className="text-[11px] font-semibold text-gray-300">Trading Frequency Controls</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="max_active_strategies">Max Active Strategies</Label>
+                        <Label htmlFor="max_active_strategies" className="text-[11px]">Max Active Strategies</Label>
                         <Input
                           id="max_active_strategies"
                           type="number"
@@ -1957,11 +1871,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="20"
                           {...alphaEdgeForm.register('max_active_strategies', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Maximum number of active strategies (5-20)</p>
+                        <p className="text-[10px] text-gray-500">Maximum number of active strategies (5-20)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="min_conviction_score">Min Conviction Score</Label>
+                        <Label htmlFor="min_conviction_score" className="text-[11px]">Min Conviction Score</Label>
                         <Input
                           id="min_conviction_score"
                           type="number"
@@ -1969,11 +1883,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="90"
                           {...alphaEdgeForm.register('min_conviction_score', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Minimum conviction score to generate signals (50-90)</p>
+                        <p className="text-[10px] text-gray-500">Minimum conviction score to generate signals (50-90)</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="min_holding_period_days">Min Holding Period (days)</Label>
+                        <Label htmlFor="min_holding_period_days" className="text-[11px]">Min Holding Period (days)</Label>
                         <Input
                           id="min_holding_period_days"
                           type="number"
@@ -1981,11 +1895,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="30"
                           {...alphaEdgeForm.register('min_holding_period_days', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Minimum days to hold a position</p>
+                        <p className="text-[10px] text-gray-500">Minimum days to hold a position</p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="max_trades_per_strategy_per_month">Max Trades/Strategy/Month</Label>
+                        <Label htmlFor="max_trades_per_strategy_per_month" className="text-[11px]">Max Trades/Strategy/Month</Label>
                         <Input
                           id="max_trades_per_strategy_per_month"
                           type="number"
@@ -1993,19 +1907,19 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           max="10"
                           {...alphaEdgeForm.register('max_trades_per_strategy_per_month', { valueAsNumber: true })}
                         />
-                        <p className="text-xs text-gray-500">Maximum trades per strategy per month</p>
+                        <p className="text-[10px] text-gray-500">Maximum trades per strategy per month</p>
                       </div>
                     </div>
                   </div>
 
                   {/* Strategy Templates Section */}
                   <div className="space-y-4">
-                    <h3 className="text-sm font-semibold text-gray-300">Alpha Edge Strategy Templates</h3>
+                    <h3 className="text-[11px] font-semibold text-gray-300">Alpha Edge Strategy Templates</h3>
                     <div className="space-y-2">
                       <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                         <div className="space-y-0.5">
-                          <Label htmlFor="earnings-momentum-enabled" className="text-base">Earnings Momentum</Label>
-                          <p className="text-sm text-gray-500">Trade small-cap stocks with positive earnings surprises</p>
+                          <Label htmlFor="earnings-momentum-enabled" className="text-[11px]">Earnings Momentum</Label>
+                          <p className="text-[10px] text-gray-500">Trade small-cap stocks with positive earnings surprises</p>
                         </div>
                         <Switch
                           id="earnings-momentum-enabled"
@@ -2016,8 +1930,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                       <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                         <div className="space-y-0.5">
-                          <Label htmlFor="sector-rotation-enabled" className="text-base">Sector Rotation</Label>
-                          <p className="text-sm text-gray-500">Rotate into sectors that outperform in current market regime</p>
+                          <Label htmlFor="sector-rotation-enabled" className="text-[11px]">Sector Rotation</Label>
+                          <p className="text-[10px] text-gray-500">Rotate into sectors that outperform in current market regime</p>
                         </div>
                         <Switch
                           id="sector-rotation-enabled"
@@ -2028,8 +1942,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                       <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                         <div className="space-y-0.5">
-                          <Label htmlFor="quality-mean-reversion-enabled" className="text-base">Quality Mean Reversion</Label>
-                          <p className="text-sm text-gray-500">Buy high-quality stocks when temporarily oversold</p>
+                          <Label htmlFor="quality-mean-reversion-enabled" className="text-[11px]">Quality Mean Reversion</Label>
+                          <p className="text-[10px] text-gray-500">Buy high-quality stocks when temporarily oversold</p>
                         </div>
                         <Switch
                           id="quality-mean-reversion-enabled"
@@ -2043,13 +1957,13 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   {/* API Usage Monitoring */}
                   {apiUsage && (
                     <div className="space-y-4">
-                      <h3 className="text-sm font-semibold text-gray-300">API Usage Monitoring</h3>
+                      <h3 className="text-[11px] font-semibold text-gray-300">API Usage Monitoring</h3>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* FMP Usage */}
                         <div className="p-4 bg-dark-bg border border-dark-border rounded-lg">
                           <div className="flex items-center justify-between mb-2">
-                            <Label className="text-sm">Financial Modeling Prep</Label>
-                            <span className="text-xs text-gray-500">
+                            <Label className="text-[11px]">Financial Modeling Prep</Label>
+                            <span className="text-[10px] text-gray-500">
                               {apiUsage.fmp_usage.calls_today} / {apiUsage.fmp_usage.limit}
                             </span>
                           </div>
@@ -2064,7 +1978,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               style={{ width: `${Math.min(apiUsage.fmp_usage.percentage, 100)}%` }}
                             />
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-[10px] text-gray-500 mt-1">
                             {apiUsage.fmp_usage.remaining} calls remaining ({apiUsage.fmp_usage.percentage.toFixed(1)}% used)
                           </p>
                         </div>
@@ -2072,8 +1986,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         {/* Alpha Vantage Usage */}
                         <div className="p-4 bg-dark-bg border border-dark-border rounded-lg">
                           <div className="flex items-center justify-between mb-2">
-                            <Label className="text-sm">Alpha Vantage</Label>
-                            <span className="text-xs text-gray-500">
+                            <Label className="text-[11px]">Alpha Vantage</Label>
+                            <span className="text-[10px] text-gray-500">
                               {apiUsage.alpha_vantage_usage.calls_today} / {apiUsage.alpha_vantage_usage.limit}
                             </span>
                           </div>
@@ -2088,7 +2002,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               style={{ width: `${Math.min(apiUsage.alpha_vantage_usage.percentage, 100)}%` }}
                             />
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">
+                          <p className="text-[10px] text-gray-500 mt-1">
                             {apiUsage.alpha_vantage_usage.remaining} calls remaining ({apiUsage.alpha_vantage_usage.percentage.toFixed(1)}% used)
                           </p>
                         </div>
@@ -2096,8 +2010,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                       {/* Cache Stats */}
                       <div className="p-4 bg-dark-bg border border-dark-border rounded-lg">
-                        <Label className="text-sm mb-2 block">Cache Statistics</Label>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
+                        <Label className="text-[11px] mb-2 block">Cache Statistics</Label>
+                        <div className="grid grid-cols-2 gap-4 text-[12px]">
                           <div>
                             <span className="text-gray-500">Cache Size:</span>
                             <span className="ml-2 text-gray-300">{apiUsage.cache_stats?.size} entries</span>
@@ -2115,8 +2029,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   <div className="p-4 bg-blue-900/20 border border-blue-700 rounded-lg flex items-start gap-3">
                     <Info className="h-5 w-5 text-blue-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <div className="text-blue-400 font-semibold mb-1">Alpha Edge Features</div>
-                      <div className="text-sm text-gray-400">
+                      <div className="text-blue-400 font-semibold text-[11px] mb-1">Alpha Edge Features</div>
+                      <div className="text-[10px] text-gray-400">
                         These settings control advanced alpha generation features including fundamental analysis, 
                         machine learning signal filtering, and specialized strategy templates. Test thoroughly in 
                         DEMO mode before enabling in LIVE mode.
@@ -2139,37 +2053,26 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     </Button>
                   </div>
                 </form>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           {/* Alerts & Notifications Tab */}
           <TabsContent value="notifications" className="space-y-6">
             {/* Alert Thresholds */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-amber-500" />
-                  Alert Thresholds
-                </CardTitle>
-                <CardDescription>
-                  Configure when you want to be alerted about portfolio events
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
+            <SectionLabel>Alert Thresholds</SectionLabel>
+            <div className="space-y-4">
                 {/* P&L Loss Alert */}
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
-                    <Label className="text-base text-red-400">Daily P&L Loss</Label>
-                    <p className="text-sm text-gray-500">Alert when daily P&L drops below threshold</p>
+                    <Label className="text-[11px] text-red-400">Daily P&L Loss</Label>
+                    <p className="text-[10px] text-gray-500">Alert when daily P&L drops below threshold</p>
                     {alertConfig.pnl_loss_enabled && (
                       <div className="flex items-center gap-2 mt-2">
-                        <span className="text-sm text-gray-400">-$</span>
+                        <span className="text-[11px] text-gray-400">-$</span>
                         <Input
                           type="number"
                           value={alertConfig.pnl_loss_threshold}
                           onChange={(e) => setAlertConfig(prev => ({ ...prev, pnl_loss_threshold: Number(e.target.value) }))}
-                          className="w-32 h-8 text-sm"
+                          className="w-32 h-8 text-[12px]"
                           min={0}
                         />
                       </div>
@@ -2184,16 +2087,16 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 {/* P&L Gain Alert */}
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
-                    <Label className="text-base text-green-400">Daily P&L Gain</Label>
-                    <p className="text-sm text-gray-500">Alert when daily P&L exceeds threshold</p>
+                    <Label className="text-[11px] text-green-400">Daily P&L Gain</Label>
+                    <p className="text-[10px] text-gray-500">Alert when daily P&L exceeds threshold</p>
                     {alertConfig.pnl_gain_enabled && (
                       <div className="flex items-center gap-2 mt-2">
-                        <span className="text-sm text-gray-400">+$</span>
+                        <span className="text-[11px] text-gray-400">+$</span>
                         <Input
                           type="number"
                           value={alertConfig.pnl_gain_threshold}
                           onChange={(e) => setAlertConfig(prev => ({ ...prev, pnl_gain_threshold: Number(e.target.value) }))}
-                          className="w-32 h-8 text-sm"
+                          className="w-32 h-8 text-[12px]"
                           min={0}
                         />
                       </div>
@@ -2208,19 +2111,19 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 {/* Drawdown Alert */}
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
-                    <Label className="text-base text-amber-400">Drawdown</Label>
-                    <p className="text-sm text-gray-500">Alert when drawdown exceeds threshold</p>
+                    <Label className="text-[11px] text-amber-400">Drawdown</Label>
+                    <p className="text-[10px] text-gray-500">Alert when drawdown exceeds threshold</p>
                     {alertConfig.drawdown_enabled && (
                       <div className="flex items-center gap-2 mt-2">
                         <Input
                           type="number"
                           value={alertConfig.drawdown_threshold}
                           onChange={(e) => setAlertConfig(prev => ({ ...prev, drawdown_threshold: Number(e.target.value) }))}
-                          className="w-24 h-8 text-sm"
+                          className="w-24 h-8 text-[12px]"
                           min={0}
                           max={100}
                         />
-                        <span className="text-sm text-gray-400">%</span>
+                        <span className="text-[11px] text-gray-400">%</span>
                       </div>
                     )}
                   </div>
@@ -2233,19 +2136,19 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 {/* Position Loss Alert */}
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
-                    <Label className="text-base text-orange-400">Position Loss</Label>
-                    <p className="text-sm text-gray-500">Alert when any position loses more than threshold</p>
+                    <Label className="text-[11px] text-orange-400">Position Loss</Label>
+                    <p className="text-[10px] text-gray-500">Alert when any position loses more than threshold</p>
                     {alertConfig.position_loss_enabled && (
                       <div className="flex items-center gap-2 mt-2">
                         <Input
                           type="number"
                           value={alertConfig.position_loss_threshold}
                           onChange={(e) => setAlertConfig(prev => ({ ...prev, position_loss_threshold: Number(e.target.value) }))}
-                          className="w-24 h-8 text-sm"
+                          className="w-24 h-8 text-[12px]"
                           min={0}
                           max={100}
                         />
-                        <span className="text-sm text-gray-400">%</span>
+                        <span className="text-[11px] text-gray-400">%</span>
                       </div>
                     )}
                   </div>
@@ -2258,19 +2161,19 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 {/* Margin Alert */}
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="flex-1 space-y-1">
-                    <Label className="text-base text-purple-400">Margin Utilization</Label>
-                    <p className="text-sm text-gray-500">Alert when margin utilization exceeds threshold</p>
+                    <Label className="text-[11px] text-purple-400">Margin Utilization</Label>
+                    <p className="text-[10px] text-gray-500">Alert when margin utilization exceeds threshold</p>
                     {alertConfig.margin_enabled && (
                       <div className="flex items-center gap-2 mt-2">
                         <Input
                           type="number"
                           value={alertConfig.margin_threshold}
                           onChange={(e) => setAlertConfig(prev => ({ ...prev, margin_threshold: Number(e.target.value) }))}
-                          className="w-24 h-8 text-sm"
+                          className="w-24 h-8 text-[12px]"
                           min={0}
                           max={100}
                         />
-                        <span className="text-sm text-gray-400">%</span>
+                        <span className="text-[11px] text-gray-400">%</span>
                       </div>
                     )}
                   </div>
@@ -2279,25 +2182,15 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     onCheckedChange={(checked) => setAlertConfig(prev => ({ ...prev, margin_enabled: checked }))}
                   />
                 </div>
-              </CardContent>
-            </Card>
+            </div>
 
             {/* Event Alerts */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Bell className="h-5 w-5 text-blue-500" />
-                  Event Alerts
-                </CardTitle>
-                <CardDescription>
-                  Alerts for system events (always-on events cannot be disabled)
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <SectionLabel>Event Alerts</SectionLabel>
+            <div className="space-y-4">
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="space-y-0.5">
-                    <Label className="text-base">Autonomous Cycle Complete</Label>
-                    <p className="text-sm text-gray-500">Alert when an autonomous cycle finishes</p>
+                    <Label className="text-[11px]">Autonomous Cycle Complete</Label>
+                    <p className="text-[10px] text-gray-500">Alert when an autonomous cycle finishes</p>
                   </div>
                   <Switch
                     checked={alertConfig.cycle_complete_enabled}
@@ -2306,40 +2199,30 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 </div>
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="space-y-0.5">
-                    <Label className="text-base">Strategy Retired</Label>
-                    <p className="text-sm text-gray-500">Alert when a strategy is retired</p>
+                    <Label className="text-[11px]">Strategy Retired</Label>
+                    <p className="text-[10px] text-gray-500">Alert when a strategy is retired</p>
                   </div>
                   <Switch
                     checked={alertConfig.strategy_retired_enabled}
                     onCheckedChange={(checked) => setAlertConfig(prev => ({ ...prev, strategy_retired_enabled: checked }))}
                   />
                 </div>
-              </CardContent>
-            </Card>
+            </div>
 
             {/* Delivery Settings */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Info className="h-5 w-5 text-cyan-500" />
-                  Delivery Settings
-                </CardTitle>
-                <CardDescription>
-                  How alerts are delivered to you
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+            <SectionLabel>Delivery Settings</SectionLabel>
+            <div className="space-y-4">
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="space-y-0.5">
-                    <Label className="text-base">In-App Notifications</Label>
-                    <p className="text-sm text-gray-500">Toast + persistent alert in notification panel (always on)</p>
+                    <Label className="text-[11px]">In-App Notifications</Label>
+                    <p className="text-[10px] text-gray-500">Toast + persistent alert in notification panel (always on)</p>
                   </div>
-                  <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded">Always On</span>
+                  <span className="text-[10px] text-green-400 bg-green-500/10 px-2 py-1 rounded">Always On</span>
                 </div>
                 <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
                   <div className="space-y-0.5">
-                    <Label className="text-base">Browser Push Notifications</Label>
-                    <p className="text-sm text-gray-500">Get notified even when the tab is not focused (critical alerts only)</p>
+                    <Label className="text-[11px]">Browser Push Notifications</Label>
+                    <p className="text-[10px] text-gray-500">Get notified even when the tab is not focused (critical alerts only)</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {!alertConfig.browser_push_enabled && (
@@ -2366,24 +2249,16 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     {alertConfigLoading ? 'Saving...' : 'Save Alert Configuration'}
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
+            </div>
           </TabsContent>
 
           {/* Users & Security Tab */}
           <TabsContent value="users" className="space-y-6">
             {/* Change Password — available to all users */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Lock className="h-5 w-5 text-blue-500" />
-                  Change Password
-                </CardTitle>
-                <CardDescription>Update your account password</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 max-w-md">
+            <SectionLabel>Change Password</SectionLabel>
+            <div className="space-y-4 max-w-md">
                 <div className="space-y-2">
-                  <Label htmlFor="old-password">Current Password</Label>
+                  <Label htmlFor="old-password" className="text-[11px]">Current Password</Label>
                   <Input
                     id="old-password"
                     type="password"
@@ -2393,7 +2268,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="new-password">New Password</Label>
+                  <Label htmlFor="new-password" className="text-[11px]">New Password</Label>
                   <Input
                     id="new-password"
                     type="password"
@@ -2403,7 +2278,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="confirm-password">Confirm New Password</Label>
+                  <Label htmlFor="confirm-password" className="text-[11px]">Confirm New Password</Label>
                   <Input
                     id="confirm-password"
                     type="password"
@@ -2418,36 +2293,26 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                 >
                   {changePasswordLoading ? 'Changing...' : 'Change Password'}
                 </Button>
-              </CardContent>
-            </Card>
+            </div>
 
             {/* User Management — admin only */}
             {isAdmin && (
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2">
-                        <Users className="h-5 w-5 text-blue-500" />
-                        User Management
-                      </CardTitle>
-                      <CardDescription>Create, edit, and manage user accounts and roles</CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={loadUsers} disabled={userListLoading}>
-                        <RotateCw className={cn("h-4 w-4 mr-1", userListLoading && "animate-spin")} />
-                        Refresh
-                      </Button>
-                      <Button size="sm" onClick={() => setShowCreateUser(true)}>
-                        <UserPlus className="h-4 w-4 mr-1" />
-                        New User
-                      </Button>
-                    </div>
+              <div>
+                <SectionLabel actions={
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={loadUsers} disabled={userListLoading}>
+                      <RotateCw className={cn("h-4 w-4 mr-1", userListLoading && "animate-spin")} />
+                      Refresh
+                    </Button>
+                    <Button size="sm" onClick={() => setShowCreateUser(true)}>
+                      <UserPlus className="h-4 w-4 mr-1" />
+                      New User
+                    </Button>
                   </div>
-                </CardHeader>
-                <CardContent>
+                }>User Management</SectionLabel>
+
                   {/* Role legend */}
-                  <div className="flex gap-4 mb-4 text-xs text-gray-400">
+                  <div className="flex gap-4 mb-4 text-[10px] text-gray-400">
                     <span><span className="inline-block w-2 h-2 rounded-full bg-red-500 mr-1" />Admin — full access, user management</span>
                     <span><span className="inline-block w-2 h-2 rounded-full bg-yellow-500 mr-1" />Trader — trade, manage strategies</span>
                     <span><span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1" />Viewer — read-only dashboard access</span>
@@ -2456,10 +2321,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   {/* Create user form */}
                   {showCreateUser && (
                     <div className="mb-4 p-4 border border-gray-700 rounded-lg bg-dark-surface space-y-3">
-                      <h4 className="text-sm font-medium text-gray-200">Create New User</h4>
+                      <h4 className="text-[11px] font-medium text-gray-200">Create New User</h4>
                       <div className="grid grid-cols-3 gap-3">
                         <div>
-                          <Label htmlFor="create-username" className="text-xs">Username</Label>
+                          <Label htmlFor="create-username" className="text-[10px]">Username</Label>
                           <Input
                             id="create-username"
                             value={newUsername}
@@ -2468,7 +2333,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           />
                         </div>
                         <div>
-                          <Label htmlFor="create-password" className="text-xs">Password</Label>
+                          <Label htmlFor="create-password" className="text-[10px]">Password</Label>
                           <Input
                             id="create-password"
                             type="password"
@@ -2478,12 +2343,12 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           />
                         </div>
                         <div>
-                          <Label htmlFor="create-role" className="text-xs">Role</Label>
+                          <Label htmlFor="create-role" className="text-[10px]">Role</Label>
                           <select
                             id="create-role"
                             value={newRole}
                             onChange={(e) => setNewRole(e.target.value)}
-                            className="w-full h-10 rounded-md border border-gray-700 bg-dark-bg px-3 text-sm text-gray-200"
+                            className="w-full h-10 rounded-md border border-gray-700 bg-dark-bg px-3 text-[12px] text-gray-200"
                           >
                             <option value="admin">Admin</option>
                             <option value="trader">Trader</option>
@@ -2506,19 +2371,19 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   {userList.length === 0 ? (
                     <div className="text-center py-8 text-gray-500">
                       <Users className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                      <p>Click Refresh to load users</p>
+                      <p className="text-[11px]">Click Refresh to load users</p>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
+                      <table className="w-full text-[12px]">
                         <thead>
                           <tr className="border-b border-gray-700 text-gray-400">
-                            <th className="text-left py-2 px-3">Username</th>
-                            <th className="text-left py-2 px-3">Role</th>
-                            <th className="text-left py-2 px-3">Status</th>
-                            <th className="text-left py-2 px-3">Created</th>
-                            <th className="text-left py-2 px-3">Last Login</th>
-                            <th className="text-right py-2 px-3">Actions</th>
+                            <th className="text-left py-2 px-3 text-[10px]">Username</th>
+                            <th className="text-left py-2 px-3 text-[10px]">Role</th>
+                            <th className="text-left py-2 px-3 text-[10px]">Status</th>
+                            <th className="text-left py-2 px-3 text-[10px]">Created</th>
+                            <th className="text-left py-2 px-3 text-[10px]">Last Login</th>
+                            <th className="text-right py-2 px-3 text-[10px]">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -2527,13 +2392,13 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               <td className="py-2 px-3 font-medium text-gray-200">
                                 {user.username}
                                 {user.username === authService.getUsername() && (
-                                  <span className="ml-2 text-xs text-blue-400">(you)</span>
+                                  <span className="ml-2 text-[10px] text-blue-400">(you)</span>
                                 )}
                               </td>
                               <td className="py-2 px-3">
                                 {user.username === authService.getUsername() ? (
                                   <span className={cn(
-                                    "px-2 py-0.5 rounded text-xs font-medium",
+                                    "px-2 py-0.5 rounded text-[10px] font-medium",
                                     user.role === 'admin' ? 'bg-red-900/30 text-red-400' :
                                     user.role === 'trader' ? 'bg-yellow-900/30 text-yellow-400' :
                                     'bg-blue-900/30 text-blue-400'
@@ -2545,7 +2410,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                     value={user.role}
                                     onChange={(e) => handleRoleChange(user.username, e.target.value)}
                                     className={cn(
-                                      "px-2 py-0.5 rounded text-xs font-medium border-0 cursor-pointer",
+                                      "px-2 py-0.5 rounded text-[10px] font-medium border-0 cursor-pointer",
                                       user.role === 'admin' ? 'bg-red-900/30 text-red-400' :
                                       user.role === 'trader' ? 'bg-yellow-900/30 text-yellow-400' :
                                       'bg-blue-900/30 text-blue-400'
@@ -2562,7 +2427,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                   onClick={() => user.username !== authService.getUsername() && handleToggleActive(user.username, user.is_active)}
                                   disabled={user.username === authService.getUsername()}
                                   className={cn(
-                                    "px-2 py-0.5 rounded text-xs font-medium",
+                                    "px-2 py-0.5 rounded text-[10px] font-medium",
                                     user.is_active ? 'bg-green-900/30 text-green-400' : 'bg-gray-700 text-gray-400',
                                     user.username !== authService.getUsername() && 'cursor-pointer hover:opacity-80'
                                   )}
@@ -2570,10 +2435,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                   {user.is_active ? 'Active' : 'Disabled'}
                                 </button>
                               </td>
-                              <td className="py-2 px-3 text-gray-400 text-xs">
+                              <td className="py-2 px-3 text-gray-400 text-[10px]">
                                 {user.created_at ? formatDate(user.created_at) : '—'}
                               </td>
-                              <td className="py-2 px-3 text-gray-400 text-xs">
+                              <td className="py-2 px-3 text-gray-400 text-[10px]">
                                 {user.last_login ? formatDateTime(user.last_login) : 'Never'}
                               </td>
                               <td className="py-2 px-3 text-right">
@@ -2586,31 +2451,31 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                                           value={resetPasswordValue}
                                           onChange={(e) => setResetPasswordValue(e.target.value)}
                                           placeholder="new password"
-                                          className="h-7 w-32 text-xs"
+                                          className="h-7 w-32 text-[10px]"
                                         />
-                                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => handleResetPassword(user.username)}>
+                                        <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => handleResetPassword(user.username)}>
                                           Set
                                         </Button>
-                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setResetPasswordUser(null); setResetPasswordValue(''); }}>
+                                        <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => { setResetPasswordUser(null); setResetPasswordValue(''); }}>
                                           ✕
                                         </Button>
                                       </div>
                                     ) : deleteConfirmUser === user.username ? (
                                       <div className="flex items-center gap-1">
-                                        <span className="text-xs text-red-400">Delete?</span>
-                                        <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => handleDeleteUser(user.username)}>
+                                        <span className="text-[10px] text-red-400">Delete?</span>
+                                        <Button size="sm" variant="destructive" className="h-7 text-[10px]" onClick={() => handleDeleteUser(user.username)}>
                                           Yes
                                         </Button>
-                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setDeleteConfirmUser(null)}>
+                                        <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setDeleteConfirmUser(null)}>
                                           No
                                         </Button>
                                       </div>
                                     ) : (
                                       <>
-                                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setResetPasswordUser(user.username)} title="Reset password">
+                                        <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setResetPasswordUser(user.username)} title="Reset password">
                                           <Key className="h-3 w-3" />
                                         </Button>
-                                        <Button size="sm" variant="ghost" className="h-7 text-xs text-red-400 hover:text-red-300" onClick={() => setDeleteConfirmUser(user.username)} title="Delete user">
+                                        <Button size="sm" variant="ghost" className="h-7 text-[10px] text-red-400 hover:text-red-300" onClick={() => setDeleteConfirmUser(user.username)} title="Delete user">
                                           <Trash2 className="h-3 w-3" />
                                         </Button>
                                       </>
@@ -2624,35 +2489,25 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       </table>
                     </div>
                   )}
-                </CardContent>
-              </Card>
+              </div>
             )}
 
             {!isAdmin && (
-              <Card>
-                <CardContent className="py-8 text-center text-gray-500">
-                  <Shield className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p>User management is only available to administrators.</p>
-                  <p className="text-xs mt-1">Your role: <span className="text-gray-300">{authService.getRole()}</span></p>
-                </CardContent>
-              </Card>
+              <div className="py-8 text-center text-gray-500">
+                <Shield className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                <p className="text-[11px]">User management is only available to administrators.</p>
+                <p className="text-[10px] mt-1">Your role: <span className="text-gray-300">{authService.getRole()}</span></p>
+              </div>
             )}
           </TabsContent>
 
           {/* Keyboard Shortcuts Tab */}
-          <TabsContent value="shortcuts" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Keyboard className="h-5 w-5 text-blue-500" />
-                  Keyboard Shortcuts
-                </CardTitle>
-                <CardDescription>
-                  Use keyboard shortcuts to navigate faster. Shortcuts are disabled while typing in input fields.
-                  Press <kbd className="px-1.5 py-0.5 rounded text-xs font-mono bg-gray-800 border border-gray-700 mx-1">?</kbd> anywhere to toggle this reference.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+          <TabsContent value="shortcuts" className="space-y-4">
+            <SectionLabel>Keyboard Shortcuts</SectionLabel>
+            <p className="text-[10px] text-gray-500 mb-2">
+              Use keyboard shortcuts to navigate faster. Shortcuts are disabled while typing in input fields.
+              Press <kbd className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-gray-800 border border-gray-700 mx-1">?</kbd> anywhere to toggle this reference.
+            </p>
                 <div className="space-y-6">
                   {(['navigation', 'actions', 'general'] as const).map((category) => {
                     const items = KEYBOARD_SHORTCUTS.filter((s) => s.category === category);
@@ -2660,7 +2515,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     const categoryLabels = { navigation: 'Navigation', actions: 'Actions', general: 'General' };
                     return (
                       <div key={category}>
-                        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+                        <h3 className="text-[11px] font-semibold text-gray-300 uppercase tracking-wider mb-3">
                           {categoryLabels[category]}
                         </h3>
                         <div className="space-y-2">
@@ -2669,8 +2524,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               key={shortcut.key}
                               className="flex items-center justify-between py-2 px-3 rounded-lg bg-dark-bg/50"
                             >
-                              <span className="text-sm text-gray-300">{shortcut.description}</span>
-                              <kbd className="px-2.5 py-1 rounded text-xs font-mono bg-gray-800 border border-gray-700 text-gray-400">
+                              <span className="text-[12px] text-gray-300">{shortcut.description}</span>
+                              <kbd className="px-2.5 py-1 rounded text-[10px] font-mono bg-gray-800 border border-gray-700 text-gray-400">
                                 {shortcut.label}
                               </kbd>
                             </div>
@@ -2680,8 +2535,6 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     );
                   })}
                 </div>
-              </CardContent>
-            </Card>
           </TabsContent>
         </Tabs>
       </div>
