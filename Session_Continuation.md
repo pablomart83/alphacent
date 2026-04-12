@@ -1136,3 +1136,126 @@ curl https://alphacent.co.uk/health
 4. ~~Order execution — multi-strategy confluence~~ ✅
 5. ~~Performance feedback loop~~ ✅
 6. ~~EXIT signals~~ ✅
+
+
+### Session Improvements (April 12, 2026 — Session 7: Phase 2 QuantFury Layout Overhaul)
+
+#### 102. Layout Foundation — Shared Components + Dependencies ✅
+- Installed `react-resizable-panels` (v4.10.0)
+- **TopNavBar** replaces Sidebar: horizontal nav (48px), brand left, 11 nav links center, account actions right. Active page: green bottom border + green text. Hamburger menu below 768px. Preserves badge counts, permission filtering, user info.
+- **MetricsBar** merges Header + GlobalSummaryBar into single 40px row: connection dot, Equity, Daily P&L ($+%), Positions, Strategies, Regime badge, Health score, Last Synced. Green/red P&L, yellow on WS disconnect. Condensed Multi-Timeframe at >1440px.
+- **PositionTickerStrip** (36px): horizontal scrollable strip, top 15 positions by value, WS-driven flash animation, click → `/portfolio/:symbol`, hidden below 768px.
+- **PanelHeader**: darker bg header with collapse/expand (persisted to localStorage), refresh, optional close. Flex container with overflow-auto body.
+- **ResizablePanelLayout**: wraps react-resizable-panels, horizontal/vertical splits, min 250px panels, CSS-based resize, persist sizes to localStorage, single-column below 1024px.
+- **PageTemplate**: consistent page shell with header zone + main content + BottomWidgetZone. `compact` prop eliminates 64px title, shows 36px action bar only.
+- **CompactMetricRow**: single 40px row, 4-8 inline metrics with AnimatedNumber, trend indicators.
+- **BottomWidgetZone**: horizontal row of 5 lazy-loaded closable mini-widgets (TopMovers, RecentSignals, MarketRegime, StrategyAlerts, MacroPulse), max 200px, visibility persisted to localStorage.
+- **DenseTable variant**: 32px rows, 12px font, 8px/4px padding on Table.tsx.
+- **Card.tsx**: reduced padding to p-3, hover glow border transition.
+- **DashboardLayout restructured**: `flex flex-col h-screen` → TopNavBar → MetricsBar → PositionTickerStrip → `<main>` (full width). Sidebar and old header removed.
+- **Files**: `frontend/src/components/TopNavBar.tsx`, `MetricsBar.tsx`, `PositionTickerStrip.tsx`, `PageTemplate.tsx`, `BottomWidgetZone.tsx`, `layout/PanelHeader.tsx`, `layout/ResizablePanelLayout.tsx`, `trading/CompactMetricRow.tsx`, `widgets/*.tsx`, `ui/Table.tsx`, `ui/Card.tsx`, `DashboardLayout.tsx`
+
+#### 103. Backend Widget Endpoints ✅
+- `GET /dashboard/top-movers?mode=DEMO` — top 5 gainers + losers by P&L %
+- `GET /dashboard/recent-signals?mode=DEMO&limit=5` — last N signals with conviction, direction, symbol
+- `GET /dashboard/strategy-alerts?mode=DEMO&limit=10` — lifecycle events (activations, retirements, pending closures, demotions)
+- **Files**: `src/api/routers/dashboard.py`, `src/api/app.py`, `frontend/src/services/api.ts`
+
+#### 104. All 11 Pages Redesigned with Panel Layouts ✅
+- **Overview**: 3-panel command center (25% metrics/pipeline, 50% equity curve hero, 25% activity)
+- **Portfolio**: 2-panel (70% positions DenseTable with inline tabs, 30% summary with pie/allocation). Tabs moved INTO PanelHeader bar. All Card wrappers removed.
+- **Orders**: 2-panel (65% OrderFlowTimeline hero + orders DenseTable, 35% execution quality + recent fills)
+- **Strategies**: 2-panel (65% strategy tables with 10 inline tabs, 35% intelligence sidebar with rankings + lifecycle events). Custom inline tab buttons in PanelHeader.
+- **Autonomous**: 2-panel (65% all 7 tabs, 35% cycle intelligence with progress + WF sparkline)
+- **Risk**: 2-panel (60% correlation hero + tabs, 40% risk summary with sector pie + contribution bars)
+- **Analytics**: full-width with CompactMetricRow + 10 tabs. MetricCards replaced with compact key-value grids.
+- **Data Management**: 2-panel (65% quality DenseTable, 35% data health + FMP cache + sync progress)
+- **System Health**: 2-panel (60% event timeline + service cards, 40% circuit breakers + API health)
+- **Audit Log**: 2-panel (65% virtual-scroll DenseTable + filters, 35% summary + rejections + lifecycle)
+- **Settings**: full-width with tabs, compact mode
+- All pages use `compact={true}` on PageTemplate (eliminates 64px page title)
+- **Files**: All 11 page components in `frontend/src/pages/`
+
+#### 105. Micro-Interactions and Visual Polish ✅
+- **AnimatedNumber**: count-up/down over 300ms using requestAnimationFrame with ease-out cubic. Applied to MetricsBar, PositionTickerStrip, CompactMetricRow.
+- **FlashWrapper**: green/red 20% opacity flash fading 500ms on value change. Applied to MetricsBar equity/P&L, PositionTickerStrip chips.
+- **Hover glow**: Card border-color transition, table row highlight, resize handle highlight, ticker chip scale(1.02).
+- **Tab fade-in**: 150ms fade-in animation on TabsContent switch via CSS keyframes.
+- **React.memo**: Applied to MetricsBar, PositionTickerStrip, AnimatedNumber, FlashWrapper, CompactMetricRow to prevent unnecessary re-renders.
+- **Files**: `frontend/src/components/ui/animated-number.tsx`, `flash-wrapper.tsx`, `Card.tsx`, `tabs.tsx`, `Table.tsx`, `index.css`
+
+#### 106. Cleanup and Audit ✅
+- Removed deprecated `Sidebar.tsx` and `GlobalSummaryBar.tsx` (zero remaining imports)
+- Cross-page visual audit: verified TopNavBar active states, PanelHeader consistency, DenseTable usage, CompactMetricRow presence, BottomWidgetZone on all pages
+- Performance audit: lazy-loaded all 5 bottom widgets, verified CSS-based panel resize (no JS re-renders during drag)
+- Fixed scroll clipping: PanelHeader updated to `flex flex-col h-full min-h-0` with `overflow-auto` body wrapper. Removed redundant `overflow-hidden` from all panel wrappers.
+- Fixed Strategies crash: `useState` hook was declared after early return (React error #310) — moved to top of component.
+- Removed redundant panel titles: "Autonomous" → "Control & Activity", "Risk" → "Analysis", "System" → "Services"
+
+#### 107. Bloomberg Terminal Density Redesign ✅
+- **Problem**: Initial Phase 2 implementation just wrapped old content in new panel containers ("pig with lipstick"). Old card-based layout with big headers, excessive padding, and wasted vertical space persisted inside panels.
+- **Fix**: Proper redesign eliminating all Card wrappers inside panels, replacing MetricCards with compact key-value grids, moving tabs into PanelHeader bars, reducing spacing from gap-4/6 to gap-2, reducing padding from p-3/4 to p-2.
+- Portfolio: tabs inline in PanelHeader, edge-to-edge table, direct key-value pairs in side panel
+- Strategies: 10 tabs inline in PanelHeader with custom buttons, all Card wrappers removed from Overview/Active/Backtested tabs
+- Analytics: MetricCards → compact grids, CIO Metrics → inline grid, spacing tightened throughout
+- All other pages: compact mode, tightened spacing, removed Card wrappers
+
+---
+
+## Current System State (April 12, 2026 — Updated Session 7)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$162K, equity ~$463K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~97 DEMO + backtested
+- **Open positions:** ~127
+- **Monitoring:** 24/7 + CloudWatch alerting + EXIT signal processing
+- **Market regime:** Equity: ranging_low_vol
+- **UI:** Phase 2 QuantFury layout complete — TopNavBar, MetricsBar, PositionTickerStrip, resizable panels, compact PageTemplate, DenseTable, BottomWidgetZone on all pages
+
+---
+
+## Phase 2 Polish — Remaining Items
+
+These items were identified during user testing of the Phase 2 layout and should be addressed before starting Phase 3:
+
+### Visual Polish
+- Some pages still have Card-wrapped sections inside tabs that could be further flattened (Autonomous Control tab, Risk Advanced tab)
+- Orders page: "Execution Quality" section in side panel still uses large font sizes for the 3 metrics — could be more compact
+- Autonomous page: "Trading Cycle Pipeline" component still uses old circular icon style — could be redesigned to match the new dense aesthetic
+- Analytics Performance tab: Daily P&L table still uses Card wrapper — should be a direct table
+
+### Data Issues
+- `/strategies/blacklisted-combos` returns 422 (Unprocessable Entity) — endpoint may need `mode` query parameter
+- `/strategies/template-rankings` returns 404 — endpoint may not be deployed or route not registered
+- `/strategies/idle-demotions` returns 422 — same mode parameter issue
+
+### Functional
+- Settings page: still has old-style form layout with large headings ("✨ Alpha Edge Settings") — could be more compact
+- BottomWidgetZone: "Never synced" shows in MetricsBar — should show actual last sync time after first sync
+
+---
+
+## Phase 3 Plan: Professional Charting + Real-Time Streaming + Workspace Presets
+
+Phase 3 replaces Recharts with TradingView Lightweight Charts for all time-series visualizations, adds real-time price streaming via WebSocket, and implements saved workspace presets. See `.kiro/specs/quant-platform-ui-overhaul/tasks.md` Tasks 25-32 for full details.
+
+### Key deliverables:
+1. **TradingView Lightweight Charts migration** (Tasks 25.1-25.6): TvChart wrapper, EquityCurveChart migration, AssetPlot candlestick chart, all remaining time-series charts, non-time-series alternatives (custom SVG), Recharts removal
+2. **Real-time price streaming** (Tasks 27.1-27.2): Backend WebSocket price ticks, frontend chart updates via `series.update()`
+3. **Saved workspace presets** (Tasks 29.1-29.2): 5 user presets + 3 defaults (Trading/Monitoring/Analysis), workspace switcher in TopNavBar
+
+### Dependencies:
+- `lightweight-charts` — TradingView charting library
+- Recharts fully removed after migration
+
+### New files:
+- `frontend/src/components/charts/TvChart.tsx` — TradingView wrapper
+- `frontend/src/components/charts/TvPeriodSelector.tsx` — Period selector for TvChart
+- `frontend/src/lib/workspace-presets.ts` — Preset management
+
+---
+
+## Nginx Config Reminder
+
+The Nginx config at `/etc/nginx/sites-available/alphacent` must include `/dashboard` in the API proxy regex (added in Session 7 for the widget endpoints). Current proxy regex includes: `/auth`, `/config`, `/account`, `/strategies`, `/orders`, `/market-data`, `/control`, `/ws`, `/performance`, `/risk`, `/analytics`, `/signals`, `/alerts`, `/data`, `/audit`, `/dashboard`.
