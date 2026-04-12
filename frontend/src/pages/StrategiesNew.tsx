@@ -1345,19 +1345,17 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
   // Header actions for PageTemplate
   const headerActions = (
-    <>
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-      <Button
+      <button
         onClick={fetchStrategies}
         disabled={refreshing}
-        variant="outline"
-        size="sm"
-        title="Reload strategies from database"
+        className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+        title="Refresh"
       >
-        <RefreshCw className={cn('h-4 w-4 mr-2', refreshing && 'animate-spin')} />
-        {refreshing ? 'Refreshing...' : 'Refresh'}
-      </Button>
-    </>
+        <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+      </button>
+    </div>
   );
 
   if (loading || tradingModeLoading) {
@@ -1391,7 +1389,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     { value: 'active', label: `Active (${filteredActiveStrategies.length})` },
     { value: 'backtested', label: `Backtested (${filteredBacktestedStrategies.length})` },
     { value: 'retired', label: `Retired (${filteredRetiredStrategies.length})` },
-    { value: 'templates', label: 'Templates' },
+    { value: 'templates', label: 'DSL Templates' },
     { value: 'ae-templates', label: 'AE Templates' },
     { value: 'symbols', label: 'Symbols' },
     { value: 'rankings', label: 'Rankings' },

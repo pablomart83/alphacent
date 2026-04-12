@@ -2,7 +2,7 @@ import { type FC, useState, useMemo, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Maximize2, Minimize2, Eye, EyeOff,
+  Maximize2, Minimize2, Eye, EyeOff, RefreshCw,
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
@@ -10,7 +10,6 @@ import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout'
 import { PanelHeader } from '../components/layout/PanelHeader';
 import { CompactMetricRow } from '../components/trading/CompactMetricRow';
 import type { CompactMetric } from '../components/trading/CompactMetricRow';
-import { RefreshButton } from '../components/ui/RefreshButton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
 import { EquityCurveChart } from '../components/charts/EquityCurveChart';
@@ -258,13 +257,27 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     return [
       {
         label: 'Equity',
-        value: formatCurrency(d.account_equity ?? 0),
+        value: d.account_equity ?? 0,
         trend: 'neutral' as const,
       },
       {
         label: 'Daily P&L',
-        value: `${pnl >= 0 ? '+' : ''}${formatCurrency(pnl)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`,
+        value: pnl,
         trend: pnl > 0 ? 'up' as const : pnl < 0 ? 'down' as const : 'neutral' as const,
+      },
+      {
+        label: 'Daily %',
+        value: `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%`,
+        trend: pnlPct > 0 ? 'up' as const : pnlPct < 0 ? 'down' as const : 'neutral' as const,
+      },
+      {
+        label: 'Unrealized',
+        value: d.total_unrealized_pnl ?? 0,
+        trend: (d.total_unrealized_pnl ?? 0) > 0 ? 'up' as const : (d.total_unrealized_pnl ?? 0) < 0 ? 'down' as const : 'neutral' as const,
+      },
+      {
+        label: 'Win Rate',
+        value: `${(d.quick_stats?.win_rate_30d ?? 0).toFixed(1)}%`,
       },
       {
         label: 'Sharpe',
@@ -274,6 +287,10 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
         label: 'Max DD',
         value: `${maxDrawdown.toFixed(2)}%`,
         trend: maxDrawdown < -5 ? 'down' as const : 'neutral' as const,
+      },
+      {
+        label: 'Cash',
+        value: d.available_cash ?? 0,
       },
     ];
   }, [dashboard, dailyPnl, maxDrawdown]);
@@ -293,10 +310,16 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
 
   // ── Header actions ─────────────────────────────────────────────────────
   const headerActions = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
       <TearSheetGenerator />
-      <RefreshButton loading={isRefreshing} label="Refresh" onClick={refresh} />
+      <button
+        onClick={refresh}
+        className={cn('p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors')}
+        title="Refresh"
+      >
+        <RefreshCw size={14} className={cn(isRefreshing && 'animate-spin')} />
+      </button>
     </div>
   );
 
@@ -383,14 +406,14 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const centerPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
-        <div className="flex-1 p-2 min-h-0">
+        <div className="flex-1 p-2 min-h-0 h-full">
           {d ? (
             <EquityCurveChart
               equityData={d.equity_curve}
               spyData={effectiveSpyData}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
-              height={Math.max(400, 500)}
+              height="100%"
             />
           ) : (
             <ChartSkeleton height={400} />

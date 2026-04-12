@@ -2,7 +2,7 @@ import { type FC, useEffect, useState, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, BarChart3, PieChart, Activity, Download, FileText,
-  Search, ArrowUpDown, Calendar, Target, Zap
+  Search, ArrowUpDown, Target, Zap, RefreshCw
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
@@ -12,7 +12,6 @@ import { MetricCard } from '../components/trading/MetricCard';
 import { DataTable } from '../components/trading/DataTable';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { RefreshButton } from '../components/ui/RefreshButton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Input } from '../components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -701,11 +700,10 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
   // ── Header actions for PageTemplate ──
   const headerActions = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
       <Select value={period} onValueChange={(value) => setPeriod(value as typeof period)}>
-        <SelectTrigger className="w-[130px]">
-          <Calendar className="h-4 w-4 mr-2" />
+        <SelectTrigger className="w-[100px] h-7 text-[11px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -716,12 +714,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           <SelectItem value="ALL">All Time</SelectItem>
         </SelectContent>
       </Select>
-      <Button variant="outline" size="sm" onClick={handleExportCSV}>
-        <Download className="h-4 w-4 mr-2" />
-        Export CSV
-      </Button>
+      <button onClick={handleExportCSV} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Export CSV">
+        <Download className="h-3.5 w-3.5" />
+      </button>
       <TearSheetGenerator />
-      <RefreshButton loading={refreshing} label="Refresh" onClick={handleRefresh} />
+      <button onClick={handleRefresh} disabled={refreshing} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Refresh">
+        <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+      </button>
     </div>
   );
 

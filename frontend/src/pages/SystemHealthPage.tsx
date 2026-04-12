@@ -5,8 +5,9 @@ import { PageTemplate } from '../components/PageTemplate';
 import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
 import { PanelHeader } from '../components/layout/PanelHeader';
 import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
-import { RefreshButton } from '../components/ui/RefreshButton';
+import { RefreshCw } from 'lucide-react';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
+import { cn } from '../lib/utils';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { usePolling } from '../hooks/usePolling';
 import { useSystemHealthStore } from '../lib/stores/system-health-store';
@@ -112,9 +113,11 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
 
   // ── Header actions ──────────────────────────────────────────────────
   const headerActions = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-      <RefreshButton loading={loading} onClick={fetch} label="Refresh" variant="outline" size="sm" />
+      <button onClick={fetch} disabled={loading} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Refresh">
+        <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+      </button>
     </div>
   );
 

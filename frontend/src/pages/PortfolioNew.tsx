@@ -888,12 +888,16 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
   // ── Header actions (compact — just refresh + freshness) ────────────
   const headerActions = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-      <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing || pollingRefreshing} className="gap-1.5 h-7 text-[11px]">
+      <button
+        onClick={refresh}
+        disabled={refreshing || pollingRefreshing}
+        className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+        title="Refresh"
+      >
         <RefreshCw className={cn('h-3.5 w-3.5', (refreshing || pollingRefreshing) && 'animate-spin')} />
-        Refresh
-      </Button>
+      </button>
     </div>
   );
 
@@ -910,10 +914,10 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           key={tab.id}
           onClick={() => setActiveTab(tab.id)}
           className={cn(
-            'px-3 py-1 text-[11px] font-medium transition-colors relative',
+            'px-4 py-1.5 text-[13px] font-semibold transition-colors relative',
             activeTab === tab.id
               ? 'text-[#10b981] after:absolute after:bottom-0 after:left-0 after:right-0 after:h-[2px] after:bg-[#10b981]'
-              : cn('text-gray-500 hover:text-gray-300', tab.highlight)
+              : cn('text-gray-500 hover:text-gray-200', tab.highlight)
           )}
         >
           {tab.label}

@@ -385,19 +385,17 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
 
   // Header actions
   const headerActions = (
-    <>
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-      <Button
-        variant="outline"
-        size="sm"
+      <button
         onClick={refresh}
         disabled={isRefreshing}
-        className="gap-2"
+        className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+        title="Refresh"
       >
-        <RefreshCw className={cn('h-4 w-4', isRefreshing && 'animate-spin')} />
-        Refresh
-      </Button>
-    </>
+        <RefreshCw className={cn('h-3.5 w-3.5', isRefreshing && 'animate-spin')} />
+      </button>
+    </div>
   );
 
   // ── Main Panel (60%) ──────────────────────────────────────────────────

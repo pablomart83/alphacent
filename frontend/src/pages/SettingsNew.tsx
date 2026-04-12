@@ -5,7 +5,7 @@ import * as z from 'zod';
 import { motion } from 'framer-motion';
 import { 
   Settings as SettingsIcon, Shield, Bell, Key, Activity,
-  Save, RotateCcw, Eye, EyeOff, CheckCircle,
+  Save, RotateCcw, Eye, EyeOff, CheckCircle, RefreshCw,
   AlertTriangle, Info, Target, TrendingUp, Keyboard, Users,
   UserPlus, Trash2, RotateCw, Lock
 } from 'lucide-react';
@@ -13,7 +13,7 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { RefreshButton } from '../components/ui/RefreshButton';
+import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { Input } from '../components/ui/Input';
 import { Label } from '../components/ui/Label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
@@ -27,7 +27,6 @@ import { formatDate, formatDateTime } from '../lib/date-utils';
 import { TradingMode, type ApiUsageStats } from '../types';
 import { cn } from '../lib/utils';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
 import { KEYBOARD_SHORTCUTS } from '../hooks/useKeyboardShortcuts';
 
 interface SettingsNewProps {
@@ -742,13 +741,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
   }
 
   const headerActions = (
-    <div className="flex items-center gap-3">
-      <RefreshButton loading={loading} label="Refresh" onClick={loadConfiguration} />
-      {lastUpdated && (
-        <div className="text-sm text-gray-500">
-          Last updated: {format(lastUpdated, 'MMM d, yyyy HH:mm')}
-        </div>
-      )}
+    <div className="flex items-center gap-1.5">
+      <DataFreshnessIndicator lastFetchedAt={lastUpdated} />
+      <button onClick={loadConfiguration} disabled={loading} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Refresh">
+        <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
+      </button>
     </div>
   );
 

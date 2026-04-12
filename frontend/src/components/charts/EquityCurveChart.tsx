@@ -27,7 +27,7 @@ interface EquityCurveChartProps {
   spyData?: Array<{ date: string; close: number }>;
   period: string;
   onPeriodChange: (period: string) => void;
-  height?: number;
+  height?: number | string;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -227,13 +227,15 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
     [equityData, spyData, period],
   );
 
-  const drawdownHeight = Math.round(height / 3);
+  const numericHeight = typeof height === 'number' ? height : 400;
+  const drawdownHeight = Math.round(numericHeight / 3);
   const benchmarkUnavailable = !spyData || spyData.length === 0;
+  const fillParent = height === '100%';
 
   return (
-    <div className="w-full">
+    <div className={fillParent ? 'w-full h-full flex flex-col' : 'w-full'}>
       {/* Header: Period selector + benchmark badge */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-1 shrink-0">
         <PeriodSelector
           periods={PERIODS}
           activePeriod={period}
@@ -245,15 +247,16 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
       </div>
 
       {/* Main equity curve chart */}
-      <InteractiveChart
-        data={mainData}
-        dataKeys={[]}
-        xAxisKey="date"
-        height={height}
-        showCrosshair={false}
-        showZoom={true}
-        showGrid={true}
-      >
+      <div className={fillParent ? 'flex-1 min-h-0' : ''}>
+        <InteractiveChart
+          data={mainData}
+          dataKeys={[]}
+          xAxisKey="date"
+          height={fillParent ? '100%' : numericHeight}
+          showCrosshair={false}
+          showZoom={true}
+          showGrid={true}
+        >
         {/* Alpha shading — positive (green) */}
         <Area
           type="monotone"
@@ -307,10 +310,11 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
           cursor={{ stroke: '#9ca3af', strokeDasharray: '3 3' }}
         />
       </InteractiveChart>
+      </div>
 
       {/* Drawdown sub-chart */}
-      <div className="mt-1">
-        <ResponsiveContainer width="100%" height={drawdownHeight}>
+      <div className="mt-1 shrink-0">
+        <ResponsiveContainer width="100%" height={fillParent ? 80 : drawdownHeight}>
           <ComposedChart data={drawdownData}>
             <CartesianGrid {...chartGridProps} />
             <XAxis

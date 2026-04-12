@@ -212,12 +212,11 @@ export const WatchlistPage: FC<WatchlistPageProps> = ({ onLogout }) => {
   }
 
   const headerActions = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-      <Button variant="outline" size="sm" onClick={fetchWatchlist} disabled={pollingRefreshing}>
-        <RefreshCw className={cn('h-4 w-4 mr-2', pollingRefreshing && 'animate-spin')} />
-        Refresh
-      </Button>
+      <button onClick={fetchWatchlist} disabled={pollingRefreshing} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Refresh">
+        <RefreshCw className={cn('h-3.5 w-3.5', pollingRefreshing && 'animate-spin')} />
+      </button>
     </div>
   );
 

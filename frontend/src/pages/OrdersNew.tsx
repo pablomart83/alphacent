@@ -1025,49 +1025,47 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
   // Header actions for PageTemplate
   const headerActions = (
-    <>
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastUpdated} />
       <Button
         variant="default"
         size="sm"
         onClick={() => { resetOrderForm(); setOrderFormOpen(true); }}
-        className="gap-2 bg-accent-green hover:bg-accent-green/80 text-black"
+        className="gap-1.5 h-7 text-[11px] bg-accent-green hover:bg-accent-green/80 text-black"
       >
         + New Order
       </Button>
-      <Button variant="outline" size="sm" onClick={exportToCSV} className="gap-2">
-        <Download className="h-4 w-4" />
-        Export
+      <Button variant="ghost" size="sm" onClick={exportToCSV} className="h-7 w-7 p-0" title="Export CSV">
+        <Download className="h-3.5 w-3.5" />
       </Button>
       <Button
-        variant="outline"
+        variant="ghost"
         size="sm"
         onClick={handleSyncOrders}
         disabled={syncing}
-        className="gap-2"
-        title="Sync order statuses with eToro"
+        className="h-7 w-7 p-0"
+        title="Sync with eToro"
       >
-        <RefreshCw className={cn('h-4 w-4', syncing && 'animate-spin')} />
-        {syncing ? 'Syncing...' : '🔄 Sync'}
+        <RefreshCw className={cn('h-3.5 w-3.5', syncing && 'animate-spin')} />
       </Button>
       <Button
-        variant="outline"
+        variant="ghost"
         size="sm"
         onClick={fetchData}
         disabled={refreshing}
-        className="gap-2"
+        className="h-7 w-7 p-0"
+        title="Refresh"
       >
-        <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-        Refresh
+        <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
       </Button>
-    </>
+    </div>
   );
 
   // ── Main Panel (65%) ─────────────────────────────────────────────────
   const mainPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader
-        title="Orders"
+        title="Order Book"
         panelId="orders-main"
         onRefresh={fetchData}
       >

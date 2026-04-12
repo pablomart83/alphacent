@@ -43,7 +43,7 @@ export interface InteractiveChartProps {
   periods?: string[];
   defaultPeriod?: string;
   onPeriodChange?: (period: string) => void;
-  height?: number;
+  height?: number | string;
   showCrosshair?: boolean;
   showZoom?: boolean;
   showGrid?: boolean;
@@ -299,8 +299,8 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
       </div>
 
       {/* Chart */}
-      <div className="min-h-[200px]">
-      <ResponsiveContainer width="100%" height={height}>
+      <div className={height === '100%' ? 'h-full min-h-[200px]' : 'min-h-[200px]'}>
+      <ResponsiveContainer width="100%" height={height === '100%' ? '100%' : (typeof height === 'number' ? height : 300)}>
         <ComposedChart
           data={displayData}
           onMouseDown={handleMouseDown as never}

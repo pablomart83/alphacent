@@ -1,5 +1,5 @@
 import { type FC, useState, useCallback, useRef } from 'react';
-import { Download, Loader2, ChevronDown } from 'lucide-react';
+import { Download, Loader2 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { cn } from '../../lib/utils';
 import { useTradingMode } from '../../contexts/TradingModeContext';
@@ -297,7 +297,7 @@ async function generatePDF(
 export const TearSheetGenerator: FC<TearSheetGeneratorProps> = ({ className }) => {
   const { tradingMode } = useTradingMode();
   const [generating, setGenerating] = useState(false);
-  const [progress, setProgress] = useState('');
+  const [_progress, setProgress] = useState('');
   const [showPeriodPicker, setShowPeriodPicker] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState<TearSheetPeriod>('3M');
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -312,23 +312,17 @@ export const TearSheetGenerator: FC<TearSheetGeneratorProps> = ({ className }) =
   return (
     <div ref={wrapperRef} className={cn('relative inline-flex items-center gap-1', className)} onBlur={handleBlur}>
       <Button
-        variant="outline"
+        variant="ghost"
         size="sm"
         onClick={() => setShowPeriodPicker((p) => !p)}
         disabled={generating}
-        className="gap-2"
+        className="gap-1 h-7 w-7 p-0"
+        title="Download Tear Sheet"
       >
         {generating ? (
-          <>
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            <span className="text-xs font-mono">{progress || 'Generating…'}</span>
-          </>
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
         ) : (
-          <>
-            <Download className="h-3.5 w-3.5" />
-            <span>Tear Sheet</span>
-            <ChevronDown className="h-3 w-3 ml-0.5" />
-          </>
+          <Download className="h-3.5 w-3.5" />
         )}
       </Button>
 

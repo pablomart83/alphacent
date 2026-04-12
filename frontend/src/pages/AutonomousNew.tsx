@@ -825,18 +825,16 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
   // ── Header actions ─────────────────────────────────────────────────────
   const headerActions = (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
-      <Button
-        variant="outline"
-        size="sm"
+      <button
         onClick={fetchData}
         disabled={refreshing}
-        className="gap-2"
+        className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+        title="Refresh"
       >
-        <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-        Refresh
-      </Button>
+        <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+      </button>
     </div>
   );
 
