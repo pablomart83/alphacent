@@ -921,7 +921,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         next.has(ac) ? next.delete(ac) : next.add(ac);
                         setCycleAssetClasses(next);
                       }} className={cn(
-                        'px-2 py-0.5 rounded text-[11px] font-medium border transition-colors',
+                        'px-2 py-0.5 rounded text-xs font-medium border transition-colors',
                         cycleAssetClasses.has(ac)
                           ? 'bg-blue-500/20 border-blue-500 text-blue-400'
                           : 'border-gray-700 text-gray-500 hover:border-blue-500/50'
@@ -938,7 +938,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         next.has(key) ? next.delete(key) : next.add(key);
                         setCycleIntervals(next);
                       }} className={cn(
-                        'px-2 py-0.5 rounded text-[11px] font-medium border transition-colors',
+                        'px-2 py-0.5 rounded text-xs font-medium border transition-colors',
                         cycleIntervals.has(key)
                           ? 'bg-[#22c55e]/20 border-[#22c55e] text-[#22c55e]'
                           : 'border-gray-700 text-gray-500 hover:border-[#22c55e]/50'
@@ -955,7 +955,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         next.has(key) ? next.delete(key) : next.add(key);
                         setCycleStrategyTypes(next);
                       }} className={cn(
-                        'px-2 py-0.5 rounded text-[11px] font-medium border transition-colors',
+                        'px-2 py-0.5 rounded text-xs font-medium border transition-colors',
                         cycleStrategyTypes.has(key)
                           ? 'bg-yellow-500/20 border-yellow-500 text-yellow-400'
                           : 'border-gray-700 text-gray-500 hover:border-yellow-500/50'
@@ -965,13 +965,13 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 </div>
                 {(cycleAssetClasses.size > 0 || cycleIntervals.size > 0 || cycleStrategyTypes.size > 0) && (
                   <button onClick={() => { setCycleAssetClasses(new Set()); setCycleIntervals(new Set()); setCycleStrategyTypes(new Set()); }}
-                    className="text-[10px] text-[#ef4444] hover:underline">Clear</button>
+                    className="text-[11px] text-[#ef4444] hover:underline">Clear</button>
                 )}
                 <Button
                   onClick={handleTriggerCycle}
                   disabled={triggering || !autonomousStatus?.enabled}
                   size="sm"
-                  className="gap-1.5 ml-auto bg-[#22c55e] hover:bg-[#22c55e]/80 text-black font-semibold h-7 text-[11px]"
+                  className="gap-1.5 ml-auto bg-[#22c55e] hover:bg-[#22c55e]/80 text-black font-semibold h-7 text-xs"
                 >
                   <RefreshCw className={cn('h-3 w-3', triggering && 'animate-spin')} />
                   {triggering ? 'Running...' : 'Run Cycle'}
@@ -985,14 +985,14 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {/* Left Column - Controls */}
                 <div className="space-y-3">
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Controls</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Controls</div>
 
                     {/* Trading State Warning */}
                     {systemStatus && systemStatus.state !== 'ACTIVE' && lifecycleCounts.active > 0 && (
                       <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2">
                         <div className="flex items-center gap-2">
                           <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
-                          <span className="text-[10px] text-yellow-400">{lifecycleCounts.active} strategies ready but trading is {systemStatus.state}.</span>
+                          <span className="text-[11px] text-yellow-400">{lifecycleCounts.active} strategies ready but trading is {systemStatus.state}.</span>
                         </div>
                       </div>
                     )}
@@ -1000,7 +1000,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     <div className="grid grid-cols-2 gap-1.5">
                         {(!systemStatus || systemStatus.state === 'STOPPED') && (
                           <Button onClick={handleStartTrading} disabled={tradingAction} variant="outline" size="sm"
-                            className="justify-start gap-1.5 h-7 text-[11px] border-[#22c55e]/30 text-[#22c55e] hover:bg-[#22c55e]/10">
+                            className="justify-start gap-1.5 h-7 text-xs border-[#22c55e]/30 text-[#22c55e] hover:bg-[#22c55e]/10">
                             <PlayCircle className="h-3 w-3" />
                             {tradingAction ? 'Starting...' : 'Start'}
                           </Button>
@@ -1008,12 +1008,12 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         {systemStatus?.state === 'ACTIVE' && (
                           <>
                             <Button onClick={handlePauseTrading} disabled={tradingAction} variant="outline" size="sm"
-                              className="justify-start gap-1.5 h-7 text-[11px] border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10">
+                              className="justify-start gap-1.5 h-7 text-xs border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10">
                               <PauseCircle className="h-3 w-3" />
                               Pause
                             </Button>
                             <Button onClick={handleStopTrading} disabled={tradingAction} variant="outline" size="sm"
-                              className="justify-start gap-1.5 h-7 text-[11px] border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
+                              className="justify-start gap-1.5 h-7 text-xs border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
                               <AlertCircle className="h-3 w-3" />
                               Stop
                             </Button>
@@ -1022,18 +1022,18 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         {systemStatus?.state === 'PAUSED' && (
                           <>
                             <Button onClick={handleResumeTrading} disabled={tradingAction} variant="outline" size="sm"
-                              className="justify-start gap-1.5 h-7 text-[11px] border-[#22c55e]/30 text-[#22c55e] hover:bg-[#22c55e]/10">
+                              className="justify-start gap-1.5 h-7 text-xs border-[#22c55e]/30 text-[#22c55e] hover:bg-[#22c55e]/10">
                               <PlayCircle className="h-3 w-3" />
                               Resume
                             </Button>
                             <Button onClick={handleStopTrading} disabled={tradingAction} variant="outline" size="sm"
-                              className="justify-start gap-1.5 h-7 text-[11px] border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
+                              className="justify-start gap-1.5 h-7 text-xs border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
                               <AlertCircle className="h-3 w-3" />
                               Stop
                             </Button>
                           </>
                         )}
-                        <Button onClick={() => navigate('/settings')} variant="outline" size="sm" className="justify-start gap-1.5 h-7 text-[11px]">
+                        <Button onClick={() => navigate('/settings')} variant="outline" size="sm" className="justify-start gap-1.5 h-7 text-xs">
                           <Settings className="h-3 w-3" />
                           Settings
                         </Button>
@@ -1047,7 +1047,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                             }
                           }}
                           variant="outline" size="sm"
-                          className="justify-start gap-1.5 h-7 text-[11px] text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
+                          className="justify-start gap-1.5 h-7 text-xs text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10"
                         >
                           <Trash2 className="h-3 w-3" />
                           Clear Caches
@@ -1058,7 +1058,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2">
                         <div className="flex items-center gap-2">
                           <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
-                          <span className="text-[10px] text-yellow-400">Auto-Management Disabled — enable in settings.</span>
+                          <span className="text-[11px] text-yellow-400">Auto-Management Disabled — enable in settings.</span>
                         </div>
                       </div>
                     )}
@@ -1066,7 +1066,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                 {/* Right Column - Schedule */}
                 <div className="space-y-3">
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Scheduled Execution</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Scheduled Execution</div>
                     {scheduleConfig ? (
                       <>
                         {/* Enable/Disable toggle */}
@@ -1091,7 +1091,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                         {/* Frequency */}
                         <div className="space-y-1">
-                          <label className="text-[11px] text-muted-foreground">Frequency</label>
+                          <label className="text-xs text-muted-foreground">Frequency</label>
                           <div className="flex gap-1">
                             {['daily', 'weekly'].map((freq) => (
                               <button key={freq} onClick={() => {
@@ -1113,7 +1113,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                         {/* Day of week (weekly only) */}
                         {editFrequency === 'weekly' && (
                           <div className="space-y-1">
-                            <label className="text-[11px] text-muted-foreground">Day</label>
+                            <label className="text-xs text-muted-foreground">Day</label>
                             <select value={editDay} onChange={(e) => setEditDay(e.target.value)}
                               className="w-full bg-background border border-border rounded-md px-2 py-1 text-xs">
                               {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => (
@@ -1125,7 +1125,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                         {/* Time picker */}
                         <div className="space-y-1">
-                          <label className="text-[11px] text-muted-foreground">Time (UTC)</label>
+                          <label className="text-xs text-muted-foreground">Time (UTC)</label>
                           <div className="flex gap-1 items-center">
                             <select value={editHour} onChange={(e) => setEditHour(parseInt(e.target.value))}
                               className="bg-background border border-border rounded-md px-1.5 py-0.5 text-xs w-14">
@@ -1140,7 +1140,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                                 <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
                               ))}
                             </select>
-                            <span className="text-[11px] text-muted-foreground">UTC</span>
+                            <span className="text-xs text-muted-foreground">UTC</span>
                           </div>
                         </div>
 
@@ -1160,7 +1160,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           <div className="bg-muted/50 rounded-lg p-2 flex items-center gap-2">
                             <Clock className="h-3 w-3 text-blue-400 flex-shrink-0" />
                             <div>
-                              <div className="text-[11px] text-muted-foreground">Next Run</div>
+                              <div className="text-xs text-muted-foreground">Next Run</div>
                               <div className="text-xs font-mono text-blue-400">
                                 {new Date(nextScheduledRun).toLocaleString('en-US', {
                                   weekday: 'short', month: 'short', day: 'numeric',
@@ -1171,7 +1171,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           </div>
                         )}
                         {lastScheduledRun && (
-                          <div className="text-[11px] text-muted-foreground">
+                          <div className="text-xs text-muted-foreground">
                             Last run: {formatTimestamp(lastScheduledRun)}
                           </div>
                         )}
@@ -1188,7 +1188,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   <AlertCircle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="text-xs font-semibold text-yellow-400">Demo Mode Active</p>
-                    <p className="text-[10px] text-yellow-400/80">All trades are simulated.</p>
+                    <p className="text-[11px] text-yellow-400/80">All trades are simulated.</p>
                   </div>
                 </div>
               )}
@@ -1216,7 +1216,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       borderColor: `color-mix(in srgb, ${s.color === 'green' ? '#22c55e' : s.color === 'red' ? '#ef4444' : s.color === 'blue' ? '#3b82f6' : '#8b5cf6'} 30%, transparent)`,
                     }}
                   >
-                    <span className="text-[11px] text-gray-400">{s.label}</span>
+                    <span className="text-xs text-gray-400">{s.label}</span>
                     <span className="text-lg font-mono font-bold text-gray-200">{s.count}</span>
                   </button>
                 ))}
@@ -1224,15 +1224,15 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
               {/* Filters + table — flat, no PanelHeader wrapper */}
               <div className="flex items-center gap-2 py-1">
-                <span className="text-[11px] text-gray-500">{filteredStrategies.length} of {strategies.length}</span>
+                <span className="text-xs text-gray-500">{filteredStrategies.length} of {strategies.length}</span>
                 <div className="relative ml-auto">
                   <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
                   <Input placeholder="Search..." value={strategySearch}
                     onChange={(e) => setStrategySearch(e.target.value)}
-                    className="pl-7 h-7 text-[11px] w-[150px]" />
+                    className="pl-7 h-7 text-xs w-[150px]" />
                 </div>
                 <Select value={strategyStageFilter} onValueChange={setStrategyStageFilter}>
-                  <SelectTrigger className="w-[110px] h-7 text-[11px]">
+                  <SelectTrigger className="w-[110px] h-7 text-xs">
                     <SelectValue placeholder="Stage" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1247,7 +1247,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {filteredStrategies.length > 0 ? (
                 <DataTable columns={strategyColumns} data={filteredStrategies} pageSize={20} showPagination={true} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
               ) : (
-                <div className="text-center py-6 text-gray-500 text-[11px]">
+                <div className="text-center py-6 text-gray-500 text-xs">
                   {strategySearch || strategyStageFilter !== 'all' ? 'No strategies match filters' : 'No strategies found'}
                 </div>
               )}
@@ -1257,15 +1257,15 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             <TabsContent value="activity" className="space-y-2 p-2">
               {/* Filters — flat inline row */}
               <div className="flex items-center gap-2 py-1">
-                <span className="text-[11px] text-gray-500">Last 50 orders · {filteredOrders.length} of {orders.length}</span>
+                <span className="text-xs text-gray-500">Last 50 orders · {filteredOrders.length} of {orders.length}</span>
                 <div className="relative ml-auto">
                   <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
                   <Input placeholder="Search symbol..." value={orderSearch}
                     onChange={(e) => setOrderSearch(e.target.value)}
-                    className="pl-7 h-7 text-[11px] w-[150px]" />
+                    className="pl-7 h-7 text-xs w-[150px]" />
                 </div>
                 <Select value={orderStatusFilter} onValueChange={setOrderStatusFilter}>
-                  <SelectTrigger className="w-[100px] h-7 text-[11px]">
+                  <SelectTrigger className="w-[100px] h-7 text-xs">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1277,7 +1277,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   </SelectContent>
                 </Select>
                 <Select value={orderSideFilter} onValueChange={setOrderSideFilter}>
-                  <SelectTrigger className="w-[90px] h-7 text-[11px]">
+                  <SelectTrigger className="w-[90px] h-7 text-xs">
                     <SelectValue placeholder="Side" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1290,7 +1290,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {filteredOrders.length > 0 ? (
                 <DataTable columns={orderColumns} data={filteredOrders} pageSize={20} showPagination={true} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
               ) : (
-                <div className="text-center py-6 text-gray-500 text-[11px]">
+                <div className="text-center py-6 text-gray-500 text-xs">
                   {orderSearch || orderStatusFilter !== 'all' || orderSideFilter !== 'all'
                     ? 'No orders match filters' : 'No autonomous orders found'}
                 </div>
@@ -1323,12 +1323,12 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {/* Rejection Reasons — flat section */}
                 <div>
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Rejection Reasons</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Rejection Reasons</div>
                   {signalData?.summary.rejection_reasons && signalData.summary.rejection_reasons.length > 0 ? (
                     <div className="space-y-1.5">
                       {signalData.summary.rejection_reasons.map((r) => (
                         <div key={r.reason}>
-                          <div className="flex justify-between text-[10px] mb-0.5">
+                          <div className="flex justify-between text-[11px] mb-0.5">
                             <span className="text-gray-300 truncate">{r.reason}</span>
                             <span className="text-gray-500 ml-2 shrink-0">{r.count} ({r.percentage.toFixed(0)}%)</span>
                           </div>
@@ -1339,16 +1339,16 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-gray-500 text-[10px]">No rejections recorded.</p>
+                    <p className="text-gray-500 text-[11px]">No rejections recorded.</p>
                   )}
                 </div>
 
                 {/* Recent Signals Table — flat */}
                 <div className="lg:col-span-2">
                   <div className="flex items-center justify-between mb-1.5">
-                    <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Recent Signals</div>
+                    <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Recent Signals</div>
                     <Select value={signalFilter} onValueChange={setSignalFilter}>
-                      <SelectTrigger className="w-[90px] h-6 text-[10px]">
+                      <SelectTrigger className="w-[90px] h-6 text-[11px]">
                         <SelectValue placeholder="Filter" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1359,9 +1359,9 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     </Select>
                   </div>
                   <div className="max-h-[350px] overflow-y-auto">
-                    <table className="w-full text-[11px] font-mono">
+                    <table className="w-full text-xs font-mono">
                       <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
-                        <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[10px]">
+                        <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[11px]">
                           <th className="text-left py-1 pr-2">Time</th>
                           <th className="text-left py-1 pr-2">Symbol</th>
                           <th className="text-left py-1 pr-2">Side</th>
@@ -1375,29 +1375,29 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           .slice(0, 50)
                           .map((s) => (
                           <tr key={s.id} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/30">
-                            <td className="py-1 pr-2 text-[11px] text-gray-500 whitespace-nowrap">
+                            <td className="py-1 pr-2 text-xs text-gray-500 whitespace-nowrap">
                               {utcToLocal(s.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td className="py-1 pr-2 font-semibold text-gray-200">{s.symbol}</td>
                             <td className="py-1 pr-2">
-                              <span className={cn('px-1 py-0.5 rounded text-[10px]',
+                              <span className={cn('px-1 py-0.5 rounded text-[11px]',
                                 s.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>
                                 {s.side}
                               </span>
                             </td>
                             <td className="py-1 pr-2">
-                              <span className={cn('px-1 py-0.5 rounded text-[10px] font-semibold',
+                              <span className={cn('px-1 py-0.5 rounded text-[11px] font-semibold',
                                 s.decision === 'ACCEPTED' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>
                                 {s.decision}
                               </span>
                             </td>
-                            <td className="py-1 text-[11px] text-gray-500 truncate max-w-[150px]" title={s.rejection_reason || ''}>
+                            <td className="py-1 text-xs text-gray-500 truncate max-w-[150px]" title={s.rejection_reason || ''}>
                               {s.rejection_reason || '—'}
                             </td>
                           </tr>
                         ))}
                         {(!signalData?.signals || signalData.signals.length === 0) && (
-                          <tr><td colSpan={5} className="py-6 text-center text-gray-500 text-[10px]">No signal decisions recorded.</td></tr>
+                          <tr><td colSpan={5} className="py-6 text-center text-gray-500 text-[11px]">No signal decisions recorded.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -1430,7 +1430,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Template Performance — inline bars, no nested panel */}
               {autonomousStatus && autonomousStatus.template_stats.length > 0 && (
                 <div>
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Template Success Rates</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Template Success Rates</div>
                   <div className="space-y-1">
                     {autonomousStatus.template_stats.map((template) => (
                       <div key={template.name} className="flex items-center gap-2 py-1 border-b border-[var(--color-dark-border)]/30 last:border-0">
@@ -1441,8 +1441,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                             template.success_rate >= 0.4 ? 'bg-yellow-400' : 'bg-[#ef4444]'
                           )} style={{ width: `${template.success_rate * 100}%` }} />
                         </div>
-                        <span className="text-[11px] font-mono text-gray-400 w-[40px] text-right shrink-0">{(template.success_rate * 100).toFixed(0)}%</span>
-                        <span className="text-[10px] text-gray-600 w-[30px] text-right shrink-0">{template.usage_count}×</span>
+                        <span className="text-xs font-mono text-gray-400 w-[40px] text-right shrink-0">{(template.success_rate * 100).toFixed(0)}%</span>
+                        <span className="text-[11px] text-gray-600 w-[30px] text-right shrink-0">{template.usage_count}×</span>
                       </div>
                     ))}
                   </div>
@@ -1452,7 +1452,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Thresholds — compact inline grid, no nested panel */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 <div>
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Activation Thresholds</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Activation Thresholds</div>
                   <div className="grid grid-cols-4 gap-1.5">
                     {[
                       { label: 'Min Sharpe', value: '1.5' },
@@ -1461,14 +1461,14 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       { label: 'Min Trades', value: '20' },
                     ].map((t, i) => (
                       <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                        <span className="text-[11px] text-gray-500">{t.label}</span>
+                        <span className="text-xs text-gray-500">{t.label}</span>
                         <span className="text-[12px] font-mono font-semibold text-gray-200">{t.value}</span>
                       </div>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Retirement Triggers</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Retirement Triggers</div>
                   <div className="grid grid-cols-4 gap-1.5">
                     {[
                       { label: 'Max Sharpe', value: '0.5' },
@@ -1477,7 +1477,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       { label: 'Min Trades', value: '30' },
                     ].map((t, i) => (
                       <div key={i} className="flex items-center justify-between py-1 px-2 rounded bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)]">
-                        <span className="text-[11px] text-gray-500">{t.label}</span>
+                        <span className="text-xs text-gray-500">{t.label}</span>
                         <span className="text-[12px] font-mono font-semibold text-gray-200">{t.value}</span>
                       </div>
                     ))}
@@ -1491,12 +1491,12 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {/* Cycle History Table */}
                 <div>
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Cycle History</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Cycle History</div>
                   {walkForwardLoading ? (
-                    <div className="flex items-center justify-center h-24 text-[11px] text-gray-500">Loading...</div>
+                    <div className="flex items-center justify-center h-24 text-xs text-gray-500">Loading...</div>
                   ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
                     <div className="overflow-x-auto max-h-[300px]">
-                      <table className="w-full text-[10px] font-mono">
+                      <table className="w-full text-[11px] font-mono">
                         <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
                           <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
                             <th className="py-1 px-2 text-left">Cycle</th>
@@ -1522,13 +1522,13 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       </table>
                     </div>
                   ) : (
-                    <div className="text-center py-6 text-[11px] text-gray-500">No walk-forward data</div>
+                    <div className="text-center py-6 text-xs text-gray-500">No walk-forward data</div>
                   )}
                 </div>
 
                 {/* Pass Rate Trend Chart */}
                 <div>
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Pass Rate Trend</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Pass Rate Trend</div>
                   {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
                     <InteractiveChart
                       data={walkForwardData.pass_rate_history}
@@ -1546,7 +1546,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
                     />
                   ) : (
-                    <div className="text-center py-6 text-[11px] text-gray-500">No pass rate history</div>
+                    <div className="text-center py-6 text-xs text-gray-500">No pass rate history</div>
                   )}
                 </div>
               </div>
@@ -1554,9 +1554,9 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {/* Similarity Rejections — flat table */}
               {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 && (
                 <div>
-                  <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Similarity Rejections</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Similarity Rejections</div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-[10px] font-mono">
+                    <table className="w-full text-[11px] font-mono">
                       <thead>
                         <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
                           <th className="py-1 px-2 text-left">Rejected Strategy</th>
@@ -1581,7 +1581,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
             {/* Tab 7: Conviction Score */}
             <TabsContent value="conviction" className="space-y-3 p-2">
-              <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Conviction Score Decomposition</div>
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Conviction Score Decomposition</div>
                   {(() => {
                     const activeWithConviction = strategies.filter(
                       (s) => (s.status === 'DEMO' || s.status === 'LIVE') && s.metadata?.conviction_score
@@ -1605,8 +1605,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           return (
                             <div key={s.id} className="space-y-1">
                               <div className="flex items-center justify-between">
-                                <span className="text-[10px] font-mono text-gray-300 truncate max-w-[180px]">{s.name}</span>
-                                <span className="text-[10px] font-mono font-semibold">{typeof total === 'number' ? total.toFixed(2) : total}</span>
+                                <span className="text-[11px] font-mono text-gray-300 truncate max-w-[180px]">{s.name}</span>
+                                <span className="text-[11px] font-mono font-semibold">{typeof total === 'number' ? total.toFixed(2) : total}</span>
                               </div>
                               <div className="flex h-3 rounded overflow-hidden bg-dark-border/30">
                                 {factors.map((f) => {
@@ -1623,7 +1623,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                             </div>
                           );
                         })}
-                        <div className="flex flex-wrap gap-2 mt-3 text-[11px] text-muted-foreground">
+                        <div className="flex flex-wrap gap-2 mt-3 text-xs text-muted-foreground">
                           {factors.map((f) => (
                             <span key={f} className="flex items-center gap-1">
                               <span className="w-2.5 h-2.5 rounded" style={{ backgroundColor: factorColors[f] }} />
@@ -1651,7 +1651,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
           {/* Cycle Progress Indicator */}
           <div>
-            <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
               Cycle Progress
             </div>
             <div className="bg-muted rounded-lg p-3">
@@ -1674,7 +1674,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               {lastCycleData && (
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <div>
-                    <div className="text-[11px] text-muted-foreground">Duration</div>
+                    <div className="text-xs text-muted-foreground">Duration</div>
                     <div className="text-xs font-mono font-semibold">
                       {lastCycleData.duration_seconds != null
                         ? lastCycleData.duration_seconds < 60
@@ -1684,11 +1684,11 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-muted-foreground">Proposals</div>
+                    <div className="text-xs text-muted-foreground">Proposals</div>
                     <div className="text-xs font-mono font-semibold text-blue-400">{lastCycleData.proposals_generated}</div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-muted-foreground">BT Pass Rate</div>
+                    <div className="text-xs text-muted-foreground">BT Pass Rate</div>
                     <div className="text-xs font-mono font-semibold text-purple-400">
                       {lastCycleData.backtested > 0
                         ? `${((lastCycleData.backtest_passed / lastCycleData.backtested) * 100).toFixed(0)}%`
@@ -1696,7 +1696,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     </div>
                   </div>
                   <div>
-                    <div className="text-[11px] text-muted-foreground">Net Activations</div>
+                    <div className="text-xs text-muted-foreground">Net Activations</div>
                     <div className={cn('text-xs font-mono font-semibold',
                       (lastCycleData.activated - lastCycleData.strategies_retired) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                       {lastCycleData.activated - lastCycleData.strategies_retired >= 0 ? '+' : ''}{lastCycleData.activated - lastCycleData.strategies_retired}
@@ -1709,7 +1709,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
           {/* WF Pass Rate Sparkline */}
           <div>
-            <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
               WF Pass Rate Trend
             </div>
             {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
@@ -1723,7 +1723,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 />
               </div>
             ) : (
-              <div className="bg-muted rounded-lg p-3 text-center text-[11px] text-muted-foreground">
+              <div className="bg-muted rounded-lg p-3 text-center text-xs text-muted-foreground">
                 No pass rate history
               </div>
             )}
@@ -1732,7 +1732,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
           {/* System Status Summary */}
           {autonomousStatus && (
             <div>
-              <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
                 Market Regime
               </div>
               <div className="bg-muted rounded-lg p-3">
@@ -1742,7 +1742,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 )}>
                   {getRegimeIcon(autonomousStatus.market_regime)} {autonomousStatus.market_regime}
                 </div>
-                <div className="text-[11px] text-muted-foreground mt-1">
+                <div className="text-xs text-muted-foreground mt-1">
                   Confidence: <span className={getConfidenceLabel(autonomousStatus.market_confidence).color}>
                     {getConfidenceLabel(autonomousStatus.market_confidence).label}
                   </span> ({(autonomousStatus.market_confidence * 100).toFixed(0)}%)
@@ -1753,7 +1753,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
           {/* Recent Similarity Rejections */}
           <div>
-            <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
               Recent Similarity Rejections
             </div>
             {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 ? (
@@ -1761,17 +1761,17 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 {walkForwardData.similarity_rejections.slice(0, 5).map((r: any, idx: number) => (
                   <div key={idx} className="bg-muted rounded-lg p-2 flex items-center justify-between">
                     <div className="min-w-0">
-                      <div className="text-[10px] font-mono text-gray-300 truncate">{r.rejected_name || '—'}</div>
-                      <div className="text-[11px] text-muted-foreground truncate">vs {r.existing_name || '—'}</div>
+                      <div className="text-[11px] font-mono text-gray-300 truncate">{r.rejected_name || '—'}</div>
+                      <div className="text-xs text-muted-foreground truncate">vs {r.existing_name || '—'}</div>
                     </div>
-                    <span className="text-[10px] font-mono font-semibold text-accent-red shrink-0 ml-2">
+                    <span className="text-[11px] font-mono font-semibold text-accent-red shrink-0 ml-2">
                       {r.similarity != null ? `${(r.similarity * 100).toFixed(0)}%` : '—'}
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="bg-muted rounded-lg p-3 text-center text-[11px] text-muted-foreground">
+              <div className="bg-muted rounded-lg p-3 text-center text-xs text-muted-foreground">
                 No similarity rejections
               </div>
             )}
@@ -1780,24 +1780,24 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
           {/* Cumulative Stats */}
           {autonomousStatus && (
             <div>
-              <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
                 Cumulative Stats
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-[11px] text-muted-foreground">Last Cycle</div>
-                  <div className="text-[10px] font-mono font-semibold text-gray-200">
+                  <div className="text-xs text-muted-foreground">Last Cycle</div>
+                  <div className="text-[11px] font-mono font-semibold text-gray-200">
                     {autonomousStatus.last_cycle_time ? formatTimestamp(autonomousStatus.last_cycle_time) : '—'}
                   </div>
                 </div>
                 <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-[11px] text-muted-foreground">Activated</div>
+                  <div className="text-xs text-muted-foreground">Activated</div>
                   <div className="text-lg font-mono font-semibold text-accent-green">
                     {autonomousStatus.cycle_stats.activated_count}
                   </div>
                 </div>
                 <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-[11px] text-muted-foreground">Retired</div>
+                  <div className="text-xs text-muted-foreground">Retired</div>
                   <div className="text-lg font-mono font-semibold text-accent-red">
                     {autonomousStatus.cycle_stats.retired_count}
                   </div>

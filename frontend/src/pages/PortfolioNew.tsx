@@ -667,7 +667,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'strategy_name',
       header: 'Strategy',
       cell: ({ row }) => (
-        <div className="font-mono text-[11px] text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
+        <div className="font-mono text-xs text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || row.original.strategy_id?.slice(0, 8) || '—'}
         </div>
       ),
@@ -676,7 +676,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'side',
       header: 'Side',
       cell: ({ row }) => (
-        <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap',
+        <span className={cn('px-1.5 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
           row.original.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red')}>
           {row.original.side}
         </span>
@@ -688,7 +688,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       cell: ({ row }) => {
         const status = getPositionStatus(row.original);
         return (
-          <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold whitespace-nowrap',
+          <span className={cn('px-1.5 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
             status === 'Open' ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400')}>
             {status}
           </span>
@@ -721,7 +721,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           <div className={cn('font-mono font-semibold text-[13px]', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatCurrency(row.original.unrealized_pnl)}
           </div>
-          <div className={cn('text-[10px] font-mono', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+          <div className={cn('text-[11px] font-mono', row.original.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatPercentage(row.original.unrealized_pnl_percent || 0)}
           </div>
         </div>
@@ -734,7 +734,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         const days = Math.floor((Date.now() - new Date(row.original.opened_at).getTime()) / (1000 * 60 * 60 * 24));
         const color = days < 7 ? 'text-[#22c55e]' : days <= 30 ? 'text-amber-400' : 'text-[#ef4444]';
         const bg = days < 7 ? 'bg-[#22c55e]/10' : days <= 30 ? 'bg-amber-400/10' : 'bg-[#ef4444]/10';
-        return <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold', color, bg)}>{days}d</span>;
+        return <span className={cn('px-1.5 py-0.5 rounded text-xs font-mono font-semibold', color, bg)}>{days}d</span>;
       },
       sortingFn: (rowA, rowB) => {
         return new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime();
@@ -747,7 +747,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         const totalValue = positions.reduce((sum, p) => sum + Math.abs(getInvested(p)), 0);
         const posValue = Math.abs(getInvested(row.original));
         const pct = totalValue > 0 ? (posValue / totalValue) * 100 : 0;
-        return <div className="text-right font-mono text-[11px] text-muted-foreground">{pct.toFixed(1)}%</div>;
+        return <div className="text-right font-mono text-xs text-muted-foreground">{pct.toFixed(1)}%</div>;
       },
     },
     {
@@ -755,7 +755,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       header: 'SL/TP',
       cell: ({ row }) => {
         const { entry_price, current_price, stop_loss, take_profit } = row.original;
-        if (!stop_loss && !take_profit) return <span className="text-[11px] text-muted-foreground">—</span>;
+        if (!stop_loss && !take_profit) return <span className="text-xs text-muted-foreground">—</span>;
         const prices = [stop_loss, entry_price, current_price, take_profit].filter((p): p is number => p != null && p > 0);
         const min = Math.min(...prices);
         const max = Math.max(...prices);
@@ -832,7 +832,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'strategy_name',
       header: 'Strategy',
       cell: ({ row }) => (
-        <div className="font-mono text-[11px] text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
+        <div className="font-mono text-xs text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || '—'}
         </div>
       ),
@@ -845,7 +845,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           <div className={cn('font-mono font-semibold text-[13px]', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatCurrency(row.original.realized_pnl)}
           </div>
-          <div className={cn('text-[10px] font-mono', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+          <div className={cn('text-[11px] font-mono', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
             {formatPercentage(row.original.realized_pnl_percent)}
           </div>
         </div>
@@ -855,7 +855,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       accessorKey: 'holding_time_hours',
       header: () => <div className="text-right">Hold</div>,
       cell: ({ row }) => (
-        <div className="text-right text-[11px] text-muted-foreground font-mono">
+        <div className="text-right text-xs text-muted-foreground font-mono">
           {row.original.holding_time_hours < 24 
             ? `${row.original.holding_time_hours.toFixed(1)}h`
             : `${(row.original.holding_time_hours / 24).toFixed(1)}d`}
@@ -865,12 +865,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'exit_reason',
       header: 'Exit',
-      cell: ({ row }) => <div className="text-[11px] text-muted-foreground">{row.original.exit_reason || 'N/A'}</div>,
+      cell: ({ row }) => <div className="text-xs text-muted-foreground">{row.original.exit_reason || 'N/A'}</div>,
     },
     {
       accessorKey: 'closed_at',
       header: () => <div className="text-right">Closed</div>,
-      cell: ({ row }) => <div className="text-right text-[11px] text-muted-foreground whitespace-nowrap font-mono">{formatTimestamp(row.original.closed_at)}</div>,
+      cell: ({ row }) => <div className="text-right text-xs text-muted-foreground whitespace-nowrap font-mono">{formatTimestamp(row.original.closed_at)}</div>,
     },
   ];
 
@@ -931,37 +931,37 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--color-dark-border)] bg-[var(--color-dark-bg)]/50">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <Input placeholder="Search..." value={positionSearch} onChange={(e) => setPositionSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-[11px]" />
+            <Input placeholder="Search..." value={positionSearch} onChange={(e) => setPositionSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-xs" />
           </div>
           <Select value={positionStrategyFilter} onValueChange={setPositionStrategyFilter}>
-            <SelectTrigger className="w-[110px] h-7 text-[11px]"><SelectValue placeholder="Strategy" /></SelectTrigger>
+            <SelectTrigger className="w-[110px] h-7 text-xs"><SelectValue placeholder="Strategy" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Strategies</SelectItem>
               {uniqueStrategies.map(s => <SelectItem key={s} value={s!}>{s?.substring(0, 8)}...</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={positionSideFilter} onValueChange={setPositionSideFilter}>
-            <SelectTrigger className="w-[80px] h-7 text-[11px]"><SelectValue placeholder="Side" /></SelectTrigger>
+            <SelectTrigger className="w-[80px] h-7 text-xs"><SelectValue placeholder="Side" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All</SelectItem>
               <SelectItem value="BUY">BUY</SelectItem>
               <SelectItem value="SELL">SELL</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={handleSyncPositions} disabled={syncing} className="gap-1 h-7 text-[10px] px-2" title="Sync with eToro">
+          <Button variant="outline" size="sm" onClick={handleSyncPositions} disabled={syncing} className="gap-1 h-7 text-[11px] px-2" title="Sync with eToro">
             <RefreshCw className={cn('h-3 w-3', syncing && 'animate-spin')} />
             Sync
           </Button>
-          <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredPositions, 'open-positions.csv')} className="gap-1 h-7 text-[10px] px-2">
+          <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredPositions, 'open-positions.csv')} className="gap-1 h-7 text-[11px] px-2">
             <Download className="h-3 w-3" />
           </Button>
           {selectedPositions.size > 0 && (
-            <Button size="sm" variant="destructive" onClick={() => setShowBulkCloseConfirm(true)} disabled={closingSelected} className="gap-1 h-7 text-[10px] px-2 ml-auto">
+            <Button size="sm" variant="destructive" onClick={() => setShowBulkCloseConfirm(true)} disabled={closingSelected} className="gap-1 h-7 text-[11px] px-2 ml-auto">
               <X className="h-3 w-3" /> Close ({selectedPositions.size})
             </Button>
           )}
           {positions.length > 0 && selectedPositions.size === 0 && (
-            <Button size="sm" variant="outline" onClick={() => setShowCloseAllConfirm(true)} className="gap-1 h-7 text-[10px] px-2 ml-auto border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
+            <Button size="sm" variant="outline" onClick={() => setShowCloseAllConfirm(true)} className="gap-1 h-7 text-[11px] px-2 ml-auto border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/10">
               <XCircle className="h-3 w-3" /> Close All
             </Button>
           )}
@@ -973,17 +973,17 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--color-dark-border)] bg-[var(--color-dark-bg)]/50">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <Input placeholder="Search..." value={closedSearch} onChange={(e) => setClosedSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-[11px]" />
+            <Input placeholder="Search..." value={closedSearch} onChange={(e) => setClosedSearch(e.target.value)} className="pl-7 h-7 w-[130px] text-xs" />
           </div>
           <Select value={closedStrategyFilter} onValueChange={setClosedStrategyFilter}>
-            <SelectTrigger className="w-[110px] h-7 text-[11px]"><SelectValue placeholder="Strategy" /></SelectTrigger>
+            <SelectTrigger className="w-[110px] h-7 text-xs"><SelectValue placeholder="Strategy" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Strategies</SelectItem>
               {uniqueStrategies.map(s => <SelectItem key={s} value={s!}>{s?.substring(0, 8)}...</SelectItem>)}
             </SelectContent>
           </Select>
           <Select value={closedDateFilter} onValueChange={setClosedDateFilter}>
-            <SelectTrigger className="w-[90px] h-7 text-[11px]"><SelectValue placeholder="Date" /></SelectTrigger>
+            <SelectTrigger className="w-[90px] h-7 text-xs"><SelectValue placeholder="Date" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Time</SelectItem>
               <SelectItem value="1d">Last 24h</SelectItem>
@@ -991,14 +991,14 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
               <SelectItem value="30d">Last 30d</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredClosedPositions, 'closed-positions.csv')} className="gap-1 h-7 text-[10px] px-2">
+          <Button variant="outline" size="sm" onClick={() => exportToCSV(filteredClosedPositions, 'closed-positions.csv')} className="gap-1 h-7 text-[11px] px-2">
             <Download className="h-3 w-3" />
           </Button>
           {selectedClosedPositions.size > 0 && (
             <Button size="sm" variant="destructive" onClick={async () => {
               if (!tradingMode) return;
               try { setDeletingClosedPositions(true); await apiClient.deleteClosedPositions(Array.from(selectedClosedPositions), tradingMode); toast.success(`Deleted ${selectedClosedPositions.size} closed position(s)`); setSelectedClosedPositions(new Set()); fetchData(); } catch { toast.error('Failed to delete closed positions'); } finally { setDeletingClosedPositions(false); }
-            }} disabled={deletingClosedPositions} className="gap-1 h-7 text-[10px] px-2 ml-auto">
+            }} disabled={deletingClosedPositions} className="gap-1 h-7 text-[11px] px-2 ml-auto">
               <Trash2 className="h-3 w-3" /> Delete ({selectedClosedPositions.size})
             </Button>
           )}
@@ -1017,7 +1017,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           <DataTable columns={positionColumns} data={filteredPositions} pageSize={50} showPagination={filteredPositions.length > 50} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
         </div>
       ) : (
-        <div className="flex items-center justify-center h-32 text-muted-foreground text-[11px]">
+        <div className="flex items-center justify-center h-32 text-muted-foreground text-xs">
           {positionSearch || positionStrategyFilter !== 'all' || positionSideFilter !== 'all' ? 'No positions match filters' : 'No open positions'}
         </div>
       );
@@ -1029,7 +1029,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           <DataTable columns={closedPositionColumns} data={filteredClosedPositions} pageSize={50} showPagination={filteredClosedPositions.length > 50} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
         </div>
       ) : (
-        <div className="flex items-center justify-center h-32 text-muted-foreground text-[11px]">
+        <div className="flex items-center justify-center h-32 text-muted-foreground text-xs">
           {closedSearch || closedStrategyFilter !== 'all' || closedDateFilter !== 'all' ? 'No closed positions match filters' : 'No closed positions'}
         </div>
       );
@@ -1039,15 +1039,15 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       return (
         <div className="flex-1 overflow-auto min-h-0 p-2">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Positions flagged for closure.{pendingClosures.length > 0 && ' Auto-close within 60s.'}
             </p>
             {pendingClosures.length > 0 && (
               <div className="flex gap-1.5">
-                <Button variant="outline" size="sm" onClick={fetchPendingClosures} className="gap-1 h-6 text-[10px] px-2">
+                <Button variant="outline" size="sm" onClick={fetchPendingClosures} className="gap-1 h-6 text-[11px] px-2">
                   <RefreshCw className="h-2.5 w-2.5" /> Refresh
                 </Button>
-                <Button size="sm" onClick={handleApproveAll} disabled={approvingAll} className="gap-1 h-6 text-[10px] px-2 bg-amber-600 hover:bg-amber-700 text-white">
+                <Button size="sm" onClick={handleApproveAll} disabled={approvingAll} className="gap-1 h-6 text-[11px] px-2 bg-amber-600 hover:bg-amber-700 text-white">
                   <Check className="h-2.5 w-2.5" /> {approvingAll ? 'Closing...' : `Approve All (${pendingClosures.length})`}
                 </Button>
               </div>
@@ -1055,7 +1055,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           </div>
           {pendingClosuresLoading && pendingClosures.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-[11px]">Loading...</span>
+              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-xs">Loading...</span>
             </div>
           ) : pendingClosures.length > 0 ? (
             <div className="space-y-1.5">
@@ -1068,24 +1068,24 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <span className="font-mono font-semibold text-[13px]">{position.symbol}</span>
-                          <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono font-semibold', position.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{position.side}</span>
-                          <span className="text-[11px] text-muted-foreground font-mono">{formatCurrency(getInvested(position))}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-xs font-mono font-semibold', position.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{position.side}</span>
+                          <span className="text-xs text-muted-foreground font-mono">{formatCurrency(getInvested(position))}</span>
                         </div>
                         <div className="flex items-center gap-1.5 mt-0.5">
-                          {position.closure_reason && <span className="text-[10px] text-amber-400">{position.closure_reason}</span>}
-                          <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground"><Clock className="h-2.5 w-2.5" />{hoursAgo < 1 ? 'Now' : hoursAgo < 24 ? `${hoursAgo}h` : `${Math.floor(hoursAgo / 24)}d`}</span>
+                          {position.closure_reason && <span className="text-[11px] text-amber-400">{position.closure_reason}</span>}
+                          <span className="flex items-center gap-0.5 text-xs text-muted-foreground"><Clock className="h-2.5 w-2.5" />{hoursAgo < 1 ? 'Now' : hoursAgo < 24 ? `${hoursAgo}h` : `${Math.floor(hoursAgo / 24)}d`}</span>
                         </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <div className="text-right mr-1">
                         <div className={cn('font-mono font-semibold text-[13px]', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(position.unrealized_pnl)}</div>
-                        <div className={cn('text-[10px] font-mono', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(position.unrealized_pnl_percent || 0)}</div>
+                        <div className={cn('text-[11px] font-mono', position.unrealized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(position.unrealized_pnl_percent || 0)}</div>
                       </div>
-                      <Button size="sm" variant="outline" onClick={() => handleDismissClosure(position.id)} disabled={dismissingId === position.id} className="h-6 text-[10px] px-2">
+                      <Button size="sm" variant="outline" onClick={() => handleDismissClosure(position.id)} disabled={dismissingId === position.id} className="h-6 text-[11px] px-2">
                         {dismissingId === position.id ? '...' : 'Dismiss'}
                       </Button>
-                      <Button size="sm" onClick={() => handleApproveClosure(position.id)} disabled={approvingId === position.id} className="h-6 text-[10px] px-2 bg-amber-600 hover:bg-amber-700 text-white">
+                      <Button size="sm" onClick={() => handleApproveClosure(position.id)} disabled={approvingId === position.id} className="h-6 text-[11px] px-2 bg-amber-600 hover:bg-amber-700 text-white">
                         {approvingId === position.id ? '...' : 'Approve'}
                       </Button>
                     </div>
@@ -1096,7 +1096,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <AlertTriangle className="h-5 w-5 mx-auto mb-1.5 opacity-30" />
-              <p className="text-[11px]">No positions pending closure</p>
+              <p className="text-xs">No positions pending closure</p>
             </div>
           )}
         </div>
@@ -1107,13 +1107,13 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       return (
         <div className="flex-1 overflow-auto min-h-0 p-2">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-[11px] text-muted-foreground">Positions flagged by fundamental exit monitoring.</p>
+            <p className="text-xs text-muted-foreground">Positions flagged by fundamental exit monitoring.</p>
             <div className="flex gap-1.5">
-              <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="gap-1 h-6 text-[10px] px-2">
+              <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="gap-1 h-6 text-[11px] px-2">
                 <RefreshCw className={cn('h-2.5 w-2.5', triggeringCheck && 'animate-spin')} /> {triggeringCheck ? 'Checking...' : 'Run Check'}
               </Button>
               {fundamentalAlerts.length > 0 && (
-                <Button size="sm" onClick={handleCloseAllAlerts} disabled={closingAllAlerts} className="gap-1 h-6 text-[10px] px-2 bg-orange-600 hover:bg-orange-700 text-white">
+                <Button size="sm" onClick={handleCloseAllAlerts} disabled={closingAllAlerts} className="gap-1 h-6 text-[11px] px-2 bg-orange-600 hover:bg-orange-700 text-white">
                   <XCircle className="h-2.5 w-2.5" /> {closingAllAlerts ? 'Closing...' : `Close All (${fundamentalAlerts.length})`}
                 </Button>
               )}
@@ -1121,7 +1121,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           </div>
           {fundamentalAlertsLoading && fundamentalAlerts.length === 0 ? (
             <div className="flex items-center justify-center py-8 text-muted-foreground">
-              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-[11px]">Loading...</span>
+              <RefreshCw className="h-3.5 w-3.5 animate-spin mr-2" /><span className="text-xs">Loading...</span>
             </div>
           ) : fundamentalAlerts.length > 0 ? (
             <div className="space-y-1.5">
@@ -1138,21 +1138,21 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-mono font-semibold text-[13px]">{alert.symbol}</span>
-                          <span className={cn('px-1 py-0.5 rounded text-[10px] font-mono font-semibold', alert.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{alert.side}</span>
-                          <span className={cn('px-1 py-0.5 rounded text-[10px] font-semibold', reasonColor)}>{flagReason}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-xs font-mono font-semibold', alert.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>{alert.side}</span>
+                          <span className={cn('px-1 py-0.5 rounded text-[11px] font-semibold', reasonColor)}>{flagReason}</span>
                         </div>
-                        {fundamentalDetail && <div className="mt-0.5 text-[10px] text-orange-300/80 font-mono truncate max-w-xs" title={fundamentalDetail}>{fundamentalDetail}</div>}
+                        {fundamentalDetail && <div className="mt-0.5 text-[11px] text-orange-300/80 font-mono truncate max-w-xs" title={fundamentalDetail}>{fundamentalDetail}</div>}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <div className="text-right mr-1">
                         <div className={cn('font-mono font-semibold text-[13px]', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatCurrency(pnl)}</div>
-                        <div className={cn('text-[10px] font-mono', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(pnlPercent)}</div>
+                        <div className={cn('text-[11px] font-mono', pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>{formatPercentage(pnlPercent)}</div>
                       </div>
-                      <Button size="sm" variant="outline" onClick={() => handleDismissAlert(alert.id)} disabled={dismissingAlertId === alert.id} className="h-6 text-[10px] px-2">
+                      <Button size="sm" variant="outline" onClick={() => handleDismissAlert(alert.id)} disabled={dismissingAlertId === alert.id} className="h-6 text-[11px] px-2">
                         {dismissingAlertId === alert.id ? '...' : 'Dismiss'}
                       </Button>
-                      <Button size="sm" onClick={() => handleCloseAlertPosition(alert.id)} disabled={closingAlertId === alert.id} className="h-6 text-[10px] px-2 bg-orange-600 hover:bg-orange-700 text-white">
+                      <Button size="sm" onClick={() => handleCloseAlertPosition(alert.id)} disabled={closingAlertId === alert.id} className="h-6 text-[11px] px-2 bg-orange-600 hover:bg-orange-700 text-white">
                         {closingAlertId === alert.id ? '...' : 'Close'}
                       </Button>
                     </div>
@@ -1163,8 +1163,8 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               <Activity className="h-5 w-5 mx-auto mb-1.5 opacity-30" />
-              <p className="text-[11px]">No fundamental alerts</p>
-              <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="mt-2 gap-1 h-6 text-[10px] px-2">
+              <p className="text-xs">No fundamental alerts</p>
+              <Button variant="outline" size="sm" onClick={handleTriggerFundamentalCheck} disabled={triggeringCheck} className="mt-2 gap-1 h-6 text-[11px] px-2">
                 <RefreshCw className={cn('h-2.5 w-2.5', triggeringCheck && 'animate-spin')} /> {triggeringCheck ? 'Running...' : 'Run Check Now'}
               </Button>
             </div>
@@ -1199,18 +1199,18 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         <div className="flex items-center justify-between px-2 py-1 bg-amber-500/5 border-b border-amber-500/20">
           <div className="flex items-center gap-1.5">
             <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
-            <span className="text-[10px] font-semibold text-amber-400">{pendingClosures.length} pending closure{pendingClosures.length !== 1 ? 's' : ''}</span>
+            <span className="text-[11px] font-semibold text-amber-400">{pendingClosures.length} pending closure{pendingClosures.length !== 1 ? 's' : ''}</span>
           </div>
-          <button onClick={() => setActiveTab('pending')} className="text-[10px] text-amber-400 hover:text-amber-300 underline">Review</button>
+          <button onClick={() => setActiveTab('pending')} className="text-[11px] text-amber-400 hover:text-amber-300 underline">Review</button>
         </div>
       )}
       {fundamentalAlerts.length > 0 && activeTab !== 'alerts' && (
         <div className="flex items-center justify-between px-2 py-1 bg-orange-500/5 border-b border-orange-500/20">
           <div className="flex items-center gap-1.5">
             <Activity className="h-3 w-3 text-orange-500 shrink-0" />
-            <span className="text-[10px] font-semibold text-orange-400">{fundamentalAlerts.length} flagged position{fundamentalAlerts.length !== 1 ? 's' : ''}</span>
+            <span className="text-[11px] font-semibold text-orange-400">{fundamentalAlerts.length} flagged position{fundamentalAlerts.length !== 1 ? 's' : ''}</span>
           </div>
-          <button onClick={() => setActiveTab('alerts')} className="text-[10px] text-orange-400 hover:text-orange-300 underline">Review</button>
+          <button onClick={() => setActiveTab('alerts')} className="text-[11px] text-orange-400 hover:text-orange-300 underline">Review</button>
         </div>
       )}
 
@@ -1220,12 +1220,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           <div className="flex items-center gap-1.5">
             <XCircle className="h-3.5 w-3.5 text-[#ef4444] shrink-0" />
             <div>
-              <span className="text-[10px] font-semibold text-[#ef4444]">{fetchError.title}</span>
-              <span className="text-[11px] text-muted-foreground ml-1.5">{fetchError.message}</span>
+              <span className="text-[11px] font-semibold text-[#ef4444]">{fetchError.title}</span>
+              <span className="text-xs text-muted-foreground ml-1.5">{fetchError.message}</span>
             </div>
           </div>
           {fetchError.retryable && (
-            <button onClick={refresh} className="text-[10px] text-[#ef4444] hover:text-red-300 underline">Retry</button>
+            <button onClick={refresh} className="text-[11px] text-[#ef4444] hover:text-red-300 underline">Retry</button>
           )}
         </div>
       )}
@@ -1289,23 +1289,23 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* By Asset Class — compact list, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[10px] font-semibold text-gray-500 tracking-wide mb-1">By Asset Class</div>
+            <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">By Asset Class</div>
             {assetClassSummary.length > 0 ? (
               <div className="space-y-0.5">
                 {assetClassSummary.map((ac) => (
                   <div key={ac.assetClass} className="flex items-center justify-between py-0.5">
                     <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-gray-300">{ac.assetClass}</span>
-                      <span className="text-[11px] text-muted-foreground font-mono">({ac.count})</span>
+                      <span className="text-xs text-gray-300">{ac.assetClass}</span>
+                      <span className="text-xs text-muted-foreground font-mono">({ac.count})</span>
                     </div>
-                    <span className={cn('text-[10px] font-mono font-semibold', ac.totalPnl > 0 ? 'text-[#22c55e]' : ac.totalPnl < 0 ? 'text-[#ef4444]' : 'text-gray-400')}>
+                    <span className={cn('text-xs font-mono font-semibold', ac.totalPnl > 0 ? 'text-[#22c55e]' : ac.totalPnl < 0 ? 'text-[#ef4444]' : 'text-gray-400')}>
                       {ac.totalPnl >= 0 ? '+' : ''}{formatCurrency(ac.totalPnl)}
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-[11px] text-muted-foreground text-center py-2">No open positions</p>
+              <p className="text-xs text-muted-foreground text-center py-2">No open positions</p>
             )}
           </div>
 
@@ -1314,7 +1314,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* Sector Exposure Pie Chart — directly rendered, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[10px] font-semibold text-gray-500 tracking-wide mb-1">Sector Exposure</div>
+            <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">Sector Exposure</div>
             {sectorExposure.length > 0 ? (
               <>
                 <SVGPieChart
@@ -1328,13 +1328,13 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                   {sectorExposure.slice(0, 8).map((s, i) => (
                     <div key={s.name} className="flex items-center gap-1">
                       <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                      <span className="text-[11px] text-gray-400 truncate max-w-[70px]">{s.name}</span>
+                      <span className="text-xs text-gray-400 truncate max-w-[70px]">{s.name}</span>
                     </div>
                   ))}
                 </div>
               </>
             ) : (
-              <p className="text-[11px] text-muted-foreground text-center py-2">No data</p>
+              <p className="text-xs text-muted-foreground text-center py-2">No data</p>
             )}
           </div>
 
@@ -1343,14 +1343,14 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
 
           {/* Allocation Breakdown — directly rendered, no Card */}
           <div className="px-2 py-2">
-            <div className="text-[10px] font-semibold text-gray-500 tracking-wide mb-1">Allocation</div>
+            <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">Allocation</div>
             {allocationData.length > 0 ? (
               <div className="space-y-1">
                 {allocationData.map((item, i) => (
                   <div key={item.name}>
                     <div className="flex items-center justify-between mb-0.5">
-                      <span className="text-[10px] text-gray-300 truncate max-w-[100px]">{item.name}</span>
-                      <span className="text-[10px] font-mono text-gray-400">{item.pct.toFixed(1)}%</span>
+                      <span className="text-xs text-gray-300 truncate max-w-[100px]">{item.name}</span>
+                      <span className="text-xs font-mono text-gray-400">{item.pct.toFixed(1)}%</span>
                     </div>
                     <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
                       <div className="h-full rounded-full transition-all" style={{ width: `${item.pct}%`, backgroundColor: COLORS[i % COLORS.length] }} />
@@ -1359,7 +1359,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
                 ))}
               </div>
             ) : (
-              <p className="text-[11px] text-muted-foreground text-center py-2">No positions</p>
+              <p className="text-xs text-muted-foreground text-center py-2">No positions</p>
             )}
           </div>
         </div>
@@ -1397,7 +1397,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         confirmVariant="destructive"
         onConfirm={() => handleClosePosition(confirmClosePosition!.id)}
       >
-        <div className="space-y-1.5 text-[11px] font-mono">
+        <div className="space-y-1.5 text-xs font-mono">
           <div className="flex justify-between"><span className="text-muted-foreground">Symbol</span><span>{confirmClosePosition?.symbol}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">Invested</span><span>{formatCurrency(getInvested(confirmClosePosition || {}))}</span></div>
           <div className="flex justify-between"><span className="text-muted-foreground">P&L</span><span className={cn(
@@ -1416,7 +1416,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         confirmVariant="destructive"
         onConfirm={handleCloseSelected}
       >
-        <div className="space-y-1 text-[11px] font-mono max-h-48 overflow-y-auto">
+        <div className="space-y-1 text-xs font-mono max-h-48 overflow-y-auto">
           {positions.filter(p => selectedPositions.has(p.id)).map(p => (
             <div key={p.id} className="flex justify-between">
               <span>{p.symbol}</span>
@@ -1442,7 +1442,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
         confirmVariant="destructive"
         onConfirm={handleCloseAllPositions}
       >
-        <div className="text-[11px] font-mono text-muted-foreground space-y-1">
+        <div className="text-xs font-mono text-muted-foreground space-y-1">
           <div className="flex justify-between"><span>Total Positions</span><span>{positions.length}</span></div>
           <div className="flex justify-between">
             <span>Total Unrealized P&L</span>
@@ -1464,14 +1464,14 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
               </Button>
             </div>
             <div className="mb-3">
-              <label className="block text-[11px] text-muted-foreground mb-1">
+              <label className="block text-xs text-muted-foreground mb-1">
                 {modifyingPosition.type === 'sl' ? 'Stop Loss Price' : 'Take Profit Price'}
               </label>
-              <Input type="number" step="0.01" value={modifyPrice} onChange={(e) => setModifyPrice(e.target.value)} placeholder="Enter price" autoFocus className="h-8 text-[11px]" />
+              <Input type="number" step="0.01" value={modifyPrice} onChange={(e) => setModifyPrice(e.target.value)} placeholder="Enter price" autoFocus className="h-8 text-xs" />
             </div>
             <div className="flex gap-2">
-              <Button onClick={handleModifySubmit} disabled={!modifyPrice} className="flex-1 h-8 text-[11px]">Confirm</Button>
-              <Button variant="outline" onClick={() => { setModifyingPosition(null); setModifyPrice(''); }} className="flex-1 h-8 text-[11px]">Cancel</Button>
+              <Button onClick={handleModifySubmit} disabled={!modifyPrice} className="flex-1 h-8 text-xs">Confirm</Button>
+              <Button variant="outline" onClick={() => { setModifyingPosition(null); setModifyPrice(''); }} className="flex-1 h-8 text-xs">Cancel</Button>
             </div>
           </motion.div>
         </div>

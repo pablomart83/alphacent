@@ -167,7 +167,7 @@ export const InteractiveChart: FC<InteractiveChartProps> = ({
           width="100%"
           height="100%"
           viewBox={`0 0 ${svgW} ${numH}`}
-          preserveAspectRatio="none"
+          preserveAspectRatio="xMidYMid meet"
           onMouseMove={handleMouseMove}
           onMouseLeave={handleMouseLeave}
         >

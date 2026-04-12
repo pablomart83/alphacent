@@ -299,7 +299,7 @@ const TvChartInner: FC<TvChartProps> = ({
     <div
       ref={containerRef}
       className={className}
-      style={{ width: '100%', height, ...style }}
+      style={{ width: '100%', height, overflow: 'hidden', ...style }}
     />
   );
 };

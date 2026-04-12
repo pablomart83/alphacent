@@ -57,14 +57,14 @@ export const PerformanceAttributionTab: FC<PerformanceAttributionTabProps> = ({
           <div className="text-center text-muted-foreground font-mono">
             <Activity className="h-8 w-8 mx-auto mb-3 opacity-50" />
             <p>Minimum number of closed trades required for meaningful attribution analysis.</p>
-            <p className="text-[10px] mt-1">Try selecting a longer period.</p>
+            <p className="text-[11px] mt-1">Try selecting a longer period.</p>
           </div>
         </div>
       ) : data ? (
         <>
           {/* Group by toggle */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground font-mono">Group by:</span>
+            <span className="text-[11px] text-muted-foreground font-mono">Group by:</span>
             {(['sector', 'asset_class'] as const).map((g) => (
               <button
                 key={g}

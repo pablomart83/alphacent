@@ -1036,7 +1036,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         variant="default"
         size="sm"
         onClick={() => { resetOrderForm(); setOrderFormOpen(true); }}
-        className="gap-1.5 h-7 text-[11px] bg-accent-green hover:bg-accent-green/80 text-black"
+        className="gap-1.5 h-7 text-xs bg-accent-green hover:bg-accent-green/80 text-black"
       >
         + New Order
       </Button>
@@ -1105,7 +1105,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       </div>
 
       {/* OrderFlowTimeline hero — top ~40% */}
-      <div className="shrink-0" style={{ height: '40%', minHeight: '180px' }}>
+      <div className="shrink-0 overflow-hidden" style={{ height: '40%', minHeight: '180px' }}>
         <div className="p-2 h-full">
           <div className="text-xs text-gray-500 mb-1 font-medium tracking-wide">Order Flow — Last 7 Days</div>
               <OrderFlowTimeline
@@ -1297,7 +1297,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                         {marketStatus.label}
                       </p>
                       {!marketStatus.isOpen && marketStatus.nextOpen && (
-                        <p className="text-[11px] text-gray-400">
+                        <p className="text-xs text-gray-400">
                           Next: {format(marketStatus.nextOpen, 'EEE, MMM d h:mm a')} UTC
                         </p>
                       )}
@@ -1334,18 +1334,18 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="flex flex-col">
                               <span className="font-mono font-semibold text-xs text-gray-200">{order.symbol}</span>
-                              <span className={cn('text-[10px] font-mono font-semibold', order.side === 'BUY' ? 'text-accent-green' : 'text-accent-red')}>
+                              <span className={cn('text-[11px] font-mono font-semibold', order.side === 'BUY' ? 'text-accent-green' : 'text-accent-red')}>
                                 {order.side}
                               </span>
                             </div>
                             <div className="flex flex-col">
                               <span className="text-xs text-gray-300 font-mono">{formatCurrency(order.quantity)}</span>
-                              <span className="text-[11px] text-gray-500">{order.price ? `@ ${formatCurrency(order.price)}` : 'Market'}</span>
+                              <span className="text-xs text-gray-500">{order.price ? `@ ${formatCurrency(order.price)}` : 'Market'}</span>
                             </div>
                             <div className="flex flex-col">
-                              <span className="text-[11px] text-gray-400">Queued {age}</span>
+                              <span className="text-xs text-gray-400">Queued {age}</span>
                               <span className={cn(
-                                'text-[10px] px-1 py-0.5 rounded mt-0.5 w-fit',
+                                'text-[11px] px-1 py-0.5 rounded mt-0.5 w-fit',
                                 isWaitingForMarket ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
                               )}>
                                 {isWaitingForMarket ? 'Waiting for market' : 'Processing'}
@@ -1578,19 +1578,19 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                 <div className={cn('text-lg font-bold font-mono', avgSlippage >= 0 ? 'text-accent-red' : 'text-accent-green')}>
                   {formatPercentage(avgSlippage)}
                 </div>
-                <div className="text-[11px] text-gray-500">Avg Slippage</div>
+                <div className="text-xs text-gray-500">Avg Slippage</div>
               </div>
               <div className="text-center">
                 <div className="text-lg font-bold font-mono text-accent-green">
                   {formatPercentage(fillRate)}
                 </div>
-                <div className="text-[11px] text-gray-500">Fill Rate</div>
+                <div className="text-xs text-gray-500">Fill Rate</div>
               </div>
               <div className="text-center">
                 <div className="text-lg font-bold font-mono text-blue-400">
                   {avgFillTime.toFixed(1)}s
                 </div>
-                <div className="text-[11px] text-gray-500">Avg Fill Time</div>
+                <div className="text-xs text-gray-500">Avg Fill Time</div>
               </div>
             </div>
             {/* Mini fill rate trend chart */}
@@ -1608,7 +1608,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                 }]}
               />
             ) : (
-              <div className="text-center py-4 text-[11px] text-gray-500">No trend data</div>
+              <div className="text-center py-4 text-xs text-gray-500">No trend data</div>
             )}
           </div>
 
@@ -1628,7 +1628,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={cn(
-                        'text-[10px] font-mono font-semibold px-1 py-0.5 rounded',
+                        'text-[11px] font-mono font-semibold px-1 py-0.5 rounded',
                         order.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red'
                       )}>
                         {order.side}
@@ -1641,7 +1641,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                       <span className="font-mono text-xs text-gray-300">
                         {formatCurrency(order.quantity)}
                       </span>
-                      <span className="text-[11px] text-gray-500">
+                      <span className="text-xs text-gray-500">
                         {formatTimestamp(order.created_at)}
                       </span>
                     </div>

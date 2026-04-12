@@ -52,14 +52,14 @@ export const RollingStatisticsTab: FC<RollingStatisticsTabProps> = ({
           <div className="text-center text-muted-foreground font-mono">
             <Activity className="h-8 w-8 mx-auto mb-3 opacity-50" />
             <p>Minimum {rollingWindow} trading days required for rolling statistics.</p>
-            <p className="text-[10px] mt-1">Try selecting a longer period or a shorter rolling window.</p>
+            <p className="text-[11px] mt-1">Try selecting a longer period or a shorter rolling window.</p>
           </div>
         </div>
       ) : data ? (
         <>
           {/* Window size toggle */}
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground font-mono">Window:</span>
+            <span className="text-[11px] text-muted-foreground font-mono">Window:</span>
             {WINDOWS.map((w) => (
               <button
                 key={w}

@@ -166,7 +166,7 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
                 <SectionLabel>Position Summary</SectionLabel>
                 <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
                   <div className="border border-border rounded-md px-3 pt-3 pb-2">
-                    <p className="text-[10px] text-muted-foreground mb-1">Side</p>
+                    <p className="text-[11px] text-muted-foreground mb-1">Side</p>
                     <Badge className={cn(
                       'font-mono text-xs',
                       position.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red'
@@ -175,27 +175,27 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
                     </Badge>
                   </div>
                   <div className="border border-border rounded-md px-3 pt-3 pb-2">
-                    <p className="text-[10px] text-muted-foreground mb-1">Entry Price</p>
+                    <p className="text-[11px] text-muted-foreground mb-1">Entry Price</p>
                     <p className="text-[13px] font-bold font-mono">{formatCurrency(position.entry_price || 0)}</p>
                   </div>
                   <div className="border border-border rounded-md px-3 pt-3 pb-2">
-                    <p className="text-[10px] text-muted-foreground mb-1">Current Price</p>
+                    <p className="text-[11px] text-muted-foreground mb-1">Current Price</p>
                     <p className="text-[13px] font-bold font-mono">{formatCurrency(position.current_price || 0)}</p>
                   </div>
                   <div className="border border-border rounded-md px-3 pt-3 pb-2">
-                    <p className="text-[10px] text-muted-foreground mb-1">Unrealized P&L</p>
+                    <p className="text-[11px] text-muted-foreground mb-1">Unrealized P&L</p>
                     <p className={cn('text-[13px] font-bold font-mono', (position.unrealized_pnl || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                       {formatCurrency(position.unrealized_pnl || 0)}
                     </p>
                   </div>
                   <div className="border border-border rounded-md px-3 pt-3 pb-2">
-                    <p className="text-[10px] text-muted-foreground mb-1">P&L %</p>
+                    <p className="text-[11px] text-muted-foreground mb-1">P&L %</p>
                     <p className={cn('text-[13px] font-bold font-mono', (position.unrealized_pnl_percent || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                       {formatPercentage(position.unrealized_pnl_percent || 0)}
                     </p>
                   </div>
                   <div className="border border-border rounded-md px-3 pt-3 pb-2">
-                    <p className="text-[10px] text-muted-foreground mb-1">Strategy</p>
+                    <p className="text-[11px] text-muted-foreground mb-1">Strategy</p>
                     <p className="text-[13px] font-mono text-gray-300 truncate">{position.strategy_name || position.strategy_id?.slice(0, 8) || '—'}</p>
                   </div>
                 </div>
@@ -207,11 +207,11 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
               <div className="flex items-center justify-between mb-1.5">
                 <div>
                   <SectionLabel className="mb-0">Price Chart — {symbol}</SectionLabel>
-                  <p className="text-[10px] text-muted-foreground">Price over holding period with buy/sell annotations</p>
+                  <p className="text-[11px] text-muted-foreground">Price over holding period with buy/sell annotations</p>
                 </div>
                 <div className="flex items-center gap-2">
                   {isLive ? (
-                    <Badge className="text-[10px] font-mono bg-accent-green/20 text-accent-green border-accent-green/30 gap-1">
+                    <Badge className="text-[11px] font-mono bg-accent-green/20 text-accent-green border-accent-green/30 gap-1">
                       <span className="relative flex h-1.5 w-1.5">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-75" />
                         <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-accent-green" />
@@ -219,7 +219,7 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
                       Live
                     </Badge>
                   ) : (
-                    <Badge variant="secondary" className="text-[10px] font-mono gap-1">
+                    <Badge variant="secondary" className="text-[11px] font-mono gap-1">
                       <span className="inline-flex rounded-full h-1.5 w-1.5 bg-gray-500" />
                       Paused
                     </Badge>
@@ -251,7 +251,7 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
             {/* P&L Time-Series Chart */}
             <div className="border border-border rounded-md p-4">
               <SectionLabel>P&L Over Time</SectionLabel>
-              <p className="text-[10px] text-muted-foreground mb-2">Unrealized P&L for this position over its holding period</p>
+              <p className="text-[11px] text-muted-foreground mb-2">Unrealized P&L for this position over its holding period</p>
               {pnlHistory.length > 0 ? (
                 <InteractiveChart
                   data={pnlHistory}

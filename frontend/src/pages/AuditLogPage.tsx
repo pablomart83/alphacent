@@ -168,7 +168,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
               <select
                 value={filters.event_types[0] || ''}
                 onChange={(e) => handleFilterChange('event_types', e.target.value ? [e.target.value] : [])}
-                className="text-[10px] font-mono rounded px-1.5 py-1 border"
+                className="text-[11px] font-mono rounded px-1.5 py-1 border"
                 style={{ backgroundColor: 'var(--color-dark-bg)', borderColor: 'var(--color-dark-border)', color: 'var(--color-text-primary)' }}
               >
                 <option value="">All Events</option>
@@ -177,7 +177,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
               <select
                 value={filters.severity}
                 onChange={(e) => handleFilterChange('severity', e.target.value)}
-                className="text-[10px] font-mono rounded px-1.5 py-1 border"
+                className="text-[11px] font-mono rounded px-1.5 py-1 border"
                 style={{ backgroundColor: 'var(--color-dark-bg)', borderColor: 'var(--color-dark-border)', color: 'var(--color-text-primary)' }}
               >
                 <option value="">All Severities</option>
@@ -188,7 +188,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
                 value={filters.symbol}
                 onChange={(e) => handleFilterChange('symbol', e.target.value)}
                 placeholder="Symbol"
-                className="w-20 px-1.5 py-1 rounded text-[10px] font-mono border"
+                className="w-20 px-1.5 py-1 rounded text-[11px] font-mono border"
                 style={{ backgroundColor: 'var(--color-dark-bg)', borderColor: 'var(--color-dark-border)', color: 'var(--color-text-primary)' }}
               />
               <input
@@ -196,27 +196,27 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
                 value={filters.strategy_name}
                 onChange={(e) => handleFilterChange('strategy_name', e.target.value)}
                 placeholder="Strategy"
-                className="w-24 px-1.5 py-1 rounded text-[10px] font-mono border"
+                className="w-24 px-1.5 py-1 rounded text-[11px] font-mono border"
                 style={{ backgroundColor: 'var(--color-dark-bg)', borderColor: 'var(--color-dark-border)', color: 'var(--color-text-primary)' }}
               />
               <input
                 type="date"
                 value={filters.start_date}
                 onChange={(e) => handleFilterChange('start_date', e.target.value)}
-                className="px-1.5 py-1 rounded text-[10px] font-mono border"
+                className="px-1.5 py-1 rounded text-[11px] font-mono border"
                 style={{ backgroundColor: 'var(--color-dark-bg)', borderColor: 'var(--color-dark-border)', color: 'var(--color-text-primary)' }}
               />
-              <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>to</span>
+              <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>to</span>
               <input
                 type="date"
                 value={filters.end_date}
                 onChange={(e) => handleFilterChange('end_date', e.target.value)}
-                className="px-1.5 py-1 rounded text-[10px] font-mono border"
+                className="px-1.5 py-1 rounded text-[11px] font-mono border"
                 style={{ backgroundColor: 'var(--color-dark-bg)', borderColor: 'var(--color-dark-border)', color: 'var(--color-text-primary)' }}
               />
               <button
                 onClick={() => { resetFilters(); setSearchInput(''); fetch(); }}
-                className="text-[10px] font-mono px-1.5 py-1 rounded border"
+                className="text-[11px] font-mono px-1.5 py-1 rounded border"
                 style={{ borderColor: 'var(--color-dark-border)', color: 'var(--color-text-secondary)' }}
               >
                 Reset
@@ -226,7 +226,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
 
           {error && (
             <div className="mx-2 mt-2 rounded-lg border p-2" style={{ backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.3)' }}>
-              <p className="text-[10px] text-red-400">{error}</p>
+              <p className="text-[11px] text-red-400">{error}</p>
             </div>
           )}
 
@@ -234,7 +234,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
           {entries.length > 0 ? (
             <div className="flex-1 min-h-0 flex flex-col">
               {/* Table Header */}
-              <div className="flex items-center text-[10px] font-mono py-1.5 px-3 border-b" style={{ borderColor: 'var(--color-dark-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-dark-bg)' }}>
+              <div className="flex items-center text-[11px] font-mono py-1.5 px-3 border-b" style={{ borderColor: 'var(--color-dark-border)', color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-dark-bg)' }}>
                 <span className="w-[140px] shrink-0">Timestamp</span>
                 <span className="w-[120px] shrink-0">Event Type</span>
                 <span className="w-[70px] shrink-0">Symbol</span>
@@ -265,27 +265,27 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
                           style={{ borderBottom: '1px solid var(--color-dark-border)', height: '32px' }}
                           onClick={() => handleRowClick(entry)}
                         >
-                          <span className="w-[140px] shrink-0 font-mono text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                          <span className="w-[140px] shrink-0 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                             {new Date(entry.timestamp).toLocaleString()}
                           </span>
-                          <span className="w-[120px] shrink-0 text-[10px] font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                          <span className="w-[120px] shrink-0 text-[11px] font-mono" style={{ color: 'var(--color-text-primary)' }}>
                             {entry.event_type?.replace(/_/g, ' ')}
                           </span>
-                          <span className="w-[70px] shrink-0 font-mono text-[10px]" style={{ color: 'var(--color-text-primary)' }}>
+                          <span className="w-[70px] shrink-0 font-mono text-[11px]" style={{ color: 'var(--color-text-primary)' }}>
                             {entry.symbol || '—'}
                           </span>
-                          <span className="w-[120px] shrink-0 text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                          <span className="w-[120px] shrink-0 text-[11px] truncate" style={{ color: 'var(--color-text-secondary)' }}>
                             {entry.strategy_name || '—'}
                           </span>
                           <span className="w-[60px] shrink-0">
                             <span
-                              className="text-[10px] font-mono px-1 py-0.5 rounded"
+                              className="text-[11px] font-mono px-1 py-0.5 rounded"
                               style={{ backgroundColor: severityBg(entry.severity), color: severityColor(entry.severity) }}
                             >
                               {entry.severity}
                             </span>
                           </span>
-                          <span className="flex-1 text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                          <span className="flex-1 text-[11px] truncate" style={{ color: 'var(--color-text-secondary)' }}>
                             {entry.description}
                           </span>
                         </div>
@@ -297,8 +297,8 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
                   })}
                 </div>
               </div>
-              {loading && <div className="text-center py-1 text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>Loading more...</div>}
-              <div className="px-3 py-1 border-t text-[10px] font-mono" style={{ borderColor: 'var(--color-dark-border)', color: 'var(--color-text-secondary)' }}>
+              {loading && <div className="text-center py-1 text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>Loading more...</div>}
+              <div className="px-3 py-1 border-t text-[11px] font-mono" style={{ borderColor: 'var(--color-dark-border)', color: 'var(--color-text-secondary)' }}>
                 {totalCount.toLocaleString()} total entries
               </div>
             </div>
@@ -306,7 +306,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center">
                 <p className="text-sm font-mono" style={{ color: 'var(--color-text-secondary)' }}>No audit records</p>
-                <p className="text-[10px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                   No audit records exist for the selected filters and date range.
                 </p>
               </div>
@@ -329,19 +329,19 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
           <div className="border border-[var(--color-dark-border)] rounded-lg">
             <div className="px-3 py-1.5 border-b" style={{ borderColor: 'var(--color-dark-border)', backgroundColor: 'var(--color-dark-bg)' }}>
               <span className="text-xs text-gray-500 tracking-wide font-medium">Signal Rejections</span>
-              <span className="ml-2 text-[10px] font-mono" style={{ color: '#eab308' }}>({rejections.length})</span>
+              <span className="ml-2 text-[11px] font-mono" style={{ color: '#eab308' }}>({rejections.length})</span>
             </div>
             {rejections.length > 0 ? (
               <div className="overflow-y-auto" style={{ maxHeight: '180px' }}>
                 {rejections.slice(0, 10).map((e) => (
                   <div key={e.id} className="px-3 py-1.5" style={{ borderBottom: '1px solid var(--color-dark-border)' }}>
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-primary)' }}>{e.symbol || '—'}</span>
-                      <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-primary)' }}>{e.symbol || '—'}</span>
+                      <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                         {new Date(e.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: '#eab308' }}>
+                    <p className="text-[11px] mt-0.5 truncate" style={{ color: '#eab308' }}>
                       {e.metadata?.rejection_reason || e.description}
                     </p>
                     <div className="flex gap-3 mt-0.5">
@@ -357,7 +357,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
               </div>
             ) : (
               <div className="p-3 text-center">
-                <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>No signal rejections.</p>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>No signal rejections.</p>
               </div>
             )}
           </div>
@@ -366,7 +366,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
           <div className="border border-[var(--color-dark-border)] rounded-lg">
             <div className="px-3 py-1.5 border-b" style={{ borderColor: 'var(--color-dark-border)', backgroundColor: 'var(--color-dark-bg)' }}>
               <span className="text-xs text-gray-500 tracking-wide font-medium">Lifecycle Events</span>
-              <span className="ml-2 text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>({lifecycleEvents.length})</span>
+              <span className="ml-2 text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>({lifecycleEvents.length})</span>
             </div>
             {lifecycleEvents.length > 0 ? (
               <div className="overflow-y-auto" style={{ maxHeight: '180px' }}>
@@ -374,7 +374,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
                   <div key={e.id} className="px-3 py-1.5" style={{ borderBottom: '1px solid var(--color-dark-border)' }}>
                     <div className="flex items-center justify-between">
                       <span
-                        className="text-[10px] font-mono"
+                        className="text-[11px] font-mono"
                         style={{
                           color: e.event_type === 'strategy_activated' ? '#22c55e'
                             : e.event_type === 'strategy_retired' ? '#ef4444'
@@ -383,11 +383,11 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
                       >
                         {e.event_type.replace(/_/g, ' ')}
                       </span>
-                      <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                         {new Date(e.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
-                    <p className="text-[10px] mt-0.5 truncate" style={{ color: 'var(--color-text-primary)' }}>
+                    <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--color-text-primary)' }}>
                       {e.strategy_name || '—'}
                     </p>
                   </div>
@@ -395,7 +395,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
               </div>
             ) : (
               <div className="p-3 text-center">
-                <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>No lifecycle events.</p>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>No lifecycle events.</p>
               </div>
             )}
           </div>
@@ -404,22 +404,22 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
           <div className="border border-[var(--color-dark-border)] rounded-lg">
             <div className="px-3 py-1.5 border-b" style={{ borderColor: 'var(--color-dark-border)', backgroundColor: 'var(--color-dark-bg)' }}>
               <span className="text-xs text-gray-500 tracking-wide font-medium">Risk Limit Events</span>
-              <span className="ml-2 text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>({riskEvents.length})</span>
+              <span className="ml-2 text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>({riskEvents.length})</span>
             </div>
             {riskEvents.length > 0 ? (
               <div className="overflow-y-auto" style={{ maxHeight: '180px' }}>
                 {riskEvents.slice(0, 10).map((e) => (
                   <div key={e.id} className="px-3 py-1.5" style={{ borderBottom: '1px solid var(--color-dark-border)' }}>
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-mono" style={{ color: '#ef4444' }}>
+                      <span className="text-[11px] font-mono" style={{ color: '#ef4444' }}>
                         {e.metadata?.limit_type || 'risk limit'}
                       </span>
-                      <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                         {new Date(e.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
                     <div className="flex gap-3 mt-0.5">
-                      <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                      <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-primary)' }}>
                         {e.symbol || e.metadata?.sector || '—'}
                       </span>
                       {e.metadata?.exposure != null && (
@@ -441,7 +441,7 @@ export const AuditLogPage: FC<AuditLogPageProps> = ({ onLogout }) => {
               </div>
             ) : (
               <div className="p-3 text-center">
-                <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>No risk limit events.</p>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>No risk limit events.</p>
               </div>
             )}
           </div>
@@ -505,7 +505,7 @@ const TradeLifecycleView: FC<{ data: TradeLifecycleData | null; loading: boolean
   if (loading) {
     return (
       <div className="px-6 py-3" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-        <p className="text-[10px] font-mono animate-pulse" style={{ color: 'var(--color-text-secondary)' }}>Loading trade lifecycle...</p>
+        <p className="text-[11px] font-mono animate-pulse" style={{ color: 'var(--color-text-secondary)' }}>Loading trade lifecycle...</p>
       </div>
     );
   }
@@ -513,11 +513,11 @@ const TradeLifecycleView: FC<{ data: TradeLifecycleData | null; loading: boolean
   if (!data) {
     return (
       <div className="px-6 py-3" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-        <p className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
           Event details: {entry.description}
         </p>
         {entry.metadata && (
-          <pre className="text-[10px] font-mono mt-1.5 p-2 rounded overflow-x-auto" style={{ backgroundColor: 'var(--color-dark-surface)', color: 'var(--color-text-secondary)' }}>
+          <pre className="text-[11px] font-mono mt-1.5 p-2 rounded overflow-x-auto" style={{ backgroundColor: 'var(--color-dark-surface)', color: 'var(--color-text-secondary)' }}>
             {JSON.stringify(entry.metadata, null, 2)}
           </pre>
         )}
@@ -545,7 +545,7 @@ const TradeLifecycleView: FC<{ data: TradeLifecycleData | null; loading: boolean
 
   return (
     <div className="px-6 py-3" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-      <p className="text-[10px] font-mono mb-2" style={{ color: 'var(--color-text-primary)' }}>Trade Lifecycle</p>
+      <p className="text-[11px] font-mono mb-2" style={{ color: 'var(--color-text-primary)' }}>Trade Lifecycle</p>
       <div className="flex items-start gap-0 overflow-x-auto">
         {steps.map((step, i) => (
           <div key={i} className="flex items-start shrink-0">
@@ -554,7 +554,7 @@ const TradeLifecycleView: FC<{ data: TradeLifecycleData | null; loading: boolean
               <div className="w-px h-6 bg-gray-600" />
             </div>
             <div className="ml-1.5 mr-4 min-w-[100px]">
-              <p className="text-[10px] font-mono font-semibold" style={{ color: 'var(--color-text-primary)' }}>{step.label}</p>
+              <p className="text-[11px] font-mono font-semibold" style={{ color: 'var(--color-text-primary)' }}>{step.label}</p>
               <p className="text-[8px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{new Date(step.time!).toLocaleString()}</p>
               <p className="text-[8px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>{step.detail}</p>
             </div>

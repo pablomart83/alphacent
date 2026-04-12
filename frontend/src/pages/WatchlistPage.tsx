@@ -268,7 +268,7 @@ export const WatchlistPage: FC<WatchlistPageProps> = ({ onLogout }) => {
         {/* Table */}
         <div className="border border-border rounded-md p-4">
           <SectionLabel actions={
-            <span className="text-[10px] font-mono text-gray-400">
+            <span className="text-[11px] font-mono text-gray-400">
               {filteredRows.length} of {rows.length} symbols
             </span>
           }>
@@ -279,7 +279,7 @@ export const WatchlistPage: FC<WatchlistPageProps> = ({ onLogout }) => {
           </SectionLabel>
           <DataTable columns={columns} data={filteredRows} pageSize={25} />
           {rows.length > 0 && (
-            <p className="text-[10px] text-gray-500 mt-4 font-mono">
+            <p className="text-[11px] text-gray-500 mt-4 font-mono">
               Data sourced from open positions. Change values reflect unrealized P&L. Real-time updates via WebSocket.
             </p>
           )}

@@ -657,7 +657,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
     <div className="flex items-center gap-1.5">
       <DataFreshnessIndicator lastFetchedAt={lastFetchedAt} />
       <Select value={period} onValueChange={(value) => setPeriod(value as typeof period)}>
-        <SelectTrigger className="w-[100px] h-7 text-[11px]">
+        <SelectTrigger className="w-[100px] h-7 text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -925,7 +925,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-3 gap-px bg-[var(--color-dark-border)] border border-[var(--color-dark-border)] rounded">
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
                   <div className="text-xs text-gray-500 tracking-wide mb-1.5">P&L Breakdown</div>
-                  <div className="space-y-1 text-[11px] font-mono">
+                  <div className="space-y-1 text-xs font-mono">
                     <div className="flex justify-between"><span className="text-gray-500">Realized</span><span className={cioDashboard.total_realized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(cioDashboard.total_realized_pnl)}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Unrealized</span><span className={cioDashboard.total_unrealized_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'}>{formatCurrency(cioDashboard.total_unrealized_pnl)}</span></div>
                     <div className="flex justify-between border-t border-[var(--color-dark-border)] pt-1"><span className="font-semibold text-gray-300">Total</span><span className={cn('font-semibold', cioDashboard.total_pnl >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(cioDashboard.total_pnl)}</span></div>
@@ -933,7 +933,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </div>
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
                   <div className="text-xs text-gray-500 tracking-wide mb-1.5">Streaks</div>
-                  <div className="space-y-1 text-[11px] font-mono">
+                  <div className="space-y-1 text-xs font-mono">
                     <div className="flex justify-between"><span className="text-gray-500">Current</span><span className={cioDashboard.current_streak >= 0 ? 'text-accent-green' : 'text-accent-red'}>{cioDashboard.current_streak > 0 ? `+${cioDashboard.current_streak}W` : cioDashboard.current_streak < 0 ? `${cioDashboard.current_streak}L` : '—'}</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Best</span><span className="text-accent-green">{cioDashboard.longest_win_streak}W</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Worst</span><span className="text-accent-red">{cioDashboard.longest_loss_streak}L</span></div>
@@ -941,7 +941,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </div>
                 <div className="bg-[var(--color-dark-surface)] px-3 py-2">
                   <div className="text-xs text-gray-500 tracking-wide mb-1.5">Execution</div>
-                  <div className="space-y-1 text-[11px] font-mono">
+                  <div className="space-y-1 text-xs font-mono">
                     <div className="flex justify-between"><span className="text-gray-500">Entry Slip</span><span>{cioDashboard.avg_entry_slippage_pct.toFixed(3)}%</span></div>
                     <div className="flex justify-between"><span className="text-gray-500">Exit Slip</span><span>{cioDashboard.avg_exit_slippage_pct.toFixed(3)}%</span></div>
                     <div className="flex justify-between border-t border-[var(--color-dark-border)] pt-1"><span className="text-gray-500">Total Cost</span><span className="text-accent-red">{formatCurrency(cioDashboard.total_slippage_cost)}</span></div>
@@ -972,7 +972,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                       <div className="text-xs text-gray-500 tracking-wide mb-2">Active Strategies</div>
-                      <div className="space-y-2 text-[11px] font-mono">
+                      <div className="space-y-2 text-xs font-mono">
                         <div className="flex justify-between"><span className="text-gray-500">Profitable</span><span className="text-accent-green">{cioDashboard.active_profitable || 0}</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Unprofitable</span><span className="text-accent-red">{cioDashboard.active_unprofitable || 0}</span></div>
                         <div className="flex justify-between border-t border-[var(--color-dark-border)] pt-2"><span className="text-gray-500">Unrealized P&L</span><span className={cn((cioDashboard.active_total_unrealized || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(cioDashboard.active_total_unrealized || 0)}</span></div>
@@ -982,15 +982,15 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
                     <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                       <div className="text-xs text-gray-500 tracking-wide mb-2">Retired Strategies (30d)</div>
-                      <div className="space-y-2 text-[11px] font-mono">
+                      <div className="space-y-2 text-xs font-mono">
                         <div className="flex justify-between"><span className="text-gray-500">Profitable</span><span className="text-accent-green">{cioDashboard.retired_profitable || 0}</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Unprofitable</span><span className="text-accent-red">{cioDashboard.retired_unprofitable || 0}</span></div>
                         <div className="flex justify-between border-t border-[var(--color-dark-border)] pt-2"><span className="text-gray-500">Total P&L</span><span className={cn((cioDashboard.retired_total_pnl || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>{formatCurrency(cioDashboard.retired_total_pnl || 0)}</span></div>
                         {cioDashboard.retirement_reasons && Object.keys(cioDashboard.retirement_reasons).length > 0 && (
                           <div className="border-t border-[var(--color-dark-border)] pt-2 space-y-1">
-                            <p className="text-[11px] text-gray-500">Retirement Reasons</p>
+                            <p className="text-xs text-gray-500">Retirement Reasons</p>
                             {Object.entries(cioDashboard.retirement_reasons).map(([reason, count]) => (
-                              <div key={reason} className="flex justify-between text-[10px]"><span className="text-gray-500 capitalize">{reason.replace(/_/g, ' ')}</span><span>{count as number}</span></div>
+                              <div key={reason} className="flex justify-between text-[11px]"><span className="text-gray-500 capitalize">{reason.replace(/_/g, ' ')}</span><span>{count as number}</span></div>
                             ))}
                           </div>
                         )}
@@ -1002,7 +1002,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                       <div className="text-xs text-gray-500 tracking-wide mb-2">Trade Quality</div>
-                      <div className="space-y-2 text-[11px] font-mono">
+                      <div className="space-y-2 text-xs font-mono">
                         <div className="flex justify-between"><span className="text-gray-500">Closed Trades</span><span>{cioDashboard.total_trades_closed || 0}</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Win / Loss</span><span><span className="text-accent-green">{cioDashboard.winning_trades || 0}</span> / <span className="text-accent-red">{cioDashboard.losing_trades || 0}</span></span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Closed WR</span><span className={cn((cioDashboard.win_rate || 0) >= 50 ? 'text-accent-green' : 'text-yellow-400')}>{(cioDashboard.win_rate || 0).toFixed(1)}%</span></div>
@@ -1018,7 +1018,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
                     <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                       <div className="text-xs text-gray-500 tracking-wide mb-2">Position Closures</div>
-                      <div className="space-y-2 text-[11px] font-mono">
+                      <div className="space-y-2 text-xs font-mono">
                         {cioDashboard.closure_reasons && Object.keys(cioDashboard.closure_reasons).length > 0 ? (
                           Object.entries(cioDashboard.closure_reasons)
                             .sort(([,a], [,b]) => (b as number) - (a as number))
@@ -1029,7 +1029,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                               </div>
                             ))
                         ) : (
-                          <p className="text-[11px] text-gray-500">No closed positions in period</p>
+                          <p className="text-xs text-gray-500">No closed positions in period</p>
                         )}
                       </div>
                     </div>
@@ -1085,40 +1085,40 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.05 }} className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Expectancy</div>
-                <div className="text-[11px] text-gray-500 mb-2">Per-trade expected value — closed trades vs all positions</div>
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Expectancy</div>
+                <div className="text-xs text-gray-500 mb-2">Per-trade expected value — closed trades vs all positions</div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-[11px] text-gray-500 mb-1">Closed Trades</p>
+                    <p className="text-xs text-gray-500 mb-1">Closed Trades</p>
                     <div className={cn('text-[13px] font-bold font-mono',
                       (perfStats?.expectancy || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                       {formatCurrency(perfStats?.expectancy || 0)}
                     </div>
-                    <p className="text-[11px] text-gray-500 mt-1">{perfStats?.total_trades || 0} closed trades</p>
+                    <p className="text-xs text-gray-500 mt-1">{perfStats?.total_trades || 0} closed trades</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-gray-500 mb-1">All Positions (incl. open)</p>
+                    <p className="text-xs text-gray-500 mb-1">All Positions (incl. open)</p>
                     <div className={cn('text-[13px] font-bold font-mono',
                       (perfStats?.total_expectancy || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                       {formatCurrency(perfStats?.total_expectancy || 0)}
                     </div>
-                    <p className="text-[11px] text-gray-500 mt-1">{perfStats?.total_expectancy_note || ''}</p>
+                    <p className="text-xs text-gray-500 mt-1">{perfStats?.total_expectancy_note || ''}</p>
                   </div>
                 </div>
-                <div className="mt-3 text-[11px] text-gray-500 font-mono border-t border-[var(--color-dark-border)] pt-2">
+                <div className="mt-3 text-xs text-gray-500 font-mono border-t border-[var(--color-dark-border)] pt-2">
                   Avg Win: {formatCurrency(perfStats?.avg_win || 0)} · Avg Loss: {formatCurrency(perfStats?.avg_loss || 0)} · WR: {perfStats?.win_rate?.toFixed(1) || 0}%
                 </div>
               </div>
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Profit Factor</div>
-                <div className="text-[11px] text-gray-500 mb-2">Gross Profits / Gross Losses — target &gt;1.5</div>
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Profit Factor</div>
+                <div className="text-xs text-gray-500 mb-2">Gross Profits / Gross Losses — target &gt;1.5</div>
                 <div className={cn('text-[13px] font-bold font-mono',
                   (perfStats?.profit_factor || 0) >= 1.5 ? 'text-accent-green' :
                   (perfStats?.profit_factor || 0) >= 1.0 ? 'text-yellow-400' : 'text-accent-red')}>
                   {(perfStats?.profit_factor || 0).toFixed(2)}
                   {(perfStats?.profit_factor || 0) >= 1.5 && <span className="text-sm ml-2">✓</span>}
                 </div>
-                <div className="mt-2 text-[11px] text-gray-500 font-mono">
+                <div className="mt-2 text-xs text-gray-500 font-mono">
                   Gross Profit: {formatCurrency(perfStats?.gross_profit || 0)} · Gross Loss: {formatCurrency(perfStats?.gross_loss || 0)}
                 </div>
               </div>
@@ -1242,9 +1242,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 mb-3">
                         <div className="w-3 h-3 rounded-full bg-accent-green" />
-                        <span className="font-semibold text-accent-green text-[11px]">Winners ({perfStats.winners_vs_losers.winners.count})</span>
+                        <span className="font-semibold text-accent-green text-xs">Winners ({perfStats.winners_vs_losers.winners.count})</span>
                       </div>
-                      <div className="space-y-2 text-[11px] font-mono">
+                      <div className="space-y-2 text-xs font-mono">
                         <div className="flex justify-between"><span className="text-gray-500">Avg Hold Time</span><span>{perfStats.winners_vs_losers.winners.avg_hold_hours?.toFixed(1)}h</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Avg Size</span><span>{formatCurrency(perfStats.winners_vs_losers.winners.avg_size || 0)}</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Common Strategy</span><span className="truncate max-w-[150px]">{perfStats.winners_vs_losers.winners.common_strategy}</span></div>
@@ -1254,9 +1254,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 mb-3">
                         <div className="w-3 h-3 rounded-full bg-accent-red" />
-                        <span className="font-semibold text-accent-red text-[11px]">Losers ({perfStats.winners_vs_losers.losers.count})</span>
+                        <span className="font-semibold text-accent-red text-xs">Losers ({perfStats.winners_vs_losers.losers.count})</span>
                       </div>
-                      <div className="space-y-2 text-[11px] font-mono">
+                      <div className="space-y-2 text-xs font-mono">
                         <div className="flex justify-between"><span className="text-gray-500">Avg Hold Time</span><span>{perfStats.winners_vs_losers.losers.avg_hold_hours?.toFixed(1)}h</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Avg Size</span><span>{formatCurrency(perfStats.winners_vs_losers.losers.avg_size || 0)}</span></div>
                         <div className="flex justify-between"><span className="text-gray-500">Common Strategy</span><span className="truncate max-w-[150px]">{perfStats.winners_vs_losers.losers.common_strategy}</span></div>
@@ -1311,17 +1311,17 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           <TabsContent value="attribution" className="space-y-3">
             <SectionLabel>Strategy Contribution</SectionLabel>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
-              <div className="text-[11px] text-gray-500">
+              <div className="text-xs text-gray-500">
                 Performance attribution by strategy • {filteredStrategies.length} of {strategyAttribution.length} strategies
               </div>
               <div className="flex flex-col sm:flex-row gap-2">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
                   <Input placeholder="Search strategy..." value={strategySearch}
-                    onChange={(e) => setStrategySearch(e.target.value)} className="pl-9 w-full sm:w-[200px] h-7 text-[11px]" />
+                    onChange={(e) => setStrategySearch(e.target.value)} className="pl-9 w-full sm:w-[200px] h-7 text-xs" />
                 </div>
                 <Select value={templateFilter} onValueChange={setTemplateFilter}>
-                  <SelectTrigger className="w-full sm:w-[140px] h-7 text-[11px]">
+                  <SelectTrigger className="w-full sm:w-[140px] h-7 text-xs">
                     <SelectValue placeholder="Template" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1332,7 +1332,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </SelectContent>
                 </Select>
                 <Select value={regimeFilter} onValueChange={setRegimeFilter}>
-                  <SelectTrigger className="w-full sm:w-[140px] h-7 text-[11px]">
+                  <SelectTrigger className="w-full sm:w-[140px] h-7 text-xs">
                     <SelectValue placeholder="Regime" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1344,7 +1344,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </SelectContent>
                 </Select>
                 <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="w-full sm:w-[140px] h-7 text-[11px]">
+                  <SelectTrigger className="w-full sm:w-[140px] h-7 text-xs">
                     <ArrowUpDown className="h-4 w-4 mr-2" />
                     <SelectValue />
                   </SelectTrigger>
@@ -1362,7 +1362,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 <DataTable columns={strategyColumns} data={filteredStrategies} pageSize={20} showPagination={true} />
               </div>
             ) : (
-              <div className="text-center py-12 text-gray-500 text-[11px]">
+              <div className="text-center py-12 text-gray-500 text-xs">
                 {strategySearch || templateFilter !== 'all' || regimeFilter !== 'all'
                   ? 'No strategies match your filters' : 'No strategy data available'}
               </div>
@@ -1463,11 +1463,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   {Object.entries(regimeAnalysis.current_regimes).map(([assetClass, data]) => (
                     <div key={assetClass} className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-semibold capitalize">{assetClass}</span>
-                        <Badge variant="outline" className="text-[10px]">{(data as any).confidence ? `${((data as any).confidence * 100).toFixed(0)}%` : ''}</Badge>
+                        <span className="text-xs font-semibold capitalize">{assetClass}</span>
+                        <Badge variant="outline" className="text-[11px]">{(data as any).confidence ? `${((data as any).confidence * 100).toFixed(0)}%` : ''}</Badge>
                       </div>
                       <p className="text-[13px] font-bold font-mono">{((data as any).regime || 'unknown').replace(/_/g, ' ')}</p>
-                      <div className="text-[11px] text-gray-500 space-y-0.5">
+                      <div className="text-xs text-gray-500 space-y-0.5">
                         <p>20d: <span className={((data as any).change_20d || 0) >= 0 ? 'text-accent-green' : 'text-accent-red'}>{((data as any).change_20d || 0).toFixed(1)}%</span></p>
                         <p>50d: <span className={((data as any).change_50d || 0) >= 0 ? 'text-accent-green' : 'text-accent-red'}>{((data as any).change_50d || 0).toFixed(1)}%</span></p>
                         <p>ATR: {((data as any).atr_ratio || 0).toFixed(2)}%</p>
@@ -1498,7 +1498,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     { label: 'Macro Regime', value: regimeAnalysis.market_context.macro_regime?.replace(/_/g, ' ') },
                   ].map((item, idx) => (
                     <div key={idx} className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-2">
-                      <p className="text-[11px] text-gray-500">{item.label}</p>
+                      <p className="text-xs text-gray-500">{item.label}</p>
                       <p className={cn('text-[13px] font-bold font-mono', item.color || '')}>{item.value || 'N/A'}</p>
                     </div>
                   ))}
@@ -1513,21 +1513,21 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
                   <div className="text-xs text-gray-500 tracking-wide mb-2">Bitcoin Halving Cycle</div>
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center justify-between text-xs">
                       <span>Phase</span>
-                      <Badge variant="outline" className="font-mono text-[10px]">{regimeAnalysis.crypto_cycle.phase?.replace(/_/g, ' ')}</Badge>
+                      <Badge variant="outline" className="font-mono text-[11px]">{regimeAnalysis.crypto_cycle.phase?.replace(/_/g, ' ')}</Badge>
                     </div>
-                    <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center justify-between text-xs">
                       <span>Months Since Halving</span>
                       <span className="font-mono">{regimeAnalysis.crypto_cycle.months_since_halving}</span>
                     </div>
-                    <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center justify-between text-xs">
                       <span>Cycle Score</span>
                       <span className="font-mono">{regimeAnalysis.crypto_cycle.cycle_score}/100</span>
                     </div>
-                    <div className="flex items-center justify-between text-[11px]">
+                    <div className="flex items-center justify-between text-xs">
                       <span>Recommendation</span>
-                      <Badge className={cn('text-[10px]',
+                      <Badge className={cn('text-[11px]',
                         regimeAnalysis.crypto_cycle.recommendation === 'accumulate' ? 'bg-green-500/20 text-green-400' :
                         regimeAnalysis.crypto_cycle.recommendation === 'hold' ? 'bg-blue-500/20 text-blue-400' :
                         regimeAnalysis.crypto_cycle.recommendation === 'reduce' ? 'bg-yellow-500/20 text-yellow-400' :
@@ -1543,7 +1543,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   <div className="text-xs text-gray-500 tracking-wide mb-2">Forex Carry Rates</div>
                   <div className="space-y-2">
                     {Object.entries(regimeAnalysis.carry_rates.carry).map(([pair, diff]) => (
-                      <div key={pair} className="flex items-center justify-between p-1.5 bg-[var(--color-dark-surface)] rounded text-[11px]">
+                      <div key={pair} className="flex items-center justify-between p-1.5 bg-[var(--color-dark-surface)] rounded text-xs">
                         <span className="font-mono">{pair}</span>
                         <span className={cn('font-mono font-bold',
                           (diff as number) > 0 ? 'text-accent-green' : (diff as number) < 0 ? 'text-accent-red' : ''
@@ -1560,7 +1560,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             {regimeAnalysis?.performance_by_regime && regimeAnalysis.performance_by_regime.length > 0 ? (
               <DataTable columns={regimeColumns} data={regimeAnalysis.performance_by_regime} pageSize={10} showPagination={false} />
             ) : (
-              <div className="text-center py-12 text-gray-500 text-[11px]">No regime data available</div>
+              <div className="text-center py-12 text-gray-500 text-xs">No regime data available</div>
             )}
 
             {/* Regime Transition Timeline */}
@@ -1572,20 +1572,20 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   {regimeAnalysis.regime_transitions.map((transition, idx) => (
                     <div key={idx} className="flex items-center justify-between p-2 bg-[var(--color-dark-bg)] border border-[var(--color-dark-border)] rounded-md">
                       <div className="flex items-center gap-3">
-                        <span className="text-[11px] text-gray-500 font-mono">
+                        <span className="text-xs text-gray-500 font-mono">
                           {formatTimestamp(transition.date, { includeTime: false })}
                         </span>
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-[10px]">{transition.from_regime}</Badge>
+                          <Badge variant="outline" className="text-[11px]">{transition.from_regime}</Badge>
                           <span className="text-gray-500">→</span>
-                          <Badge variant="outline" className="text-[10px]">{transition.to_regime}</Badge>
+                          <Badge variant="outline" className="text-[11px]">{transition.to_regime}</Badge>
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500 text-[11px]">No regime transitions recorded</div>
+                <div className="text-center py-12 text-gray-500 text-xs">No regime transitions recorded</div>
               )}
             </motion.div>
 
@@ -1595,33 +1595,33 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               transition={{ duration: 0.3, delay: 0.2 }}>
               {regimeAnalysis?.strategy_regime_performance && regimeAnalysis.strategy_regime_performance.length > 0 ? (
                 <div className="overflow-x-auto rounded-md border border-[var(--color-dark-border)]">
-                  <table className="w-full text-[11px]">
+                  <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-[var(--color-dark-border)]">
-                        <th className="text-left p-2 font-mono text-[11px] text-gray-500">Strategy</th>
-                        <th className="text-right p-2 font-mono text-[11px] text-gray-500">Trending Up</th>
-                        <th className="text-right p-2 font-mono text-[11px] text-gray-500">Trending Down</th>
-                        <th className="text-right p-2 font-mono text-[11px] text-gray-500">Ranging</th>
-                        <th className="text-right p-2 font-mono text-[11px] text-gray-500">Volatile</th>
+                        <th className="text-left p-2 font-mono text-xs text-gray-500">Strategy</th>
+                        <th className="text-right p-2 font-mono text-xs text-gray-500">Trending Up</th>
+                        <th className="text-right p-2 font-mono text-xs text-gray-500">Trending Down</th>
+                        <th className="text-right p-2 font-mono text-xs text-gray-500">Ranging</th>
+                        <th className="text-right p-2 font-mono text-xs text-gray-500">Volatile</th>
                       </tr>
                     </thead>
                     <tbody>
                       {regimeAnalysis.strategy_regime_performance.map((row, idx) => (
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/50">
-                          <td className="p-2 font-mono text-[10px]">{row.strategy}</td>
-                          <td className={cn('p-2 font-mono text-[10px] text-right',
+                          <td className="p-2 font-mono text-[11px]">{row.strategy}</td>
+                          <td className={cn('p-2 font-mono text-[11px] text-right',
                             row.trending_up >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(row.trending_up)}
                           </td>
-                          <td className={cn('p-2 font-mono text-[10px] text-right',
+                          <td className={cn('p-2 font-mono text-[11px] text-right',
                             row.trending_down >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(row.trending_down)}
                           </td>
-                          <td className={cn('p-2 font-mono text-[10px] text-right',
+                          <td className={cn('p-2 font-mono text-[11px] text-right',
                             row.ranging >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(row.ranging)}
                           </td>
-                          <td className={cn('p-2 font-mono text-[10px] text-right',
+                          <td className={cn('p-2 font-mono text-[11px] text-right',
                             row.volatile >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(row.volatile)}
                           </td>
@@ -1631,7 +1631,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </table>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500 text-[11px]">No strategy regime data available</div>
+                <div className="text-center py-12 text-gray-500 text-xs">No strategy regime data available</div>
               )}
             </motion.div>
           </TabsContent>
@@ -1646,41 +1646,41 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               
               {/* Fundamental Filter Statistics */}
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">Fundamental Filter Statistics</div>
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Fundamental Filter Statistics</div>
                 {fundamentalStats ? (
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <p className="text-[11px] text-gray-500 mb-1">Symbols Filtered</p>
+                        <p className="text-xs text-gray-500 mb-1">Symbols Filtered</p>
                         <p className="text-[13px] font-bold font-mono">{fundamentalStats.symbols_filtered || 0}</p>
                       </div>
                       <div>
-                        <p className="text-[11px] text-gray-500 mb-1">Symbols Passed</p>
+                        <p className="text-xs text-gray-500 mb-1">Symbols Passed</p>
                         <p className="text-[13px] font-bold font-mono text-accent-green">
                           {fundamentalStats.symbols_passed || 0}
                         </p>
                       </div>
                     </div>
                     <div>
-                      <p className="text-[11px] text-gray-500 mb-1">Pass Rate</p>
+                      <p className="text-xs text-gray-500 mb-1">Pass Rate</p>
                       <div className="flex items-center gap-2">
                         <div className="flex-1 bg-[var(--color-dark-surface)] rounded-full h-2">
                           <div className="bg-accent-green h-2 rounded-full" 
                             style={{ width: `${fundamentalStats.pass_rate || 0}%` }} />
                         </div>
-                        <span className="text-[11px] font-mono font-semibold">
+                        <span className="text-xs font-mono font-semibold">
                           {formatPercentage(fundamentalStats.pass_rate || 0)}
                         </span>
                       </div>
                     </div>
                     <div>
-                      <p className="text-[11px] text-gray-500 mb-2">Most Common Failure Reasons</p>
+                      <p className="text-xs text-gray-500 mb-2">Most Common Failure Reasons</p>
                       <div className="space-y-1">
                         {fundamentalStats.failure_reasons && Object.entries(fundamentalStats.failure_reasons)
                           .sort(([, a], [, b]) => (b as number) - (a as number))
                           .slice(0, 3)
                           .map(([reason, count]) => (
-                            <div key={reason} className="flex justify-between text-[10px]">
+                            <div key={reason} className="flex justify-between text-[11px]">
                               <span className="text-gray-500 capitalize">
                                 {reason.replace(/_/g, ' ')}
                               </span>
@@ -1691,56 +1691,56 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-[10px]">No data available</div>
+                  <div className="text-center py-8 text-gray-500 text-[11px]">No data available</div>
                 )}
               </div>
 
               {/* ML Filter Statistics */}
               <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
-                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide mb-2">ML Filter Statistics</div>
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">ML Filter Statistics</div>
                 {mlStats ? (
                   <div className="space-y-3">
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <p className="text-[11px] text-gray-500 mb-1">Signals Filtered</p>
+                        <p className="text-xs text-gray-500 mb-1">Signals Filtered</p>
                         <p className="text-[13px] font-bold font-mono">{mlStats.signals_filtered || 0}</p>
                       </div>
                       <div>
-                        <p className="text-[11px] text-gray-500 mb-1">Signals Passed</p>
+                        <p className="text-xs text-gray-500 mb-1">Signals Passed</p>
                         <p className="text-[13px] font-bold font-mono text-accent-green">
                           {mlStats.signals_passed || 0}
                         </p>
                       </div>
                     </div>
                     <div>
-                      <p className="text-[11px] text-gray-500 mb-1">Average Confidence</p>
+                      <p className="text-xs text-gray-500 mb-1">Average Confidence</p>
                       <div className="flex items-center gap-2">
                         <div className="flex-1 bg-[var(--color-dark-surface)] rounded-full h-2">
                           <div className="bg-blue-500 h-2 rounded-full" 
                             style={{ width: `${(mlStats.avg_confidence || 0) * 100}%` }} />
                         </div>
-                        <span className="text-[11px] font-mono font-semibold">
+                        <span className="text-xs font-mono font-semibold">
                           {formatPercentage((mlStats.avg_confidence || 0) * 100)}
                         </span>
                       </div>
                     </div>
                     {mlStats.model_accuracy && (
                       <div>
-                        <p className="text-[11px] text-gray-500 mb-2">Model Accuracy Metrics</p>
+                        <p className="text-xs text-gray-500 mb-2">Model Accuracy Metrics</p>
                         <div className="grid grid-cols-2 gap-2">
-                          <div className="flex justify-between text-[10px]">
+                          <div className="flex justify-between text-[11px]">
                             <span className="text-gray-500">Accuracy</span>
                             <span className="font-mono">{formatPercentage((mlStats.model_accuracy || 0) * 100)}</span>
                           </div>
-                          <div className="flex justify-between text-[10px]">
+                          <div className="flex justify-between text-[11px]">
                             <span className="text-gray-500">Precision</span>
                             <span className="font-mono">{formatPercentage((mlStats.model_precision || 0) * 100)}</span>
                           </div>
-                          <div className="flex justify-between text-[10px]">
+                          <div className="flex justify-between text-[11px]">
                             <span className="text-gray-500">Recall</span>
                             <span className="font-mono">{formatPercentage((mlStats.model_recall || 0) * 100)}</span>
                           </div>
-                          <div className="flex justify-between text-[10px]">
+                          <div className="flex justify-between text-[11px]">
                             <span className="text-gray-500">F1 Score</span>
                             <span className="font-mono">{formatPercentage((mlStats.model_f1_score || 0) * 100)}</span>
                           </div>
@@ -1749,7 +1749,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-[10px]">No data available</div>
+                  <div className="text-center py-8 text-gray-500 text-[11px]">No data available</div>
                 )}
               </div>
             </motion.div>
@@ -1777,7 +1777,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   />
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500 text-[10px]">No data available</div>
+                <div className="text-center py-12 text-gray-500 text-[11px]">No data available</div>
               )}
             </motion.div>
 
@@ -1787,31 +1787,31 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               transition={{ duration: 0.3, delay: 0.2 }}>
               {templatePerformance && templatePerformance.length > 0 ? (
                 <div className="overflow-x-auto rounded-md border border-[var(--color-dark-border)]">
-                  <table className="w-full text-[11px]">
+                  <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-[var(--color-dark-border)]">
-                        <th className="text-left p-2 font-mono text-[11px] text-gray-500">Template</th>
-                        <th className="text-right p-2 font-mono text-[11px] text-gray-500">Trades</th>
-                        <th className="text-right p-2 font-mono text-[11px] text-gray-500">Win Rate</th>
-                        <th className="text-right p-2 font-mono text-[11px] text-gray-500">Return</th>
-                        <th className="text-right p-2 font-mono text-[11px] text-gray-500">Sharpe</th>
+                        <th className="text-left p-2 font-mono text-xs text-gray-500">Template</th>
+                        <th className="text-right p-2 font-mono text-xs text-gray-500">Trades</th>
+                        <th className="text-right p-2 font-mono text-xs text-gray-500">Win Rate</th>
+                        <th className="text-right p-2 font-mono text-xs text-gray-500">Return</th>
+                        <th className="text-right p-2 font-mono text-xs text-gray-500">Sharpe</th>
                       </tr>
                     </thead>
                     <tbody>
                       {templatePerformance.map((template, idx) => (
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/50">
-                          <td className="p-2 font-mono text-[10px]">
-                            <Badge variant="outline" className="text-[10px]">{template.template}</Badge>
+                          <td className="p-2 font-mono text-[11px]">
+                            <Badge variant="outline" className="text-[11px]">{template.template}</Badge>
                           </td>
-                          <td className="p-2 font-mono text-[10px] text-right">{template.trades || 0}</td>
-                          <td className="p-2 font-mono text-[10px] text-right">
+                          <td className="p-2 font-mono text-[11px] text-right">{template.trades || 0}</td>
+                          <td className="p-2 font-mono text-[11px] text-right">
                             {formatPercentage(template.win_rate || 0)}
                           </td>
-                          <td className={cn('p-2 font-mono text-[10px] text-right font-semibold',
+                          <td className={cn('p-2 font-mono text-[11px] text-right font-semibold',
                             (template.total_return || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(template.total_return || 0)}
                           </td>
-                          <td className="p-2 font-mono text-[10px] text-right">
+                          <td className="p-2 font-mono text-[11px] text-right">
                             {(template.sharpe_ratio || 0).toFixed(2)}
                           </td>
                         </tr>
@@ -1820,7 +1820,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </table>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500 text-[10px]">No template data available</div>
+                <div className="text-center py-12 text-gray-500 text-[11px]">No template data available</div>
               )}
             </motion.div>
 
@@ -1836,13 +1836,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     { label: 'Total Savings', value: formatCurrency(costSavings.total_savings || 0), color: 'text-blue-400', sub: `${formatPercentage(((costSavings.total_savings || 0) / (costSavings.before_costs || 1)) * 100)} reduction` },
                   ]} cols={3} />
                   <div>
-                    <p className="text-[11px] text-gray-500 mb-2">Cost as % of Returns</p>
+                    <p className="text-xs text-gray-500 mb-2">Cost as % of Returns</p>
                     <div className="flex items-center gap-2">
                       <div className="flex-1 bg-[var(--color-dark-surface)] rounded-full h-3">
                         <div className="bg-blue-500 h-3 rounded-full" 
                           style={{ width: `${Math.min(100, costSavings.cost_as_percent_of_returns || 0)}%` }} />
                       </div>
-                      <span className="text-[11px] font-mono font-semibold">
+                      <span className="text-xs font-mono font-semibold">
                         {formatPercentage(costSavings.cost_as_percent_of_returns || 0)}
                       </span>
                     </div>
@@ -1860,7 +1860,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500 text-[10px]">No cost data available</div>
+                <div className="text-center py-12 text-gray-500 text-[11px]">No cost data available</div>
               )}
             </motion.div>
           </TabsContent>
@@ -1871,17 +1871,17 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           <TabsContent value="trade-journal" className="space-y-3">
             <SectionLabel actions={
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handleExportCSV} className="h-6 text-[10px]">
+                <Button variant="outline" size="sm" onClick={handleExportCSV} className="h-6 text-[11px]">
                   <Download className="h-3 w-3 mr-1" />
                   Export CSV
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleGenerateMonthlyReport} className="h-6 text-[10px]">
+                <Button variant="outline" size="sm" onClick={handleGenerateMonthlyReport} className="h-6 text-[11px]">
                   <FileText className="h-3 w-3 mr-1" />
                   Monthly Report
                 </Button>
               </div>
             }>Trade Journal</SectionLabel>
-            <div className="text-[11px] text-gray-500 mb-2">
+            <div className="text-xs text-gray-500 mb-2">
               Detailed trade history with filters • {tradeJournalEntries.length} trades
             </div>
 
@@ -1891,19 +1891,19 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 placeholder="Strategy ID..."
                 value={journalFilters.strategy_id}
                 onChange={(e) => setJournalFilters({ ...journalFilters, strategy_id: e.target.value })}
-                className="h-7 text-[11px]"
+                className="h-7 text-xs"
               />
               <Input
                 placeholder="Symbol..."
                 value={journalFilters.symbol}
                 onChange={(e) => setJournalFilters({ ...journalFilters, symbol: e.target.value })}
-                className="h-7 text-[11px]"
+                className="h-7 text-xs"
               />
               <Select
                 value={journalFilters.regime || 'all'}
                 onValueChange={(value) => setJournalFilters({ ...journalFilters, regime: value === 'all' ? '' : value })}
               >
-                <SelectTrigger className="h-7 text-[11px]">
+                <SelectTrigger className="h-7 text-xs">
                   <SelectValue placeholder="All Regimes" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1918,7 +1918,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 value={journalFilters.outcome}
                 onValueChange={(value) => setJournalFilters({ ...journalFilters, outcome: value as 'all' | 'win' | 'loss' })}
               >
-                <SelectTrigger className="h-7 text-[11px]">
+                <SelectTrigger className="h-7 text-xs">
                   <SelectValue placeholder="All Outcomes" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1935,24 +1935,24 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 placeholder="Start Date"
                 value={journalFilters.start_date}
                 onChange={(e) => setJournalFilters({ ...journalFilters, start_date: e.target.value })}
-                className="h-7 text-[11px]"
+                className="h-7 text-xs"
               />
               <Input
                 type="date"
                 placeholder="End Date"
                 value={journalFilters.end_date}
                 onChange={(e) => setJournalFilters({ ...journalFilters, end_date: e.target.value })}
-                className="h-7 text-[11px]"
+                className="h-7 text-xs"
               />
             </div>
 
             {/* Trade Table */}
             {tradeJournalEntries.length > 0 ? (
               <div className="overflow-x-auto max-h-[600px] overflow-y-auto rounded-md border border-[var(--color-dark-border)]">
-                <table className="w-full text-[11px]">
+                <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-[var(--color-dark-surface)] border-b border-[var(--color-dark-border)]">
                     <tr>
-                      <th className="text-left p-2 font-mono text-[11px] text-gray-500 cursor-pointer"
+                      <th className="text-left p-2 font-mono text-xs text-gray-500 cursor-pointer"
                         onClick={() => {
                           if (journalSortBy === 'entry_time') {
                             setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
@@ -1963,7 +1963,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                         }}>
                         Date {journalSortBy === 'entry_time' && (journalSortOrder === 'asc' ? '↑' : '↓')}
                       </th>
-                      <th className="text-left p-2 font-mono text-[11px] text-gray-500 cursor-pointer"
+                      <th className="text-left p-2 font-mono text-xs text-gray-500 cursor-pointer"
                         onClick={() => {
                           if (journalSortBy === 'symbol') {
                             setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
@@ -1974,10 +1974,10 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                         }}>
                         Symbol {journalSortBy === 'symbol' && (journalSortOrder === 'asc' ? '↑' : '↓')}
                       </th>
-                      <th className="text-left p-2 font-mono text-[11px] text-gray-500">Strategy</th>
-                      <th className="text-right p-2 font-mono text-[11px] text-gray-500">Entry</th>
-                      <th className="text-right p-2 font-mono text-[11px] text-gray-500">Exit</th>
-                      <th className="text-right p-2 font-mono text-[11px] text-gray-500 cursor-pointer"
+                      <th className="text-left p-2 font-mono text-xs text-gray-500">Strategy</th>
+                      <th className="text-right p-2 font-mono text-xs text-gray-500">Entry</th>
+                      <th className="text-right p-2 font-mono text-xs text-gray-500">Exit</th>
+                      <th className="text-right p-2 font-mono text-xs text-gray-500 cursor-pointer"
                         onClick={() => {
                           if (journalSortBy === 'pnl') {
                             setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
@@ -1988,7 +1988,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                         }}>
                         P&L {journalSortBy === 'pnl' && (journalSortOrder === 'asc' ? '↑' : '↓')}
                       </th>
-                      <th className="text-right p-2 font-mono text-[11px] text-gray-500 cursor-pointer"
+                      <th className="text-right p-2 font-mono text-xs text-gray-500 cursor-pointer"
                         onClick={() => {
                           if (journalSortBy === 'hold_time_hours') {
                             setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
@@ -1999,50 +1999,50 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                         }}>
                         Hold Time {journalSortBy === 'hold_time_hours' && (journalSortOrder === 'asc' ? '↑' : '↓')}
                       </th>
-                      <th className="text-left p-2 font-mono text-[11px] text-gray-500">Regime</th>
-                      <th className="text-left p-2 font-mono text-[11px] text-gray-500">Exit Reason</th>
-                      <th className="text-right p-2 font-mono text-[11px] text-gray-500">Conviction</th>
+                      <th className="text-left p-2 font-mono text-xs text-gray-500">Regime</th>
+                      <th className="text-left p-2 font-mono text-xs text-gray-500">Exit Reason</th>
+                      <th className="text-right p-2 font-mono text-xs text-gray-500">Conviction</th>
                     </tr>
                   </thead>
                   <tbody>
                     {tradeJournalEntries.map((trade) => (
                       <tr key={trade.id} className="border-b border-[var(--color-dark-border)]/50 hover:bg-[var(--color-dark-surface)]">
-                        <td className="p-2 font-mono text-[10px]">
+                        <td className="p-2 font-mono text-[11px]">
                           {formatTimestamp(trade.entry_time, { includeTime: false })}
                         </td>
-                        <td className="p-2 font-mono text-[10px] font-semibold">{trade.symbol}</td>
-                        <td className="p-2 font-mono text-[11px] text-gray-500 truncate max-w-[150px]" title={trade.strategy_name || trade.strategy_id}>
+                        <td className="p-2 font-mono text-[11px] font-semibold">{trade.symbol}</td>
+                        <td className="p-2 font-mono text-xs text-gray-500 truncate max-w-[150px]" title={trade.strategy_name || trade.strategy_id}>
                           {trade.strategy_name || trade.strategy_id}
                         </td>
-                        <td className="p-2 font-mono text-[10px] text-right">
+                        <td className="p-2 font-mono text-[11px] text-right">
                           {formatCurrency(trade.entry_price)}
                         </td>
-                        <td className="p-2 font-mono text-[10px] text-right">
+                        <td className="p-2 font-mono text-[11px] text-right">
                           {trade.exit_price ? formatCurrency(trade.exit_price) : '-'}
                         </td>
-                        <td className={cn('p-2 font-mono text-[10px] text-right font-semibold',
+                        <td className={cn('p-2 font-mono text-[11px] text-right font-semibold',
                           (trade.pnl || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                           {trade.pnl ? formatCurrency(trade.pnl) : '-'}
                           {trade.pnl_percent && (
-                            <span className="text-[10px] ml-1">
+                            <span className="text-[11px] ml-1">
                               ({formatPercentage(trade.pnl_percent)})
                             </span>
                           )}
                         </td>
-                        <td className="p-2 font-mono text-[10px] text-right">
+                        <td className="p-2 font-mono text-[11px] text-right">
                           {trade.hold_time_hours ? `${(trade.hold_time_hours / 24).toFixed(1)}d` : '-'}
                         </td>
-                        <td className="p-2 text-[10px]">
+                        <td className="p-2 text-[11px]">
                           {trade.market_regime && (
-                            <Badge variant="outline" className="text-[10px]">
+                            <Badge variant="outline" className="text-[11px]">
                               {trade.market_regime}
                             </Badge>
                           )}
                         </td>
-                        <td className="p-2 text-[11px] text-gray-500">
+                        <td className="p-2 text-xs text-gray-500">
                           {trade.exit_reason || '-'}
                         </td>
-                        <td className="p-2 font-mono text-[10px] text-right">
+                        <td className="p-2 font-mono text-[11px] text-right">
                           {trade.conviction_score ? trade.conviction_score.toFixed(0) : '-'}
                         </td>
                       </tr>
@@ -2051,7 +2051,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 </table>
               </div>
             ) : (
-              <div className="text-center py-12 text-gray-500 text-[11px]">
+              <div className="text-center py-12 text-gray-500 text-xs">
                 No trades match your filters
               </div>
             )}
@@ -2092,11 +2092,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               <div className="flex items-center justify-center gap-6 mt-2">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-accent-green" />
-                  <span className="text-[11px] text-gray-500">Winners</span>
+                  <span className="text-xs text-gray-500">Winners</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 rounded-full bg-accent-red" />
-                  <span className="text-[11px] text-gray-500">Losers</span>
+                  <span className="text-xs text-gray-500">Losers</span>
                 </div>
               </div>
             </motion.div>
@@ -2114,22 +2114,22 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     {tradeJournalPatterns.best_patterns.map((pattern, idx) => (
                       <div key={idx} className="p-2 bg-[var(--color-dark-surface)] rounded">
                         <div className="flex items-center justify-between mb-1">
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-[11px]">
                             {pattern.pattern_type}
                           </Badge>
-                          <span className="text-[11px] font-mono font-semibold text-accent-green">
+                          <span className="text-xs font-mono font-semibold text-accent-green">
                             {formatPercentage(pattern.win_rate ?? 0)}
                           </span>
                         </div>
-                        <p className="text-[11px] font-mono">{pattern.pattern}</p>
-                        <p className="text-[11px] text-gray-500 mt-1">
+                        <p className="text-xs font-mono">{pattern.pattern}</p>
+                        <p className="text-xs text-gray-500 mt-1">
                           {pattern.total_trades} trades • Avg P&L: {formatCurrency(pattern.avg_pnl ?? 0)}
                         </p>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-[10px]">
+                  <div className="text-center py-8 text-gray-500 text-[11px]">
                     No patterns identified yet
                   </div>
                 )}
@@ -2143,22 +2143,22 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     {tradeJournalPatterns.worst_patterns.map((pattern, idx) => (
                       <div key={idx} className="p-2 bg-[var(--color-dark-surface)] rounded">
                         <div className="flex items-center justify-between mb-1">
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-[11px]">
                             {pattern.pattern_type}
                           </Badge>
-                          <span className="text-[11px] font-mono font-semibold text-accent-red">
+                          <span className="text-xs font-mono font-semibold text-accent-red">
                             {formatPercentage(pattern.win_rate ?? 0)}
                           </span>
                         </div>
-                        <p className="text-[11px] font-mono">{pattern.pattern}</p>
-                        <p className="text-[11px] text-gray-500 mt-1">
+                        <p className="text-xs font-mono">{pattern.pattern}</p>
+                        <p className="text-xs text-gray-500 mt-1">
                           {pattern.total_trades} trades • Avg P&L: {formatCurrency(pattern.avg_pnl ?? 0)}
                         </p>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-[10px]">
+                  <div className="text-center py-8 text-gray-500 text-[11px]">
                     No patterns identified yet
                   </div>
                 )}
@@ -2182,10 +2182,10 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                           {rec.type === 'optimize_hold_period' && <Target className="h-4 w-4 text-purple-500" />}
                         </div>
                         <div className="flex-1">
-                          <p className="text-[11px] font-semibold mb-1 capitalize">
+                          <p className="text-xs font-semibold mb-1 capitalize">
                             {rec.type.replace(/_/g, ' ')}
                           </p>
-                          <p className="text-[11px] text-gray-500">
+                          <p className="text-xs text-gray-500">
                             <span className="font-mono">{rec.target}</span> - {rec.reason}
                           </p>
                         </div>
@@ -2194,7 +2194,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 text-gray-500 text-[10px]">
+                <div className="text-center py-8 text-gray-500 text-[11px]">
                   No recommendations available yet. More trade data needed.
                 </div>
               )}

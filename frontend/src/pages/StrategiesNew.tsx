@@ -1465,11 +1465,11 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
               <div className="space-y-1">
                 {templateDistribution.map(({ name, count }) => (
                   <div key={name} className="flex items-center gap-2 px-1">
-                    <span className="text-[11px] font-mono text-gray-400 w-28 truncate">{name}</span>
+                    <span className="text-xs font-mono text-gray-400 w-28 truncate">{name}</span>
                     <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
                       <div className="h-full bg-accent-green" style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
                     </div>
-                    <span className="text-[10px] font-mono text-gray-500 w-6 text-right">{count}</span>
+                    <span className="text-[11px] font-mono text-gray-500 w-6 text-right">{count}</span>
                   </div>
                 ))}
               </div>
@@ -1482,15 +1482,15 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 <div className="space-y-1">
                   {categoryDistribution.map(({ name, count }) => (
                     <div key={name} className="flex items-center gap-2 px-1">
-                      <span className="text-[11px] font-mono text-gray-400 w-24 truncate">{name}</span>
+                      <span className="text-xs font-mono text-gray-400 w-24 truncate">{name}</span>
                       <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
                         <div className={cn("h-full", name === 'Alpha Edge' ? "bg-purple-500" : name === 'Template-Based' ? "bg-blue-500" : "bg-gray-500")}
                           style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
                       </div>
-                      <span className="text-[10px] font-mono text-gray-500 w-6 text-right">{count}</span>
+                      <span className="text-[11px] font-mono text-gray-500 w-6 text-right">{count}</span>
                     </div>
                   ))}
-                  {categoryDistribution.length === 0 && <div className="text-[10px] text-gray-600 px-1">No data</div>}
+                  {categoryDistribution.length === 0 && <div className="text-[11px] text-gray-600 px-1">No data</div>}
                 </div>
               </div>
               <div>
@@ -1498,14 +1498,14 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 <div className="space-y-1">
                   {typeDistribution.map(({ name, count }) => (
                     <div key={name} className="flex items-center gap-2 px-1">
-                      <span className="text-[11px] font-mono text-gray-400 w-24 truncate">{name}</span>
+                      <span className="text-xs font-mono text-gray-400 w-24 truncate">{name}</span>
                       <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
                         <div className="h-full bg-accent-green" style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
                       </div>
-                      <span className="text-[10px] font-mono text-gray-500 w-6 text-right">{count}</span>
+                      <span className="text-[11px] font-mono text-gray-500 w-6 text-right">{count}</span>
                     </div>
                   ))}
-                  {typeDistribution.length === 0 && <div className="text-[10px] text-gray-600 px-1">No data</div>}
+                  {typeDistribution.length === 0 && <div className="text-[11px] text-gray-600 px-1">No data</div>}
                 </div>
               </div>
             </div>
@@ -1517,22 +1517,22 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 {topPerformingStrategies.map((strategy, index) => (
                   <div key={strategy.id} className="flex items-center justify-between px-2 py-1.5 hover:bg-gray-800/40 rounded">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[10px] font-mono text-gray-500 w-4">{index + 1}</span>
+                      <span className="text-[11px] font-mono text-gray-500 w-4">{index + 1}</span>
                       <div className="min-w-0">
-                        <div className="text-[11px] font-mono text-gray-200 truncate">{strategy.name}</div>
-                        <div className="text-[11px] text-gray-500 font-mono truncate">{strategy.symbols.join(', ')}</div>
+                        <div className="text-xs font-mono text-gray-200 truncate">{strategy.name}</div>
+                        <div className="text-xs text-gray-500 font-mono truncate">{strategy.symbols.join(', ')}</div>
                       </div>
                     </div>
                     <div className="text-right shrink-0 ml-2">
-                      <div className={cn('text-[11px] font-mono font-bold', (strategy.performance_metrics?.total_return || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                      <div className={cn('text-xs font-mono font-bold', (strategy.performance_metrics?.total_return || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                         {formatPercentage((strategy.performance_metrics?.total_return || 0) * 100)}
                       </div>
-                      <div className="text-[11px] text-gray-500 font-mono">S: {formatMetric(strategy.performance_metrics?.sharpe_ratio)}</div>
+                      <div className="text-xs text-gray-500 font-mono">S: {formatMetric(strategy.performance_metrics?.sharpe_ratio)}</div>
                     </div>
                   </div>
                 ))}
                 {topPerformingStrategies.length === 0 && (
-                  <div className="text-center text-gray-600 text-[10px] py-4">No active strategies</div>
+                  <div className="text-center text-gray-600 text-[11px] py-4">No active strategies</div>
                 )}
               </div>
             </div>
@@ -1604,22 +1604,22 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
-                <span className="text-[11px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
-                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[10px] px-2">Backtest</Button>
+                <span className="text-xs text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[11px] px-2">Backtest</Button>
                 {selectedStrategiesInfo.hasBacktested && (
-                  <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-accent-green border-accent-green/30">Activate</Button>
+                  <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[11px] px-2 text-accent-green border-accent-green/30">Activate</Button>
                 )}
                 {selectedStrategiesInfo.hasActive && (
-                  <Button onClick={handleBulkDeactivate} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-yellow-500 border-yellow-500/30">Deactivate</Button>
+                  <Button onClick={handleBulkDeactivate} variant="outline" size="sm" className="h-6 text-[11px] px-2 text-yellow-500 border-yellow-500/30">Deactivate</Button>
                 )}
-                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[10px] px-2">Retire</Button>
+                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[11px] px-2">Retire</Button>
                 {selectedStrategies.size === 2 && (
                   <Button onClick={() => {
                     const selected = Array.from(selectedStrategies).map(id => strategies.find(s => s.id === id)).filter(Boolean) as Strategy[];
                     if (selected.length === 2) { setComparedStrategies([selected[0], selected[1]]); setShowComparison(true); }
-                  }} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-blue-400 border-blue-400/30">Compare</Button>
+                  }} variant="outline" size="sm" className="h-6 text-[11px] px-2 text-blue-400 border-blue-400/30">Compare</Button>
                 )}
-                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[10px] px-2 ml-auto">Clear</Button>
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[11px] px-2 ml-auto">Clear</Button>
               </div>
             )}
 
@@ -1690,11 +1690,11 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
-                <span className="text-[11px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
-                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[10px] px-2">Re-Backtest</Button>
-                <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[10px] px-2 text-accent-green border-accent-green/30">Activate</Button>
-                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[10px] px-2">Retire</Button>
-                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[10px] px-2 ml-auto">Clear</Button>
+                <span className="text-xs text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[11px] px-2">Re-Backtest</Button>
+                <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[11px] px-2 text-accent-green border-accent-green/30">Activate</Button>
+                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[11px] px-2">Retire</Button>
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[11px] px-2 ml-auto">Clear</Button>
               </div>
             )}
 
@@ -1765,9 +1765,9 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {/* Bulk Actions */}
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
-                <span className="text-[11px] text-gray-500 font-mono">{selectedStrategies.size} sel</span>
-                <Button onClick={handleBulkPermanentDelete} variant="destructive" size="sm" className="h-6 text-[10px] px-2">Permanently Delete</Button>
-                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[10px] px-2 ml-auto">Clear</Button>
+                <span className="text-xs text-gray-500 font-mono">{selectedStrategies.size} sel</span>
+                <Button onClick={handleBulkPermanentDelete} variant="destructive" size="sm" className="h-6 text-[11px] px-2">Permanently Delete</Button>
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[11px] px-2 ml-auto">Clear</Button>
               </div>
             )}
 
@@ -1803,9 +1803,9 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           {/* Template Rankings Tab (Task 9.1) */}
           <TabsContent value="rankings" className="p-2">
               {templateRankingsLoading ? (
-                <div className="flex items-center justify-center h-32 text-[11px] text-gray-500">Loading rankings...</div>
+                <div className="flex items-center justify-center h-32 text-xs text-gray-500">Loading rankings...</div>
               ) : templateRankings.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-[11px] text-gray-500">No template ranking data available</div>
+                <div className="flex items-center justify-center h-32 text-xs text-gray-500">No template ranking data available</div>
               ) : (
                 <>
                   <FilterBar>
@@ -1840,7 +1840,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                             { key: 'active_count', label: 'Active' },
                             { key: 'last_proposal_date', label: 'Last Proposal' },
                           ].map((col) => (
-                            <th key={col.key} className={cn('py-1.5 px-2 text-left cursor-pointer hover:text-gray-200 text-[10px]', col.key !== 'name' && 'text-right')}
+                            <th key={col.key} className={cn('py-1.5 px-2 text-left cursor-pointer hover:text-gray-200 text-[11px]', col.key !== 'name' && 'text-right')}
                               onClick={() => { if (templateRankingSortKey === col.key) { setTemplateRankingSortDir((d) => d === 'asc' ? 'desc' : 'asc'); } else { setTemplateRankingSortKey(col.key); setTemplateRankingSortDir('desc'); } }}>
                               {col.label} {templateRankingSortKey === col.key ? (templateRankingSortDir === 'desc' ? '↓' : '↑') : ''}
                             </th>
@@ -1862,12 +1862,12 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                           })
                           .map((t: any, idx: number) => (
                             <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
-                              <td className="py-1.5 px-2 text-gray-200 truncate max-w-[200px] text-[11px]">{t.name || t.template_name || '—'}</td>
+                              <td className="py-1.5 px-2 text-gray-200 truncate max-w-[200px] text-xs">{t.name || t.template_name || '—'}</td>
                               <td className={cn('py-1.5 px-2 text-right text-[13px]', (t.win_rate ?? 0) >= 50 ? 'text-accent-green' : 'text-accent-red')}>{t.win_rate != null ? `${(t.win_rate).toFixed(1)}%` : '—'}</td>
                               <td className="py-1.5 px-2 text-right text-[13px]">{t.avg_sharpe != null ? t.avg_sharpe.toFixed(2) : '—'}</td>
                               <td className="py-1.5 px-2 text-right text-[13px]">{t.total_trades ?? '—'}</td>
                               <td className="py-1.5 px-2 text-right text-[13px]">{t.active_count ?? '—'}</td>
-                              <td className="py-1.5 px-2 text-right text-[11px] text-gray-500">{t.last_proposal_date ? new Date(t.last_proposal_date).toLocaleDateString() : '—'}</td>
+                              <td className="py-1.5 px-2 text-right text-xs text-gray-500">{t.last_proposal_date ? new Date(t.last_proposal_date).toLocaleDateString() : '—'}</td>
                             </tr>
                           ))}
                       </tbody>
@@ -1880,12 +1880,12 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           {/* Blacklists Tab (Task 9.1) */}
           <TabsContent value="blacklists" className="p-2">
               {blacklists.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-[11px] text-gray-500">No blacklisted combinations</div>
+                <div className="flex items-center justify-center h-32 text-xs text-gray-500">No blacklisted combinations</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs font-mono table-dense">
                     <thead>
-                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[10px]">
+                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[11px]">
                         <th className="py-1.5 px-2 text-left">Template</th>
                         <th className="py-1.5 px-2 text-left">Symbol</th>
                         <th className="py-1.5 px-2 text-left">Type</th>
@@ -1896,11 +1896,11 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     <tbody>
                       {blacklists.map((bl: any, idx: number) => (
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
-                          <td className="py-1.5 px-2 text-gray-200 truncate max-w-[180px] text-[11px]">{bl.template}</td>
-                          <td className="py-1.5 px-2 text-gray-300 text-[11px]">{bl.symbol}</td>
-                          <td className="py-1.5 px-2"><Badge variant="secondary" className="text-[10px]">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
-                          <td className="py-1.5 px-2 text-right text-gray-300 text-[11px]">{bl.count}</td>
-                          <td className="py-1.5 px-2 text-gray-500 text-[10px]">{bl.timestamp ? new Date(bl.timestamp).toLocaleDateString() : '—'}</td>
+                          <td className="py-1.5 px-2 text-gray-200 truncate max-w-[180px] text-xs">{bl.template}</td>
+                          <td className="py-1.5 px-2 text-gray-300 text-xs">{bl.symbol}</td>
+                          <td className="py-1.5 px-2"><Badge variant="secondary" className="text-[11px]">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
+                          <td className="py-1.5 px-2 text-right text-gray-300 text-xs">{bl.count}</td>
+                          <td className="py-1.5 px-2 text-gray-500 text-[11px]">{bl.timestamp ? new Date(bl.timestamp).toLocaleDateString() : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1912,12 +1912,12 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           {/* Idle Demotions Tab (Task 9.1) */}
           <TabsContent value="demotions" className="p-2">
               {idleDemotions.length === 0 ? (
-                <div className="flex items-center justify-center h-32 text-[11px] text-gray-500">No recent demotions</div>
+                <div className="flex items-center justify-center h-32 text-xs text-gray-500">No recent demotions</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs font-mono table-dense">
                     <thead>
-                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[10px]">
+                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[11px]">
                         <th className="py-1.5 px-2 text-left">Strategy</th>
                         <th className="py-1.5 px-2 text-left">Timestamp</th>
                         <th className="py-1.5 px-2 text-left">Reason</th>
@@ -1926,9 +1926,9 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     <tbody>
                       {idleDemotions.map((d: any, idx: number) => (
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
-                          <td className="py-1.5 px-2 text-gray-200 text-[11px]">{d.name}</td>
-                          <td className="py-1.5 px-2 text-gray-500 text-[10px]">{d.timestamp ? formatTimestamp(d.timestamp) : '—'}</td>
-                          <td className="py-1.5 px-2 text-gray-500 text-[11px]">{d.reason}</td>
+                          <td className="py-1.5 px-2 text-gray-200 text-xs">{d.name}</td>
+                          <td className="py-1.5 px-2 text-gray-500 text-[11px]">{d.timestamp ? formatTimestamp(d.timestamp) : '—'}</td>
+                          <td className="py-1.5 px-2 text-gray-500 text-xs">{d.reason}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1958,14 +1958,14 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           <div className="border-t border-[var(--color-dark-border)] pt-1.5">
             <SectionLabel>Top 5 Rankings</SectionLabel>
             {templateRankingsLoading ? (
-              <div className="text-center py-3 text-[11px] text-gray-500">Loading...</div>
+              <div className="text-center py-3 text-xs text-gray-500">Loading...</div>
             ) : top5Rankings.length === 0 ? (
-              <div className="text-center py-3 text-[11px] text-gray-500">No ranking data</div>
+              <div className="text-center py-3 text-xs text-gray-500">No ranking data</div>
             ) : (
               <table className="w-full text-xs font-mono">
                 <thead>
                   <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
-                    <th className="py-1 px-1.5 text-left text-[11px]">Template</th>
+                    <th className="py-1 px-1.5 text-left text-xs">Template</th>
                     <th className="py-1 px-1.5 text-right text-[13px]">WR</th>
                     <th className="py-1 px-1.5 text-right text-[13px]">Sharpe</th>
                   </tr>
@@ -1989,14 +1989,14 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
           <div className="border-t border-[var(--color-dark-border)] pt-1.5">
             <SectionLabel>Recent Events</SectionLabel>
             {recentLifecycleEvents.length === 0 ? (
-              <div className="text-center py-3 text-[11px] text-gray-500">No recent events</div>
+              <div className="text-center py-3 text-xs text-gray-500">No recent events</div>
             ) : (
               <div className="space-y-0.5 overflow-auto max-h-[300px]">
                 {recentLifecycleEvents.map((event, idx) => (
                   <div key={idx} className="flex items-center justify-between py-1 px-1.5 rounded hover:bg-gray-800/40">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className={cn(
-                        'text-[10px] font-mono font-semibold px-1 py-0.5 rounded',
+                        'text-[11px] font-mono font-semibold px-1 py-0.5 rounded',
                         event.type === 'Activated' && 'bg-accent-green/20 text-accent-green',
                         event.type === 'Retired' && 'bg-accent-red/20 text-accent-red',
                         event.type === 'Demoted' && 'bg-yellow-400/20 text-yellow-400',
@@ -2005,7 +2005,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                       </span>
                       <span className="font-mono text-[13px] text-gray-200 truncate">{event.name}</span>
                     </div>
-                    <span className="text-[11px] text-gray-500 shrink-0 ml-1">{formatTimestamp(event.timestamp)}</span>
+                    <span className="text-xs text-gray-500 shrink-0 ml-1">{formatTimestamp(event.timestamp)}</span>
                   </div>
                 ))}
               </div>

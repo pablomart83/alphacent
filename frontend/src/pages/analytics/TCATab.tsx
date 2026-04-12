@@ -76,7 +76,7 @@ export const TCATab: FC<TCATabProps> = ({
           <div className="text-center text-muted-foreground font-mono">
             <AlertTriangle className="h-8 w-8 mx-auto mb-3 opacity-50" />
             <p>Minimum 10 closed trades required for meaningful execution quality analysis.</p>
-            <p className="text-[10px] mt-1">Try selecting a longer period.</p>
+            <p className="text-[11px] mt-1">Try selecting a longer period.</p>
           </div>
         </div>
       ) : data ? (
@@ -105,7 +105,7 @@ export const TCATab: FC<TCATabProps> = ({
             transition={{ duration: 0.3, delay: 0.05 }}>
             <div className="border border-border rounded-md p-4">
               <SectionLabel>Slippage by Symbol</SectionLabel>
-              <p className="text-[10px] font-mono text-muted-foreground mb-2">Red &gt; 0.5%, Yellow 0.1-0.5%</p>
+              <p className="text-[11px] font-mono text-muted-foreground mb-2">Red &gt; 0.5%, Yellow 0.1-0.5%</p>
               <SVGBarChart
                 data={data.slippage_by_symbol.map((entry) => ({
                   label: entry.symbol,
@@ -131,7 +131,7 @@ export const TCATab: FC<TCATabProps> = ({
                       <tr>
                         <th className="px-1 py-1 text-xs font-mono text-muted-foreground">Day</th>
                         {Array.from({ length: 24 }, (_, h) => (
-                          <th key={h} className="px-0.5 py-1 text-[10px] font-mono text-muted-foreground text-center">{h}</th>
+                          <th key={h} className="px-0.5 py-1 text-[11px] font-mono text-muted-foreground text-center">{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -270,9 +270,9 @@ export const TCATab: FC<TCATabProps> = ({
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 {data.per_asset_class.map(ac => (
                   <div key={ac.asset_class} className="border border-border rounded-md px-3 pt-3 pb-2">
-                    <p className="text-[10px] text-muted-foreground mb-1 font-mono">{ac.asset_class}</p>
+                    <p className="text-[11px] text-muted-foreground mb-1 font-mono">{ac.asset_class}</p>
                     <p className="text-[13px] font-bold font-mono">{ac.avg_slippage.toFixed(3)}%</p>
-                    <p className="text-[10px] text-muted-foreground font-mono">{ac.avg_shortfall_bps.toFixed(1)} bps · {ac.trade_count} trades</p>
+                    <p className="text-[11px] text-muted-foreground font-mono">{ac.avg_shortfall_bps.toFixed(1)} bps · {ac.trade_count} trades</p>
                   </div>
                 ))}
               </div>
