@@ -50,7 +50,7 @@ export const FilterBar: FC<FilterBarProps> = ({
           placeholder={searchPlaceholder}
           value={searchValue ?? ''}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="pl-7 h-7 text-[11px] w-[150px]"
+          className="pl-7 h-7 text-xs w-[150px]"
         />
       </div>
     )}

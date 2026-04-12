@@ -1469,7 +1469,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                     <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
                       <div className="h-full bg-accent-green" style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
                     </div>
-                    <span className="text-[11px] font-mono text-gray-500 w-6 text-right">{count}</span>
+                    <span className="text-xs font-mono text-gray-500 w-6 text-right">{count}</span>
                   </div>
                 ))}
               </div>
@@ -1487,10 +1487,10 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                         <div className={cn("h-full", name === 'Alpha Edge' ? "bg-purple-500" : name === 'Template-Based' ? "bg-blue-500" : "bg-gray-500")}
                           style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
                       </div>
-                      <span className="text-[11px] font-mono text-gray-500 w-6 text-right">{count}</span>
+                      <span className="text-xs font-mono text-gray-500 w-6 text-right">{count}</span>
                     </div>
                   ))}
-                  {categoryDistribution.length === 0 && <div className="text-[11px] text-gray-600 px-1">No data</div>}
+                  {categoryDistribution.length === 0 && <div className="text-xs text-gray-600 px-1">No data</div>}
                 </div>
               </div>
               <div>
@@ -1502,10 +1502,10 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                       <div className="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
                         <div className="h-full bg-accent-green" style={{ width: `${(count / Math.max(activeStrategies.length, 1)) * 100}%` }} />
                       </div>
-                      <span className="text-[11px] font-mono text-gray-500 w-6 text-right">{count}</span>
+                      <span className="text-xs font-mono text-gray-500 w-6 text-right">{count}</span>
                     </div>
                   ))}
-                  {typeDistribution.length === 0 && <div className="text-[11px] text-gray-600 px-1">No data</div>}
+                  {typeDistribution.length === 0 && <div className="text-xs text-gray-600 px-1">No data</div>}
                 </div>
               </div>
             </div>
@@ -1517,7 +1517,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 {topPerformingStrategies.map((strategy, index) => (
                   <div key={strategy.id} className="flex items-center justify-between px-2 py-1.5 hover:bg-gray-800/40 rounded">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[11px] font-mono text-gray-500 w-4">{index + 1}</span>
+                      <span className="text-xs font-mono text-gray-500 w-4">{index + 1}</span>
                       <div className="min-w-0">
                         <div className="text-xs font-mono text-gray-200 truncate">{strategy.name}</div>
                         <div className="text-xs text-gray-500 font-mono truncate">{strategy.symbols.join(', ')}</div>
@@ -1532,7 +1532,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                   </div>
                 ))}
                 {topPerformingStrategies.length === 0 && (
-                  <div className="text-center text-gray-600 text-[11px] py-4">No active strategies</div>
+                  <div className="text-center text-gray-600 text-xs py-4">No active strategies</div>
                 )}
               </div>
             </div>
@@ -1605,21 +1605,21 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
                 <span className="text-xs text-gray-500 font-mono">{selectedStrategies.size} sel</span>
-                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[11px] px-2">Backtest</Button>
+                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-xs px-2">Backtest</Button>
                 {selectedStrategiesInfo.hasBacktested && (
-                  <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[11px] px-2 text-accent-green border-accent-green/30">Activate</Button>
+                  <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-xs px-2 text-accent-green border-accent-green/30">Activate</Button>
                 )}
                 {selectedStrategiesInfo.hasActive && (
-                  <Button onClick={handleBulkDeactivate} variant="outline" size="sm" className="h-6 text-[11px] px-2 text-yellow-500 border-yellow-500/30">Deactivate</Button>
+                  <Button onClick={handleBulkDeactivate} variant="outline" size="sm" className="h-6 text-xs px-2 text-yellow-500 border-yellow-500/30">Deactivate</Button>
                 )}
-                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[11px] px-2">Retire</Button>
+                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-xs px-2">Retire</Button>
                 {selectedStrategies.size === 2 && (
                   <Button onClick={() => {
                     const selected = Array.from(selectedStrategies).map(id => strategies.find(s => s.id === id)).filter(Boolean) as Strategy[];
                     if (selected.length === 2) { setComparedStrategies([selected[0], selected[1]]); setShowComparison(true); }
-                  }} variant="outline" size="sm" className="h-6 text-[11px] px-2 text-blue-400 border-blue-400/30">Compare</Button>
+                  }} variant="outline" size="sm" className="h-6 text-xs px-2 text-blue-400 border-blue-400/30">Compare</Button>
                 )}
-                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[11px] px-2 ml-auto">Clear</Button>
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-xs px-2 ml-auto">Clear</Button>
               </div>
             )}
 
@@ -1691,10 +1691,10 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
                 <span className="text-xs text-gray-500 font-mono">{selectedStrategies.size} sel</span>
-                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-[11px] px-2">Re-Backtest</Button>
-                <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-[11px] px-2 text-accent-green border-accent-green/30">Activate</Button>
-                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-[11px] px-2">Retire</Button>
-                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[11px] px-2 ml-auto">Clear</Button>
+                <Button onClick={handleBulkBacktest} variant="outline" size="sm" className="h-6 text-xs px-2">Re-Backtest</Button>
+                <Button onClick={handleBulkActivate} variant="outline" size="sm" className="h-6 text-xs px-2 text-accent-green border-accent-green/30">Activate</Button>
+                <Button onClick={handleBulkRetire} variant="destructive" size="sm" className="h-6 text-xs px-2">Retire</Button>
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-xs px-2 ml-auto">Clear</Button>
               </div>
             )}
 
@@ -1766,8 +1766,8 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
             {selectedStrategies.size > 0 && (
               <div className="flex items-center gap-2 py-1 border-t border-[var(--color-dark-border)]">
                 <span className="text-xs text-gray-500 font-mono">{selectedStrategies.size} sel</span>
-                <Button onClick={handleBulkPermanentDelete} variant="destructive" size="sm" className="h-6 text-[11px] px-2">Permanently Delete</Button>
-                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-[11px] px-2 ml-auto">Clear</Button>
+                <Button onClick={handleBulkPermanentDelete} variant="destructive" size="sm" className="h-6 text-xs px-2">Permanently Delete</Button>
+                <Button onClick={() => setSelectedStrategies(new Set())} variant="ghost" size="sm" className="h-6 text-xs px-2 ml-auto">Clear</Button>
               </div>
             )}
 
@@ -1840,7 +1840,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                             { key: 'active_count', label: 'Active' },
                             { key: 'last_proposal_date', label: 'Last Proposal' },
                           ].map((col) => (
-                            <th key={col.key} className={cn('py-1.5 px-2 text-left cursor-pointer hover:text-gray-200 text-[11px]', col.key !== 'name' && 'text-right')}
+                            <th key={col.key} className={cn('py-1.5 px-2 text-left cursor-pointer hover:text-gray-200 text-xs', col.key !== 'name' && 'text-right')}
                               onClick={() => { if (templateRankingSortKey === col.key) { setTemplateRankingSortDir((d) => d === 'asc' ? 'desc' : 'asc'); } else { setTemplateRankingSortKey(col.key); setTemplateRankingSortDir('desc'); } }}>
                               {col.label} {templateRankingSortKey === col.key ? (templateRankingSortDir === 'desc' ? '↓' : '↑') : ''}
                             </th>
@@ -1885,7 +1885,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs font-mono table-dense">
                     <thead>
-                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[11px]">
+                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-xs">
                         <th className="py-1.5 px-2 text-left">Template</th>
                         <th className="py-1.5 px-2 text-left">Symbol</th>
                         <th className="py-1.5 px-2 text-left">Type</th>
@@ -1898,9 +1898,9 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
                           <td className="py-1.5 px-2 text-gray-200 truncate max-w-[180px] text-xs">{bl.template}</td>
                           <td className="py-1.5 px-2 text-gray-300 text-xs">{bl.symbol}</td>
-                          <td className="py-1.5 px-2"><Badge variant="secondary" className="text-[11px]">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
+                          <td className="py-1.5 px-2"><Badge variant="secondary" className="text-xs">{bl.type === 'rejection' ? 'Rejection' : 'Zero Trade'}</Badge></td>
                           <td className="py-1.5 px-2 text-right text-gray-300 text-xs">{bl.count}</td>
-                          <td className="py-1.5 px-2 text-gray-500 text-[11px]">{bl.timestamp ? new Date(bl.timestamp).toLocaleDateString() : '—'}</td>
+                          <td className="py-1.5 px-2 text-gray-500 text-xs">{bl.timestamp ? new Date(bl.timestamp).toLocaleDateString() : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1917,7 +1917,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs font-mono table-dense">
                     <thead>
-                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[11px]">
+                      <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-xs">
                         <th className="py-1.5 px-2 text-left">Strategy</th>
                         <th className="py-1.5 px-2 text-left">Timestamp</th>
                         <th className="py-1.5 px-2 text-left">Reason</th>
@@ -1927,7 +1927,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                       {idleDemotions.map((d: any, idx: number) => (
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
                           <td className="py-1.5 px-2 text-gray-200 text-xs">{d.name}</td>
-                          <td className="py-1.5 px-2 text-gray-500 text-[11px]">{d.timestamp ? formatTimestamp(d.timestamp) : '—'}</td>
+                          <td className="py-1.5 px-2 text-gray-500 text-xs">{d.timestamp ? formatTimestamp(d.timestamp) : '—'}</td>
                           <td className="py-1.5 px-2 text-gray-500 text-xs">{d.reason}</td>
                         </tr>
                       ))}
@@ -1996,7 +1996,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                   <div key={idx} className="flex items-center justify-between py-1 px-1.5 rounded hover:bg-gray-800/40">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className={cn(
-                        'text-[11px] font-mono font-semibold px-1 py-0.5 rounded',
+                        'text-xs font-mono font-semibold px-1 py-0.5 rounded',
                         event.type === 'Activated' && 'bg-accent-green/20 text-accent-green',
                         event.type === 'Retired' && 'bg-accent-red/20 text-accent-red',
                         event.type === 'Demoted' && 'bg-yellow-400/20 text-yellow-400',

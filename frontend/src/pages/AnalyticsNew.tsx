@@ -990,7 +990,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                           <div className="border-t border-[var(--color-dark-border)] pt-2 space-y-1">
                             <p className="text-xs text-gray-500">Retirement Reasons</p>
                             {Object.entries(cioDashboard.retirement_reasons).map(([reason, count]) => (
-                              <div key={reason} className="flex justify-between text-[11px]"><span className="text-gray-500 capitalize">{reason.replace(/_/g, ' ')}</span><span>{count as number}</span></div>
+                              <div key={reason} className="flex justify-between text-xs"><span className="text-gray-500 capitalize">{reason.replace(/_/g, ' ')}</span><span>{count as number}</span></div>
                             ))}
                           </div>
                         )}
@@ -1464,7 +1464,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     <div key={assetClass} className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold capitalize">{assetClass}</span>
-                        <Badge variant="outline" className="text-[11px]">{(data as any).confidence ? `${((data as any).confidence * 100).toFixed(0)}%` : ''}</Badge>
+                        <Badge variant="outline" className="text-xs">{(data as any).confidence ? `${((data as any).confidence * 100).toFixed(0)}%` : ''}</Badge>
                       </div>
                       <p className="text-[13px] font-bold font-mono">{((data as any).regime || 'unknown').replace(/_/g, ' ')}</p>
                       <div className="text-xs text-gray-500 space-y-0.5">
@@ -1515,7 +1515,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between text-xs">
                       <span>Phase</span>
-                      <Badge variant="outline" className="font-mono text-[11px]">{regimeAnalysis.crypto_cycle.phase?.replace(/_/g, ' ')}</Badge>
+                      <Badge variant="outline" className="font-mono text-xs">{regimeAnalysis.crypto_cycle.phase?.replace(/_/g, ' ')}</Badge>
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span>Months Since Halving</span>
@@ -1527,7 +1527,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     </div>
                     <div className="flex items-center justify-between text-xs">
                       <span>Recommendation</span>
-                      <Badge className={cn('text-[11px]',
+                      <Badge className={cn('text-xs',
                         regimeAnalysis.crypto_cycle.recommendation === 'accumulate' ? 'bg-green-500/20 text-green-400' :
                         regimeAnalysis.crypto_cycle.recommendation === 'hold' ? 'bg-blue-500/20 text-blue-400' :
                         regimeAnalysis.crypto_cycle.recommendation === 'reduce' ? 'bg-yellow-500/20 text-yellow-400' :
@@ -1576,9 +1576,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                           {formatTimestamp(transition.date, { includeTime: false })}
                         </span>
                         <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-[11px]">{transition.from_regime}</Badge>
+                          <Badge variant="outline" className="text-xs">{transition.from_regime}</Badge>
                           <span className="text-gray-500">→</span>
-                          <Badge variant="outline" className="text-[11px]">{transition.to_regime}</Badge>
+                          <Badge variant="outline" className="text-xs">{transition.to_regime}</Badge>
                         </div>
                       </div>
                     </div>
@@ -1608,20 +1608,20 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     <tbody>
                       {regimeAnalysis.strategy_regime_performance.map((row, idx) => (
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/50">
-                          <td className="p-2 font-mono text-[11px]">{row.strategy}</td>
-                          <td className={cn('p-2 font-mono text-[11px] text-right',
+                          <td className="p-2 font-mono text-xs">{row.strategy}</td>
+                          <td className={cn('p-2 font-mono text-xs text-right',
                             row.trending_up >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(row.trending_up)}
                           </td>
-                          <td className={cn('p-2 font-mono text-[11px] text-right',
+                          <td className={cn('p-2 font-mono text-xs text-right',
                             row.trending_down >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(row.trending_down)}
                           </td>
-                          <td className={cn('p-2 font-mono text-[11px] text-right',
+                          <td className={cn('p-2 font-mono text-xs text-right',
                             row.ranging >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(row.ranging)}
                           </td>
-                          <td className={cn('p-2 font-mono text-[11px] text-right',
+                          <td className={cn('p-2 font-mono text-xs text-right',
                             row.volatile >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(row.volatile)}
                           </td>
@@ -1680,7 +1680,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                           .sort(([, a], [, b]) => (b as number) - (a as number))
                           .slice(0, 3)
                           .map(([reason, count]) => (
-                            <div key={reason} className="flex justify-between text-[11px]">
+                            <div key={reason} className="flex justify-between text-xs">
                               <span className="text-gray-500 capitalize">
                                 {reason.replace(/_/g, ' ')}
                               </span>
@@ -1691,7 +1691,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-[11px]">No data available</div>
+                  <div className="text-center py-8 text-gray-500 text-xs">No data available</div>
                 )}
               </div>
 
@@ -1728,19 +1728,19 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                       <div>
                         <p className="text-xs text-gray-500 mb-2">Model Accuracy Metrics</p>
                         <div className="grid grid-cols-2 gap-2">
-                          <div className="flex justify-between text-[11px]">
+                          <div className="flex justify-between text-xs">
                             <span className="text-gray-500">Accuracy</span>
                             <span className="font-mono">{formatPercentage((mlStats.model_accuracy || 0) * 100)}</span>
                           </div>
-                          <div className="flex justify-between text-[11px]">
+                          <div className="flex justify-between text-xs">
                             <span className="text-gray-500">Precision</span>
                             <span className="font-mono">{formatPercentage((mlStats.model_precision || 0) * 100)}</span>
                           </div>
-                          <div className="flex justify-between text-[11px]">
+                          <div className="flex justify-between text-xs">
                             <span className="text-gray-500">Recall</span>
                             <span className="font-mono">{formatPercentage((mlStats.model_recall || 0) * 100)}</span>
                           </div>
-                          <div className="flex justify-between text-[11px]">
+                          <div className="flex justify-between text-xs">
                             <span className="text-gray-500">F1 Score</span>
                             <span className="font-mono">{formatPercentage((mlStats.model_f1_score || 0) * 100)}</span>
                           </div>
@@ -1749,7 +1749,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-[11px]">No data available</div>
+                  <div className="text-center py-8 text-gray-500 text-xs">No data available</div>
                 )}
               </div>
             </motion.div>
@@ -1777,7 +1777,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   />
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500 text-[11px]">No data available</div>
+                <div className="text-center py-12 text-gray-500 text-xs">No data available</div>
               )}
             </motion.div>
 
@@ -1800,18 +1800,18 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     <tbody>
                       {templatePerformance.map((template, idx) => (
                         <tr key={idx} className="border-b border-[var(--color-dark-border)]/50">
-                          <td className="p-2 font-mono text-[11px]">
-                            <Badge variant="outline" className="text-[11px]">{template.template}</Badge>
+                          <td className="p-2 font-mono text-xs">
+                            <Badge variant="outline" className="text-xs">{template.template}</Badge>
                           </td>
-                          <td className="p-2 font-mono text-[11px] text-right">{template.trades || 0}</td>
-                          <td className="p-2 font-mono text-[11px] text-right">
+                          <td className="p-2 font-mono text-xs text-right">{template.trades || 0}</td>
+                          <td className="p-2 font-mono text-xs text-right">
                             {formatPercentage(template.win_rate || 0)}
                           </td>
-                          <td className={cn('p-2 font-mono text-[11px] text-right font-semibold',
+                          <td className={cn('p-2 font-mono text-xs text-right font-semibold',
                             (template.total_return || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                             {formatPercentage(template.total_return || 0)}
                           </td>
-                          <td className="p-2 font-mono text-[11px] text-right">
+                          <td className="p-2 font-mono text-xs text-right">
                             {(template.sharpe_ratio || 0).toFixed(2)}
                           </td>
                         </tr>
@@ -1820,7 +1820,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </table>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500 text-[11px]">No template data available</div>
+                <div className="text-center py-12 text-gray-500 text-xs">No template data available</div>
               )}
             </motion.div>
 
@@ -1860,7 +1860,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-12 text-gray-500 text-[11px]">No cost data available</div>
+                <div className="text-center py-12 text-gray-500 text-xs">No cost data available</div>
               )}
             </motion.div>
           </TabsContent>
@@ -1871,11 +1871,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           <TabsContent value="trade-journal" className="space-y-3">
             <SectionLabel actions={
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handleExportCSV} className="h-6 text-[11px]">
+                <Button variant="outline" size="sm" onClick={handleExportCSV} className="h-6 text-xs">
                   <Download className="h-3 w-3 mr-1" />
                   Export CSV
                 </Button>
-                <Button variant="outline" size="sm" onClick={handleGenerateMonthlyReport} className="h-6 text-[11px]">
+                <Button variant="outline" size="sm" onClick={handleGenerateMonthlyReport} className="h-6 text-xs">
                   <FileText className="h-3 w-3 mr-1" />
                   Monthly Report
                 </Button>
@@ -2007,34 +2007,34 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   <tbody>
                     {tradeJournalEntries.map((trade) => (
                       <tr key={trade.id} className="border-b border-[var(--color-dark-border)]/50 hover:bg-[var(--color-dark-surface)]">
-                        <td className="p-2 font-mono text-[11px]">
+                        <td className="p-2 font-mono text-xs">
                           {formatTimestamp(trade.entry_time, { includeTime: false })}
                         </td>
-                        <td className="p-2 font-mono text-[11px] font-semibold">{trade.symbol}</td>
+                        <td className="p-2 font-mono text-xs font-semibold">{trade.symbol}</td>
                         <td className="p-2 font-mono text-xs text-gray-500 truncate max-w-[150px]" title={trade.strategy_name || trade.strategy_id}>
                           {trade.strategy_name || trade.strategy_id}
                         </td>
-                        <td className="p-2 font-mono text-[11px] text-right">
+                        <td className="p-2 font-mono text-xs text-right">
                           {formatCurrency(trade.entry_price)}
                         </td>
-                        <td className="p-2 font-mono text-[11px] text-right">
+                        <td className="p-2 font-mono text-xs text-right">
                           {trade.exit_price ? formatCurrency(trade.exit_price) : '-'}
                         </td>
-                        <td className={cn('p-2 font-mono text-[11px] text-right font-semibold',
+                        <td className={cn('p-2 font-mono text-xs text-right font-semibold',
                           (trade.pnl || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
                           {trade.pnl ? formatCurrency(trade.pnl) : '-'}
                           {trade.pnl_percent && (
-                            <span className="text-[11px] ml-1">
+                            <span className="text-xs ml-1">
                               ({formatPercentage(trade.pnl_percent)})
                             </span>
                           )}
                         </td>
-                        <td className="p-2 font-mono text-[11px] text-right">
+                        <td className="p-2 font-mono text-xs text-right">
                           {trade.hold_time_hours ? `${(trade.hold_time_hours / 24).toFixed(1)}d` : '-'}
                         </td>
-                        <td className="p-2 text-[11px]">
+                        <td className="p-2 text-xs">
                           {trade.market_regime && (
-                            <Badge variant="outline" className="text-[11px]">
+                            <Badge variant="outline" className="text-xs">
                               {trade.market_regime}
                             </Badge>
                           )}
@@ -2042,7 +2042,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                         <td className="p-2 text-xs text-gray-500">
                           {trade.exit_reason || '-'}
                         </td>
-                        <td className="p-2 font-mono text-[11px] text-right">
+                        <td className="p-2 font-mono text-xs text-right">
                           {trade.conviction_score ? trade.conviction_score.toFixed(0) : '-'}
                         </td>
                       </tr>
@@ -2114,7 +2114,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     {tradeJournalPatterns.best_patterns.map((pattern, idx) => (
                       <div key={idx} className="p-2 bg-[var(--color-dark-surface)] rounded">
                         <div className="flex items-center justify-between mb-1">
-                          <Badge variant="outline" className="text-[11px]">
+                          <Badge variant="outline" className="text-xs">
                             {pattern.pattern_type}
                           </Badge>
                           <span className="text-xs font-mono font-semibold text-accent-green">
@@ -2129,7 +2129,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-[11px]">
+                  <div className="text-center py-8 text-gray-500 text-xs">
                     No patterns identified yet
                   </div>
                 )}
@@ -2143,7 +2143,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     {tradeJournalPatterns.worst_patterns.map((pattern, idx) => (
                       <div key={idx} className="p-2 bg-[var(--color-dark-surface)] rounded">
                         <div className="flex items-center justify-between mb-1">
-                          <Badge variant="outline" className="text-[11px]">
+                          <Badge variant="outline" className="text-xs">
                             {pattern.pattern_type}
                           </Badge>
                           <span className="text-xs font-mono font-semibold text-accent-red">
@@ -2158,7 +2158,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 text-[11px]">
+                  <div className="text-center py-8 text-gray-500 text-xs">
                     No patterns identified yet
                   </div>
                 )}
@@ -2194,7 +2194,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 text-gray-500 text-[11px]">
+                <div className="text-center py-8 text-gray-500 text-xs">
                   No recommendations available yet. More trade data needed.
                 </div>
               )}

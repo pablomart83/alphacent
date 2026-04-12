@@ -1334,7 +1334,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                           <div className="flex items-center gap-3 min-w-0">
                             <div className="flex flex-col">
                               <span className="font-mono font-semibold text-xs text-gray-200">{order.symbol}</span>
-                              <span className={cn('text-[11px] font-mono font-semibold', order.side === 'BUY' ? 'text-accent-green' : 'text-accent-red')}>
+                              <span className={cn('text-xs font-mono font-semibold', order.side === 'BUY' ? 'text-accent-green' : 'text-accent-red')}>
                                 {order.side}
                               </span>
                             </div>
@@ -1345,7 +1345,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                             <div className="flex flex-col">
                               <span className="text-xs text-gray-400">Queued {age}</span>
                               <span className={cn(
-                                'text-[11px] px-1 py-0.5 rounded mt-0.5 w-fit',
+                                'text-xs px-1 py-0.5 rounded mt-0.5 w-fit',
                                 isWaitingForMarket ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'
                               )}>
                                 {isWaitingForMarket ? 'Waiting for market' : 'Processing'}
@@ -1628,7 +1628,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span className={cn(
-                        'text-[11px] font-mono font-semibold px-1 py-0.5 rounded',
+                        'text-xs font-mono font-semibold px-1 py-0.5 rounded',
                         order.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red'
                       )}>
                         {order.side}

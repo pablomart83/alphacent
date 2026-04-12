@@ -498,7 +498,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                         {riskStatus.reasons.length > 0 && riskStatus.status !== 'safe' && (
                           <div className="mt-1 space-y-0.5">
                             {riskStatus.reasons.map((reason, idx) => (
-                              <p key={idx} className="text-[11px] font-mono text-muted-foreground flex items-center gap-1">
+                              <p key={idx} className="text-xs font-mono text-muted-foreground flex items-center gap-1">
                                 <span className={cn('w-1 h-1 rounded-full flex-shrink-0', reason.includes('DANGER') ? 'bg-accent-red' : 'bg-yellow-400')} />
                                 {reason}
                               </p>
@@ -650,7 +650,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                         )}>
                           <div className="flex items-start justify-between mb-1">
                             <p className="text-xs font-semibold">{scenario.name}</p>
-                            <span className={cn('text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded', scenario.estimated_loss_pct > 5 ? 'bg-accent-red/20 text-accent-red' : scenario.estimated_loss_pct > 2 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400')}>
+                            <span className={cn('text-xs font-mono font-semibold px-1.5 py-0.5 rounded', scenario.estimated_loss_pct > 5 ? 'bg-accent-red/20 text-accent-red' : scenario.estimated_loss_pct > 2 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400')}>
                               -{formatPercentage(scenario.estimated_loss_pct)}
                             </span>
                           </div>
@@ -850,7 +850,7 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                 {/* Sector legend */}
                 <div className="space-y-1 mt-2">
                   {sectorPieData.slice(0, 5).map((sector, idx) => (
-                    <div key={sector.name} className="flex items-center justify-between text-[11px]">
+                    <div key={sector.name} className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-1.5">
                         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: SECTOR_COLORS[idx % SECTOR_COLORS.length] }} />
                         <span className="text-gray-400 truncate">{sector.name}</span>

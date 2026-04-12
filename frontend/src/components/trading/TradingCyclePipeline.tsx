@@ -447,7 +447,7 @@ const CycleSummaryCard: FC<{ stages: Record<string, StageState> }> = ({ stages }
     <div className="rounded-lg border border-accent-green/30 bg-accent-green/5 p-3">
       <div className="flex items-center gap-2 mb-2">
         <CheckCircle2 className="h-4 w-4 text-accent-green" />
-        <span className="text-[11px] font-semibold text-accent-green uppercase tracking-wide">Cycle Complete</span>
+        <span className="text-xs font-semibold text-accent-green uppercase tracking-wide">Cycle Complete</span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {summaryItems.map((item) => (

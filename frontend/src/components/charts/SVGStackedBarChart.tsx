@@ -79,7 +79,7 @@ export const SVGStackedBarChart: FC<SVGStackedBarChartProps> = ({
 
   return (
     <div ref={containerRef} className="relative w-full" style={{ height: height + legendH }}>
-      <svg width="100%" height={height} viewBox={`0 0 500 ${height}`} preserveAspectRatio="xMidYMid meet">
+      <svg width="100%" height={height} viewBox={`0 0 500 ${height}`} preserveAspectRatio="xMidYMid meet" style={{maxHeight: height}}>
         {/* Grid */}
         {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
           const y = margin.top + (1 - frac) * chartH;

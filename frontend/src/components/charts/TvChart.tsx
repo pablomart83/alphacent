@@ -177,6 +177,7 @@ const TvChartInner: FC<TvChartProps> = ({
         textColor: THEME.text,
         fontFamily: "'JetBrains Mono', 'Courier New', monospace",
         fontSize: 11,
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: THEME.grid, style: LineStyle.Dotted },

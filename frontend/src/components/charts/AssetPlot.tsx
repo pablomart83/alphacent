@@ -81,6 +81,7 @@ export const AssetPlot: FC<AssetPlotProps> = ({ priceData, orders = [], symbol, 
         textColor: THEME.text,
         fontFamily: "'JetBrains Mono', 'Courier New', monospace",
         fontSize: 11,
+        attributionLogo: false,
       },
       grid: {
         vertLines: { color: THEME.grid, style: LineStyle.Dotted },

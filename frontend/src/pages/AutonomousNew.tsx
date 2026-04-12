@@ -965,7 +965,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 </div>
                 {(cycleAssetClasses.size > 0 || cycleIntervals.size > 0 || cycleStrategyTypes.size > 0) && (
                   <button onClick={() => { setCycleAssetClasses(new Set()); setCycleIntervals(new Set()); setCycleStrategyTypes(new Set()); }}
-                    className="text-[11px] text-[#ef4444] hover:underline">Clear</button>
+                    className="text-xs text-[#ef4444] hover:underline">Clear</button>
                 )}
                 <Button
                   onClick={handleTriggerCycle}
@@ -992,7 +992,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2">
                         <div className="flex items-center gap-2">
                           <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
-                          <span className="text-[11px] text-yellow-400">{lifecycleCounts.active} strategies ready but trading is {systemStatus.state}.</span>
+                          <span className="text-xs text-yellow-400">{lifecycleCounts.active} strategies ready but trading is {systemStatus.state}.</span>
                         </div>
                       </div>
                     )}
@@ -1058,7 +1058,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       <div className="bg-yellow-500/10 border border-yellow-500/30 rounded p-2">
                         <div className="flex items-center gap-2">
                           <AlertCircle className="h-3.5 w-3.5 text-yellow-400 shrink-0" />
-                          <span className="text-[11px] text-yellow-400">Auto-Management Disabled — enable in settings.</span>
+                          <span className="text-xs text-yellow-400">Auto-Management Disabled — enable in settings.</span>
                         </div>
                       </div>
                     )}
@@ -1188,7 +1188,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   <AlertCircle className="h-4 w-4 text-yellow-400 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="text-xs font-semibold text-yellow-400">Demo Mode Active</p>
-                    <p className="text-[11px] text-yellow-400/80">All trades are simulated.</p>
+                    <p className="text-xs text-yellow-400/80">All trades are simulated.</p>
                   </div>
                 </div>
               )}
@@ -1328,7 +1328,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     <div className="space-y-1.5">
                       {signalData.summary.rejection_reasons.map((r) => (
                         <div key={r.reason}>
-                          <div className="flex justify-between text-[11px] mb-0.5">
+                          <div className="flex justify-between text-xs mb-0.5">
                             <span className="text-gray-300 truncate">{r.reason}</span>
                             <span className="text-gray-500 ml-2 shrink-0">{r.count} ({r.percentage.toFixed(0)}%)</span>
                           </div>
@@ -1339,7 +1339,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-gray-500 text-[11px]">No rejections recorded.</p>
+                    <p className="text-gray-500 text-xs">No rejections recorded.</p>
                   )}
                 </div>
 
@@ -1348,7 +1348,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   <div className="flex items-center justify-between mb-1.5">
                     <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Recent Signals</div>
                     <Select value={signalFilter} onValueChange={setSignalFilter}>
-                      <SelectTrigger className="w-[90px] h-6 text-[11px]">
+                      <SelectTrigger className="w-[90px] h-6 text-xs">
                         <SelectValue placeholder="Filter" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1361,7 +1361,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                   <div className="max-h-[350px] overflow-y-auto">
                     <table className="w-full text-xs font-mono">
                       <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
-                        <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-[11px]">
+                        <tr className="border-b border-[var(--color-dark-border)] text-gray-500 text-xs">
                           <th className="text-left py-1 pr-2">Time</th>
                           <th className="text-left py-1 pr-2">Symbol</th>
                           <th className="text-left py-1 pr-2">Side</th>
@@ -1380,13 +1380,13 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                             </td>
                             <td className="py-1 pr-2 font-semibold text-gray-200">{s.symbol}</td>
                             <td className="py-1 pr-2">
-                              <span className={cn('px-1 py-0.5 rounded text-[11px]',
+                              <span className={cn('px-1 py-0.5 rounded text-xs',
                                 s.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>
                                 {s.side}
                               </span>
                             </td>
                             <td className="py-1 pr-2">
-                              <span className={cn('px-1 py-0.5 rounded text-[11px] font-semibold',
+                              <span className={cn('px-1 py-0.5 rounded text-xs font-semibold',
                                 s.decision === 'ACCEPTED' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]')}>
                                 {s.decision}
                               </span>
@@ -1397,7 +1397,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           </tr>
                         ))}
                         {(!signalData?.signals || signalData.signals.length === 0) && (
-                          <tr><td colSpan={5} className="py-6 text-center text-gray-500 text-[11px]">No signal decisions recorded.</td></tr>
+                          <tr><td colSpan={5} className="py-6 text-center text-gray-500 text-xs">No signal decisions recorded.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -1442,7 +1442,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           )} style={{ width: `${template.success_rate * 100}%` }} />
                         </div>
                         <span className="text-xs font-mono text-gray-400 w-[40px] text-right shrink-0">{(template.success_rate * 100).toFixed(0)}%</span>
-                        <span className="text-[11px] text-gray-600 w-[30px] text-right shrink-0">{template.usage_count}×</span>
+                        <span className="text-xs text-gray-600 w-[30px] text-right shrink-0">{template.usage_count}×</span>
                       </div>
                     ))}
                   </div>
@@ -1496,7 +1496,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-center h-24 text-xs text-gray-500">Loading...</div>
                   ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
                     <div className="overflow-x-auto max-h-[300px]">
-                      <table className="w-full text-[11px] font-mono">
+                      <table className="w-full text-xs font-mono">
                         <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
                           <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
                             <th className="py-1 px-2 text-left">Cycle</th>
@@ -1556,7 +1556,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 <div>
                   <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Similarity Rejections</div>
                   <div className="overflow-x-auto">
-                    <table className="w-full text-[11px] font-mono">
+                    <table className="w-full text-xs font-mono">
                       <thead>
                         <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
                           <th className="py-1 px-2 text-left">Rejected Strategy</th>
@@ -1605,8 +1605,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                           return (
                             <div key={s.id} className="space-y-1">
                               <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-mono text-gray-300 truncate max-w-[180px]">{s.name}</span>
-                                <span className="text-[11px] font-mono font-semibold">{typeof total === 'number' ? total.toFixed(2) : total}</span>
+                                <span className="text-xs font-mono text-gray-300 truncate max-w-[180px]">{s.name}</span>
+                                <span className="text-xs font-mono font-semibold">{typeof total === 'number' ? total.toFixed(2) : total}</span>
                               </div>
                               <div className="flex h-3 rounded overflow-hidden bg-dark-border/30">
                                 {factors.map((f) => {
@@ -1761,10 +1761,10 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 {walkForwardData.similarity_rejections.slice(0, 5).map((r: any, idx: number) => (
                   <div key={idx} className="bg-muted rounded-lg p-2 flex items-center justify-between">
                     <div className="min-w-0">
-                      <div className="text-[11px] font-mono text-gray-300 truncate">{r.rejected_name || '—'}</div>
+                      <div className="text-xs font-mono text-gray-300 truncate">{r.rejected_name || '—'}</div>
                       <div className="text-xs text-muted-foreground truncate">vs {r.existing_name || '—'}</div>
                     </div>
-                    <span className="text-[11px] font-mono font-semibold text-accent-red shrink-0 ml-2">
+                    <span className="text-xs font-mono font-semibold text-accent-red shrink-0 ml-2">
                       {r.similarity != null ? `${(r.similarity * 100).toFixed(0)}%` : '—'}
                     </span>
                   </div>
@@ -1786,7 +1786,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-3 gap-2">
                 <div className="bg-muted rounded-lg p-2 text-center">
                   <div className="text-xs text-muted-foreground">Last Cycle</div>
-                  <div className="text-[11px] font-mono font-semibold text-gray-200">
+                  <div className="text-xs font-mono font-semibold text-gray-200">
                     {autonomousStatus.last_cycle_time ? formatTimestamp(autonomousStatus.last_cycle_time) : '—'}
                   </div>
                 </div>

@@ -85,7 +85,7 @@ export const SVGBarChart: FC<SVGBarChartProps> = ({
 
     return (
       <div ref={containerRef} className={`relative w-full ${className || ''}`} style={{ height: svgH }}>
-        <svg width="100%" height="100%" viewBox={`0 0 300 ${svgH}`} preserveAspectRatio="xMidYMid meet">
+        <svg width="100%" height="100%" viewBox={`0 0 300 ${svgH}`} preserveAspectRatio="xMidYMid meet" style={{maxHeight: height}}>
           {data.map((d, i) => {
             const y = i * (barH + 4) + 10;
             const barWidth = maxVal > 0 ? (Math.abs(d.value) / maxVal) * (300 - labelW - 10) : 0;
@@ -132,7 +132,7 @@ export const SVGBarChart: FC<SVGBarChartProps> = ({
 
   return (
     <div ref={containerRef} className={`relative w-full ${className || ''}`} style={{ height }}>
-      <svg width="100%" height="100%" viewBox={`0 0 500 ${height}`} preserveAspectRatio="xMidYMid meet">
+      <svg width="100%" height="100%" viewBox={`0 0 500 ${height}`} preserveAspectRatio="xMidYMid meet" style={{maxHeight: height}}>
         {/* Grid lines */}
         {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
           const y = margin.top + (1 - frac) * (height - margin.top - margin.bottom);

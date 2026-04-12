@@ -356,7 +356,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const leftPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Metrics" panelId="overview-metrics" onRefresh={refresh}>
-        <div className="flex flex-col gap-2 p-2">
+        <div className="flex flex-col gap-1.5 p-1.5">
           {/* Compact Metric Row */}
           <CompactMetricRow metrics={compactMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
 
@@ -427,7 +427,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const rightPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Activity" panelId="overview-activity" onRefresh={refresh}>
-        <div className="flex flex-col gap-2 p-2">
+        <div className="flex flex-col gap-1.5 p-1.5">
           {/* Recent Trades */}
           <div>
             <div className="text-xs font-medium text-gray-500 tracking-wide mb-1.5">
@@ -440,7 +440,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                     <div className="flex items-center gap-1.5 min-w-0">
                       <span className="text-xs font-mono font-semibold text-gray-200 truncate">{trade.symbol}</span>
                       <span className={cn(
-                        'text-[11px] font-mono px-1 py-0.5 rounded',
+                        'text-xs font-mono px-1 py-0.5 rounded',
                         trade.side === 'BUY' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400',
                       )}>
                         {trade.side}
@@ -453,7 +453,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                       )}>
                         {(trade.realized_pnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(trade.realized_pnl ?? 0)}
                       </span>
-                      <span className="text-[11px] text-muted-foreground font-mono">
+                      <span className="text-xs text-muted-foreground font-mono">
                         {trade.closed_at ? formatDate(trade.closed_at, 'MMM d') : '—'}
                       </span>
                     </div>

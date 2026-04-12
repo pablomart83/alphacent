@@ -108,7 +108,7 @@ export const ReturnDistribution: FC<ReturnDistributionProps> = ({
         </Badge>
       </div>
       <div ref={containerRef} className="relative min-h-[200px] w-full" style={{ height }}>
-        <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${height}`} preserveAspectRatio="xMidYMid meet">
+        <svg width="100%" height="100%" viewBox={`0 0 ${svgW} ${height}`} preserveAspectRatio="xMidYMid meet" style={{maxHeight: height}}>
           {/* Grid lines */}
           {[0, 0.25, 0.5, 0.75, 1].map((frac) => {
             const y = margin.top + (1 - frac) * chartH;

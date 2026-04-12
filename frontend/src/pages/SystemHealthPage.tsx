@@ -132,8 +132,8 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
               <div className="flex items-center gap-2">
                 <span className="text-red-400 text-sm">🚨</span>
                 <div>
-                  <p className="text-[11px] font-semibold text-red-400">System Alert</p>
-                  <p className="text-[11px] text-red-400/80">
+                  <p className="text-xs font-semibold text-red-400">System Alert</p>
+                  <p className="text-xs text-red-400/80">
                     {hasOpenCB && 'Circuit breaker OPEN detected. '}
                     {hasStaleMonitoring && 'Monitoring service stale or errored.'}
                   </p>
@@ -144,7 +144,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
 
           {error && (
             <div className="rounded-lg border p-3" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: 'rgba(239, 68, 68, 0.3)' }}>
-              <p className="text-[11px] text-red-400">{error}</p>
+              <p className="text-xs text-red-400">{error}</p>
             </div>
           )}
 
@@ -164,21 +164,21 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                         }`} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                            <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
                               {new Date(evt.timestamp).toLocaleTimeString()}
                             </span>
-                            <span className="text-[11px] font-mono px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--color-dark-bg)', color: 'var(--color-text-secondary)' }}>
+                            <span className="text-xs font-mono px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--color-dark-bg)', color: 'var(--color-text-secondary)' }}>
                               {evt.type}
                             </span>
                           </div>
-                          <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--color-text-primary)' }}>{evt.description}</p>
+                          <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--color-text-primary)' }}>{evt.description}</p>
                         </div>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="flex items-center justify-center p-6">
-                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>No events in the last 24 hours.</p>
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>No events in the last 24 hours.</p>
                   </div>
                 )}
               </div>
@@ -188,7 +188,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
               <div className="rounded-lg border p-3" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs text-gray-500 tracking-wide font-medium">Monitoring Service</span>
-                  <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded ${data.monitoring_service?.running ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                  <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${data.monitoring_service?.running ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
                     {data.monitoring_service?.running ? 'Running' : 'Stopped'}
                   </span>
                 </div>
@@ -197,9 +197,9 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                     <div key={task.name} className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
                       <div className="flex items-center gap-1.5 mb-1">
                         <div className={`w-1.5 h-1.5 rounded-full ${statusDot(task.status)} ${task.status !== 'healthy' ? 'animate-pulse' : ''}`} />
-                        <p className="text-[11px] font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>{task.name}</p>
+                        <p className="text-xs font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>{task.name}</p>
                       </div>
-                      <p className="text-[11px] font-mono" style={{ color: 'var(--color-text-primary)' }}>{formatAge(task.last_cycle)}</p>
+                      <p className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>{formatAge(task.last_cycle)}</p>
                       <p className="text-[8px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>every {task.interval_seconds}s</p>
                     </div>
                   ))}
@@ -232,10 +232,10 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                     const thread = (data as any)?.[key] ?? (data as any)?.background_threads?.[key];
                     return (
                       <div key={key} className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-                        <p className="text-[11px] font-mono mb-1" style={{ color: 'var(--color-text-primary)' }}>
+                        <p className="text-xs font-mono mb-1" style={{ color: 'var(--color-text-primary)' }}>
                           {key === 'quick_price_update' ? 'Quick Price Update' : 'Full Price Sync'}
                         </p>
-                        <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                        <div className="grid grid-cols-3 gap-1.5 text-xs">
                           <div>
                             <p style={{ color: 'var(--color-text-secondary)' }}>Last Run</p>
                             <p className="font-mono" style={{ color: 'var(--color-text-primary)' }}>{thread?.last_run ? formatAge(thread.last_run) : '—'}</p>
@@ -269,7 +269,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                       <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
                       {custom ? (
                         <div>
-                          <p className="text-[11px] font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                          <p className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>
                             {data.cache_stats?.fmp_cache_warm_status?.last_warm_time ? formatAge(data.cache_stats.fmp_cache_warm_status.last_warm_time) : '—'}
                           </p>
                           <p className="text-[8px] mt-0.5 font-mono" style={{ color: 'var(--color-text-secondary)' }}>
@@ -316,7 +316,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                   <div className="flex items-center gap-2 mb-1.5">
                     <div className={`w-3 h-3 rounded-full ${cbStateColor(cb.state)} ${cb.state === 'OPEN' || cb.state === 'open' ? 'animate-pulse' : ''}`} />
                     <span className="text-xs font-mono font-semibold capitalize" style={{ color: 'var(--color-text-primary)' }}>{cb.category}</span>
-                    <span className={`ml-auto text-[11px] font-mono px-1.5 py-0.5 rounded ${
+                    <span className={`ml-auto text-xs font-mono px-1.5 py-0.5 rounded ${
                       cb.state === 'CLOSED' || cb.state === 'closed' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
                       cb.state === 'HALF_OPEN' || cb.state === 'half_open' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
                       'bg-red-500/10 text-red-400 border border-red-500/20'
@@ -341,7 +341,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                 </div>
               ))}
               {(data?.circuit_breakers ?? []).length === 0 && (
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>No circuit breaker data available.</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>No circuit breaker data available.</p>
               )}
             </div>
           </div>

@@ -177,13 +177,31 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
 
   return (
     <div className={fillParent ? 'w-full h-full flex flex-col' : 'w-full'}>
-      {/* Header: Period selector + benchmark badge */}
+      {/* Header: Period selector + legend + benchmark badge */}
       <div className="flex items-center justify-between mb-1 shrink-0">
-        <TvPeriodSelector
-          periods={PERIODS}
-          activePeriod={period}
-          onPeriodChange={onPeriodChange}
-        />
+        <div className="flex items-center gap-3">
+          <TvPeriodSelector
+            periods={PERIODS}
+            activePeriod={period}
+            onPeriodChange={onPeriodChange}
+          />
+          <div className="flex items-center gap-3 text-xs font-mono">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-[#3b82f6] rounded" />
+              <span className="text-gray-400">Portfolio</span>
+            </span>
+            {!benchmarkUnavailable && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 bg-gray-500 rounded" style={{ borderTop: '1px dashed #6b7280' }} />
+                <span className="text-gray-400">SPY</span>
+              </span>
+            )}
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-[#ef4444] rounded" />
+              <span className="text-gray-400">Drawdown</span>
+            </span>
+          </div>
+        </div>
         {benchmarkUnavailable && (
           <Badge variant="warning">Benchmark unavailable</Badge>
         )}
