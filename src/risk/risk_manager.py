@@ -557,13 +557,13 @@ class RiskManager:
             logger.warning(f"Max exposure reached: {current_exposure:.2f} / {max_total_exposure:.2f} (equity=${portfolio_value:.0f})")
             return 0.0
 
-        # Strategy allocation: use BALANCE (cash) not equity for the dollar amount.
-        # The allocation percentage is set against equity (portfolio value), but the
-        # actual dollars available to place orders come from the cash balance.
-        # A 5% allocation on $459K equity = $23K, but if balance is only $221K,
-        # we can't actually deploy $23K per strategy — we'd run out of cash.
-        cash_balance = account.balance
-        strategy_allocated_capital = cash_balance * (strategy_allocation_pct / 100.0)
+        # Strategy allocation: use EQUITY (portfolio value) for the dollar amount.
+        # The allocation percentage represents the strategy's share of the total portfolio.
+        # Cash balance is low because capital is deployed in positions — that's normal.
+        # A 5% allocation on $461K equity = $23K, which is the right scale for a
+        # strategy managing positions worth $2-5K each.
+        # The available_capital and remaining_exposure caps below prevent over-deployment.
+        strategy_allocated_capital = portfolio_value * (strategy_allocation_pct / 100.0)
         
         # Calculate current exposure for THIS strategy
         strategy_current_exposure = sum(
