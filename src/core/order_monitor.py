@@ -1435,179 +1435,154 @@ class OrderMonitor:
                 # Track which positions are present on eToro this sync
                 seen_this_sync = set()
                 
-                # Count how many positions are missing this sync cycle
-                missing_this_sync = 0
                 for db_pos in open_db_positions:
-                    if db_pos.etoro_position_id not in etoro_position_ids:
-                        # Skip very new positions
-                        if db_pos.opened_at:
-                            try:
-                                opened_naive = db_pos.opened_at.replace(tzinfo=None) if db_pos.opened_at.tzinfo else db_pos.opened_at
-                                age_seconds = (datetime.now().replace(tzinfo=None) - opened_naive).total_seconds()
-                            except Exception:
-                                age_seconds = 999
-                            if age_seconds < 120:
-                                continue
-                        missing_this_sync += 1
-                
-                # SAFETY GUARD: If >20% of positions disappeared at once, this is likely
-                # an eToro DEMO reset or API glitch — don't mass-close, just log.
-                mass_closure_threshold = max(5, int(len(open_db_positions) * 0.20))
-                if missing_this_sync > mass_closure_threshold:
-                    logger.warning(
-                        f"SAFETY: {missing_this_sync}/{len(open_db_positions)} positions missing from eToro "
-                        f"(>{mass_closure_threshold} threshold). Possible DEMO reset or API issue. "
-                        f"Skipping closure check — will retry next sync."
-                    )
-                    # Don't increment miss counters during a mass event
-                else:
-                    for db_pos in open_db_positions:
-                        pos_key = db_pos.etoro_position_id
-                        
-                        if pos_key in etoro_position_ids:
-                            # Position found on eToro — reset miss counter
-                            self._position_miss_count.pop(pos_key, None)
-                            seen_this_sync.add(pos_key)
-                            continue
-                        
-                        # Position missing from eToro — increment miss counter
-                        
-                        # Skip very new positions (eToro propagation delay)
-                        if db_pos.opened_at:
-                            try:
-                                opened_naive = db_pos.opened_at.replace(tzinfo=None) if db_pos.opened_at.tzinfo else db_pos.opened_at
-                                age_seconds = (datetime.now().replace(tzinfo=None) - opened_naive).total_seconds()
-                            except Exception:
-                                age_seconds = 999
-                            if age_seconds < 120:
-                                continue
-                        
-                        misses = self._position_miss_count.get(pos_key, 0) + 1
-                        self._position_miss_count[pos_key] = misses
-                        
-                        if misses < self._miss_threshold:
-                            logger.info(
-                                f"Position {db_pos.symbol} (eToro: {pos_key}) missing from eToro "
-                                f"({misses}/{self._miss_threshold} consecutive misses — not closing yet)"
-                            )
-                            continue
-                        
-                        # Position confirmed gone after N consecutive misses — close it
-                        logger.warning(
-                            f"Closing position {db_pos.id} ({db_pos.symbol}) — "
-                            f"not found on eToro (etoro_id: {db_pos.etoro_position_id})"
-                        )
-                        db_pos.closed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                        # Calculate realized PnL from price difference (not stale unrealized_pnl).
-                        # unrealized_pnl may be stale if price enrichment hasn't run recently.
-                        # Use: invested_amount * (close_price - entry_price) / entry_price for LONG
-                        #      invested_amount * (entry_price - close_price) / entry_price for SHORT
-                        entry = db_pos.entry_price or 0
-                        current = db_pos.current_price or entry
-                        invested = db_pos.invested_amount or db_pos.quantity or 0
-                        if entry > 0 and invested > 0:
-                            side_str = str(db_pos.side).upper() if db_pos.side else 'LONG'
-                            if 'SHORT' in side_str or 'SELL' in side_str:
-                                calculated_pnl = invested * (entry - current) / entry
-                            else:
-                                calculated_pnl = invested * (current - entry) / entry
-                            db_pos.realized_pnl = calculated_pnl
-                        else:
-                            db_pos.realized_pnl = db_pos.unrealized_pnl or 0.0
-                        db_pos.unrealized_pnl = 0.0
-                        closed_count += 1
-                        
-                        # Determine exit reason from price vs SL/TP
-                        # Set closure_reason BEFORE trade journal so the position record
-                        # shows the correct reason in the UI.
-                        sl = db_pos.stop_loss or 0
-                        tp = db_pos.take_profit or 0
-                        side_str = str(db_pos.side).upper() if db_pos.side else 'LONG'
-                        is_long = 'LONG' in side_str or 'BUY' in side_str
-                        exit_reason = "etoro_closed"
-                        if tp > 0:
-                            if is_long and current >= tp * 0.995:
-                                exit_reason = "take_profit_hit"
-                            elif not is_long and current <= tp * 1.005:
-                                exit_reason = "take_profit_hit"
-                        if exit_reason == "etoro_closed" and sl > 0:
-                            if is_long and current <= sl * 1.005:
-                                exit_reason = "stop_loss_hit"
-                            elif not is_long and current >= sl * 0.995:
-                                exit_reason = "stop_loss_hit"
-                        db_pos.closure_reason = exit_reason.replace("_", " ").title()
-                        
-                        # Log to trade journal
-                        try:
-                            from src.analytics.trade_journal import TradeJournal
-                            journal = TradeJournal(self.db)
-                            
-                            # Ensure entry exists in journal (may be missing for sync-created positions)
-                            journal.log_entry(
-                                trade_id=str(db_pos.id),
-                                strategy_id=db_pos.strategy_id or "unknown",
-                                symbol=db_pos.symbol,
-                                entry_time=db_pos.opened_at or db_pos.closed_at,
-                                entry_price=db_pos.entry_price or 0,
-                                entry_size=db_pos.invested_amount or db_pos.quantity or 0,
-                                entry_reason="autonomous_signal",
-                                order_side="BUY" if is_long else "SELL",
-                            )
-                            journal.log_exit(
-                                trade_id=str(db_pos.id),
-                                exit_time=db_pos.closed_at,
-                                exit_price=db_pos.current_price,
-                                exit_reason=exit_reason,
-                                symbol=db_pos.symbol,
-                            )
-                        except Exception as journal_err:
-                            logger.debug(f"Could not log exit to trade journal for {db_pos.symbol}: {journal_err}")
-                        
-                        # If position had $0 P&L and was very recent, likely a phantom
-                        # from an async eToro rejection. Fail the order and demote strategy.
-                        is_phantom = (db_pos.realized_pnl == 0.0 and db_pos.opened_at and
-                                      (datetime.now().replace(tzinfo=None) - 
-                                       (db_pos.opened_at.replace(tzinfo=None) if db_pos.opened_at.tzinfo else db_pos.opened_at)
-                                      ).total_seconds() < 600)  # Less than 10 minutes old
-                        if is_phantom and db_pos.strategy_id:
-                            try:
-                                from src.models.enums import OrderStatus as _OrderStatus, StrategyStatus as _StrategyStatus
-                                # Fail the associated order
-                                recent_order = session.query(OrderORM).filter(
-                                    OrderORM.strategy_id == db_pos.strategy_id,
-                                    OrderORM.symbol == db_pos.symbol,
-                                    OrderORM.status == _OrderStatus.FILLED,
-                                ).order_by(OrderORM.submitted_at.desc()).first()
-                                if recent_order:
-                                    recent_order.status = _OrderStatus.FAILED
-                                    logger.warning(f"Marked order {recent_order.id} ({db_pos.symbol}) as FAILED — phantom position")
-                                
-                                # Demote strategy if it has no other real positions
-                                from src.models.orm import StrategyORM
-                                strategy = session.query(StrategyORM).filter(StrategyORM.id == db_pos.strategy_id).first()
-                                if strategy and strategy.status == _StrategyStatus.DEMO:
-                                    other_open = session.query(PositionORM).filter(
-                                        PositionORM.strategy_id == db_pos.strategy_id,
-                                        PositionORM.closed_at.is_(None),
-                                        PositionORM.id != db_pos.id,
-                                    ).count()
-                                    if other_open == 0:
-                                        strategy.status = _StrategyStatus.BACKTESTED
-                                        if isinstance(strategy.strategy_metadata, dict):
-                                            strategy.strategy_metadata['activation_approved'] = True
-                                        strategy.activated_at = None
-                                        logger.warning(f"Demoted {strategy.name} DEMO → BACKTESTED (phantom position, will re-trigger)")
-                            except Exception as cleanup_err:
-                                logger.warning(f"Phantom cleanup error: {cleanup_err}")
-                        
-                        # Position closed — remove from miss counter
-                        self._position_miss_count.pop(pos_key, None)
+                    pos_key = db_pos.etoro_position_id
                     
-                    # Clean up miss counter for positions no longer in DB
-                    active_keys = {p.etoro_position_id for p in open_db_positions}
-                    stale = [k for k in self._position_miss_count if k not in active_keys]
-                    for k in stale:
-                        del self._position_miss_count[k]
+                    if pos_key in etoro_position_ids:
+                        # Position found on eToro — reset miss counter
+                        self._position_miss_count.pop(pos_key, None)
+                        seen_this_sync.add(pos_key)
+                        continue
+                    
+                    # Position missing from eToro — increment miss counter
+                    
+                    # Skip very new positions (eToro propagation delay)
+                    if db_pos.opened_at:
+                        try:
+                            opened_naive = db_pos.opened_at.replace(tzinfo=None) if db_pos.opened_at.tzinfo else db_pos.opened_at
+                            age_seconds = (datetime.now().replace(tzinfo=None) - opened_naive).total_seconds()
+                        except Exception:
+                            age_seconds = 999
+                        if age_seconds < 120:
+                            continue
+                    
+                    misses = self._position_miss_count.get(pos_key, 0) + 1
+                    self._position_miss_count[pos_key] = misses
+                    
+                    if misses < self._miss_threshold:
+                        logger.info(
+                            f"Position {db_pos.symbol} (eToro: {pos_key}) missing from eToro "
+                            f"({misses}/{self._miss_threshold} consecutive misses — not closing yet)"
+                        )
+                        continue
+                    
+                    # Position confirmed gone after N consecutive misses — close it
+                    logger.warning(
+                        f"Closing position {db_pos.id} ({db_pos.symbol}) — "
+                        f"not found on eToro (etoro_id: {db_pos.etoro_position_id})"
+                    )
+                    db_pos.closed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    # Calculate realized PnL from price difference (not stale unrealized_pnl).
+                    # unrealized_pnl may be stale if price enrichment hasn't run recently.
+                    # Use: invested_amount * (close_price - entry_price) / entry_price for LONG
+                    #      invested_amount * (entry_price - close_price) / entry_price for SHORT
+                    entry = db_pos.entry_price or 0
+                    current = db_pos.current_price or entry
+                    invested = db_pos.invested_amount or db_pos.quantity or 0
+                    if entry > 0 and invested > 0:
+                        side_str = str(db_pos.side).upper() if db_pos.side else 'LONG'
+                        if 'SHORT' in side_str or 'SELL' in side_str:
+                            calculated_pnl = invested * (entry - current) / entry
+                        else:
+                            calculated_pnl = invested * (current - entry) / entry
+                        db_pos.realized_pnl = calculated_pnl
+                    else:
+                        db_pos.realized_pnl = db_pos.unrealized_pnl or 0.0
+                    db_pos.unrealized_pnl = 0.0
+                    closed_count += 1
+                    
+                    # Determine exit reason from price vs SL/TP.
+                    # If price is near SL or TP, label accordingly.
+                    # Otherwise label as "Etoro Closed" — reason unknown
+                    # (could be DEMO expiry, margin, manual, or API-side SL/TP).
+                    sl = db_pos.stop_loss or 0
+                    tp = db_pos.take_profit or 0
+                    side_str = str(db_pos.side).upper() if db_pos.side else 'LONG'
+                    is_long = 'LONG' in side_str or 'BUY' in side_str
+                    exit_reason = "etoro_closed"
+                    if tp > 0:
+                        if is_long and current >= tp * 0.995:
+                            exit_reason = "take_profit_hit"
+                        elif not is_long and current <= tp * 1.005:
+                            exit_reason = "take_profit_hit"
+                    if exit_reason == "etoro_closed" and sl > 0:
+                        if is_long and current <= sl * 1.005:
+                            exit_reason = "stop_loss_hit"
+                        elif not is_long and current >= sl * 0.995:
+                            exit_reason = "stop_loss_hit"
+                    db_pos.closure_reason = exit_reason.replace("_", " ").title()
+                    
+                    # Log to trade journal
+                    try:
+                        from src.analytics.trade_journal import TradeJournal
+                        journal = TradeJournal(self.db)
+                        
+                        # Ensure entry exists in journal (may be missing for sync-created positions)
+                        journal.log_entry(
+                            trade_id=str(db_pos.id),
+                            strategy_id=db_pos.strategy_id or "unknown",
+                            symbol=db_pos.symbol,
+                            entry_time=db_pos.opened_at or db_pos.closed_at,
+                            entry_price=db_pos.entry_price or 0,
+                            entry_size=db_pos.invested_amount or db_pos.quantity or 0,
+                            entry_reason="autonomous_signal",
+                            order_side="BUY" if is_long else "SELL",
+                        )
+                        journal.log_exit(
+                            trade_id=str(db_pos.id),
+                            exit_time=db_pos.closed_at,
+                            exit_price=db_pos.current_price,
+                            exit_reason=exit_reason,
+                            symbol=db_pos.symbol,
+                        )
+                    except Exception as journal_err:
+                        logger.debug(f"Could not log exit to trade journal for {db_pos.symbol}: {journal_err}")
+                    
+                    # If position had $0 P&L and was very recent, likely a phantom
+                    # from an async eToro rejection. Fail the order and demote strategy.
+                    is_phantom = (db_pos.realized_pnl == 0.0 and db_pos.opened_at and
+                                  (datetime.now().replace(tzinfo=None) - 
+                                   (db_pos.opened_at.replace(tzinfo=None) if db_pos.opened_at.tzinfo else db_pos.opened_at)
+                                  ).total_seconds() < 600)  # Less than 10 minutes old
+                    if is_phantom and db_pos.strategy_id:
+                        try:
+                            from src.models.enums import OrderStatus as _OrderStatus, StrategyStatus as _StrategyStatus
+                            # Fail the associated order
+                            recent_order = session.query(OrderORM).filter(
+                                OrderORM.strategy_id == db_pos.strategy_id,
+                                OrderORM.symbol == db_pos.symbol,
+                                OrderORM.status == _OrderStatus.FILLED,
+                            ).order_by(OrderORM.submitted_at.desc()).first()
+                            if recent_order:
+                                recent_order.status = _OrderStatus.FAILED
+                                logger.warning(f"Marked order {recent_order.id} ({db_pos.symbol}) as FAILED — phantom position")
+                            
+                            # Demote strategy if it has no other real positions
+                            from src.models.orm import StrategyORM
+                            strategy = session.query(StrategyORM).filter(StrategyORM.id == db_pos.strategy_id).first()
+                            if strategy and strategy.status == _StrategyStatus.DEMO:
+                                other_open = session.query(PositionORM).filter(
+                                    PositionORM.strategy_id == db_pos.strategy_id,
+                                    PositionORM.closed_at.is_(None),
+                                    PositionORM.id != db_pos.id,
+                                ).count()
+                                if other_open == 0:
+                                    strategy.status = _StrategyStatus.BACKTESTED
+                                    if isinstance(strategy.strategy_metadata, dict):
+                                        strategy.strategy_metadata['activation_approved'] = True
+                                    strategy.activated_at = None
+                                    logger.warning(f"Demoted {strategy.name} DEMO → BACKTESTED (phantom position, will re-trigger)")
+                        except Exception as cleanup_err:
+                            logger.warning(f"Phantom cleanup error: {cleanup_err}")
+                    
+                    # Position closed — remove from miss counter
+                    self._position_miss_count.pop(pos_key, None)
+                
+                # Clean up miss counter for positions no longer in DB
+                active_keys = {p.etoro_position_id for p in open_db_positions}
+                stale = [k for k in self._position_miss_count if k not in active_keys]
+                for k in stale:
+                    del self._position_miss_count[k]
             
             try:
                 session.commit()
