@@ -125,11 +125,11 @@ class PositionManager:
                 activation_pct = params["activation"]
                 distance_pct = params["distance"]
 
-                # Config overrides (if user explicitly set values, respect them)
-                if self.risk_config.trailing_stop_activation_pct != 0.05:  # non-default
-                    activation_pct = self.risk_config.trailing_stop_activation_pct
-                if self.risk_config.trailing_stop_distance_pct != 0.03:  # non-default
-                    distance_pct = self.risk_config.trailing_stop_distance_pct
+                # NOTE: Per-asset-class thresholds are always used.
+                # The config-level trailing_stop_activation_pct / trailing_stop_distance_pct
+                # are legacy fields kept for backward compatibility but no longer override
+                # the asset-class-aware values. The per-asset-class calibration (based on
+                # daily volatility ranges) is far more appropriate than a single global value.
 
                 # Check activation threshold
                 if profit_pct < activation_pct:

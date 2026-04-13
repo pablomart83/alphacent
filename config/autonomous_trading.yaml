@@ -543,8 +543,16 @@ position_management:
   max_holding_period_days_intraday: 2
   trailing_stops:
     enabled: true
-    activation_pct: 0.12
-    distance_pct: 0.04
+    # Per-asset-class thresholds are used (defined in PositionManager.TRAILING_STOP_PARAMS):
+    #   stocks:  3% activation, 5% distance
+    #   etfs:    3% activation, 4% distance
+    #   crypto:  6% activation, 8% distance
+    #   forex:   2% activation, 3% distance
+    #   commodities: 4% activation, 6% distance
+    #   indices: 3% activation, 4% distance
+    # These legacy fields are kept for backward compatibility but no longer override.
+    activation_pct: 0.05
+    distance_pct: 0.03
   partial_exits:
     enabled: true
     levels:

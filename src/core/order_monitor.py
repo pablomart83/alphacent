@@ -1231,6 +1231,9 @@ class OrderMonitor:
                         for order in matching_orders:
                             order_symbol = normalize_symbol(order.symbol)
                             if order_symbol == normalized_symbol:
+                                # Skip close orders — they shouldn't match new positions
+                                if getattr(order, 'order_action', None) == 'close':
+                                    continue
                                 # Check if the order side matches the position side
                                 order_is_buy = order.side == OrderSide.BUY
                                 pos_is_long = pos.side.value == 'LONG' if hasattr(pos.side, 'value') else str(pos.side) == 'LONG'
@@ -1365,6 +1368,36 @@ class OrderMonitor:
                         updated_count += 1
                         continue
 
+                    # SAFETY: Validate position side against strategy direction.
+                    # If a strategy is "long" only, don't create a SHORT position for it.
+                    # This prevents phantom positions from close-order race conditions
+                    # (e.g., eToro interprets a close SELL as opening a new SHORT).
+                    pos_side_str = pos.side.value.upper() if hasattr(pos.side, 'value') else str(pos.side).upper()
+                    if matched_strategy_id and matched_strategy_id != 'etoro_position':
+                        try:
+                            from src.models.orm import StrategyORM as _StrategyORM_check
+                            strategy_orm = session.query(_StrategyORM_check).filter_by(id=matched_strategy_id).first()
+                            if strategy_orm and strategy_orm.strategy_metadata:
+                                strategy_direction = (strategy_orm.strategy_metadata.get('direction', '') or '').lower()
+                                if strategy_direction == 'long' and 'SHORT' in pos_side_str:
+                                    logger.warning(
+                                        f"REJECTED phantom position: {normalized_symbol} {pos_side_str} "
+                                        f"from eToro ID {pos.etoro_position_id} — strategy "
+                                        f"'{strategy_orm.name}' is direction=long. "
+                                        f"Likely a close-order race condition. Skipping."
+                                    )
+                                    continue
+                                elif strategy_direction == 'short' and 'LONG' in pos_side_str:
+                                    logger.warning(
+                                        f"REJECTED phantom position: {normalized_symbol} {pos_side_str} "
+                                        f"from eToro ID {pos.etoro_position_id} — strategy "
+                                        f"'{strategy_orm.name}' is direction=short. "
+                                        f"Likely a close-order race condition. Skipping."
+                                    )
+                                    continue
+                        except Exception as e:
+                            logger.debug(f"Could not validate strategy direction for {matched_strategy_id}: {e}")
+
                     new_pos = PositionORM(
                         id=pos.id,
                         strategy_id=matched_strategy_id,
@@ -1384,7 +1417,7 @@ class OrderMonitor:
                     )
                     session.add(new_pos)
                     created_count += 1
-                    logger.info(f"Created new position from eToro: {normalized_symbol} (eToro ID: {pos.etoro_position_id})")
+                    logger.info(f"Created new position from eToro: {normalized_symbol} {pos_side_str} (eToro ID: {pos.etoro_position_id})")
             
             # Close positions that are open in DB but no longer exist on eToro
             open_db_positions = session.query(PositionORM).filter(

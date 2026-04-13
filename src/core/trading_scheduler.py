@@ -523,23 +523,6 @@ class TradingScheduler:
                                 rejection_reason=None,
                             )
 
-                            # Save close order to DB for tracking
-                            import uuid as _exit_uuid
-                            from src.models.enums import OrderSide as _ExitOrderSide, OrderType as _ExitOrderType
-                            close_order = OrderORM(
-                                id=str(_exit_uuid.uuid4()),
-                                strategy_id=strategy.id,
-                                symbol=signal.symbol,
-                                side=_ExitOrderSide.SELL if _exit_side == PositionSide.LONG else _ExitOrderSide.BUY,
-                                order_type=_ExitOrderType.MARKET,
-                                quantity=pos_to_close.invested_amount or 0,
-                                status=OrderStatus.PENDING,
-                                submitted_at=datetime.now(),
-                                order_action='close',
-                            )
-                            session.add(close_order)
-                            session.commit()
-
                             orders_executed += 1
 
                         except Exception as e:
