@@ -1629,6 +1629,55 @@ class EToroAPIClient:
             self._record_failure("positions")
             logger.error(f"Failed to close position {position_id}: {e}")
             raise EToroAPIError(f"Failed to close position: {e}")
+
+    def partial_close_position(self, position_id: str, amount: float, instrument_id: int = None) -> Dict[str, Any]:
+        """Partially close an open position by dollar amount.
+
+        Uses eToro's market-close-orders endpoint with an Amount parameter
+        to reduce the position size without opening an opposite-side position.
+
+        Args:
+            position_id: eToro position ID
+            amount: Dollar amount to close (must be less than total invested)
+            instrument_id: eToro instrument ID (required for demo close endpoint)
+
+        Returns:
+            Close order response
+
+        Raises:
+            EToroAPIError: If partial close fails
+        """
+        logger.info(f"Partially closing position {position_id} — amount: ${amount:.2f}")
+
+        self._check_circuit_breaker("positions")
+
+        try:
+            if self.mode == TradingMode.DEMO:
+                endpoint = f"/api/v1/trading/execution/demo/market-close-orders/positions/{position_id}"
+            else:
+                endpoint = f"/api/v1/trading/positions/{position_id}/close"
+
+            payload = {"Amount": amount}
+            if instrument_id is not None:
+                payload["InstrumentID"] = instrument_id
+
+            data = self._make_request(
+                method="POST",
+                endpoint=endpoint,
+                json_data=payload
+            )
+
+            logger.info(f"Position {position_id} partial close submitted (${amount:.2f})")
+            self._record_success("positions")
+            return data
+
+        except CircuitBreakerOpen:
+            raise
+        except Exception as e:
+            self._record_failure("positions")
+            logger.error(f"Failed to partially close position {position_id}: {e}")
+            raise EToroAPIError(f"Failed to partially close position: {e}")
+
     def update_position_stop_loss(self, position_id: str, stop_loss_rate: float, instrument_id: int = None) -> Dict[str, Any]:
         """Update stop-loss for an open position.
 

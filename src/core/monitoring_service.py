@@ -1658,12 +1658,15 @@ class MonitoringService:
 
                         try:
                             from src.api.etoro_client import EToroAPIError
+                            from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
 
-                            response = self.etoro_client.place_order(
-                                symbol=pos.symbol,
-                                side=side,
-                                order_type=OrderType.MARKET,
-                                quantity=exit_amount,
+                            # Use partial_close_position API — this reduces the existing
+                            # position instead of opening a new opposite-side position.
+                            instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(pos.symbol)
+                            response = self.etoro_client.partial_close_position(
+                                position_id=pos.etoro_position_id,
+                                amount=exit_amount,
+                                instrument_id=instrument_id,
                             )
 
                             order_orm.etoro_order_id = response.get("order_id")
