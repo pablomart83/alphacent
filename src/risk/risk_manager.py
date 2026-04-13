@@ -540,21 +540,27 @@ class RiskManager:
             and not getattr(pos, 'pending_closure', False)
         )
 
-        available_capital = portfolio_value - current_exposure
+        # Available capital = actual cash balance from eToro.
+        # This is the hard truth — it's what we can actually deploy.
+        # Don't use (equity - DB exposure) because our DB exposure can be
+        # out of sync with eToro's actual margin used.
+        available_capital = account.balance
         
         if available_capital <= 0:
             logger.warning(
-                f"No available capital: equity=${portfolio_value:.0f}, "
-                f"exposure=${current_exposure:.0f}, available=${available_capital:.0f}"
+                f"No available capital: balance=${account.balance:.0f}, "
+                f"equity=${portfolio_value:.0f}, exposure=${current_exposure:.0f}"
             )
             return 0.0
 
         # Calculate remaining exposure capacity based on EQUITY
+        # Use eToro's actual margin_used (not DB exposure) for accuracy
+        actual_exposure = getattr(account, 'margin_used', None) or current_exposure
         max_total_exposure = portfolio_value * self.config.max_exposure_pct
-        remaining_exposure = max_total_exposure - current_exposure
+        remaining_exposure = max_total_exposure - actual_exposure
         
         if remaining_exposure <= 0:
-            logger.warning(f"Max exposure reached: {current_exposure:.2f} / {max_total_exposure:.2f} (equity=${portfolio_value:.0f})")
+            logger.warning(f"Max exposure reached: {actual_exposure:.2f} / {max_total_exposure:.2f} (equity=${portfolio_value:.0f})")
             return 0.0
 
         # Strategy allocation: use EQUITY (portfolio value) for the dollar amount.
