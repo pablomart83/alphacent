@@ -235,7 +235,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         }
         return [orderWithMetrics, ...prev];
       });
-      toast.info(`Order ${order.status.toLowerCase()}: ${order.symbol}`);
+      toast.info(`Order ${(order.status || 'updated').toLowerCase()}: ${order.symbol || 'unknown'}`);
     });
 
     return () => {
@@ -301,7 +301,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
 
   // Filter orders
   const filteredOrders = orders.filter(order => {
-    const matchesSearch = order.symbol.toLowerCase().includes(orderSearch.toLowerCase());
+    const matchesSearch = (order.symbol || '').toLowerCase().includes(orderSearch.toLowerCase());
     const matchesStatus = orderStatusFilter === 'all' || order.status === orderStatusFilter;
     const matchesSide = orderSideFilter === 'all' || order.side === orderSideFilter;
     const matchesSource = orderSourceFilter === 'all' || 
