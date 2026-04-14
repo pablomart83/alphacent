@@ -1491,24 +1491,45 @@ class OrderMonitor:
                     db_pos.unrealized_pnl = 0.0
                     closed_count += 1
                     
-                    # Determine exit reason from price vs SL/TP.
-                    # If price is near SL or TP, label accordingly.
-                    # Otherwise label as "Etoro Closed" — reason unknown
-                    # (could be DEMO expiry, margin, manual, or API-side SL/TP).
+                    # Determine exit reason by fetching the LIVE market price.
+                    # The stale current_price from last sync can be minutes old.
+                    # A fresh price tells us definitively whether SL/TP was breached.
                     sl = db_pos.stop_loss or 0
                     tp = db_pos.take_profit or 0
                     side_str = str(db_pos.side).upper() if db_pos.side else 'LONG'
                     is_long = 'LONG' in side_str or 'BUY' in side_str
                     exit_reason = "etoro_closed"
+                    
+                    # Fetch live price for this instrument
+                    live_price = current  # fallback to last synced price
+                    try:
+                        md = self.etoro_client.get_market_data(db_pos.symbol)
+                        if md and md.close and md.close > 0:
+                            live_price = md.close
+                            # Also update the close price on the position for accurate P&L
+                            db_pos.current_price = live_price
+                            if entry > 0 and invested > 0:
+                                if 'SHORT' in side_str or 'SELL' in side_str:
+                                    db_pos.realized_pnl = invested * (entry - live_price) / entry
+                                else:
+                                    db_pos.realized_pnl = invested * (live_price - entry) / entry
+                            logger.info(
+                                f"Fetched live price for closed {db_pos.symbol}: "
+                                f"${live_price:.2f} (was ${current:.2f})"
+                            )
+                    except Exception as _price_err:
+                        logger.debug(f"Could not fetch live price for {db_pos.symbol}: {_price_err}")
+                    
+                    # Determine reason from live price vs SL/TP
                     if tp > 0:
-                        if is_long and current >= tp * 0.995:
+                        if is_long and live_price >= tp:
                             exit_reason = "take_profit_hit"
-                        elif not is_long and current <= tp * 1.005:
+                        elif not is_long and live_price <= tp:
                             exit_reason = "take_profit_hit"
                     if exit_reason == "etoro_closed" and sl > 0:
-                        if is_long and current <= sl * 1.005:
+                        if is_long and live_price <= sl:
                             exit_reason = "stop_loss_hit"
-                        elif not is_long and current >= sl * 0.995:
+                        elif not is_long and live_price >= sl:
                             exit_reason = "stop_loss_hit"
                     db_pos.closure_reason = exit_reason.replace("_", " ").title()
                     
