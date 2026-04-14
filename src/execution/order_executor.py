@@ -193,31 +193,57 @@ class OrderExecutor:
                     # class (e.g., forex primary symbol but trading a stock watchlist symbol).
                     if stop_loss_pct and current_price > 0:
                         try:
-                            import yfinance as yf
+                            from src.data.market_data_manager import MarketDataManager
+                            import yaml as _yaml
+                            from pathlib import Path as _Path
+                            from datetime import timedelta as _td
                             import pandas as _pd
-                            _ticker = yf.download(normalized_symbol, period='30d', interval='1d', progress=False)
-                            if len(_ticker) > 14:
-                                _tr = _pd.concat([
-                                    _ticker['High'] - _ticker['Low'],
-                                    abs(_ticker['High'] - _ticker['Close'].shift(1)),
-                                    abs(_ticker['Low'] - _ticker['Close'].shift(1))
-                                ], axis=1).max(axis=1)
-                                _atr14 = float(_tr.rolling(14).mean().iloc[-1])
-                                _atr_pct = _atr14 / current_price
-                                _atr_floor = _atr_pct * 2.0  # SL must be at least 2x ATR
-                                
-                                if stop_loss_pct < _atr_floor:
-                                    original_rr = (take_profit_pct / stop_loss_pct) if take_profit_pct and stop_loss_pct else 2.0
-                                    old_sl = stop_loss_pct
-                                    stop_loss_pct = round(_atr_floor, 4)
-                                    if take_profit_pct:
-                                        take_profit_pct = round(stop_loss_pct * original_rr, 4)
-                                    logger.info(
-                                        f"ATR floor at order time for {normalized_symbol}: "
-                                        f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
-                                        f"(ATR={_atr_pct:.2%}, floor=1.5x ATR={_atr_floor:.2%}). "
-                                        f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x)"
-                                    )
+
+                            _cfg_path = _Path("config/autonomous_trading.yaml")
+                            _cfg = {}
+                            if _cfg_path.exists():
+                                with open(_cfg_path) as _f:
+                                    _cfg = _yaml.safe_load(_f) or {}
+                            _mdm = MarketDataManager(_cfg)
+                            _end = datetime.now()
+                            _start = _end - _td(days=30)
+                            _bars = _mdm.get_historical_data(normalized_symbol, _start, _end, interval="1d")
+
+                            if _bars and len(_bars) > 14:
+                                _highs = [b.high for b in _bars if b.high and b.low and b.close]
+                                _lows = [b.low for b in _bars if b.high and b.low and b.close]
+                                _closes = [b.close for b in _bars if b.high and b.low and b.close]
+                                if len(_closes) > 14:
+                                    _tr_list = []
+                                    for _i in range(1, len(_closes)):
+                                        _tr_val = max(
+                                            _highs[_i] - _lows[_i],
+                                            abs(_highs[_i] - _closes[_i - 1]),
+                                            abs(_lows[_i] - _closes[_i - 1])
+                                        )
+                                        _tr_list.append(_tr_val)
+                                    if _tr_list:
+                                        _atr14 = sum(_tr_list[-14:]) / min(14, len(_tr_list[-14:]))
+                                        _atr_pct = _atr14 / current_price
+                                        _atr_floor = _atr_pct * 2.0  # SL must be at least 2x ATR
+
+                                        if stop_loss_pct < _atr_floor:
+                                            original_rr = (take_profit_pct / stop_loss_pct) if take_profit_pct and stop_loss_pct else 2.0
+                                            old_sl = stop_loss_pct
+                                            stop_loss_pct = round(_atr_floor, 4)
+                                            if take_profit_pct:
+                                                take_profit_pct = round(stop_loss_pct * original_rr, 4)
+                                            # Clamp SL to max 12% to avoid absurdly wide stops
+                                            if stop_loss_pct > 0.12:
+                                                stop_loss_pct = 0.12
+                                                if take_profit_pct:
+                                                    take_profit_pct = round(0.12 * original_rr, 4)
+                                            logger.info(
+                                                f"ATR floor at order time for {normalized_symbol}: "
+                                                f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
+                                                f"(ATR={_atr_pct:.2%}, floor=2x ATR={_atr_floor:.2%}). "
+                                                f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x)"
+                                            )
                         except Exception as _atr_err:
                             logger.debug(f"Could not compute ATR floor for {normalized_symbol}: {_atr_err}")
                     
