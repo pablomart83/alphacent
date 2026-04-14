@@ -1520,7 +1520,11 @@ class OrderMonitor:
                     except Exception as _price_err:
                         logger.debug(f"Could not fetch live price for {db_pos.symbol}: {_price_err}")
                     
-                    # Determine reason from live price vs SL/TP
+                    # Determine reason from live price vs SL/TP.
+                    # Three checks, in order of confidence:
+                    # 1. Live price currently past SL/TP → definitive
+                    # 2. P&L loss is within the SL range → SL fired, price bounced back
+                    # 3. P&L gain is within the TP range → TP fired, price pulled back
                     if tp > 0:
                         if is_long and live_price >= tp:
                             exit_reason = "take_profit_hit"
@@ -1531,6 +1535,32 @@ class OrderMonitor:
                             exit_reason = "stop_loss_hit"
                         elif not is_long and live_price >= sl:
                             exit_reason = "stop_loss_hit"
+                    
+                    # Check 2: P&L-based detection. If the position lost money and
+                    # the loss % is within the SL distance, the SL almost certainly
+                    # fired — the price just bounced back by the time we checked.
+                    # e.g., SL at -5%, position closed at -4.4% → SL hit, price recovered slightly.
+                    if exit_reason == "etoro_closed" and sl > 0 and entry > 0:
+                        if is_long:
+                            sl_pct = (entry - sl) / entry  # e.g., 0.05 for 5% SL
+                            loss_pct = (entry - live_price) / entry  # positive when losing
+                        else:
+                            sl_pct = (sl - entry) / entry
+                            loss_pct = (live_price - entry) / entry
+                        # If we lost money and the loss is >= 50% of the SL distance, it's a SL hit
+                        if loss_pct > 0 and sl_pct > 0 and loss_pct >= sl_pct * 0.5:
+                            exit_reason = "stop_loss_hit"
+                        # Similarly for TP
+                        if exit_reason == "etoro_closed" and tp > 0:
+                            if is_long:
+                                tp_pct = (tp - entry) / entry
+                                gain_pct = (live_price - entry) / entry
+                            else:
+                                tp_pct = (entry - tp) / entry
+                                gain_pct = (entry - live_price) / entry
+                            if gain_pct > 0 and tp_pct > 0 and gain_pct >= tp_pct * 0.5:
+                                exit_reason = "take_profit_hit"
+                    
                     db_pos.closure_reason = exit_reason.replace("_", " ").title()
                     
                     # Log to trade journal
