@@ -1743,36 +1743,82 @@ The font normalization from Session 8 was partial — many inconsistencies remai
 
 ---
 
-## Current System State (April 17, 2026)
+### Session Improvements (April 17, 2026 — Session 12: FMP Cache & Data Fetching Overhaul)
+
+#### 120. FundamentalDataProvider Singleton Race Condition Fix ✅ (CRITICAL)
+- **Root cause**: `__init__` self-registration was racy — 4 parallel signal gen workers all called `FundamentalDataProvider(config)` simultaneously. Python creates all 4 objects before any `__init__` runs, so all 4 passed the `if _singleton_instance is None` check and each got their own `RateLimiter` with 300/min budget. Effective rate = 1200 calls/min against FMP → service crashing every ~10 minutes.
+- **Fix**: Removed self-registration from `__init__`. `get_fundamental_data_provider()` now atomically creates + assigns singleton inside the lock before returning.
+- `monitoring_service._get_fundamental_provider()` was also creating a fresh instance on every call — now uses `get_fundamental_data_provider()`.
+- **Files**: `src/data/fundamental_data_provider.py`, `src/core/monitoring_service.py`
+
+#### 121. FMP Insider Trading Endpoint Disabled ✅
+- `/api/v4/insider-trading` is a legacy endpoint (deprecated Aug 2025), 403 for all non-legacy accounts
+- Stable API (`/stable/search-insider-trades`, `/stable/latest-insider-trade` etc.) returns 404 — plan-gated (returns `[]` + 404 for free tier)
+- `get_insider_trading()` now returns `[]` immediately — no rate limit tokens wasted
+- Dead code removed from method body
+- **Files**: `src/data/fundamental_data_provider.py`
+
+#### 122. FMP Cache Warm Rate Exhaustion Fix ✅
+- **Root cause**: 8 concurrent workers × 5 calls/symbol = 40 calls/burst. Exhausted 300/min budget after ~60 symbols, circuit breaker fired, remaining ~140 symbols failed (39 errors per run).
+- **Fix**: Reduced `ThreadPoolExecutor` workers 8 → 3. Keeps burst at 15 calls max, ~60 symbols/min with headroom for concurrent signal generation.
+- **Files**: `src/data/fmp_cache_warmer.py`
+
+#### 123. `_is_data_complete` False Positives Fixed ✅
+- Was requiring 2/3 of `[eps, revenue_growth, pe_ratio]` but `revenue_growth` is structurally `None` from a single-period FMP fetch (requires 2 periods to compute).
+- Was causing ~30+ symbols (INTC, CRWD, ZS, NET, MDB, TEAM, SOUN, AI, etc.) to be flagged as incomplete → unnecessary Alpha Vantage fallback → stale data warnings.
+- **Fix**: Now only requires `eps OR pe_ratio` (1 of 2 instead of 2 of 3).
+- **Files**: `src/data/fundamental_data_provider.py`
+
+#### 124. FMP Cache Warm TTL Aligned to Coverage Display ✅
+- Manual trigger was using `force_ttl_hours=24` — re-fetching anything older than 24h even if coverage showed it as fresh (< 7 days). Running twice would re-fetch the same symbols.
+- **Fix**: Changed to `force_ttl_hours=168` (7 days) — matches the coverage % display. Re-running 2-3 times now progressively fills only the symbols that failed, without re-fetching symbols successfully cached this week.
+- **Files**: `src/api/routers/data_management.py`
+
+#### 125. MarketDataManager Singleton ✅
+- 15+ places were creating fresh `MarketDataManager` instances with empty `_raw_fetch_cache` and `_historical_memory_cache`. Signal gen workers each had their own empty cache — zero sharing between strategies.
+- **Fix**: Added `get_market_data_manager()` / `set_market_data_manager()` singleton pattern. Monitoring service registers its instance on startup. Trading scheduler uses the shared instance instead of creating a new one.
+- **Files**: `src/data/market_data_manager.py`, `src/core/monitoring_service.py`, `src/core/trading_scheduler.py`
+
+#### 126. Intraday DB Cache Staleness False Positives Fixed ✅
+- `_get_historical_from_db` was rejecting 1h/4h data if the latest bar was > 2h old — triggering 208 individual Yahoo calls on every restart just because it was morning (overnight gap).
+- **Fix**: Only reject intraday DB cache if the market was actually open during the gap. Checks US/Eastern timezone: if it's pre-market, after-hours, or weekend → gap is expected → use DB data as-is. Crypto (24/7) still uses the 2h staleness check.
+- **Files**: `src/data/market_data_manager.py`
+
+#### 127. Double Yahoo Calls in `_sync_price_data` Eliminated ✅
+- Phase 1 of the hourly sync was calling `get_historical_data()` (which has Yahoo fallback) to check DB cache. Symbols missing DB cache got fetched individually in Phase 1, then again in the batch in Phase 2 → double Yahoo call per symbol.
+- **Fix**: Phase 1 now calls `_get_historical_from_db()` directly. If DB misses, just adds to batch list. All Yahoo fetches happen in Phase 2 as a single `yf.download()` batch call.
+- **Files**: `src/core/monitoring_service.py`
+
+---
+
+## Current System State (April 17, 2026 — Updated Session 12)
 
 - **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
 - **Account:** eToro DEMO, balance ~$162K, equity ~$463K
 - **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
 - **Active strategies:** ~114 DEMO
-- **Open positions:** ~185 (158 LONG, 27 SHORT — bull market gate closing shorts)
+- **Open positions:** ~185 (158 LONG, 27 SHORT)
 - **Market regime:** Equity: trending_up_weak, Crypto: trending_up
-- **FMP cache**: 217 symbols in DB, 210 fresh within 7 days (~91% coverage)
-- **Session TTL**: 8 hours (restarts don't log users out)
-- **Key changes**: Strategy retirement → BACKTESTED with TTL, meaningful strategy names, FMP singleton, ZNC=F fixed, bull market short gate active
+- **FMP cache**: ~210 symbols fresh within 7 days (~91% coverage), 39 failures fixed
+- **Data fetching**: Singleton pattern for both FundamentalDataProvider and MarketDataManager — zero redundant instances, shared caches across all components
+- **Insider trading**: Disabled (FMP plan-gated) — no more 403 spam on startup
+- **Intraday cache**: No longer rejected on overnight/weekend gaps — 208 Yahoo calls eliminated from every restart
 
 ---
 
-## Open Items (Updated Session 11)
-
-### FMP Cache Warmer (PENDING)
-- The manual "Refresh Fundamentals" button was working before singleton implementation
-- After singleton: warmer uses dedicated provider (not singleton) but `get_sector_performance()` was blocking the thread — removed that call
-- **Status**: Should work now after removing `get_sector_performance()` pre-warm. Verify in next session.
-- If still broken: check if `_fmp_request` → `wait_for_token` is blocking on the dedicated provider
+## Open Items (Updated Session 12)
 
 ### Trading Performance
 - Monitor win rate after all quant improvements (target: >50%)
 - Track how many shorts are being closed by bull market gate
 - Monitor supersession: are better-calibrated strategies replacing old ones?
 
+### FMP Cache
+- Run cache warm 2-3 times to fill remaining ~9% failures (rate limit recovery between runs)
+- Insider trading data unavailable on current FMP plan — conviction scorer `_score_fundamental_quality()` uses `insider_net_buying` field which will always be 0
+
 ### Strategy Identity
 - Existing strategies still have old names (V38, V174, etc.) — new naming only applies to newly proposed strategies
-- Consider a one-time migration to rename existing strategies (low priority)
 
 ### Infrastructure
 - API key patching: SCP of `autonomous_trading.yaml` overwrites keys — need post-SCP hook
