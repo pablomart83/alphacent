@@ -39,7 +39,7 @@ interface DashboardData {
   sector_exposure: Array<{ sector: string; allocation_pct: number; pnl: number; pnl_pct: number; position_count: number }>;
   market_regime: { current_regime: string; regime_color: string; regime_description: string };
   health_score: { score: number; drawdown_score: number; concentration_score: number; margin_score: number; diversity_score: number };
-  quick_stats: { open_positions: number; active_strategies: number; pending_orders: number; todays_trades: number; win_rate_30d: number };
+  quick_stats: { open_positions: number; active_strategies: number; pending_orders: number; todays_trades: number; win_rate_30d: number; sharpe_30d?: number | null };
   account_balance: number;
   account_equity: number;
   available_cash: number;
@@ -251,7 +251,9 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     if (!d) return [];
     const pnl = dailyPnl?.pnl_absolute ?? 0;
     const pnlPct = dailyPnl?.pnl_percent ?? 0;
-    const sharpe = d.quick_stats?.win_rate_30d != null
+    const sharpe = d.quick_stats?.sharpe_30d != null
+      ? d.quick_stats.sharpe_30d.toFixed(2)
+      : d.quick_stats?.win_rate_30d != null
       ? (d.quick_stats.win_rate_30d / 100 * 2).toFixed(2)
       : 'N/A';
     return [

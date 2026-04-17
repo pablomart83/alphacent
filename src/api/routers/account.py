@@ -1456,6 +1456,7 @@ class QuickStats(BaseModel):
     pending_orders: int
     todays_trades: int
     win_rate_30d: float
+    sharpe_30d: Optional[float] = None
 
 class DashboardSummaryResponse(BaseModel):
     """Complete dashboard summary response."""
@@ -1843,12 +1844,38 @@ async def get_dashboard_summary(
     wins = sum(1 for p in recent_closed if (p.realized_pnl or 0) > 0)
     win_rate = (wins / len(recent_closed) * 100) if recent_closed else 0
 
+    # Sharpe 30d from equity snapshots (accurate, not estimated)
+    sharpe_30d = None
+    try:
+        thirty_days_str = thirty_days_ago.strftime("%Y-%m-%d")
+        snap_30d = db.query(EquitySnapshotORM).filter(
+            EquitySnapshotORM.date >= thirty_days_str
+        ).order_by(EquitySnapshotORM.date.asc()).all()
+        if snap_30d and len(snap_30d) >= 10:
+            daily_rets = []
+            for i in range(1, len(snap_30d)):
+                prev_eq = snap_30d[i - 1].equity
+                curr_eq = snap_30d[i].equity
+                if prev_eq > 0:
+                    daily_rets.append((curr_eq - prev_eq) / prev_eq)
+            if len(daily_rets) >= 10:
+                import numpy as _np
+                rf_daily = 0.02 / 252
+                excess = [r - rf_daily for r in daily_rets]
+                std = float(_np.std(excess, ddof=1))
+                if std > 0:
+                    sharpe_30d = round(float(_np.mean(excess) / std * _np.sqrt(252)), 2)
+                    sharpe_30d = max(-5.0, min(5.0, sharpe_30d))
+    except Exception:
+        pass
+
     quick_stats = QuickStats(
         open_positions=len(open_positions),
         active_strategies=active_strategies,
         pending_orders=pending_orders,
         todays_trades=todays_trades,
-        win_rate_30d=round(win_rate, 1)
+        win_rate_30d=round(win_rate, 1),
+        sharpe_30d=sharpe_30d,
     )
 
     return DashboardSummaryResponse(

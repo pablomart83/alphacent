@@ -688,86 +688,117 @@ async def get_performance_analytics(
     account = session.query(AccountInfoORM).filter_by(account_id=account_id).first()
     account_equity = getattr(account, 'equity', None) or getattr(account, 'balance', 100000.0) if account else 100000.0
     
-    # Use positions (both open and closed) for P&L
-    positions = session.query(PositionORM).filter(
-        PositionORM.opened_at >= start_date
-    ).order_by(PositionORM.opened_at).all()
-    
-    # Build DAILY P&L aggregation — one data point per calendar day.
-    # This is how Sharpe ratio should be calculated: daily portfolio returns,
-    # not per-position returns. A PM looks at daily P&L, not per-trade P&L.
-    daily_pnl: Dict[str, float] = {}  # date_str -> total P&L that day
-    daily_invested: Dict[str, float] = {}  # date_str -> total capital at risk
-    
-    for pos in positions:
-        pnl = _position_pnl(pos)
-        invested = _get_position_value(pos)
-        # Use close date for closed positions, open date for still-open ones
-        ts = pos.closed_at or pos.opened_at
-        if ts:
-            day_key = ts.strftime('%Y-%m-%d')
-            daily_pnl[day_key] = daily_pnl.get(day_key, 0.0) + pnl
-            daily_invested[day_key] = daily_invested.get(day_key, 0.0) + invested
-    
-    # Sort days chronologically
-    sorted_days = sorted(daily_pnl.keys())
-    
-    # Build equity curve from actual account equity
+    # ── PRIMARY: Use equity_snapshots table for accurate daily returns ──────────
+    # equity_snapshots records actual account equity at end of each day.
+    # This is the correct input for Sharpe — it captures all P&L sources
+    # (realized + unrealized changes) without double-counting or distortion.
+    from src.models.orm import EquitySnapshotORM
+    snapshot_rows = session.query(EquitySnapshotORM).filter(
+        EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d')
+    ).order_by(EquitySnapshotORM.date.asc()).all()
+
     equity_curve = []
-    current_equity = account_equity - sum(daily_pnl.values())  # Estimate starting equity
-    if current_equity <= 0:
-        current_equity = account_equity  # Fallback
-    peak_equity = current_equity
     daily_returns = []
-    wins = []
-    losses = []
     monthly_returns: Dict[str, float] = {}
-    
-    for day_key in sorted_days:
-        pnl = daily_pnl[day_key]
-        invested = daily_invested.get(day_key, 1.0)
-        
-        current_equity += pnl
-        peak_equity = max(peak_equity, current_equity)
-        drawdown = ((peak_equity - current_equity) / peak_equity * 100) if peak_equity > 0 else 0.0
-        
-        # Daily return as percentage of equity (not per-position)
-        daily_ret = pnl / max(current_equity - pnl, 1.0)  # Use pre-P&L equity as base
-        daily_returns.append(daily_ret)
-        
-        if pnl > 0:
-            wins.append(pnl)
-        elif pnl < 0:
-            losses.append(abs(pnl))
-        
-        equity_curve.append(EquityCurvePoint(
-            timestamp=day_key,
-            equity=round(current_equity, 2),
-            drawdown=round(drawdown, 2)
-        ))
-        
-        # Monthly returns as PERCENTAGE of equity, not raw dollars
-        month_key = day_key[:7]  # YYYY-MM
-        if month_key not in monthly_returns:
-            monthly_returns[month_key] = 0.0
-        monthly_returns[month_key] += daily_ret * 100  # Accumulate daily return %
-    
-    # Calculate metrics from daily returns (correct Sharpe calculation)
-    total_pnl = sum(daily_pnl.values())
-    starting_equity = current_equity - total_pnl
-    total_return = (total_pnl / starting_equity * 100) if starting_equity > 0 else 0.0
+
+    if snapshot_rows and len(snapshot_rows) >= 2:
+        # Build equity curve and daily returns from snapshots
+        peak_equity = snapshot_rows[0].equity
+        for i, row in enumerate(snapshot_rows):
+            eq = row.equity
+            peak_equity = max(peak_equity, eq)
+            drawdown = ((peak_equity - eq) / peak_equity * 100) if peak_equity > 0 else 0.0
+            equity_curve.append(EquityCurvePoint(
+                timestamp=row.date if isinstance(row.date, str) else row.date.strftime('%Y-%m-%d'),
+                equity=round(eq, 2),
+                drawdown=round(drawdown, 2)
+            ))
+            if i > 0:
+                prev_eq = snapshot_rows[i - 1].equity
+                if prev_eq > 0:
+                    daily_ret = (eq - prev_eq) / prev_eq
+                    daily_returns.append(daily_ret)
+                    month_key = (row.date if isinstance(row.date, str) else row.date.strftime('%Y-%m-%d'))[:7]
+                    monthly_returns[month_key] = monthly_returns.get(month_key, 0.0) + daily_ret * 100
+
+        # Metrics from snapshots
+        first_eq = snapshot_rows[0].equity
+        last_eq = snapshot_rows[-1].equity
+        total_return = ((last_eq - first_eq) / first_eq * 100) if first_eq > 0 else 0.0
+        max_drawdown = max([p.drawdown for p in equity_curve]) if equity_curve else 0.0
+
+        # Win/loss from closed positions (for win rate + profit factor)
+        positions = session.query(PositionORM).filter(
+            PositionORM.opened_at >= start_date,
+            PositionORM.closed_at.isnot(None),
+        ).all()
+        wins = [_position_pnl(p) for p in positions if _position_pnl(p) > 0]
+        losses = [abs(_position_pnl(p)) for p in positions if _position_pnl(p) < 0]
+        # Also count open positions for total_trades
+        all_positions = session.query(PositionORM).filter(
+            PositionORM.opened_at >= start_date
+        ).all()
+        total_trades = len(all_positions)
+        winning_trades = len(wins)
+        win_rate = (winning_trades / len(positions) * 100) if positions else 0.0
+        profit_factor = (sum(wins) / sum(losses)) if losses and sum(losses) > 0 else 0.0
+
+    else:
+        # ── FALLBACK: Build from position-level P&L when no snapshots ────────
+        # Less accurate but works when equity_snapshots is empty.
+        positions = session.query(PositionORM).filter(
+            PositionORM.opened_at >= start_date
+        ).order_by(PositionORM.opened_at).all()
+
+        daily_pnl: Dict[str, float] = {}
+        for pos in positions:
+            pnl = _position_pnl(pos)
+            ts = pos.closed_at or pos.opened_at
+            if ts:
+                day_key = ts.strftime('%Y-%m-%d')
+                daily_pnl[day_key] = daily_pnl.get(day_key, 0.0) + pnl
+
+        sorted_days = sorted(daily_pnl.keys())
+        current_equity = account_equity - sum(daily_pnl.values())
+        if current_equity <= 0:
+            current_equity = account_equity
+        peak_equity = current_equity
+        wins = []
+        losses = []
+
+        for day_key in sorted_days:
+            pnl = daily_pnl[day_key]
+            current_equity += pnl
+            peak_equity = max(peak_equity, current_equity)
+            drawdown = ((peak_equity - current_equity) / peak_equity * 100) if peak_equity > 0 else 0.0
+            daily_ret = pnl / max(current_equity - pnl, 1.0)
+            daily_returns.append(daily_ret)
+            if pnl > 0:
+                wins.append(pnl)
+            elif pnl < 0:
+                losses.append(abs(pnl))
+            equity_curve.append(EquityCurvePoint(
+                timestamp=day_key,
+                equity=round(current_equity, 2),
+                drawdown=round(drawdown, 2)
+            ))
+            month_key = day_key[:7]
+            monthly_returns[month_key] = monthly_returns.get(month_key, 0.0) + daily_ret * 100
+
+        total_pnl = sum(daily_pnl.values())
+        starting_equity = current_equity - total_pnl
+        total_return = (total_pnl / starting_equity * 100) if starting_equity > 0 else 0.0
+        max_drawdown = max([p.drawdown for p in equity_curve]) if equity_curve else 0.0
+        total_trades = len(positions)
+        winning_trades = len(wins)
+        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+        profit_factor = (sum(wins) / sum(losses)) if losses and sum(losses) > 0 else 0.0
+
+    # ── Sharpe / Sortino from daily returns ───────────────────────────────────
     sharpe = calculate_sharpe_ratio(daily_returns)
     sortino = calculate_sortino_ratio(daily_returns)
-    max_drawdown = max([point.drawdown for point in equity_curve]) if equity_curve else 0.0
-    
-    total_trades = len(positions)
-    winning_trades = len(wins)
-    win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
-    profit_factor = (sum(wins) / sum(losses)) if losses and sum(losses) > 0 else 0.0
-    
-    # Round monthly returns for display
     monthly_returns = {k: round(v, 2) for k, v in monthly_returns.items()}
-    
+
     returns_distribution = {
         'large_positive': len([r for r in daily_returns if r > 0.02]),
         'positive': len([r for r in daily_returns if 0 < r <= 0.02]),
