@@ -163,22 +163,32 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
       const result = await apiClient.triggerFmpCacheWarm();
       if (result.success) {
         toast.success('FMP cache warm started — polling for progress...');
-        // Poll every 3s while running
+        // Give the thread 5s to start before polling
+        // Then poll every 3s, but require running=false for 2 consecutive polls
+        // before declaring it done (handles thread startup race)
+        let notRunningCount = 0;
         const poll = setInterval(async () => {
           try {
             const s = await apiClient.getFmpCacheStatus();
             setFmpCacheStatus(s);
             if (!s.running) {
-              clearInterval(poll);
-              setFmpCacheWarming(false);
-              if (s.error) {
-                toast.error(`FMP cache warm failed: ${s.error}`);
-              } else {
-                toast.success(`FMP cache warm complete — ${s.fetched} fetched, ${s.cached} cached (${s.coverage_pct}% coverage)`);
+              notRunningCount++;
+              if (notRunningCount >= 2) {
+                clearInterval(poll);
+                setFmpCacheWarming(false);
+                if (s.error) {
+                  toast.error(`FMP cache warm failed: ${s.error}`);
+                } else if (s.completed_at) {
+                  toast.success(`FMP cache warm complete — ${s.fetched} fetched, ${s.cached} cached (${s.coverage_pct}% coverage)`);
+                }
               }
+            } else {
+              notRunningCount = 0; // reset if it starts running
             }
           } catch { /* ignore poll errors */ }
         }, 3000);
+        // Safety: stop polling after 20 minutes regardless
+        setTimeout(() => { clearInterval(poll); setFmpCacheWarming(false); }, 20 * 60 * 1000);
       } else {
         toast.error(result.message);
         setFmpCacheWarming(false);

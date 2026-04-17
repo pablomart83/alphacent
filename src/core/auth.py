@@ -53,7 +53,7 @@ class AuthenticationManager:
     DB-backed user authentication with bcrypt hashing and in-memory sessions.
     """
 
-    def __init__(self, session_timeout_minutes: int = 30):
+    def __init__(self, session_timeout_minutes: int = 480):  # 8 hours default
         self.sessions: Dict[str, Session] = {}
         self.session_timeout = timedelta(minutes=session_timeout_minutes)
         self._db = None

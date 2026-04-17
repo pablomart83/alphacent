@@ -80,7 +80,7 @@ async def login(
         httponly=False,
         secure=False,
         samesite="lax",
-        max_age=30 * 60,
+        max_age=8 * 60 * 60,  # 8 hours
     )
 
     session = auth_manager.sessions.get(session_id)

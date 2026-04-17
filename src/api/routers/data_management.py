@@ -252,12 +252,16 @@ def _compute_fmp_coverage() -> dict:
 @router.get("/fmp-cache/status")
 async def get_fmp_cache_status():
     """Get FMP fundamental cache status and coverage."""
-    global _fmp_cache_progress
+    global _fmp_cache_progress, _fmp_cache_thread
     coverage = _compute_fmp_coverage()
+    # running = True if thread is alive OR progress dict says running
+    # (handles the race between trigger response and thread startup)
+    thread_alive = _fmp_cache_thread is not None and _fmp_cache_thread.is_alive()
+    is_running = thread_alive or _fmp_cache_progress.get("running", False)
     return {
         **_fmp_cache_progress,
         **coverage,
-        "running": _fmp_cache_thread is not None and _fmp_cache_thread.is_alive(),
+        "running": is_running,
     }
 
 
@@ -1054,14 +1058,13 @@ async def get_data_quality():
             latest_prices: dict[str, datetime] = {}
             source_map: dict[str, str] = {}
             rows = session.execute(text(
-                "SELECT symbol, MAX(fetched_at) as latest, source "
+                "SELECT symbol, MAX(fetched_at) as latest "
                 "FROM historical_price_cache "
                 "GROUP BY symbol"
             )).fetchall()
             for row in rows:
                 sym = row[0]
                 latest_ts = row[1]
-                src = row[2] or "yahoo"
                 if latest_ts:
                     if isinstance(latest_ts, str):
                         try:
@@ -1070,7 +1073,7 @@ async def get_data_quality():
                             pass
                     elif isinstance(latest_ts, datetime):
                         latest_prices[sym] = latest_ts
-                source_map[sym] = src.lower() if src else "yahoo"
+                source_map[sym] = "yahoo"  # default; source column not reliably in GROUP BY
 
             # Build entries — union of quality reports and price cache symbols
             all_symbols = set(quality_reports.keys()) | set(latest_prices.keys()) | set(asset_class_map.keys())
