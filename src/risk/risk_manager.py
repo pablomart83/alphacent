@@ -453,15 +453,6 @@ class RiskManager:
                     reason=f"Position would exceed max exposure limit of {self.config.max_exposure_pct:.1%}"
                 )
 
-            # Check symbol concentration limits (NEW)
-            is_valid, reason = self.check_symbol_concentration(signal.symbol, position_size, account, positions)
-            if not is_valid:
-                return ValidationResult(
-                    is_valid=False,
-                    position_size=0.0,
-                    reason=reason
-                )
-
             logger.info(
                 f"Signal validated: {signal.symbol} {signal.action.value} "
                 f"size={position_size:.2f} (base={base_position_size:.2f}) "

@@ -2903,16 +2903,22 @@ class MonitoringService:
             config_min_wr = config_ret.get('min_win_rate', 0.35)
             config_max_dd = config_ret.get('max_drawdown', 0.31)
             
-            # Detect current regime
+            # Detect current regime using the same MarketStatisticsAnalyzer path
+            # that the rest of the system uses. The old MarketAnalyzer() instantiation
+            # was silently failing (no market_data arg), leaving current_regime='unknown'
+            # and making the entire regime mismatch penalty branch dead code.
             current_regime = 'unknown'
             try:
-                from src.strategy.strategy_proposer import StrategyProposer
-                from src.strategy.market_analyzer import MarketAnalyzer
-                analyzer = MarketAnalyzer()
-                sub_regime, _, _, _ = analyzer.detect_sub_regime()
-                current_regime = sub_regime.value
-            except Exception:
-                pass
+                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                from src.data.market_data_manager import get_market_data_manager
+                _mdm = get_market_data_manager()
+                if _mdm:
+                    _analyzer = MarketStatisticsAnalyzer(_mdm)
+                    sub_regime, _, _, _ = _analyzer.detect_sub_regime()
+                    current_regime = sub_regime.value
+                    logger.debug(f"[StrategyDecay] Current regime: {current_regime}")
+            except Exception as _regime_err:
+                logger.warning(f"[StrategyDecay] Could not detect regime: {_regime_err}")
             
             session = self.db.get_session()
             try:
@@ -3143,14 +3149,25 @@ class MonitoringService:
                             else:
                                 probation_days = 7   # Daily: 1 week default
                             
+                            # Halve probation when BOTH decay=0 AND health≤2 — doubly broken.
+                            # No point protecting a strategy that's failing on both dimensions.
+                            health_score_val = meta.get('health_score')
+                            if health_score_val is not None and health_score_val <= 2:
+                                probation_days = max(1, probation_days // 2)
+                                logger.debug(
+                                    f"[StrategyDecay] {strat_orm.name}: probation halved to {probation_days}d "
+                                    f"(decay=0 AND health={health_score_val})"
+                                )
+                            
                             if age_days < probation_days:
                                 should_retire = False
                         
                         if should_retire:
-                            # Before retiring, check if the strategy is actually profitable live.
-                            # Decay score is based on backtest metrics — a strategy can have
-                            # decayed backtest edge but still be making money in production.
-                            # Don't kill a winner.
+                            # Before retiring, check if the strategy is genuinely profitable.
+                            # Require at least 2% return on deployed capital — not just $1 green.
+                            # A strategy at +$5 on $6K deployed is noise, not a winner.
+                            # This prevents the override from protecting every marginally green
+                            # strategy during a regime change when capital needs to be recycled.
                             strat_positions = session.query(PositionORM).filter(
                                 PositionORM.strategy_id == strat_orm.id
                             ).all()
@@ -3159,10 +3176,17 @@ class MonitoringService:
                                     (p.realized_pnl or 0) + (p.unrealized_pnl or 0)
                                     for p in strat_positions
                                 )
-                                if live_pnl > 0:
+                                live_invested = sum(
+                                    (p.invested_amount if p.invested_amount and p.invested_amount > 0 else abs(p.quantity or 0))
+                                    for p in strat_positions
+                                )
+                                # Must be >2% return on deployed capital to qualify as a winner
+                                winner_threshold = live_invested * 0.02
+                                if live_pnl > winner_threshold:
                                     logger.info(
                                         f"[StrategyDecay] {strat_orm.name}: decay=0 but live P&L "
-                                        f"is +${live_pnl:,.2f} — keeping profitable strategy alive"
+                                        f"is +${live_pnl:,.2f} ({live_pnl/live_invested:.1%} on ${live_invested:,.0f}) "
+                                        f"— keeping genuine winner alive"
                                     )
                                     # Reset decay to 3 to give it more runway
                                     meta['decay_score'] = 3
@@ -3170,6 +3194,11 @@ class MonitoringService:
                                     flag_modified(strat_orm, 'strategy_metadata')
                                     result["updated"] += 1
                                     should_retire = False
+                                elif live_pnl > 0:
+                                    logger.info(
+                                        f"[StrategyDecay] {strat_orm.name}: decay=0, P&L +${live_pnl:,.2f} "
+                                        f"({live_pnl/live_invested:.1%}) below 2% winner threshold — retiring"
+                                    )
                         
                         if should_retire:
                             top_penalties = sorted(penalties.items(), key=lambda x: -x[1])[:3]

@@ -32,14 +32,29 @@ class TradingScheduler:
     
     def __init__(
         self,
-        signal_generation_interval: int = 3600,  # 1 hour — matches default_interval: 1h data
+        signal_generation_interval: int = 0,  # 0 = read from autonomous_trading.yaml
     ):
         """
         Initialize trading scheduler.
         
         Args:
-            signal_generation_interval: Seconds between signal generation runs (default 3600 = 1 hour)
+            signal_generation_interval: Seconds between signal generation runs (0 = read from YAML)
         """
+        if signal_generation_interval == 0:
+            try:
+                import yaml
+                from pathlib import Path
+                _cfg_path = Path("config/autonomous_trading.yaml")
+                if _cfg_path.exists():
+                    with open(_cfg_path, 'r') as _f:
+                        _cfg = yaml.safe_load(_f) or {}
+                    signal_generation_interval = int(
+                        _cfg.get('signal_generation', {}).get('interval_seconds', 3600)
+                    )
+                else:
+                    signal_generation_interval = 3600
+            except Exception:
+                signal_generation_interval = 3600
         self.signal_generation_interval = signal_generation_interval
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -435,10 +450,10 @@ class TradingScheduler:
             max_batch_exposure_pct = 0.40  # Max 40% of equity per signal generation run
             max_batch_amount = account_equity_val * max_batch_exposure_pct
             
-            # In-run dedup: track (symbol, direction) pairs we've already submitted orders for
-            # in THIS signal generation run. Prevents race condition where two strategies
-            # both submit orders for the same symbol before either position is in DB.
-            orders_submitted_this_run = set()  # (normalized_symbol, direction)
+            # In-run dedup: track (strategy_id, symbol, direction) to prevent a single
+            # strategy from opening multiple positions on the same symbol in one batch.
+            # Keyed on strategy_id so different strategies can still trade the same symbol.
+            orders_submitted_this_run = set()  # (strategy_id, normalized_symbol, direction)
             
             for strategy_id, signals in coordinated_results.items():
                 if not signals:
@@ -586,11 +601,11 @@ class TradingScheduler:
                         continue  # Skip the ENTRY logic below
 
                     # ── ENTRY SIGNAL HANDLING ─────────────────────────────
-                    # In-run dedup: skip if we already submitted an order for this symbol/direction
+                    # In-run dedup: skip if this strategy already submitted an order for this symbol/direction
                     from src.utils.symbol_normalizer import normalize_symbol as _norm
                     _sig_sym = _norm(signal.symbol)
                     _sig_dir = "LONG" if signal.action in [_SignalAction.ENTER_LONG] else "SHORT"
-                    if (_sig_sym, _sig_dir) in orders_submitted_this_run:
+                    if (strategy_id, _sig_sym, _sig_dir) in orders_submitted_this_run:
                         logger.info(
                             f"Skipping {signal.symbol} {_sig_dir} — already submitted order "
                             f"for this symbol/direction in this run"
@@ -1003,8 +1018,8 @@ class TradingScheduler:
                             session.commit()
                             orders_executed += 1
                             
-                            # Track this symbol/direction to prevent in-run duplicates
-                            orders_submitted_this_run.add((_sig_sym, _sig_dir))
+                            # Track this strategy+symbol+direction to prevent in-run duplicates
+                            orders_submitted_this_run.add((strategy_id, _sig_sym, _sig_dir))
                             
                             # Track cumulative allocation
                             cumulative_allocated += validation_result.position_size
@@ -1031,7 +1046,7 @@ class TradingScheduler:
                                     else:
                                         _hedge_action = None
 
-                                    if _hedge_action and (_pt_partner, _hedge_dir) not in orders_submitted_this_run:
+                                    if _hedge_action and (strategy_id, _pt_partner, _hedge_dir) not in orders_submitted_this_run:
                                         _hedge_signal = _TS(
                                             strategy_id=signal.strategy_id,
                                             symbol=_pt_partner,
@@ -1081,7 +1096,7 @@ class TradingScheduler:
                                         session.add(_hedge_orm)
                                         session.commit()
 
-                                        orders_submitted_this_run.add((_pt_partner, _hedge_dir))
+                                        orders_submitted_this_run.add((strategy_id, _pt_partner, _hedge_dir))
                                         cumulative_allocated += validation_result.position_size
                                         orders_executed += 1
 
@@ -1842,12 +1857,21 @@ class TradingScheduler:
                     position_duplicate_count += len(tf_signals)
                     continue
                 
-                # Same-strategy dedup within this timeframe bucket
+                # Same-strategy dedup within this timeframe bucket.
+                # Also dedup same-template-name: RSI Dip Buy V24 and RSI Dip Buy V120
+                # are the same signal logic — only one should enter per symbol per cycle.
                 if existing_count > 0:
                     existing_strategy_ids = set()
+                    existing_template_names = set()
                     for pos in existing_positions_for_key:
                         if hasattr(pos, 'strategy_id') and pos.strategy_id:
                             existing_strategy_ids.add(pos.strategy_id)
+                            # Also collect template names from existing positions
+                            strat_tuple = strategy_map.get(pos.strategy_id, (None, None))
+                            if strat_tuple[0] and strat_tuple[0].metadata:
+                                tmpl = strat_tuple[0].metadata.get('template_name')
+                                if tmpl:
+                                    existing_template_names.add(tmpl)
                     
                     new_signals = []
                     for strategy_id, signal, strategy_name in tf_signals:
@@ -1864,6 +1888,41 @@ class TradingScheduler:
                     if not new_signals:
                         continue
                     tf_signals = new_signals
+
+                # Same-template dedup within incoming signals (not yet in existing positions).
+                # Prevents RSI Dip Buy V24 and RSI Dip Buy V120 both entering the same symbol
+                # in the same cycle — they're the same logic, not independent alpha.
+                # Keep only the highest-confidence signal per template name.
+                seen_template_names: dict = {}  # template_name -> (strategy_id, signal, strategy_name)
+                template_deduped = []
+                for strategy_id, signal, strategy_name in tf_signals:
+                    strat, _ = strategy_map.get(strategy_id, (None, None))
+                    tmpl = (strat.metadata or {}).get('template_name') if strat and strat.metadata else None
+                    if tmpl and tmpl in seen_template_names:
+                        # Keep the higher-confidence one
+                        existing_entry = seen_template_names[tmpl]
+                        if signal.confidence > existing_entry[1].confidence:
+                            self._log_coordination_rejection(
+                                signal=existing_entry[1],
+                                strategy_name=existing_entry[2],
+                                rejection_reason=f"Same-template duplicate: {tmpl} already queued for {normalized_symbol} (lower confidence)",
+                            )
+                            seen_template_names[tmpl] = (strategy_id, signal, strategy_name)
+                        else:
+                            self._log_coordination_rejection(
+                                signal=signal,
+                                strategy_name=strategy_name,
+                                rejection_reason=f"Same-template duplicate: {tmpl} already queued for {normalized_symbol} (lower confidence)",
+                            )
+                    else:
+                        if tmpl:
+                            seen_template_names[tmpl] = (strategy_id, signal, strategy_name)
+                        template_deduped.append((strategy_id, signal, strategy_name))
+
+                # Rebuild from seen_template_names to ensure we have the winners
+                tf_signals = list(seen_template_names.values()) if seen_template_names else template_deduped
+                if not tf_signals:
+                    continue
                 
                 # Filter signals that already have pending orders
                 # Same-strategy dedup only: a strategy can't double-order the same symbol/direction
