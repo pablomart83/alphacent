@@ -287,7 +287,11 @@ class AutonomousStrategyManager:
         self._save_cycle_run(cycle_id, "running", cycle_start)
 
         try:
-            # Step -1: Warm FMP cache (once per 24h)
+            # Step -1: Warm FMP cache
+            # Skip if warmed recently AND cache coverage is adequate (>80% of symbols have fresh data).
+            # This prevents the scenario where the first cycle after reboot partially warms the cache
+            # (rate limit hit), saves the timestamp, and then subsequent cycles skip warming entirely
+            # leaving the cache incomplete.
             try:
                 from src.data.fmp_cache_warmer import FMPCacheWarmer
                 should_warm = True
@@ -295,12 +299,43 @@ class AutonomousStrategyManager:
                 if last_warm:
                     hours_since_warm = (datetime.now() - last_warm).total_seconds() / 3600
                     if hours_since_warm < 24:
-                        should_warm = False
-                        logger.info(f"\n[STEP -1] FMP cache warm skipped ({hours_since_warm:.1f}h since last warm)")
-                        self._emit_stage_event("cache_warming", "complete", 4, {
-                            "skipped": True,
-                            "reason": f"Last warm {hours_since_warm:.0f}h ago",
-                        })
+                        # Check cache coverage — if too many symbols are missing, warm anyway
+                        try:
+                            from src.models.database import get_database
+                            from src.models.orm import FundamentalDataORM
+                            from src.core.tradeable_instruments import get_tradeable_symbols
+                            from src.models.enums import TradingMode
+                            all_symbols = get_tradeable_symbols(TradingMode.DEMO)
+                            stock_symbols = [s for s in all_symbols if s not in FMPCacheWarmer.SKIP_FUNDAMENTALS]
+                            db = get_database()
+                            session = db.get_session()
+                            try:
+                                fresh_cutoff = datetime.now() - timedelta(days=7)
+                                fresh_count = session.query(FundamentalDataORM).filter(
+                                    FundamentalDataORM.fetched_at >= fresh_cutoff
+                                ).count()
+                            finally:
+                                session.close()
+                            coverage_pct = fresh_count / len(stock_symbols) if stock_symbols else 1.0
+                            if coverage_pct >= 0.80:
+                                should_warm = False
+                                logger.info(f"\n[STEP -1] FMP cache warm skipped ({hours_since_warm:.1f}h since last warm, {coverage_pct:.0%} coverage)")
+                                self._emit_stage_event("cache_warming", "complete", 4, {
+                                    "skipped": True,
+                                    "reason": f"Last warm {hours_since_warm:.0f}h ago, {coverage_pct:.0%} coverage",
+                                })
+                            else:
+                                logger.info(
+                                    f"\n[STEP -1] FMP cache coverage only {coverage_pct:.0%} ({fresh_count}/{len(stock_symbols)}) "
+                                    f"— warming despite recent timestamp"
+                                )
+                        except Exception as _cov_err:
+                            logger.debug(f"Could not check cache coverage: {_cov_err}")
+                            should_warm = False  # If we can't check, assume it's fine
+                            self._emit_stage_event("cache_warming", "complete", 4, {
+                                "skipped": True,
+                                "reason": f"Last warm {hours_since_warm:.0f}h ago",
+                            })
                 if should_warm:
                     logger.info("\n[STEP -1] Warming FMP fundamental data cache...")
                     self._emit_stage_event("cache_warming", "running", 1, {
@@ -964,86 +999,105 @@ class AutonomousStrategyManager:
     def _cleanup_inactive_strategies(self, stats: Dict) -> None:
         """
         Clean up strategies at cycle start.
-        
-        Permanently deletes:
-        - RETIRED (no longer needed)
-        - PROPOSED (not yet backtested — stale from interrupted cycle)
-        - INVALID (failed validation)
-        
-        Keeps:
-        - BACKTESTED (validated and waiting for signal — ready to trade)
-        - DEMO (actively trading with open positions)
-        - LIVE (actively trading in live account)
-        
-        Args:
-            stats: Statistics dictionary to update
+
+        Design:
+        - PROPOSED / INVALID: delete immediately (stale research artifacts)
+        - BACKTESTED (unapproved, not demoted from active): delete (failed WF thresholds)
+        - BACKTESTED (demoted_from_active, within TTL): keep for re-evaluation
+        - BACKTESTED (demoted_from_active, past TTL): permanently delete
+        - RETIRED (legacy, shouldn't exist anymore): clean up if past 14d
+        - DEMO / LIVE: never touched here
+
+        Active strategy retirement (health=0 / decay=0) is handled in
+        _check_strategy_health and _check_strategy_decay, which demote to
+        BACKTESTED with activation_approved=False and a 14-day TTL.
         """
         try:
             from src.models.database import get_database
             from src.models.orm import StrategyORM, StrategyRetirementORM
-            
+
             db = get_database()
             session = db.get_session()
-            
+
             try:
-                # Permanently delete RETIRED, PROPOSED, INVALID strategies
-                # Also delete BACKTESTED strategies that were NOT approved for activation
-                # (they failed activation thresholds — stale WF results)
-                strategies_to_delete = (
-                    session.query(StrategyORM)
-                    .filter(StrategyORM.status.in_([
-                        StrategyStatus.RETIRED,
+                stale_strategies = []
+
+                # 1. PROPOSED and INVALID — always delete (stale cycle artifacts)
+                stale_strategies += session.query(StrategyORM).filter(
+                    StrategyORM.status.in_([
                         StrategyStatus.PROPOSED,
                         StrategyStatus.INVALID
-                    ]))
-                    .all()
-                )
-                
-                # Also delete unapproved BACKTESTED strategies
-                backtested_strategies = (
-                    session.query(StrategyORM)
-                    .filter(StrategyORM.status == StrategyStatus.BACKTESTED)
-                    .all()
-                )
-                for s in backtested_strategies:
+                    ])
+                ).all()
+
+                # 2. RETIRED (legacy path — shouldn't exist since we now demote to BACKTESTED,
+                #    but clean up any that slipped through before this change)
+                for s in session.query(StrategyORM).filter(StrategyORM.status == StrategyStatus.RETIRED).all():
+                    age_days = (datetime.now() - s.retired_at).days if s.retired_at else 999
+                    if age_days > 14:
+                        stale_strategies.append(s)
+                        logger.info(f"    Cleaning up legacy RETIRED: {s.name} ({age_days}d old)")
+
+                # 3. BACKTESTED — keep approved and recently-demoted-from-active; delete the rest
+                for s in session.query(StrategyORM).filter(StrategyORM.status == StrategyStatus.BACKTESTED).all():
                     meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
-                    if not meta.get('activation_approved'):
-                        strategies_to_delete.append(s)
-                
-                if not strategies_to_delete:
+
+                    if meta.get('activation_approved'):
+                        continue  # Approved and waiting for signal — keep
+
+                    if meta.get('demoted_from_active'):
+                        # Demoted from active (health=0 or decay=0) — respect TTL
+                        ttl_days = meta.get('demotion_ttl_days', 14)
+                        demoted_at_str = meta.get('demoted_at')
+                        if demoted_at_str:
+                            try:
+                                age_days = (datetime.now() - datetime.fromisoformat(demoted_at_str)).days
+                                if age_days <= ttl_days:
+                                    continue  # Within TTL — keep for re-evaluation
+                                logger.info(
+                                    f"    Demoted strategy past TTL: {s.name} "
+                                    f"({age_days}d > {ttl_days}d TTL)"
+                                )
+                            except Exception:
+                                continue  # Can't parse — keep to be safe
+                        else:
+                            continue  # No timestamp — keep to be safe
+
+                    # Unapproved, not demoted from active — failed WF thresholds, delete
+                    stale_strategies.append(s)
+
+                if not stale_strategies:
                     logger.info("  No strategies to clean up")
-                    return
-                
-                # Also delete associated retirement records
-                delete_ids = [s.id for s in strategies_to_delete]
-                session.query(StrategyRetirementORM).filter(
-                    StrategyRetirementORM.strategy_id.in_(delete_ids)
-                ).delete(synchronize_session=False)
-                
-                for strategy_orm in strategies_to_delete:
-                    old_status = strategy_orm.status.value if hasattr(strategy_orm.status, "value") else str(strategy_orm.status)
-                    logger.info(f"    Deleting: {strategy_orm.name} (status: {old_status})")
-                    session.delete(strategy_orm)
-                    stats["strategies_cleaned"] += 1
-                
+                else:
+                    delete_ids = [s.id for s in stale_strategies]
+                    session.query(StrategyRetirementORM).filter(
+                        StrategyRetirementORM.strategy_id.in_(delete_ids)
+                    ).delete(synchronize_session=False)
+
+                    for s in stale_strategies:
+                        old_status = s.status.value if hasattr(s.status, "value") else str(s.status)
+                        logger.info(f"    Deleting: {s.name} (status: {old_status})")
+                        session.delete(s)
+                        stats["strategies_cleaned"] += 1
+
                 session.commit()
-                
-                # Count what we kept
+
                 backtested_count = session.query(StrategyORM).filter(
                     StrategyORM.status == StrategyStatus.BACKTESTED
                 ).count()
                 active_count = session.query(StrategyORM).filter(
                     StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
                 ).count()
-                
+
                 logger.info(
-                    f"  ✓ Deleted {stats['strategies_cleaned']} stale strategies. "
-                    f"Kept: {backtested_count} BACKTESTED (ready), {active_count} DEMO/LIVE (trading)"
+                    f"  ✓ Cleanup complete. "
+                    f"Kept: {backtested_count} BACKTESTED, {active_count} DEMO/LIVE. "
+                    f"Deleted: {stats['strategies_cleaned']} stale."
                 )
-                
+
             finally:
                 session.close()
-                
+
         except Exception as e:
             logger.error(f"Error cleaning up strategies: {e}", exc_info=True)
             stats["errors"].append({"step": "cleanup", "message": str(e)})

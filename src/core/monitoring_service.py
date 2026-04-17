@@ -2592,14 +2592,25 @@ class MonitoringService:
                     if open_count == 0:
                         meta = strat_orm.strategy_metadata
                         reason = meta.get('pending_retirement_reason', 'Pending retirement completed')
-                        logger.info(f"[StrategyHealth] Finalizing retirement of {strat_orm.name} (all positions closed): {reason}")
-                        strat_orm.status = StrategyStatus.RETIRED
-                        strat_orm.retired_at = datetime.now()
-                        meta['retirement_reason'] = reason
-                        meta['retired_by'] = meta.get('retired_by', 'pending_retirement')
+                        logger.info(
+                            f"[StrategyHealth] Demoting {strat_orm.name} to BACKTESTED "
+                            f"(all positions closed, TTL reset): {reason}"
+                        )
+                        # Demote to BACKTESTED with TTL — don't permanently retire.
+                        # Market regimes rotate; a strategy that failed in trending_up
+                        # may be excellent in ranging_low_vol. Keep it for re-evaluation.
+                        strat_orm.status = StrategyStatus.BACKTESTED
+                        strat_orm.retired_at = None
+                        meta['activation_approved'] = False  # Must pass WF again
+                        meta['demoted_from_active'] = True
+                        meta['demoted_at'] = datetime.now().isoformat()
+                        meta['demotion_reason'] = reason
+                        meta['demotion_ttl_days'] = 14  # Will be cleaned up after 14 days if not re-activated
                         meta.pop('pending_retirement', None)
                         meta.pop('pending_retirement_reason', None)
                         meta.pop('pending_retirement_at', None)
+                        meta.pop('retirement_reason', None)
+                        meta.pop('retired_by', None)
                         strat_orm.strategy_metadata = meta
                         flag_modified(strat_orm, 'strategy_metadata')
                         result["retired"] += 1
@@ -2784,12 +2795,21 @@ class MonitoringService:
                             # Stop new signal generation by removing activation approval
                             meta.pop('activation_approved', None)
                         else:
-                            # No open positions — safe to retire immediately
-                            logger.info(f"[StrategyHealth] Retiring {strat_orm.name}: {retirement_reason}")
-                            strat_orm.status = StrategyStatus.RETIRED
-                            strat_orm.retired_at = datetime.now()
-                            meta['retirement_reason'] = retirement_reason
-                            meta['retired_by'] = 'health_score'
+                            # No open positions — demote to BACKTESTED (not permanently retired)
+                            # Strategy gets a TTL window to prove itself again in the next cycle
+                            logger.info(
+                                f"[StrategyHealth] Demoting {strat_orm.name} to BACKTESTED "
+                                f"(health=0, no open positions): {retirement_reason}"
+                            )
+                            strat_orm.status = StrategyStatus.BACKTESTED
+                            strat_orm.retired_at = None
+                            meta['activation_approved'] = False
+                            meta['demoted_from_active'] = True
+                            meta['demoted_at'] = datetime.now().isoformat()
+                            meta['demotion_reason'] = retirement_reason
+                            meta['demotion_ttl_days'] = 14
+                            meta.pop('retirement_reason', None)
+                            meta.pop('retired_by', None)
                             strat_orm.strategy_metadata = meta
                             flag_modified(strat_orm, 'strategy_metadata')
                             result["retired"] += 1
@@ -3155,11 +3175,20 @@ class MonitoringService:
                                 strat_orm.strategy_metadata = meta
                                 flag_modified(strat_orm, 'strategy_metadata')
                             else:
-                                logger.info(f"[StrategyDecay] Retiring {strat_orm.name}: {retirement_reason}")
-                                strat_orm.status = StrategyStatus.RETIRED
-                                strat_orm.retired_at = datetime.now()
-                                meta['retirement_reason'] = retirement_reason
-                                meta['retired_by'] = 'decay_score'
+                                # No open positions — demote to BACKTESTED (not permanently retired)
+                                logger.info(
+                                    f"[StrategyDecay] Demoting {strat_orm.name} to BACKTESTED "
+                                    f"(decay=0, no open positions): {retirement_reason}"
+                                )
+                                strat_orm.status = StrategyStatus.BACKTESTED
+                                strat_orm.retired_at = None
+                                meta['activation_approved'] = False
+                                meta['demoted_from_active'] = True
+                                meta['demoted_at'] = datetime.now().isoformat()
+                                meta['demotion_reason'] = retirement_reason
+                                meta['demotion_ttl_days'] = 14
+                                meta.pop('retirement_reason', None)
+                                meta.pop('retired_by', None)
                                 strat_orm.strategy_metadata = meta
                                 flag_modified(strat_orm, 'strategy_metadata')
                                 result["retired"] += 1

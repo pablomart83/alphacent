@@ -378,11 +378,14 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     });
     const dayFilled = dayOrders.filter(o => o.status === 'FILLED').length;
     const rate = dayOrders.length > 0 ? (dayFilled / dayOrders.length) * 100 : 0;
+    // TvChart requires Unix timestamp in seconds (not ms) for time axis
+    const timeSeconds = Math.floor(dayStart / 1000);
     return {
-      date: analyticsPeriod === '1D' 
+      time: timeSeconds,
+      fillRate: rate,
+      label: analyticsPeriod === '1D' 
         ? `${day}h ago`
         : format(subDays(new Date(), day), 'MMM dd'),
-      fillRate: rate,
     };
   }).reverse();
 
@@ -1104,26 +1107,8 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         </div>
       </div>
 
-      {/* OrderFlowTimeline hero — top ~40% */}
-      <div className="shrink-0 overflow-hidden" style={{ height: '40%', minHeight: '180px' }}>
-        <div className="p-2 h-full">
-          <div className="text-xs text-gray-500 mb-1 font-medium tracking-wide">Order Flow — Last 7 Days</div>
-              <OrderFlowTimeline
-                orders={orders.map((o) => ({
-                  id: o.id,
-                  symbol: o.symbol,
-                  status: o.status,
-                  side: o.side,
-                  created_at: o.created_at,
-                  quantity: o.quantity,
-                }))}
-                days={7}
-              />
-            </div>
-          </div>
-
-          {/* Orders DenseTable with tabs — bottom ~60% */}
-          <div className="flex-1 min-h-0 border-t border-[var(--color-dark-border)]">
+          {/* Orders DenseTable with tabs — top ~60% */}
+          <div className="flex-1 min-h-0 border-b border-[var(--color-dark-border)]">
             <Tabs value={ordersTab} onValueChange={(v) => { setOrdersTab(v); if (v === 'analytics') fetchExecutionQuality(); }} className="flex flex-col h-full">
               {/* Hidden TabsList — we use custom buttons above */}
 
@@ -1515,7 +1500,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                       series={[{
                         id: 'fillRate',
                         type: 'line',
-                        data: fillRateTrend.map(d => ({ time: d.date, value: d.fillRate })),
+                        data: fillRateTrend.map(d => ({ time: d.time, value: d.fillRate })),
                         color: '#10b981',
                         lineWidth: 2,
                       }]}
@@ -1555,6 +1540,24 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               </TabsContent>
             </Tabs>
           </div>
+
+      {/* OrderFlowTimeline — below the table, fixed height */}
+      <div className="shrink-0 border-t border-[var(--color-dark-border)]" style={{ height: '200px' }}>
+        <div className="p-2 h-full">
+          <div className="text-xs text-gray-500 mb-1 font-medium tracking-wide">Order Flow — Last 7 Days</div>
+          <OrderFlowTimeline
+            orders={orders.map((o) => ({
+              id: o.id,
+              symbol: o.symbol,
+              status: o.status,
+              side: o.side,
+              created_at: o.created_at,
+              quantity: o.quantity,
+            }))}
+            days={7}
+          />
+        </div>
+      </div>
     </div>
   );
 
@@ -1603,7 +1606,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                 series={[{
                   id: 'fillRateMini',
                   type: 'line',
-                  data: fillRateTrend.map(d => ({ time: d.date, value: d.fillRate })),
+                  data: fillRateTrend.map(d => ({ time: d.time, value: d.fillRate })),
                   color: '#10b981',
                   lineWidth: 1.5,
                 }]}

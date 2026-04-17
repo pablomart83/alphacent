@@ -137,9 +137,12 @@ class FMPCacheWarmer:
             f"{len(stale_symbols)} stale/missing (fetching from API)"
         )
 
-        # Parallelize API fetches — 8 concurrent symbols.
-        # Each symbol internally parallelizes 6 FMP endpoints, so effective
-        # concurrency is ~48 requests. With 300/min budget that's fine.
+        # Parallelize API fetches — 3 concurrent symbols (conservative).
+        # Each symbol internally makes ~6 FMP endpoints sequentially.
+        # With 300/min budget and 3 concurrent: ~18 req/s burst, well within limits.
+        # Previously 8 workers caused 401/429 errors by exhausting the rate limit.
+        # We also save a partial timestamp every 20 symbols so that if the process
+        # is interrupted, the next cycle skips already-warmed symbols.
         import threading
         _stats_lock = threading.Lock()
         completed_count = [0]  # Mutable for closure
@@ -188,6 +191,13 @@ class FMPCacheWarmer:
                         f"{stats['fundamentals_cached']} from DB cache, "
                         f"{stats['fundamentals_failed']} failed) in {elapsed:.1f}s"
                     )
+                    # Save partial timestamp every 20 symbols so interrupted runs
+                    # don't restart from scratch on the next cycle.
+                    if completed_count[0] % 20 == 0:
+                        try:
+                            self._save_last_warm_timestamp()
+                        except Exception:
+                            pass
 
                 # Progress callback for UI
                 if progress_callback and completed_count[0] % 5 == 0:
@@ -198,7 +208,7 @@ class FMPCacheWarmer:
 
         if stale_symbols:
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            with ThreadPoolExecutor(max_workers=3) as executor:  # Reduced from 8 to stay within rate limits
                 futures = [
                     executor.submit(_warm_one_symbol, sym, ca)
                     for sym, ca in stale_symbols
