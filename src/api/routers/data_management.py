@@ -303,11 +303,8 @@ async def trigger_fmp_cache_warm():
 
             logger.info("FMP cache warm thread started")
 
-            config_path = Path("config/autonomous_trading.yaml")
-            config = {}
-            if config_path.exists():
-                with open(config_path) as f:
-                    config = yaml.safe_load(f) or {}
+            from src.core.config_loader import load_config
+            config = load_config()
 
             logger.info(f"FMP cache warm: config loaded, FMP enabled={config.get('data_sources', {}).get('financial_modeling_prep', {}).get('enabled', False)}")
 
@@ -421,18 +418,13 @@ def _run_sync_with_logging(mon) -> None:
 
         _capture_log(f"Active strategy symbols: {len(active_symbols)}")
 
-        # Init market data manager
-        if not hasattr(mon, '_market_data') or mon._market_data is None:
-            import yaml
-            from pathlib import Path
-            config = {}
-            config_path = Path("config/autonomous_trading.yaml")
-            if config_path.exists():
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f) or {}
-            from src.api.etoro_client import EToroAPIClient
-            mon._market_data = MarketDataManager(mon.etoro_client, config=config)
-        md = mon._market_data
+        # Init market data manager — use singleton, don't create a new instance
+        from src.data.market_data_manager import get_market_data_manager
+        md = get_market_data_manager()
+        if md is None:
+            # Singleton not registered yet (shouldn't happen during normal operation)
+            from src.core.config_loader import load_config as _lc_md
+            md = MarketDataManager(mon.etoro_client, config=_lc_md())
 
         end = datetime.now()
         stats = {
@@ -885,29 +877,35 @@ async def get_monitoring_status():
             fred_status = {"name": "FRED (Federal Reserve)", "status": "unknown"}
             try:
                 import yaml
-                from pathlib import Path
-                config_path = Path("config/autonomous_trading.yaml")
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = yaml.safe_load(f) or {}
-                    fred_config = config.get('data_sources', {}).get('fred', {})
-                    fred_enabled = fred_config.get('enabled', False)
-                    fred_status["enabled"] = fred_enabled
-                    fred_status["status"] = "configured" if fred_enabled else "disabled"
-                    if fred_enabled and fred_config.get('api_key'):
-                        fred_status["api_key_set"] = True
-                    
-                    # Try to get last fetch time from market analyzer
-                    from src.core.trading_scheduler import get_trading_scheduler
-                    sched = get_trading_scheduler()
-                    if sched and hasattr(sched, 'strategy_engine') and sched.strategy_engine:
-                        ma = getattr(sched.strategy_engine, 'market_analyzer', None)
-                        if ma:
-                            fred_status["status"] = "healthy" if getattr(ma, 'fred_enabled', False) else "disabled"
-                            last_context = getattr(ma, '_last_market_context_time', None)
-                            if last_context:
-                                fred_status["last_fetch"] = _ts_iso(last_context)
-                                fred_status["last_fetch_age"] = _age_str(last_context)
+                from src.core.config_loader import load_config as _lc_fred
+                _fred_cfg = _lc_fred()
+                fred_config = _fred_cfg.get('data_sources', {}).get('fred', {})
+                fred_enabled = fred_config.get('enabled', False)
+                fred_status["enabled"] = fred_enabled
+                fred_status["status"] = "configured" if fred_enabled else "disabled"
+                if fred_enabled and fred_config.get('api_key') and fred_config['api_key'] != 'REPLACE_VIA_SECRETS_MANAGER':
+                    fred_status["api_key_set"] = True
+
+                # Get FRED health from market analyzer via singleton
+                try:
+                    from src.data.market_data_manager import get_market_data_manager
+                    _mdm = get_market_data_manager()
+                    if _mdm and hasattr(_mdm, 'market_analyzer'):
+                        ma = _mdm.market_analyzer
+                    else:
+                        from src.core.trading_scheduler import get_trading_scheduler
+                        sched = get_trading_scheduler()
+                        ma = None
+                        if sched and hasattr(sched, '_strategy_engine') and sched._strategy_engine:
+                            ma = getattr(sched._strategy_engine, 'market_analyzer', None)
+                    if ma:
+                        fred_status["status"] = "healthy" if getattr(ma, 'fred_enabled', False) else "disabled"
+                        last_context = getattr(ma, '_last_market_context_time', None)
+                        if last_context:
+                            fred_status["last_fetch"] = _ts_iso(last_context)
+                            fred_status["last_fetch_age"] = _age_str(last_context)
+                except Exception:
+                    pass
             except Exception as e:
                 fred_status["error"] = str(e)
             

@@ -694,61 +694,40 @@ async def get_api_usage(
     logger.info(f"Getting API usage statistics for user {username}")
     
     try:
-        # Try to get usage from FundamentalDataProvider if available
+        # Try to get usage from FundamentalDataProvider singleton
         try:
-            from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
-            import yaml
-            from pathlib import Path
-            _cfg = {}
-            _cfg_path = Path("config/autonomous_trading.yaml")
-            if _cfg_path.exists():
-                with open(_cfg_path, 'r') as _f:
-                    _cfg = yaml.safe_load(_f) or {}
-            provider = get_fundamental_data_provider(_cfg)
-            
-            # Get FMP usage
-            fmp_usage = {
-                'calls_today': provider.fmp_calls_today,
-                'limit': 250,
-                'percentage': (provider.fmp_calls_today / 250) * 100,
-                'remaining': 250 - provider.fmp_calls_today
-            }
-            
-            # Get Alpha Vantage usage
-            av_usage = {
-                'calls_today': provider.av_calls_today,
-                'limit': 500,
-                'percentage': (provider.av_calls_today / 500) * 100,
-                'remaining': 500 - provider.av_calls_today
-            }
-            
-            # Get cache stats
+            from src.data.fundamental_data_provider import get_fundamental_data_provider
+            provider = get_fundamental_data_provider()
+
+            if provider:
+                # Use the real rate limiter stats
+                raw_usage = provider.get_api_usage()
+                fmp_raw = raw_usage.get('fmp', {})
+                rate_limit = fmp_raw.get('max_calls', 300)
+                calls_made = fmp_raw.get('calls_made', 0)
+                fmp_usage = {
+                    'calls_today': calls_made,
+                    'limit': rate_limit,
+                    'percentage': round(fmp_raw.get('usage_percent', 0), 1),
+                    'remaining': fmp_raw.get('calls_remaining', rate_limit - calls_made),
+                }
+                cache_size = raw_usage.get('cache_size', 0)
+            else:
+                raise ValueError("Singleton not registered yet")
+
+            # Alpha Vantage — disabled, always 0
+            av_usage = {'calls_today': 0, 'limit': 25, 'percentage': 0, 'remaining': 25}
+
             cache_stats = {
-                'size': len(provider.cache),
-                'hit_rate': provider.cache_hits / max(provider.cache_hits + provider.cache_misses, 1) * 100 if hasattr(provider, 'cache_hits') else 0
+                'size': cache_size,
+                'hit_rate': 0,
             }
-        
+
         except Exception as e:
-            logger.warning(f"Could not load FundamentalDataProvider: {e}")
-            # Return default values if provider not available
-            fmp_usage = {
-                'calls_today': 0,
-                'limit': 250,
-                'percentage': 0,
-                'remaining': 250
-            }
-            
-            av_usage = {
-                'calls_today': 0,
-                'limit': 500,
-                'percentage': 0,
-                'remaining': 500
-            }
-            
-            cache_stats = {
-                'size': 0,
-                'hit_rate': 0
-            }
+            logger.debug(f"Could not load FundamentalDataProvider: {e}")
+            fmp_usage = {'calls_today': 0, 'limit': 300, 'percentage': 0, 'remaining': 300}
+            av_usage = {'calls_today': 0, 'limit': 25, 'percentage': 0, 'remaining': 25}
+            cache_stats = {'size': 0, 'hit_rate': 0}
         
         return ApiUsageResponse(
             fmp_usage=fmp_usage,
