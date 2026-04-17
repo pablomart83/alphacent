@@ -204,7 +204,10 @@ data_sources:
       earnings_period_ttl: 86400
       earnings_calendar_ttl: 604800
   alpha_vantage:
-    enabled: true
+    # Free tier: 25 req/day — exhausted in minutes during cache warming, provides nothing.
+    # NEWS_SENTIMENT is the only valuable AV endpoint for quant use (pre-scored NLP sentiment).
+    # Enable and upgrade to $50/month plan if/when news sentiment is wired into conviction scorer.
+    enabled: false
     api_key: REPLACE_VIA_SECRETS_MANAGER
     rate_limit: 500
     cache_duration: 86400
