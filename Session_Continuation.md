@@ -1674,3 +1674,110 @@ The font normalization from Session 8 was partial — many inconsistencies remai
 ### From Previous Sessions
 - Risk controls — Portfolio-level VaR check before new positions
 - `/strategies/blacklisted-combos`, `/strategies/template-rankings`, `/strategies/idle-demotions` — 422/404 errors
+
+
+---
+
+### Session Improvements (April 17, 2026 — Session 11: Quant Trading Audit + System Fixes)
+
+#### 111. Quant Trading Improvements (from April 1-17 trade review) ✅
+- **Trailing stops**: Activation thresholds widened (stocks 3%→5%, crypto 6%→8%). ATR-based minimum trail distance added: `max(distance_pct * price, 1.5x daily ATR)` — eliminates penny-stop whipsaws
+- **ATR floor at order time**: Raised from 2x to 2.5x ATR. Min R:R raised from 1.5 to 2.0
+- **Bull market short closure**: `_close_shorts_in_bull_market()` runs every ~30s — flags all open equity shorts for closure when regime is `trending_up*`
+- **Fundamental exits**: Sector rotation exits now require 3-day regime stability + position must be profitable. Earnings miss exits only fire if profitable OR SL >50% consumed
+- **Strategy retirement**: Requires minimum 5 closed trades before health evaluation. Intraday losers cut at 50% of hold limit (requires ≥1% loss to trigger)
+- **Regime gate**: Short concentration limit (max 3 equity shorts in non-bearish regimes). Exit signal confidence guard (0.40 threshold on losing positions). Trending_up long sizing 1.25x
+- **Config**: `trending_up*` directional quotas `min_short_pct: 0.0`, adaptive_risk ATR multiplier 1.5→2.5
+- **Files**: `src/execution/position_manager.py`, `src/execution/order_executor.py`, `src/core/monitoring_service.py`, `src/core/trading_scheduler.py`, `config/autonomous_trading.yaml`
+
+#### 112. Strategy Retirement → BACKTESTED with TTL ✅ (CRITICAL)
+- Active strategies (health=0 or decay=0) now demote to BACKTESTED (activation_approved=False, 14d TTL) instead of setting RETIRED status
+- `pending_retirement` finalizer demotes to BACKTESTED instead of RETIRED
+- RETIRED status is now terminal — deleted immediately at cycle start (no 14d wait)
+- Demoted strategies re-run walk-forward in next cycle; if they pass, they reactivate
+- **Files**: `src/core/monitoring_service.py`, `src/strategy/autonomous_strategy_manager.py`
+
+#### 113. Strategy Identity Overhaul ✅
+- **Meaningful names**: `SMA Trend Momentum TQQQ LONG RSI(14/75)` instead of `SMA Trend Momentum Multi V38`
+- **Watchlist dedup**: `_build_watchlists` now excludes symbols already covered by another active strategy of the same template
+- **Supersession**: When a better-calibrated proposal (>15% Sharpe improvement) is found for same template×symbol, old strategy gets `superseded=True` (stops new signals, open position runs to close), new strategy activates immediately
+- **Signal generation**: Superseded strategies excluded from signal loop
+- **UI**: Superseded/Retiring/Re-eval badges on strategy name cell with tooltip
+- **Files**: `src/strategy/strategy_proposer.py`, `src/strategy/autonomous_strategy_manager.py`, `src/core/trading_scheduler.py`, `frontend/src/pages/StrategiesNew.tsx`
+
+#### 114. FMP Cache Warmer Fixes ✅
+- **Token bucket rate limiter**: Added to `RateLimiter` class — enforces 5 calls/sec (300/min) across all workers. `wait_for_token()` blocks workers until slot available instead of dropping calls. 8 workers now fully utilize 300/min without 429s
+- **FMP cache trigger button**: Added to Data Management page with live coverage % bar, progress counter, elapsed time
+- **FMP cache warmer**: Uses dedicated `FundamentalDataProvider` instance (not singleton) so it has its own rate limiter and doesn't compete with signal generation
+- **Force TTL**: Manual trigger uses 24h TTL (re-fetches anything older than 24h) instead of 7-day default
+- **Files**: `src/data/fundamental_data_provider.py`, `src/data/fmp_cache_warmer.py`, `src/api/routers/data_management.py`, `frontend/src/pages/DataManagementNew.tsx`
+
+#### 115. FundamentalDataProvider Singleton ✅ (CRITICAL)
+- **Root cause**: 10+ call sites each created their own `FundamentalDataProvider` instance. Each had its own in-memory earnings_calendar_cache (empty on creation) and its own RateLimiter (each thinking it had 300 calls). Combined they were making 10x the API calls.
+- **Fix**: Module-level `_singleton_instance` + `_singleton_lock`. `__init__` auto-registers as singleton on first creation. `get_fundamental_data_provider()` returns singleton.
+- **`get_earnings_calendar`**: Now checks memory cache first (was bypassing it). Fixed double-counting bug (old code called `can_make_call()` + `record_call()` separately alongside `_fmp_request()` which uses `wait_for_token()`).
+- **All 10 instantiation sites patched**: `strategy_engine.py`, `strategy_proposer.py`, `fundamental_ranker.py`, `fmp_cache_warmer.py`, `account.py`, `config.py`, `database.py`
+- **Result**: 0 "FMP unavailable for earnings calendar" warnings (was flooding every cycle)
+- **Files**: `src/data/fundamental_data_provider.py`, `src/strategy/strategy_engine.py`, `src/strategy/strategy_proposer.py`, `src/strategy/fundamental_ranker.py`, `src/data/fmp_cache_warmer.py`, `src/api/routers/account.py`, `src/api/routers/config.py`, `src/models/database.py`
+
+#### 116. ZNC=F / DAILY_ONLY_SYMBOLS ✅
+- ZINC, ALUMINUM, PLATINUM added to `DAILY_ONLY_SYMBOLS` set in `symbol_mapper.py`
+- Monitoring service hourly batch download now skips these symbols (CME futures have no reliable 1h data on Yahoo Finance)
+- **Files**: `src/utils/symbol_mapper.py`, `src/core/monitoring_service.py`
+
+#### 117. Session / Auth Fixes ✅
+- Session TTL extended from 30min to 8h — backend restarts no longer log users out
+- Cookie `max_age` extended to match (8h)
+- SQL GROUP BY error fixed in data quality endpoint (`source` column removed from query)
+- **Files**: `src/core/auth.py`, `src/api/routers/auth.py`, `src/api/routers/data_management.py`
+
+#### 118. Orders Page Layout ✅
+- Orders table moved above OrderFlowTimeline (table is primary, chart is secondary)
+- TvChart fill rate trend fixed to use Unix timestamps (was using string labels)
+- **Files**: `frontend/src/pages/OrdersNew.tsx`
+
+#### 119. FMP Cache Warmer — Autonomous Cycle ✅
+- Coverage check before skipping: if cache coverage <80%, warm even if timestamp is recent (handles partial warm from rate limit interruption)
+- Partial timestamp saved every 20 symbols so interrupted runs don't restart from scratch
+- **Files**: `src/strategy/autonomous_strategy_manager.py`
+
+---
+
+## Current System State (April 17, 2026)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$162K, equity ~$463K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~114 DEMO
+- **Open positions:** ~185 (158 LONG, 27 SHORT — bull market gate closing shorts)
+- **Market regime:** Equity: trending_up_weak, Crypto: trending_up
+- **FMP cache**: 217 symbols in DB, 210 fresh within 7 days (~91% coverage)
+- **Session TTL**: 8 hours (restarts don't log users out)
+- **Key changes**: Strategy retirement → BACKTESTED with TTL, meaningful strategy names, FMP singleton, ZNC=F fixed, bull market short gate active
+
+---
+
+## Open Items (Updated Session 11)
+
+### FMP Cache Warmer (PENDING)
+- The manual "Refresh Fundamentals" button was working before singleton implementation
+- After singleton: warmer uses dedicated provider (not singleton) but `get_sector_performance()` was blocking the thread — removed that call
+- **Status**: Should work now after removing `get_sector_performance()` pre-warm. Verify in next session.
+- If still broken: check if `_fmp_request` → `wait_for_token` is blocking on the dedicated provider
+
+### Trading Performance
+- Monitor win rate after all quant improvements (target: >50%)
+- Track how many shorts are being closed by bull market gate
+- Monitor supersession: are better-calibrated strategies replacing old ones?
+
+### Strategy Identity
+- Existing strategies still have old names (V38, V174, etc.) — new naming only applies to newly proposed strategies
+- Consider a one-time migration to rename existing strategies (low priority)
+
+### Infrastructure
+- API key patching: SCP of `autonomous_trading.yaml` overwrites keys — need post-SCP hook
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+
+### From Previous Sessions
+- Risk controls — Portfolio-level VaR check before new positions
+- `/strategies/blacklisted-combos`, `/strategies/template-rankings`, `/strategies/idle-demotions` — 422/404 errors
