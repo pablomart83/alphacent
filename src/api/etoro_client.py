@@ -1585,12 +1585,14 @@ class EToroAPIClient:
                 raise EToroAPIError(f"Failed to cancel order: {e}")
             raise
 
-    def close_position(self, position_id: str, instrument_id: int = None) -> Dict[str, Any]:
+    def close_position(self, position_id: str, instrument_id: int = None, amount: float = None) -> Dict[str, Any]:
         """Close an open position.
 
         Args:
             position_id: eToro position ID
             instrument_id: eToro instrument ID (required for demo close endpoint)
+            amount: Dollar amount to close (required — without it eToro creates a
+                    stuck order with unitsToDeduct=0.0). Pass invested_amount.
 
         Returns:
             Close order response
@@ -1612,6 +1614,8 @@ class EToroAPIClient:
             payload = {}
             if instrument_id is not None:
                 payload["InstrumentID"] = instrument_id
+            if amount is not None and amount > 0:
+                payload["Amount"] = amount
 
             data = self._make_request(
                 method="POST",

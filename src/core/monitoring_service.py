@@ -1964,7 +1964,11 @@ class MonitoringService:
             # Look up instrument ID for the symbol (required for demo close endpoint)
             from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
             instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(pos.symbol)
-            self.etoro_client.close_position(pos.etoro_position_id, instrument_id=instrument_id)
+            self.etoro_client.close_position(
+                pos.etoro_position_id,
+                instrument_id=instrument_id,
+                amount=close_dollar_amount,
+            )
 
             order_orm.status = OrderStatus.FILLED
             order_orm.submitted_at = datetime.now()

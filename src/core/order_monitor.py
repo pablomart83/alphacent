@@ -1306,12 +1306,29 @@ class OrderMonitor:
 
                     if existing_by_strategy:
                         # Position already exists for this strategy+symbol — update etoro_position_id
-                        logger.info(
-                            f"Position already exists for {normalized_symbol} (id: {existing_by_strategy.id}, "
-                            f"strategy: {existing_by_strategy.strategy_id}). Updating etoro_position_id from "
-                            f"'{existing_by_strategy.etoro_position_id}' to '{pos.etoro_position_id}'"
+                        # BUT: only update if no other row (open or closed) already holds this eToro ID.
+                        # If a closed duplicate holds it, skip the ID update to avoid UniqueViolation.
+                        new_etoro_id = pos.etoro_position_id
+                        id_already_taken = (
+                            new_etoro_id in db_by_etoro_id or
+                            session.query(PositionORM).filter(
+                                PositionORM.etoro_position_id == new_etoro_id,
+                                PositionORM.id != existing_by_strategy.id,
+                            ).count() > 0
                         )
-                        existing_by_strategy.etoro_position_id = pos.etoro_position_id
+                        if id_already_taken:
+                            logger.debug(
+                                f"Skipping etoro_position_id update for {normalized_symbol} "
+                                f"(id: {existing_by_strategy.id}) — ID {new_etoro_id} already held "
+                                f"by another row (closed duplicate pending eToro close)"
+                            )
+                        else:
+                            logger.info(
+                                f"Position already exists for {normalized_symbol} (id: {existing_by_strategy.id}, "
+                                f"strategy: {existing_by_strategy.strategy_id}). Updating etoro_position_id from "
+                                f"'{existing_by_strategy.etoro_position_id}' to '{new_etoro_id}'"
+                            )
+                            existing_by_strategy.etoro_position_id = new_etoro_id
                         existing_by_strategy.current_price = pos.current_price
                         existing_by_strategy.unrealized_pnl = pos.unrealized_pnl
                         
