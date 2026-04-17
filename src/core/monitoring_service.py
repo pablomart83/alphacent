@@ -906,7 +906,7 @@ class MonitoringService:
             finally:
                 session.close()
             
-            # Initialize market data manager
+            # Initialize market data manager (singleton — shared across all components)
             if not hasattr(self, '_market_data') or self._market_data is None:
                 import yaml
                 from pathlib import Path
@@ -916,6 +916,10 @@ class MonitoringService:
                     with open(config_path, 'r') as f:
                         config = yaml.safe_load(f) or {}
                 self._market_data = MarketDataManager(self.etoro_client, config=config)
+                # Register as the process-wide singleton so all other components share
+                # the same cache instead of creating empty instances
+                from src.data.market_data_manager import set_market_data_manager
+                set_market_data_manager(self._market_data)
             md = self._market_data
             
             end = datetime.now()
@@ -939,22 +943,18 @@ class MonitoringService:
                     continue  # Skip weekend-only symbols on weekends
                 
                 try:
-                    # Try DB cache for 1d
+                    # Check DB cache for 1d — use _get_historical_from_db directly
+                    # to avoid falling through to Yahoo (Phase 2 handles that in batch).
                     start_1d = end - timedelta(days=220)
-                    data_1d = md.get_historical_data(
-                        symbol, start_1d, end, interval="1d", prefer_yahoo=True
-                    )
-                    if data_1d:
+                    db_data_1d = md._get_historical_from_db(normalize_symbol(symbol), start_1d, end, "1d")
+                    if db_data_1d and len(db_data_1d) > 10:
                         stats["1d"] += 1
                         stats["db_cached"] += 1
                         if is_active:
-                            hist_cache.set(f"{symbol}:1d:120", data_1d)
+                            hist_cache.set(f"{symbol}:1d:120", db_data_1d)
                             stats["memory_loaded"] += 1
                     else:
                         need_yahoo_1d.append(symbol)
-                except ValueError:
-                    # get_historical_data raises ValueError when all sources fail
-                    need_yahoo_1d.append(symbol)
                 except Exception as e:
                     logger.debug(f"DB cache check failed for {symbol} 1d: {e}")
                     need_yahoo_1d.append(symbol)
@@ -969,21 +969,13 @@ class MonitoringService:
                         # Force Yahoo fetch for crypto/forex/active symbols
                         need_yahoo_1h.append(symbol)
                     else:
-                        # For inactive non-24/7 symbols, DB cache is fine
-                        data_1h = md.get_historical_data(
-                            symbol, start_1h, end, interval="1h", prefer_yahoo=True
-                        )
-                        if data_1h:
-                            norm_sym = normalize_symbol(symbol)
+                        # For inactive non-24/7 symbols, check DB directly (no Yahoo fallback)
+                        db_data_1h = md._get_historical_from_db(normalize_symbol(symbol), start_1h, end, "1h")
+                        if db_data_1h and len(db_data_1h) > 10:
                             stats["1h"] += 1
                             stats["db_cached"] += 1
-                            if is_active:
-                                hist_cache.set(f"{symbol}:1h:25", data_1h)
-                                stats["memory_loaded"] += 1
                         else:
                             need_yahoo_1h.append(symbol)
-                except ValueError:
-                    need_yahoo_1h.append(symbol)
                 except Exception as e:
                     logger.debug(f"DB cache check failed for {symbol} 1h: {e}")
                     need_yahoo_1h.append(symbol)

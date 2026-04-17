@@ -834,7 +834,6 @@ class MarketDataManager:
             }).dropna(subset=['Open', 'Close'])
             logger.info(f"Synthesized {len(hist_4h)} 4H bars from {len(hist)} 1H bars for {symbol}")
             hist = hist_4h
-
         # Convert to MarketData objects (keep original symbol, not Yahoo ticker)
         data_list = []
         for timestamp, row in hist.iterrows():
@@ -1024,7 +1023,9 @@ class MarketDataManager:
                     )
                     return None
 
-                # Staleness check — for intraday, data older than 2 hours is stale
+                # Staleness check for intraday data.
+                # Only reject if the market was actually open and we're missing bars.
+                # Overnight/weekend gaps are expected — don't force a Yahoo fetch for those.
                 latest_bar = records[-1]
                 latest_date = latest_bar.date.replace(tzinfo=None) if hasattr(latest_bar.date, 'tzinfo') and latest_bar.date.tzinfo else latest_bar.date
                 end_naive = end.replace(tzinfo=None) if hasattr(end, 'tzinfo') and end.tzinfo else end
@@ -1037,12 +1038,36 @@ class MarketDataManager:
                     )
                     return None
                 elif interval != "1d" and end_gap > 2 * 3600:
-                    # Intraday data more than 2 hours stale — need fresh fetch
-                    logger.debug(
-                        f"DB cache for {symbol} {interval} is stale: "
-                        f"latest bar is {end_gap / 3600:.1f}h before now"
-                    )
-                    return None
+                    # Only force a fresh fetch if the market was open during the gap.
+                    # Overnight (16h gap) and weekend (66h gap) are normal — don't
+                    # trigger 208 Yahoo calls on every restart just because it's morning.
+                    import pytz
+                    now_utc = datetime.utcnow()
+                    now_et = now_utc  # approximate — just need weekday + hour
+                    try:
+                        et_tz = pytz.timezone('US/Eastern')
+                        now_et = datetime.now(et_tz).replace(tzinfo=None)
+                    except Exception:
+                        pass
+                    
+                    is_weekend = now_et.weekday() >= 5  # Sat=5, Sun=6
+                    is_premarket = now_et.hour < 9 or (now_et.hour == 9 and now_et.minute < 30)
+                    is_afterhours = now_et.hour >= 16
+                    
+                    from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+                    is_crypto = symbol.upper().replace("USD", "") in {s.replace("USD", "") for s in DEMO_ALLOWED_CRYPTO}
+                    
+                    # Crypto trades 24/7 — always stale after 2h
+                    # Stocks/ETFs/Forex: only stale if market was open during the gap
+                    market_was_closed = not is_crypto and (is_weekend or is_premarket or is_afterhours)
+                    
+                    if not market_was_closed:
+                        logger.debug(
+                            f"DB cache for {symbol} {interval} is stale: "
+                            f"latest bar is {end_gap / 3600:.1f}h before now (market open)"
+                        )
+                        return None
+                    # else: market was closed, gap is expected — use DB data as-is
 
                 # Convert to MarketData objects
                 data_list = []
@@ -1228,3 +1253,32 @@ class MarketDataManager:
         """
         return self.quality_validator.get_all_reports()
 
+
+# ---------------------------------------------------------------------------
+# Module-level singleton — ONE shared MarketDataManager across the process.
+#
+# Why this matters:
+# - _raw_fetch_cache: avoids redundant Yahoo calls for the same symbol/interval
+#   within a session. Multiple instances each have empty caches.
+# - _historical_memory_cache: 1h in-memory cache for DB query results.
+#   Multiple instances re-query DB on every call.
+# - _purged_symbols: tracks poisoned cache purges — multiple instances re-purge.
+#
+# The singleton is set by the monitoring service on startup (it has the etoro_client).
+# All other code that needs a MarketDataManager should call get_market_data_manager().
+# ---------------------------------------------------------------------------
+
+_mdm_singleton: Optional['MarketDataManager'] = None
+_mdm_lock = __import__('threading').Lock()
+
+
+def get_market_data_manager() -> Optional['MarketDataManager']:
+    """Return the shared MarketDataManager singleton, or None if not yet initialized."""
+    return _mdm_singleton
+
+
+def set_market_data_manager(instance: 'MarketDataManager') -> None:
+    """Register the shared singleton. Called once by the monitoring service on startup."""
+    global _mdm_singleton
+    with _mdm_lock:
+        _mdm_singleton = instance

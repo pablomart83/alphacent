@@ -1949,6 +1949,12 @@ class TradingScheduler:
             )
             
             self._market_data = MarketDataManager(self._etoro_client)
+            # Prefer the shared singleton if already initialized by monitoring service
+            from src.data.market_data_manager import get_market_data_manager
+            _shared_mdm = get_market_data_manager()
+            if _shared_mdm is not None:
+                self._market_data = _shared_mdm
+                logger.info("TradingScheduler: using shared MarketDataManager singleton")
             self._websocket_manager = get_websocket_manager()
             self._strategy_engine = StrategyEngine(None, self._market_data, self._websocket_manager)
             
