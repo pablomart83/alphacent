@@ -1211,11 +1211,25 @@ class OrderMonitor:
                     if pos.invested_amount:
                         existing_pos.invested_amount = pos.invested_amount
                     
-                    # CRITICAL: If position is marked as closed in DB but open on eToro, reopen it
+                    # CRITICAL: If position is marked as closed in DB but open on eToro, reopen it.
+                    # BUT: only reopen if there's no closure_reason — a closure_reason means
+                    # our system intentionally closed it (SL hit, race condition duplicate,
+                    # strategy retired, time-based exit, etc.). In that case, the eToro position
+                    # is still open because the close order hasn't filled yet — don't fight it.
                     if existing_pos.closed_at is not None:
-                        logger.info(f"Reopening position {existing_pos.id} ({normalized_symbol}) - was closed in DB but open on eToro")
-                        existing_pos.closed_at = None
-                        reopened_count += 1
+                        if existing_pos.closure_reason:
+                            logger.debug(
+                                f"Position {existing_pos.id} ({normalized_symbol}) closed in DB "
+                                f"with reason '{existing_pos.closure_reason}' — not reopening "
+                                f"(close order pending on eToro)"
+                            )
+                        else:
+                            logger.info(
+                                f"Reopening position {existing_pos.id} ({normalized_symbol}) "
+                                f"— eToro ID {pos.etoro_position_id} exists on eToro but was closed in DB"
+                            )
+                            existing_pos.closed_at = None
+                            reopened_count += 1
                     
                     updated_count += 1
                     logger.debug(f"Updated position {existing_pos.id} (strategy: {existing_pos.strategy_id}, symbol: {normalized_symbol})")
@@ -1358,7 +1372,16 @@ class OrderMonitor:
                         PositionORM.closed_at.isnot(None),
                     ).first()
                     if closed_dup:
-                        # Reopen the closed position instead of creating a duplicate
+                        # Reopen the closed position instead of creating a duplicate —
+                        # BUT only if it was closed without a reason (sync artifact).
+                        # If it has a closure_reason, our system intentionally closed it;
+                        # the eToro position is still open because the close order is pending.
+                        if closed_dup.closure_reason:
+                            logger.debug(
+                                f"Skipping reopen of {closed_dup.id} ({normalized_symbol}) — "
+                                f"closed with reason '{closed_dup.closure_reason}' (close order pending)"
+                            )
+                            continue
                         logger.info(
                             f"Reopening closed position {closed_dup.id} ({normalized_symbol}) — "
                             f"eToro ID {pos.etoro_position_id} exists on eToro but was closed in DB"
