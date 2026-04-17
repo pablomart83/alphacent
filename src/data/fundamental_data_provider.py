@@ -1764,11 +1764,10 @@ class FundamentalDataProvider:
 
     def get_insider_trading(self, symbol: str, months: int = 6) -> List[Dict[str, Any]]:
         """
-        Fetch insider trading data from FMP /insider-trading endpoint.
+        Fetch insider trading data from FMP stable API.
 
-        NOTE: The v4 /insider-trading endpoint is a legacy endpoint (deprecated Aug 2025),
-        only available to pre-Aug 2025 subscribers. The stable API has no equivalent path.
-        This method returns [] immediately until a working endpoint is identified.
+        Uses /stable/search-insider-trades endpoint (available on Starter plan).
+        Falls back gracefully if plan-gated (404) or rate-limited.
 
         Args:
             symbol: Stock ticker symbol
@@ -1777,9 +1776,50 @@ class FundamentalDataProvider:
         Returns:
             List of dicts with keys: date, transaction_type, shares, price, name, title
         """
-        # v4 endpoint is legacy (403 for new accounts), stable API has no replacement yet.
-        # Return empty rather than burning rate limit tokens on guaranteed failures.
-        return []
+        if not self.fmp_api_key:
+            return []
+
+        # Skip non-equity symbols — no insider data for ETFs, crypto, forex, indices
+        from src.core.tradeable_instruments import (
+            DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+            DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_INDICES,
+        )
+        if symbol in set(DEMO_ALLOWED_CRYPTO) | set(DEMO_ALLOWED_FOREX) | set(DEMO_ALLOWED_COMMODITIES) | set(DEMO_ALLOWED_INDICES):
+            return []
+
+        limit = months * 10  # ~10 transactions per month is generous
+        try:
+            data = self._fmp_request(
+                f"/stable/search-insider-trades",
+                params={"symbol": symbol, "limit": limit},
+            )
+            if not data or not isinstance(data, list):
+                return []
+
+            results = []
+            for item in data:
+                tx_type_raw = (item.get("transactionType") or item.get("transaction_type") or "").lower()
+                # Normalize: P = Purchase (buy), S = Sale (sell)
+                if tx_type_raw in ("p", "purchase", "buy"):
+                    tx_type = "buy"
+                elif tx_type_raw in ("s", "sale", "sell"):
+                    tx_type = "sell"
+                else:
+                    tx_type = tx_type_raw
+
+                results.append({
+                    "date": item.get("transactionDate") or item.get("date") or "",
+                    "transaction_type": tx_type,
+                    "shares": abs(item.get("securitiesTransacted") or item.get("shares") or 0),
+                    "price": item.get("price") or 0,
+                    "name": item.get("reportingName") or item.get("name") or "",
+                    "title": item.get("typeOfOwner") or item.get("title") or "",
+                })
+            return results
+
+        except Exception as e:
+            logger.debug(f"Insider trading fetch failed for {symbol}: {e}")
+            return []
 
 
     def get_insider_net_purchases(self, symbol: str, lookback_days: int = 90) -> Dict[str, Any]:

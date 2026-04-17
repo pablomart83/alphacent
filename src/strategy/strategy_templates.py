@@ -2542,8 +2542,13 @@ class StrategyTemplateLibrary:
                 "requires_fundamental_data": False,
                 "market_neutral": True,
                 "pair_symbols": [
+                    # Original 8 pairs
                     ["KO", "PEP"], ["GOOGL", "META"], ["JPM", "GS"], ["XOM", "CVX"],
                     ["MSFT", "AAPL"], ["V", "MA"], ["HD", "LOW"], ["UNH", "LLY"],
+                    # Expanded 10 pairs
+                    ["GS", "MS"], ["BAC", "WFC"], ["NVDA", "AMD"], ["MCD", "YUM"],
+                    ["PFE", "MRK"], ["T", "VZ"], ["NEE", "DUK"], ["CAT", "DE"],
+                    ["BA", "LMT"], ["AMZN", "SHOP"],
                 ],
             }
         ))
@@ -7663,6 +7668,105 @@ class StrategyTemplateLibrary:
             expected_holding_period="60-365 days",
             risk_reward_ratio=3.5,
             metadata={"direction": "long", "crypto_optimized": True, "skip_param_override": True, "low_frequency": True}
+        ))
+
+        # ===== POST-EARNINGS ANNOUNCEMENT DRIFT (PEAD) — Alpha Edge =====
+        # One of the most documented anomalies: stocks with earnings beats continue
+        # to drift upward for 10-20 days after the announcement (Bernard & Thomas, 1989).
+        # FMP earnings surprise data is available — this is directly implementable.
+        templates.append(StrategyTemplate(
+            name="Post-Earnings Drift Long",
+            description="Enter LONG 2-5 days after an earnings beat (surprise > 2%). Captures post-earnings announcement drift (PEAD) — the tendency of stocks to continue rising after positive earnings surprises.",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+            ],
+            entry_conditions=[
+                "Earnings surprise > 2% (actual EPS > estimated EPS)",
+                "Entry 2-5 days after earnings announcement",
+                "Price still below pre-earnings high (drift not yet captured)",
+                "RSI(14) < 70 (not overbought)",
+            ],
+            exit_conditions=[
+                "Profit target 8%",
+                "Stop loss 4%",
+                "Max hold 20 days (drift window exhausted)",
+            ],
+            required_indicators=["RSI:14", "SMA:20"],
+            default_parameters={
+                "min_earnings_surprise_pct": 0.02,
+                "entry_days_after_earnings": 3,
+                "max_entry_days": 5,
+                "profit_target": 0.08,
+                "stop_loss_pct": 0.04,
+                "hold_period_max": 20,
+                "rsi_max": 70,
+            },
+            expected_trade_frequency="2-4 trades/month",
+            expected_holding_period="5-20 days",
+            risk_reward_ratio=2.0,
+            metadata={
+                "direction": "long",
+                "strategy_category": "alpha_edge",
+                "alpha_edge_type": "earnings_momentum",
+                "alpha_edge_bypass": True,
+                "requires_fundamental_data": True,
+                "requires_earnings_data": True,
+                "best_symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",
+                                 "JPM", "GS", "V", "MA", "UNH", "JNJ", "PG", "HD"],
+            }
+        ))
+
+        # ===== 52-WEEK HIGH MOMENTUM — Alpha Edge =====
+        # George & Hwang (2004): stocks near 52-week highs outperform.
+        # Anchoring bias causes investors to hesitate at round-number highs,
+        # creating a momentum effect when the stock finally breaks through.
+        templates.append(StrategyTemplate(
+            name="52-Week High Momentum Long",
+            description="Enter LONG when stock is within 5% of its 52-week high with RSI not overbought. Captures the documented tendency of stocks near 52-week highs to continue outperforming (George & Hwang, 2004).",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+            ],
+            entry_conditions=[
+                "Price within 5% of 52-week high",
+                "RSI(14) between 50 and 70 (momentum but not overbought)",
+                "Volume above 20-day average (confirmation)",
+                "Price above SMA(50) (uptrend intact)",
+            ],
+            exit_conditions=[
+                "Profit target 10%",
+                "Stop loss 5%",
+                "Max hold 30 days",
+                "Price drops more than 3% below 52-week high (breakout failed)",
+            ],
+            required_indicators=["RSI:14", "SMA:50", "SMA:20"],
+            default_parameters={
+                "high_proximity_pct": 0.05,
+                "rsi_min": 50,
+                "rsi_max": 70,
+                "profit_target": 0.10,
+                "stop_loss_pct": 0.05,
+                "hold_period_max": 30,
+            },
+            expected_trade_frequency="3-6 trades/month",
+            expected_holding_period="5-30 days",
+            risk_reward_ratio=2.0,
+            metadata={
+                "direction": "long",
+                "strategy_category": "alpha_edge",
+                "alpha_edge_type": "earnings_momentum",
+                "alpha_edge_bypass": True,
+                "requires_fundamental_data": False,
+                "best_symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "V", "MA",
+                                 "UNH", "HD", "CAT", "DE", "GS", "JPM", "BAC"],
+            }
         ))
 
         return templates

@@ -717,6 +717,97 @@ class TradingScheduler:
                         except Exception as _conc_err:
                             logger.debug(f"Short concentration check failed: {_conc_err}")
 
+                    # ── VIX PANIC FILTER: Block new LONG entries when VIX is spiking ──
+                    # When VIX > 30 AND is >20% above its 10-day average, the market is
+                    # in panic mode. New LONG entries in panic conditions have poor
+                    # risk-adjusted returns — mean reversion is more likely than trend
+                    # continuation. Wait for VIX to stabilize before entering new longs.
+                    # Only applies to equity LONGs (not crypto, forex, commodities).
+                    if _sig_dir == "LONG":
+                        try:
+                            from src.core.tradeable_instruments import (
+                                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                                DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_INDICES,
+                            )
+                            _is_equity_long = (_sig_sym not in set(DEMO_ALLOWED_CRYPTO)
+                                              and _sig_sym not in set(DEMO_ALLOWED_FOREX)
+                                              and _sig_sym not in set(DEMO_ALLOWED_COMMODITIES)
+                                              and _sig_sym not in set(DEMO_ALLOWED_INDICES))
+                            if _is_equity_long:
+                                from src.data.market_data_manager import get_market_data_manager
+                                _mdm_vix = get_market_data_manager()
+                                if _mdm_vix:
+                                    from datetime import timedelta as _td_vix
+                                    _vix_end = datetime.now()
+                                    _vix_start = _vix_end - _td_vix(days=20)
+                                    _vix_bars = _mdm_vix.get_historical_data("^VIX", _vix_start, _vix_end, interval="1d")
+                                    if _vix_bars and len(_vix_bars) >= 5:
+                                        _vix_closes = [b.close for b in _vix_bars if b.close]
+                                        _vix_current = _vix_closes[-1]
+                                        _vix_10d_avg = sum(_vix_closes[-10:]) / min(10, len(_vix_closes))
+                                        if _vix_current > 30 and _vix_current > _vix_10d_avg * 1.20:
+                                            logger.info(
+                                                f"VIX panic filter: blocking {_sig_sym} LONG — "
+                                                f"VIX={_vix_current:.1f} (>30 and {(_vix_current/_vix_10d_avg - 1)*100:.0f}% above 10d avg={_vix_10d_avg:.1f})"
+                                            )
+                                            self._log_signal_decision(
+                                                session=session,
+                                                signal=signal,
+                                                strategy_name=strategy.name,
+                                                decision="REJECTED",
+                                                rejection_reason=f"VIX panic filter: VIX={_vix_current:.1f} (spiking, >30 and >20% above 10d avg)",
+                                            )
+                                            signals_rejected += 1
+                                            continue
+                        except Exception as _vix_err:
+                            logger.debug(f"VIX panic filter check failed: {_vix_err}")
+
+                    # ── YIELD CURVE INVERSION GATE: Suppress equity LONGs on inverted curve ──
+                    # When the 2s10s spread (10Y - 2Y Treasury) is inverted (< 0), it signals
+                    # recession risk. New equity LONG positions opened during inversion have
+                    # historically underperformed. Gate: block new equity LONGs when 2s10s < -0.25%
+                    # (sustained inversion, not just a brief dip).
+                    # FRED data (T10Y2Y) is already available in our system.
+                    if _sig_dir == "LONG":
+                        try:
+                            from src.core.tradeable_instruments import (
+                                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                                DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_INDICES,
+                                DEMO_ALLOWED_ETFS,
+                            )
+                            _is_equity_long2 = (_sig_sym not in set(DEMO_ALLOWED_CRYPTO)
+                                               and _sig_sym not in set(DEMO_ALLOWED_FOREX)
+                                               and _sig_sym not in set(DEMO_ALLOWED_COMMODITIES)
+                                               and _sig_sym not in set(DEMO_ALLOWED_INDICES)
+                                               and _sig_sym not in set(DEMO_ALLOWED_ETFS))
+                            if _is_equity_long2:
+                                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                                _analyzer_yc = MarketStatisticsAnalyzer(self._market_data)
+                                _macro = _analyzer_yc.get_market_context()
+                                _yc_spread = None
+                                if _macro and isinstance(_macro, dict):
+                                    _fred_data = _macro.get("fred_data", {})
+                                    _t10y2y = _fred_data.get("T10Y2Y")
+                                    if _t10y2y is not None:
+                                        _yc_spread = float(_t10y2y)
+                                # Block if yield curve is deeply inverted (< -0.25%)
+                                if _yc_spread is not None and _yc_spread < -0.25:
+                                    logger.info(
+                                        f"Yield curve gate: blocking {_sig_sym} LONG — "
+                                        f"2s10s spread={_yc_spread:.2f}% (inverted, recession signal)"
+                                    )
+                                    self._log_signal_decision(
+                                        session=session,
+                                        signal=signal,
+                                        strategy_name=strategy.name,
+                                        decision="REJECTED",
+                                        rejection_reason=f"Yield curve gate: 2s10s={_yc_spread:.2f}% (inverted)",
+                                    )
+                                    signals_rejected += 1
+                                    continue
+                        except Exception as _yc_err:
+                            logger.debug(f"Yield curve gate check failed: {_yc_err}")
+
                     # Validate signal through risk manager
                     validation_result = self._risk_manager.validate_signal(
                         signal=signal,

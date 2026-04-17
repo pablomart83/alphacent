@@ -1179,10 +1179,20 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
                 series={[{
                   id: 'portfolio',
                   type: 'area',
-                  data: (perfStats?.equity_curve || performanceMetrics?.equity_curve || []).map((d: any) => ({
-                    time: d.date,
-                    value: d.portfolio ?? d.value ?? 0,
-                  })),
+                  data: (() => {
+                    const raw = perfStats?.equity_curve || performanceMetrics?.equity_curve || [];
+                    if (!raw.length) return [];
+                    // Deduplicate by date — keep last value per date, then sort ascending
+                    const byDate = new Map<string, number>();
+                    raw.forEach((d: any) => {
+                      const date = typeof d.date === 'string' ? d.date.slice(0, 10) : null;
+                      if (date) byDate.set(date, d.portfolio ?? d.value ?? 0);
+                    });
+                    return Array.from(byDate.entries())
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .filter(([, v]) => v > 0)
+                      .map(([date, value]) => ({ time: date, value }));
+                  })(),
                   lineColor: '#10b981',
                   topColor: 'rgba(16, 185, 129, 0.3)',
                   bottomColor: 'rgba(16, 185, 129, 0)',

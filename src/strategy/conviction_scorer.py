@@ -108,6 +108,12 @@ class ConvictionScorer:
         news_sentiment_adj = self._score_news_sentiment(signal)
         total_score += news_sentiment_adj
 
+        # Factor exposure adjustment (±6 points) — regime-aware factor tilt
+        # In ranging/low-vol: favor low-beta, high-quality (defensive)
+        # In trending-up: favor high-momentum, high-beta (offensive)
+        factor_adj = self._score_factor_exposure(signal, strategy)
+        total_score += factor_adj
+
         breakdown = {
             'walkforward_edge': {
                 'score': wf_score,
@@ -143,6 +149,11 @@ class ConvictionScorer:
                 'score': news_sentiment_adj,
                 'max': 8,
                 'details': {'symbol': signal.symbol, 'raw_score': news_sentiment_adj / 8.0 if news_sentiment_adj != 0 else 0.0},
+            },
+            'factor_exposure': {
+                'score': factor_adj,
+                'max': 6,
+                'details': {'symbol': signal.symbol},
             },
             # Legacy keys for backward compatibility with frontend/analytics
             'signal_strength': {
@@ -924,6 +935,96 @@ class ConvictionScorer:
 
         except Exception as e:
             logger.debug(f"[NewsSentiment] Error scoring {sym}: {e}")
+            return 0.0
+
+    # ─── FACTOR EXPOSURE (±6 points) ────────────────────────────────────
+    def _score_factor_exposure(self, signal: TradingSignal, strategy: Strategy) -> float:
+        """
+        Regime-aware factor tilt adjustment.
+
+        In ranging/low-vol regimes: favor low-beta, high-quality (defensive factors).
+        In trending-up regimes: favor high-momentum, high-beta (offensive factors).
+
+        Uses FMP fundamental data: beta (market factor), pe_ratio (value proxy),
+        revenue_growth (momentum proxy). Only applies to equity LONGs/SHORTs.
+
+        Returns ±6 points.
+        """
+        try:
+            from src.core.tradeable_instruments import (
+                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_INDICES, DEMO_ALLOWED_ETFS,
+            )
+            sym = signal.symbol.upper().split(':')[0]
+            non_equity = (set(DEMO_ALLOWED_CRYPTO) | set(DEMO_ALLOWED_FOREX)
+                         | set(DEMO_ALLOWED_COMMODITIES) | set(DEMO_ALLOWED_INDICES)
+                         | set(DEMO_ALLOWED_ETFS))
+            if sym in non_equity:
+                return 0.0
+
+            # Get current regime
+            current_regime = 'unknown'
+            if self.market_analyzer:
+                try:
+                    sub_regime, _, _, _ = self.market_analyzer.detect_sub_regime()
+                    current_regime = sub_regime.value.lower() if sub_regime else 'unknown'
+                except Exception:
+                    pass
+
+            # Get fundamental data for factor proxies
+            from src.data.fundamental_data_provider import get_fundamental_data_provider
+            provider = get_fundamental_data_provider()
+            if not provider:
+                return 0.0
+
+            fd = provider.get_fundamental_data(sym)
+            if not fd:
+                return 0.0
+
+            beta = getattr(fd, 'beta', None)
+            pe_ratio = getattr(fd, 'pe_ratio', None)
+            revenue_growth = getattr(fd, 'revenue_growth', None)
+
+            is_long = signal.action in (SignalAction.ENTER_LONG,)
+            adjustment = 0.0
+
+            if current_regime in ('ranging_low_vol', 'ranging', 'ranging_high_vol'):
+                # Defensive regime: reward low-beta, penalize high-beta for longs
+                if beta is not None:
+                    if is_long:
+                        if beta < 0.8:
+                            adjustment += 3.0   # Low-beta long in ranging = defensive, good
+                        elif beta > 1.5:
+                            adjustment -= 3.0   # High-beta long in ranging = risky
+                    else:
+                        if beta > 1.5:
+                            adjustment += 2.0   # High-beta short in ranging = good short candidate
+                        elif beta < 0.8:
+                            adjustment -= 2.0   # Shorting defensive stocks in ranging = poor
+
+            elif current_regime in ('trending_up', 'trending_up_weak', 'trending_up_strong'):
+                # Offensive regime: reward high-momentum, high-beta for longs
+                if beta is not None and is_long:
+                    if beta > 1.3:
+                        adjustment += 3.0   # High-beta long in uptrend = amplified gains
+                    elif beta < 0.7:
+                        adjustment -= 2.0   # Low-beta long in uptrend = underperforms
+
+                # Revenue growth momentum factor
+                if revenue_growth is not None and is_long:
+                    if revenue_growth > 0.15:
+                        adjustment += 3.0   # Strong revenue growth in uptrend = momentum
+                    elif revenue_growth < 0.0:
+                        adjustment -= 2.0   # Declining revenue in uptrend = weak
+
+            # Value factor: extremely high P/E is a risk in any regime
+            if pe_ratio is not None and pe_ratio > 60 and is_long:
+                adjustment -= 2.0   # Overvalued — higher drawdown risk
+
+            return max(-6.0, min(6.0, adjustment))
+
+        except Exception as e:
+            logger.debug(f"Factor exposure scoring failed for {signal.symbol}: {e}")
             return 0.0
 
     def _log_conviction_score(self, signal: TradingSignal, strategy: Strategy, conviction: ConvictionScore) -> None:

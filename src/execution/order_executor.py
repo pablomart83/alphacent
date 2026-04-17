@@ -193,18 +193,22 @@ class OrderExecutor:
                     # class (e.g., forex primary symbol but trading a stock watchlist symbol).
                     if stop_loss_pct and current_price > 0:
                         try:
-                            from src.data.market_data_manager import MarketDataManager
-                            import yaml as _yaml
-                            from pathlib import Path as _Path
+                            from src.data.market_data_manager import get_market_data_manager
                             from datetime import timedelta as _td
-                            import pandas as _pd
 
-                            _cfg_path = _Path("config/autonomous_trading.yaml")
-                            _cfg = {}
-                            if _cfg_path.exists():
-                                with open(_cfg_path) as _f:
-                                    _cfg = _yaml.safe_load(_f) or {}
-                            _mdm = MarketDataManager(_cfg)
+                            _mdm = get_market_data_manager()
+                            if _mdm is None:
+                                # Fallback: create a lightweight instance just for ATR
+                                from src.data.market_data_manager import MarketDataManager
+                                import yaml as _yaml
+                                from pathlib import Path as _Path
+                                _cfg_path = _Path("config/autonomous_trading.yaml")
+                                _cfg = {}
+                                if _cfg_path.exists():
+                                    with open(_cfg_path) as _f:
+                                        _cfg = _yaml.safe_load(_f) or {}
+                                _mdm = MarketDataManager(_cfg)
+
                             _end = datetime.now()
                             _start = _end - _td(days=30)
                             _bars = _mdm.get_historical_data(normalized_symbol, _start, _end, interval="1d")

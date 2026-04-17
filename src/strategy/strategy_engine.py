@@ -5329,16 +5329,11 @@ class StrategyEngine:
         
         elif template_type == 'pairs_trading':
             # Pairs Trading needs price data for both symbols in the pair to compute correlation and z-score
-            pairs_map = {
-                s: pair for pair in [
-                    ("KO", "PEP"), ("GOOGL", "META"), ("JPM", "GS"), ("XOM", "CVX"),
-                    ("MSFT", "AAPL"), ("V", "MA"), ("HD", "LOW"), ("UNH", "LLY"),
-                ] for s in pair
-            }
-            if symbol not in pairs_map:
+            # Use the class-level PAIRS_MAP which is the single source of truth
+            if symbol not in self.PAIRS_MAP:
                 validation_result["warnings"].append(f"{symbol} is not in the pairs trading universe")
             else:
-                pair = pairs_map[symbol]
+                pair = self.PAIRS_MAP[symbol]
                 partner = pair[1] if pair[0] == symbol else pair[0]
                 try:
                     end_date = datetime.now()
@@ -7364,13 +7359,22 @@ class StrategyEngine:
     # ===== PAIRS TRADING CONSTANTS =====
     PAIRS_MAP = {
         s: pair for pair in [
+            # Original 8 pairs
             ("KO", "PEP"), ("GOOGL", "META"), ("JPM", "GS"), ("XOM", "CVX"),
             ("MSFT", "AAPL"), ("V", "MA"), ("HD", "LOW"), ("UNH", "LLY"),
+            # Expanded 10 pairs (all in our 232-stock universe)
+            ("GS", "MS"), ("BAC", "WFC"), ("NVDA", "AMD"), ("MCD", "YUM"),
+            ("PFE", "MRK"), ("T", "VZ"), ("NEE", "DUK"), ("CAT", "DE"),
+            ("BA", "LMT"), ("AMZN", "SHOP"),
         ] for s in pair
     }
 
     def _simulate_pairs_trading_trades(self, df: pd.DataFrame, params: Dict, strategy: Strategy = None) -> List[Dict]:
-        """Simulate Pairs Trading trades using z-score of price ratio between correlated pairs."""
+        """Simulate Pairs Trading trades using OLS regression spread z-score between correlated pairs.
+
+        Uses the academically correct approach: spread = sym - β*partner - α (OLS regression),
+        which produces cleaner z-scores than the simple price ratio method.
+        """
         trades = []
         z_entry = params.get('z_entry', 2.0)
         z_exit = params.get('z_exit', 0.0)
@@ -7405,29 +7409,47 @@ class StrategyEngine:
         if len(combined) < rolling_window + 10:
             return trades
 
-        ratio = combined['sym'] / combined['partner']
-        ratio_mean = ratio.rolling(window=rolling_window).mean()
-        ratio_std = ratio.rolling(window=rolling_window).std()
-        z_score = (ratio - ratio_mean) / ratio_std.replace(0, float('nan'))
+        # OLS regression spread: spread = sym - β*partner - α
+        # Rolling OLS gives time-varying hedge ratio β, which is more robust than fixed ratio
+        def _rolling_ols_spread(sym_series: pd.Series, partner_series: pd.Series, window: int) -> pd.Series:
+            """Compute rolling OLS spread: sym - β*partner - α"""
+            spreads = pd.Series(index=sym_series.index, dtype=float)
+            for i in range(window, len(sym_series)):
+                y = sym_series.iloc[i - window:i].values
+                x = partner_series.iloc[i - window:i].values
+                # OLS: β = cov(x,y)/var(x), α = mean(y) - β*mean(x)
+                x_mean, y_mean = x.mean(), y.mean()
+                var_x = ((x - x_mean) ** 2).mean()
+                if var_x < 1e-10:
+                    continue
+                beta = ((x - x_mean) * (y - y_mean)).mean() / var_x
+                alpha = y_mean - beta * x_mean
+                spreads.iloc[i] = sym_series.iloc[i] - beta * partner_series.iloc[i] - alpha
+            return spreads
+
+        spread = _rolling_ols_spread(combined['sym'], combined['partner'], rolling_window)
+        spread_mean = spread.rolling(window=rolling_window).mean()
+        spread_std = spread.rolling(window=rolling_window).std()
+        z_score = (spread - spread_mean) / spread_std.replace(0, float('nan'))
 
         in_trade = False
         entry_price = 0.0
         entry_idx = 0
         trade_direction = None  # 'long_sym' or 'short_sym'
 
-        for i in range(rolling_window, len(combined)):
+        for i in range(rolling_window * 2, len(combined)):
             if pd.isna(z_score.iloc[i]):
                 continue
             z = z_score.iloc[i]
             if not in_trade:
                 if z > z_entry:
-                    # Symbol is overpriced relative to partner → SHORT symbol
+                    # Spread above mean → sym overpriced vs partner → SHORT sym
                     entry_price = combined['sym'].iloc[i]
                     entry_idx = i
                     trade_direction = 'short_sym'
                     in_trade = True
                 elif z < -z_entry:
-                    # Symbol is underpriced relative to partner → LONG symbol
+                    # Spread below mean → sym underpriced vs partner → LONG sym
                     entry_price = combined['sym'].iloc[i]
                     entry_idx = i
                     trade_direction = 'long_sym'
@@ -7604,13 +7626,22 @@ class StrategyEngine:
             logger.debug(f"Pairs Trading {symbol}/{partner}: correlation {correlation:.2f} < {min_corr} — skip")
             return None
 
-        # Calculate z-score of price ratio
-        ratio = combined['sym'] / combined['partner']
-        ratio_mean = ratio.rolling(window=rolling_window).mean().iloc[-1]
-        ratio_std = ratio.rolling(window=rolling_window).std().iloc[-1]
-        if pd.isna(ratio_mean) or pd.isna(ratio_std) or ratio_std == 0:
+        # OLS regression spread: spread = sym - β*partner - α
+        # More robust than price ratio — handles different price scales and drift
+        y = combined['sym'].values
+        x = combined['partner'].values
+        x_mean, y_mean = x.mean(), y.mean()
+        var_x = ((x - x_mean) ** 2).mean()
+        if var_x < 1e-10:
             return None
-        current_z = (ratio.iloc[-1] - ratio_mean) / ratio_std
+        beta = ((x - x_mean) * (y - y_mean)).mean() / var_x
+        alpha_ols = y_mean - beta * x_mean
+        spread = combined['sym'] - beta * combined['partner'] - alpha_ols
+        spread_mean = spread.rolling(window=rolling_window).mean().iloc[-1]
+        spread_std = spread.rolling(window=rolling_window).std().iloc[-1]
+        if pd.isna(spread_mean) or pd.isna(spread_std) or spread_std == 0:
+            return None
+        current_z = (spread.iloc[-1] - spread_mean) / spread_std
         current_price = float(data['close'].iloc[-1])
 
         # EXIT LOGIC

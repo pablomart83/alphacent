@@ -38,7 +38,7 @@ function getHealthColor(score: number): string {
 export const MetricsBar: FC = memo(() => {
   const { tradingMode } = useTradingMode();
   const wsConnected = useWebSocketConnection();
-  const { label: lastSyncedLabel } = useLastSynced();
+  const { label: lastSyncedLabel, touch: touchLastSynced } = useLastSynced();
   const [data, setData] = useState<MetricsData>({
     totalEquity: 0,
     dailyPnl: 0,
@@ -66,6 +66,7 @@ export const MetricsBar: FC = memo(() => {
         marketRegime: summary?.market_regime?.current_regime ?? 'unknown',
         healthScore: summary?.health_score?.score ?? 0,
       });
+      touchLastSynced();
     } catch {
       // Non-critical — keep last known values
     }
