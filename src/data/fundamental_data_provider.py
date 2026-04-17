@@ -274,19 +274,13 @@ class FundamentalDataProvider:
         """
         Initialize provider.
 
-        On first instantiation, registers itself as the module-level singleton so
-        all subsequent calls to get_fundamental_data_provider() return this instance.
-        This means any existing code that does FundamentalDataProvider(config) will
-        automatically become the singleton on first call.
+        Do NOT call this directly — use get_fundamental_data_provider() to get
+        the shared singleton. Direct instantiation bypasses the singleton and
+        creates a separate rate limiter + memory cache, causing redundant API calls.
 
         Args:
             config: Configuration dictionary with data_sources section
         """
-        global _singleton_instance
-        # Register as singleton on first creation (thread-safe via _singleton_lock)
-        with _singleton_lock:
-            if _singleton_instance is None:
-                _singleton_instance = self
 
         if config is None:
             try:
@@ -660,6 +654,11 @@ class FundamentalDataProvider:
                 if e.response.status_code == 429:
                     logger.error(f"FMP API rate limit exceeded (429) for {endpoint}")
                     self.fmp_rate_limiter.activate_circuit_breaker()
+                elif e.response.status_code == 403:
+                    logger.warning(f"FMP API 403 Forbidden for {endpoint} — endpoint not available on current plan, disabling for this session")
+                    # Mark insider trading as forbidden so we stop wasting tokens on it
+                    if "insider-trading" in endpoint:
+                        self._insider_trading_forbidden = True
                 else:
                     logger.error(f"FMP API HTTP error for {endpoint}: {e}")
                 return None
@@ -1783,6 +1782,10 @@ class FundamentalDataProvider:
         Returns:
             List of dicts with keys: date, transaction_type, shares, price, name, title
         """
+        # If we've already detected that insider trading is not available on this plan, skip
+        if getattr(self, '_insider_trading_forbidden', False):
+            return []
+
         # Check in-memory cache first (24h TTL)
         cache_key = f"insider_{symbol}"
         cached = self._insider_cache.get(cache_key)
@@ -2172,6 +2175,10 @@ def get_fundamental_data_provider(config: Optional[Dict] = None) -> 'Fundamental
     """
     Get or create the shared FundamentalDataProvider singleton.
 
+    This is the ONLY correct way to get a FundamentalDataProvider. Direct
+    instantiation creates a separate rate limiter and memory cache, causing
+    redundant API calls and blowing the FMP rate limit.
+
     Args:
         config: Optional config dict. Only used on first call (initialization).
                 Subsequent calls return the existing instance regardless of config.
@@ -2184,7 +2191,9 @@ def get_fundamental_data_provider(config: Optional[Dict] = None) -> 'Fundamental
         return _singleton_instance
 
     with _singleton_lock:
+        # Double-checked locking: re-check inside the lock
         if _singleton_instance is not None:
             return _singleton_instance
-        # Creating the instance will auto-register it via __init__
-        return FundamentalDataProvider(config)
+        instance = FundamentalDataProvider(config)
+        _singleton_instance = instance
+        return instance

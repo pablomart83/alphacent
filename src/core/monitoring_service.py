@@ -3361,15 +3361,12 @@ class MonitoringService:
             session.close()
 
     def _get_fundamental_provider(self):
-        """Lazy-load and return a FundamentalDataProvider instance."""
+        """Lazy-load and return the shared FundamentalDataProvider singleton."""
         try:
-            from src.data.fundamental_data_provider import FundamentalDataProvider
-
-            with open("config/autonomous_trading.yaml", "r") as f:
-                config = yaml.safe_load(f) or {}
-            return FundamentalDataProvider(config)
+            from src.data.fundamental_data_provider import get_fundamental_data_provider
+            return get_fundamental_data_provider()
         except Exception as e:
-            logger.error(f"Failed to create FundamentalDataProvider: {e}")
+            logger.error(f"Failed to get FundamentalDataProvider: {e}")
             return None
 
     def _get_regime_and_sectors(self) -> tuple:
