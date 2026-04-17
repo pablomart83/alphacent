@@ -2139,7 +2139,19 @@ This session was a comprehensive audit against the "151 Trading Strategies" SSRN
 ### Infrastructure
 - Consider t3.small downgrade — waiting on CloudWatch memory data (1 week)
 - FMP Starter plan: insider trading plan-gated (404). Upgrade to Professional (~$79/month) to unlock `/stable/search-insider-trades`
-- Add `alphacent/marketaux-api-key` to AWS Secrets Manager (currently hardcoded in YAML as fallback) ✅ Done
+#### 154. Marketaux Key Added to AWS Secrets Manager ✅
+- Created `alphacent/marketaux-api-key` secret in Secrets Manager (eu-west-1)
+- Re-ran `deploy/patch-api-keys.sh` on EC2 — all 4 keys now sourced from Secrets Manager
+- Backend restarted and verified: FMP key configured, Marketaux sentiment scoring active (TXN=-0.628 bearish → -5.0 conviction), FRED enabled
+- **No more hardcoded keys anywhere in the codebase**
+
+---
+
+## Current System State (April 17, 2026 — Updated Session 14 Final)
+
+- **API Keys**: All 4 keys (FMP, Alpha Vantage, FRED, Marketaux) in AWS Secrets Manager. Zero hardcoded keys. `config/api_keys.yaml` written by `patch-api-keys.sh` / GitHub Actions.
+- **Backend**: Healthy, signal generation running, news sentiment scoring active
+- **Open positions**: ~190, equity ~$470K
 
 ### Strategy
 - Existing strategies still have old names (V38, V174, etc.) — new naming only applies to newly proposed strategies
