@@ -429,29 +429,16 @@ class FundamentalDataProvider:
                     self._save_to_database(fmp_data)
                     return fmp_data
                 else:
-                    logger.warning(f"FMP data for {symbol} is incomplete, trying Alpha Vantage immediately")
+                    logger.debug(f"FMP data for {symbol} is incomplete (eps={fmp_data.eps}, pe={fmp_data.pe_ratio}) — using as-is")
+                    # Still save what we have — partial data is better than nothing
+                    self.cache.set(symbol, fmp_data)
+                    self._save_to_database(fmp_data)
+                    return fmp_data
         
-        # Fallback to Alpha Vantage (immediate if FMP data is missing or incomplete)
-        if self.av_enabled:
-            if fmp_data:
-                logger.info(f"FMP data incomplete for {symbol}, falling back to Alpha Vantage")
-            else:
-                logger.warning(f"FMP unavailable for {symbol}, falling back to Alpha Vantage")
-            
-            av_data = self._fetch_from_alpha_vantage(symbol)
-            if av_data:
-                # Merge with FMP data if available
-                if fmp_data:
-                    merged_data = self._merge_fundamental_data(fmp_data, av_data)
-                    self.cache.set(symbol, merged_data)
-                    self._save_to_database(merged_data)
-                    return merged_data
-                else:
-                    # Store in both caches
-                    self.cache.set(symbol, av_data)
-                    self._save_to_database(av_data)
-                    return av_data
-        
+        # Alpha Vantage fallback disabled — free tier is 25 req/day, exhausted immediately
+        # during cache warming. Returns rate-limit message for every call after the first 25.
+        # FMP alone is sufficient with the relaxed _is_data_complete check (eps OR pe_ratio).
+
         # Last resort: Check for stale data in database (better than nothing)
         stale_data = self._get_from_database(symbol, allow_stale=True)
         if stale_data:
@@ -924,20 +911,27 @@ class FundamentalDataProvider:
         The in-memory cache has a 7-day TTL (earnings_calendar_ttl).
         """
         # Non-fundamental symbols don't have earnings — ETFs, crypto, forex, indices, commodities
+        # ETFs are included in full — none of them report individual earnings.
+        # Calling FMP for ETFs returns [] which then triggers AV fallback (25 req/day limit).
         NON_FUNDAMENTAL_SYMBOLS = {
             # Crypto
             'BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'AVAX', 'DOT', 'LINK',
             'NEAR', 'LTC', 'BCH', 'DOGE', 'SHIB', 'MATIC', 'UNI',
             # Forex
-            'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF',
+            'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'NZDUSD', 'EURGBP',
             # Indices
             'SPX500', 'NSDQ100', 'DJ30', 'UK100', 'GER40',
             # Commodities
             'GOLD', 'SILVER', 'OIL', 'COPPER', 'NATGAS', 'PLATINUM', 'ALUMINUM', 'ZINC',
-            # ETFs (broad market, sector, bond — none have individual earnings)
+            'WEAT', 'DBA', 'UNG', 'USO', 'PALL',
+            # All ETFs (none report individual earnings)
             'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO',
             'GLD', 'SLV', 'TLT', 'HYG', 'AGG',
             'XLE', 'XLF', 'XLK', 'XLU', 'XLV', 'XLI', 'XLP', 'XLY',
+            'XHB', 'XBI', 'ARKK', 'ITA', 'FXI',
+            'SMH', 'SOXX', 'SOXL', 'TQQQ', 'SQQQ', 'SPXU', 'UPRO',
+            'EEM', 'EWZ', 'KWEB', 'FXI',
+            'URA', 'COPX', 'DFEN', 'CIBR',
         }
         if symbol.upper() in NON_FUNDAMENTAL_SYMBOLS:
             return None
@@ -956,9 +950,11 @@ class FundamentalDataProvider:
         if self.fmp_enabled:
             data = self._fetch_earnings_calendar_fmp(symbol)
 
-        if not data and self.av_enabled:
-            logger.warning(f"FMP unavailable for earnings calendar {symbol}, falling back to Alpha Vantage")
-            data = self._fetch_earnings_calendar_av(symbol)
+        # Alpha Vantage fallback disabled — free tier is 25 req/day which is exhausted
+        # immediately during cache warming. AV earnings data provides no value at this limit.
+        # If FMP returns None (e.g., symbol not in FMP universe), just return None.
+        if not data:
+            logger.debug(f"No earnings calendar data available for {symbol} from FMP")
 
         if data:
             # Cache the result
