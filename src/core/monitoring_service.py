@@ -2495,13 +2495,19 @@ class MonitoringService:
                                     f"extending hold limit from {strategy_hold_max}h to 48h"
                                 )
                             elif not is_profitable and hold_hours > effective_hold_max * 0.5:
-                                # Losing position past 50% of hold limit — close immediately
-                                # Don't wait for the full limit; cut the loser early
-                                effective_hold_max = effective_hold_max * 0.5
-                                logger.info(
-                                    f"[TimeBasedExit] {pos.symbol}: losing hourly position past "
-                                    f"50% of hold limit — closing early at {effective_hold_max:.0f}h"
-                                )
+                                # Losing position past 50% of hold limit — cut early only if
+                                # the loss is meaningful (> 1% of invested). Positions at -0.1%
+                                # are within spread/noise and shouldn't be cut early.
+                                entry = pos.entry_price or 0
+                                current = pos.current_price or entry
+                                loss_pct = abs(current - entry) / entry if entry > 0 else 0
+                                if loss_pct >= 0.01:  # At least 1% loss to trigger early cut
+                                    effective_hold_max = effective_hold_max * 0.5
+                                    logger.info(
+                                        f"[TimeBasedExit] {pos.symbol}: losing hourly position "
+                                        f"({loss_pct:.1%} loss) past 50% of hold limit — "
+                                        f"closing early at {effective_hold_max:.0f}h"
+                                    )
                     except Exception:
                         pass
                     
