@@ -1988,3 +1988,160 @@ The font normalization from Session 8 was partial — many inconsistencies remai
 ### From Previous Sessions
 - Risk controls — Portfolio-level VaR check before new positions
 - `/strategies/blacklisted-combos`, `/strategies/template-rankings`, `/strategies/idle-demotions` — 422/404 errors
+
+---
+
+### Session Improvements (April 17, 2026 — Session 14: SSRN Audit, UI Overhaul, Quant Improvements)
+
+This session was a comprehensive audit against the "151 Trading Strategies" SSRN paper (Kakushadze & Serur), a TradingView capabilities gap analysis, and a full implementation sprint covering all outstanding items.
+
+#### 135. Analytics Equity Curve Fix ✅ (CRITICAL)
+- **Bug**: Analytics Performance tab equity curve rendered blank. Root cause: data built from position-level P&L aggregated by date — multiple positions "closing" on the same day produced artificially large single-day returns, inflating Sharpe to 5.0.
+- **Fix**: Analytics `/performance` endpoint now uses `equity_snapshots` table as primary source (13 daily equity readings). Daily returns computed as `(equity_today - equity_yesterday) / equity_yesterday`. Falls back to position-level aggregation only when no snapshots exist.
+- **Also fixed**: Overview Sharpe was a fake formula (`win_rate / 100 * 2`). Now reads `sharpe_30d` from dashboard summary, computed from equity snapshots. `QuickStats` model extended with `sharpe_30d` field.
+- **Files**: `src/api/routers/analytics.py`, `src/api/routers/account.py`, `frontend/src/pages/OverviewNew.tsx`
+
+#### 136. MetricsBar "Never Synced" Fix ✅
+- `useLastSynced()` hook only updated via WebSocket events — never called `touch()` after REST fetches.
+- **Fix**: `MetricsBar.fetchMetrics()` now calls `touchLastSynced()` after every successful data load.
+- **Files**: `frontend/src/components/MetricsBar.tsx`
+
+#### 137. ATR Floor — Singleton MarketDataManager ✅
+- Order executor was creating a fresh `MarketDataManager` instance on every order for ATR calculation — empty cache, redundant YAML parsing.
+- **Fix**: Now uses `get_market_data_manager()` singleton. Falls back to lightweight instance only if singleton not registered.
+- **Files**: `src/execution/order_executor.py`
+
+#### 138. Pairs Trading — OLS Regression Spread ✅ (CRITICAL)
+- **Previously**: Used simple price ratio `sym / partner` for z-score. Noisy, scale-dependent, produces inflated Sharpe in backtests.
+- **Fix**: Both backtest simulation and live signal handler now use OLS regression spread: `spread = sym - β*partner - α` with rolling hedge ratio β. Academically correct (Kakushadze & Serur, Chapter 3).
+- **Files**: `src/strategy/strategy_engine.py`
+
+#### 139. Pairs Trading — Expanded Universe ✅
+- Hardcoded 8 pairs (16 symbols) → 18 pairs (36 symbols).
+- Added: GS/MS, BAC/WFC, NVDA/AMD, MCD/YUM, PFE/MRK, T/VZ, NEE/DUK, CAT/DE, BA/LMT, AMZN/SHOP.
+- Validation logic updated to use class-level `PAIRS_MAP` (single source of truth).
+- Template metadata `pair_symbols` updated to match.
+- **Files**: `src/strategy/strategy_engine.py`, `src/strategy/strategy_templates.py`
+
+#### 140. Pairs Trading — Two-Leg Execution ✅ (CRITICAL)
+- **Previously**: Only traded one leg (the assigned symbol). Not market-neutral.
+- **Fix**: When a pairs trading entry signal fires for symbol A, the scheduler immediately executes the hedge leg for symbol B in the opposite direction — both under the **same strategy ID**. Hedge leg is skipped if B was already traded this run (dedup guard). When the primary leg exits (DSL exit signal), the hedge leg is automatically marked `pending_closure`.
+- Both legs appear in the same strategy's position list in the UI.
+- **Files**: `src/core/trading_scheduler.py`
+
+#### 141. PEAD Template — Post-Earnings Announcement Drift ✅
+- New Alpha Edge template: "Post-Earnings Drift Long"
+- Entry: 2-5 days after earnings beat (surprise > 2%), price still below pre-earnings high, RSI < 70
+- Hold: 10-20 days (drift window). TP: 8%, SL: 4%. Routes to existing `earnings_momentum` handler.
+- One of the most documented anomalies in the 151 book (Bernard & Thomas, 1989).
+- **Files**: `src/strategy/strategy_templates.py`
+
+#### 142. 52-Week High Momentum Template ✅
+- New Alpha Edge template: "52-Week High Momentum Long"
+- Entry: price within 5% of 52-week high, RSI 50-70, volume above 20-day avg, price above SMA(50)
+- Hold: 5-30 days. TP: 10%, SL: 5%. Routes to existing 52-week high handler (line 9254).
+- George & Hwang (2004): anchoring bias creates momentum effect at 52-week highs.
+- **Files**: `src/strategy/strategy_templates.py`
+
+#### 143. VIX Panic Filter ✅
+- Blocks new equity LONG entries when VIX > 30 AND >20% above its 10-day average.
+- Fails silently if VIX data unavailable (never blocks a trade on data absence).
+- **Files**: `src/core/trading_scheduler.py`
+
+#### 144. Yield Curve Inversion Gate ✅
+- Blocks new individual equity LONG positions when 2s10s spread (FRED T10Y2Y) < -0.25% (sustained inversion).
+- Does not apply to ETFs (XLU, XLP, GLD are valid defensive plays during inversion).
+- **Files**: `src/core/trading_scheduler.py`
+
+#### 145. Factor Exposure Scoring ✅
+- New conviction scorer component: `_score_factor_exposure()` (±6 points).
+- Regime-aware: in ranging/low-vol → reward low-beta longs, penalize high-beta; in trending-up → reward high-beta/momentum longs.
+- High P/E (>60) penalized in all regimes. Uses FMP beta, pe_ratio, revenue_growth.
+- **Files**: `src/strategy/conviction_scorer.py`
+
+#### 146. FMP Insider Trading — Stable API ✅
+- `get_insider_trading()` now tries `/stable/search-insider-trades` endpoint.
+- Tested on EC2: returns 404 on Starter plan (plan-gated). Method returns `[]` gracefully.
+- Will work automatically when FMP plan is upgraded — no code change needed.
+- **Files**: `src/data/fundamental_data_provider.py`
+
+#### 147. AssetPlot — Candlestick + Volume + Support/Resistance ✅
+- Replaced line series with OHLC candlesticks (green/red) using data from `historical_price_cache`.
+- Volume histogram pane below, synchronized crosshair.
+- Auto-detected support/resistance levels: swing high/low detection + 52-week high/low, rendered as dashed lines with legend.
+- **Files**: `frontend/src/components/charts/AssetPlot.tsx`
+
+#### 148. Trade Markers on Equity Curve ✅
+- Green/red dots on the portfolio area series for each closed trade, sized by P&L magnitude (1-4px).
+- Passed via new `trades` prop on `EquityCurveChart`, wired into OverviewNew from `recentTrades`.
+- **Files**: `frontend/src/components/charts/EquityCurveChart.tsx`, `frontend/src/pages/OverviewNew.tsx`
+
+#### 149. TvMultiPane — Synchronized Multi-Pane Charts ✅
+- New reusable component: multiple TradingView Lightweight Charts stacked vertically with synchronized crosshair via `subscribeCrosshairMove`.
+- Foundation for AssetPlot's price+volume layout and future multi-indicator views.
+- **Files**: `frontend/src/components/charts/TvMultiPane.tsx`
+
+#### 150. Multi-Timeframe View in PositionDetailView ✅
+- 2×2 grid showing 1D, 4H, 1H price charts + P&L chart for the position.
+- Data fetched in parallel (non-blocking) after the main 1D detail loads.
+- Backend `position detail` endpoint now accepts `?interval=1d|4h|1h`.
+- **Files**: `frontend/src/pages/PositionDetailView.tsx`, `src/api/routers/account.py`, `frontend/src/services/api.ts`
+
+#### 151. Workspace Presets — No Full Reload ✅
+- Switching presets now only reloads the page if the preset actually changes panel sizes.
+- Widget visibility and collapsed states apply instantly via the `WORKSPACE_PRESET_EVENT` event system.
+- **Files**: `frontend/src/lib/workspace-presets.ts`
+
+#### 152. Separate API Keys File ✅ (CRITICAL — Infrastructure)
+- All API keys now live in `config/api_keys.yaml` (excluded from git and rsync).
+- Covers: FMP, Alpha Vantage, FRED, Marketaux. eToro stays in `config/demo_credentials.json` (Fernet-encrypted). Yahoo Finance has no key.
+- `src/core/config_loader.py`: loads `api_keys.yaml` at startup and overlays keys onto `autonomous_trading.yaml` — SCP deploys can never overwrite keys again.
+- `deploy/patch-api-keys.sh`: run manually after any SCP deploy to re-write keys from Secrets Manager.
+- GitHub Actions now writes `api_keys.yaml` instead of patching the YAML.
+- `FundamentalDataProvider`, `MarketStatisticsAnalyzer`, and `app.py` all use `config_loader.load_config()`.
+- **Files**: `config/api_keys.yaml`, `src/core/config_loader.py`, `src/strategy/market_analyzer.py`, `src/data/fundamental_data_provider.py`, `src/api/app.py`, `.github/workflows/deploy.yml`, `.gitignore`, `deploy/patch-api-keys.sh`
+
+#### 153. Unconfirmed Closure — Dynamic Miss Threshold ✅
+- Raised from 3 to a dynamic threshold based on position age:
+  - Very new (<1h): 10 misses (~10 min) — eToro propagation delay
+  - Normal: 5 misses (~5 min) — survives brief API hiccups
+  - Long-held (>24h): 8 misses (~8 min) — extra caution on established positions
+- **Files**: `src/core/order_monitor.py`
+
+---
+
+## Current System State (April 17, 2026 — Updated Session 14)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$14K, equity ~$470K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~114 DEMO
+- **Open positions:** ~190
+- **Market regime:** Equity: trending_up_weak, Crypto: trending_up
+- **Conviction scorer**: 7 components — WF edge (40) + signal quality (25) + regime fit (20) + asset tradability (15) + fundamental quality (±15) + news sentiment (±8) + carry bias (±5) + crypto cycle (±5) + **factor exposure (±6)**
+- **Pairs Trading**: OLS regression spread, 18 pairs (36 symbols), two-leg execution under same strategy
+- **New templates**: Post-Earnings Drift Long, 52-Week High Momentum Long
+- **New gates**: VIX panic filter (>30 + spiking), yield curve inversion gate (2s10s < -0.25%)
+- **API keys**: Separate `config/api_keys.yaml` — SCP-safe, written by GitHub Actions from Secrets Manager
+- **Sharpe**: Now computed from daily equity snapshots (accurate) — Analytics and Overview consistent
+- **UI**: Candlestick+volume AssetPlot, trade markers on equity curve, multi-timeframe position view, TvMultiPane, workspace preset no-reload
+
+---
+
+## Open Items (Updated Session 14)
+
+### Trading Performance
+- Monitor win rate after all quant improvements (target: >50%, currently ~47%)
+- Monitor pairs trading two-leg execution: are both legs opening/closing correctly?
+- Monitor VIX filter and yield curve gate: how often do they block signals?
+- Monitor factor exposure scoring impact on signal quality
+
+### Infrastructure
+- Consider t3.small downgrade — waiting on CloudWatch memory data (1 week)
+- FMP Starter plan: insider trading plan-gated (404). Upgrade to Professional (~$79/month) to unlock `/stable/search-insider-trades`
+- Add `alphacent/marketaux-api-key` to AWS Secrets Manager (currently hardcoded in YAML as fallback)
+
+### Strategy
+- Existing strategies still have old names (V38, V174, etc.) — new naming only applies to newly proposed strategies
+- Portfolio-level VaR check before new positions — decided not to implement (complexity vs benefit unclear)
+- News sentiment: ~192 symbols still unpopulated (filling at 100 req/day, ~2 days remaining)
