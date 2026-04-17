@@ -3026,25 +3026,9 @@ Generate a CORRECTED strategy that addresses all errors:"""
         except Exception:
             pass
 
-        # _match_templates_to_symbols already scored all (template, symbol) pairs internally.
-        # We need the all_pairs data to build watchlists. Store it during matching.
-        watchlists = self._build_watchlists(
-            all_pairs=getattr(self, '_last_scored_pairs', []),
-            assignments=template_symbol_assignments,
-            watchlist_size=watchlist_size,
-            active_symbol_template_pairs=active_symbol_template_pairs,
-        )
-        logger.info(f"Built watchlists for {len(watchlists)} templates (size: {watchlist_size})")
-
-        # === PHASE 2: Generate unique strategies with parameter variations ===
-        # Each template produces one strategy per variation (different params, same watchlist).
-        # The watchlist is built from the scored (template, symbol) assignments.
-        strategies = []
-        seen_templates = set()
-        skipped_dupes = 0
-        
         # Load existing active AND approved-backtested strategies to avoid proposing
-        # same template+symbol combos that are already in the pipeline
+        # same template+symbol combos that are already in the pipeline.
+        # Must be built BEFORE _build_watchlists which uses active_symbol_template_pairs.
         active_template_symbols = set()  # template names with active/approved strategies
         active_symbol_template_pairs = set()  # (template_name, symbol) pairs already in pipeline
         try:
@@ -3079,7 +3063,24 @@ Generate a CORRECTED strategy that addresses all errors:"""
                     logger.info(f"Loaded {len(active_template_symbols)} active/approved templates for dedup ({len(active_symbol_template_pairs)} template+symbol pairs)")
         except Exception as e:
             logger.warning(f"Could not load active strategies for proposal dedup: {e}")
-        
+
+        # _match_templates_to_symbols already scored all (template, symbol) pairs internally.
+        # We need the all_pairs data to build watchlists. Store it during matching.
+        watchlists = self._build_watchlists(
+            all_pairs=getattr(self, '_last_scored_pairs', []),
+            assignments=template_symbol_assignments,
+            watchlist_size=watchlist_size,
+            active_symbol_template_pairs=active_symbol_template_pairs,
+        )
+        logger.info(f"Built watchlists for {len(watchlists)} templates (size: {watchlist_size})")
+
+        # === PHASE 2: Generate unique strategies with parameter variations ===
+        # Each template produces one strategy per variation (different params, same watchlist).
+        # The watchlist is built from the scored (template, symbol) assignments.
+        strategies = []
+        seen_templates = set()
+        skipped_dupes = 0
+
         # Group assignments by template to build watchlists
         from collections import OrderedDict
         template_assignments = OrderedDict()
