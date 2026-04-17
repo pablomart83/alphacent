@@ -284,16 +284,16 @@ class FundamentalDataProvider:
 
         if config is None:
             try:
-                import yaml
-                from pathlib import Path
-                config_path = Path("config/autonomous_trading.yaml")
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = yaml.safe_load(f) or {}
-                else:
-                    config = {}
+                from src.core.config_loader import load_config
+                config = load_config()
             except Exception:
-                config = {}
+                try:
+                    import yaml
+                    from pathlib import Path
+                    config_path = Path("config/autonomous_trading.yaml")
+                    config = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+                except Exception:
+                    config = {}
 
         self.config = config
         

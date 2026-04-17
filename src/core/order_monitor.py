@@ -95,8 +95,18 @@ class OrderMonitor:
         # A position must be missing from eToro for N consecutive syncs
         # before we close it in DB. Prevents API glitches/outages from
         # mass-closing real positions.
+        #
+        # Threshold logic:
+        #   - New positions (<1h old): 10 misses (~10 min) — eToro propagation can be slow
+        #   - Normal positions: 5 misses (~5 min) — enough to survive brief API hiccups
+        #   - Long-held positions (>24h): 8 misses (~8 min) — extra caution, these are real
+        #
+        # You said you won't do manual operations, so any disappearance is either:
+        #   (a) eToro SL/TP hit — price will confirm it
+        #   (b) Brief API glitch — position reappears next sync
+        #   (c) DEMO account reset — mass closure guard catches this
         self._position_miss_count: dict = {}  # etoro_position_id -> consecutive_misses
-        self._miss_threshold = 3  # require 3 consecutive misses (~3 min at 60s sync)
+        self._miss_threshold = 5  # default: 5 consecutive misses (~5 min at 60s sync)
 
     def _load_risk_config(self):
         """Load risk config from YAML, falling back to dataclass defaults."""
@@ -1458,11 +1468,27 @@ class OrderMonitor:
                     
                     misses = self._position_miss_count.get(pos_key, 0) + 1
                     self._position_miss_count[pos_key] = misses
-                    
-                    if misses < self._miss_threshold:
+
+                    # Dynamic threshold based on position age:
+                    # - Very new (<1h): 10 misses — eToro propagation delay is real
+                    # - Long-held (>24h): 8 misses — extra caution, these are established positions
+                    # - Normal: 5 misses (default)
+                    dynamic_threshold = self._miss_threshold
+                    if db_pos.opened_at:
+                        try:
+                            opened_naive = db_pos.opened_at.replace(tzinfo=None) if db_pos.opened_at.tzinfo else db_pos.opened_at
+                            age_hours = (datetime.now().replace(tzinfo=None) - opened_naive).total_seconds() / 3600
+                            if age_hours < 1.0:
+                                dynamic_threshold = 10  # Very new — wait longer
+                            elif age_hours > 24.0:
+                                dynamic_threshold = 8   # Long-held — extra caution
+                        except Exception:
+                            pass
+
+                    if misses < dynamic_threshold:
                         logger.info(
                             f"Position {db_pos.symbol} (eToro: {pos_key}) missing from eToro "
-                            f"({misses}/{self._miss_threshold} consecutive misses — not closing yet)"
+                            f"({misses}/{dynamic_threshold} consecutive misses — not closing yet)"
                         )
                         continue
                     

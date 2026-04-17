@@ -47,14 +47,18 @@ class MarketStatisticsAnalyzer:
         
         Args:
             market_data_manager: Manager for fetching market data
-            config_path: Path to configuration file
+            config_path: Path to configuration file (base config — keys overlaid from api_keys.yaml)
         """
         self.market_data = market_data_manager
         self.indicator_lib = IndicatorLibrary()
         
-        # Load configuration
-        with open(config_path, 'r') as f:
-            self.config = yaml.safe_load(f)
+        # Load configuration — use config_loader so api_keys.yaml overlay is applied
+        try:
+            from src.core.config_loader import load_config
+            self.config = load_config()
+        except Exception:
+            with open(config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
         
         # Initialize data source clients
         self._init_alpha_vantage()

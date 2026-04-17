@@ -43,6 +43,7 @@ jobs:
             --exclude 'config/.encryption_key' \
             --exclude 'config/demo_credentials.json' \
             --exclude 'config/live_credentials.json' \
+            --exclude 'config/api_keys.yaml' \
             --exclude '.env' \
             --exclude '.env.production' \
             --exclude 'frontend/dist/' \
@@ -85,7 +86,7 @@ jobs:
           echo "$ETORO_CREDS" > config/demo_credentials.json
           chmod 600 config/demo_credentials.json
 
-          # Patch API keys in YAML
+          # Patch API keys — write to separate api_keys.yaml (never overwrites autonomous_trading.yaml)
           python3.11 << 'PYEOF'
           import yaml, subprocess
 
@@ -97,16 +98,18 @@ jobs:
                   capture_output=True, text=True)
               return r.stdout.strip()
 
-          with open("config/autonomous_trading.yaml") as f:
-              config = yaml.safe_load(f)
+          keys = {
+              "financial_modeling_prep": {"api_key": get_secret("alphacent/fmp-api-key")},
+              "alpha_vantage":           {"api_key": get_secret("alphacent/alpha-vantage-api-key")},
+              "fred":                    {"api_key": get_secret("alphacent/fred-api-key")},
+              "marketaux":               {"api_key": get_secret("alphacent/marketaux-api-key")},
+          }
 
-          config["data_sources"]["financial_modeling_prep"]["api_key"] = get_secret("alphacent/fmp-api-key")
-          config["data_sources"]["alpha_vantage"]["api_key"] = get_secret("alphacent/alpha-vantage-api-key")
-          config["data_sources"]["fred"]["api_key"] = get_secret("alphacent/fred-api-key")
-
-          with open("config/autonomous_trading.yaml", "w") as f:
-              yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-          print("API keys patched")
+          with open("config/api_keys.yaml", "w") as f:
+              yaml.dump(keys, f, default_flow_style=False, sort_keys=False)
+          import os
+          os.chmod("config/api_keys.yaml", 0o600)
+          print("API keys written to config/api_keys.yaml")
           PYEOF
 
           # Create .env.production

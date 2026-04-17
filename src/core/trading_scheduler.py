@@ -540,6 +540,35 @@ class TradingScheduler:
                                 f"unrealized P&L: ${pos_to_close.unrealized_pnl:.2f})"
                             )
 
+                            # ── PAIRS TRADING: Close hedge leg when primary exits ──────
+                            _exit_meta = signal.metadata or {}
+                            _exit_partner = _exit_meta.get("pair_partner")
+                            _exit_pt_type = _exit_meta.get("template_type")
+                            if _exit_partner and _exit_pt_type == "pairs_trading":
+                                try:
+                                    # Find the hedge leg position (opposite side, same strategy)
+                                    _hedge_exit_side = PositionSide.SHORT if _exit_side == PositionSide.LONG else PositionSide.LONG
+                                    _hedge_pos = session.query(PositionORM).filter(
+                                        PositionORM.strategy_id == signal.strategy_id,
+                                        PositionORM.symbol == _exit_partner,
+                                        PositionORM.side == _hedge_exit_side,
+                                        PositionORM.closed_at.is_(None),
+                                        PositionORM.pending_closure == False,
+                                    ).first()
+                                    if _hedge_pos:
+                                        _hedge_pos.pending_closure = True
+                                        _hedge_pos.closure_reason = (
+                                            f"Pairs Trading hedge exit: primary leg {signal.symbol} closed"
+                                        )
+                                        session.commit()
+                                        logger.info(
+                                            f"Pairs Trading hedge leg marked for closure: "
+                                            f"{_exit_partner} {_hedge_exit_side.value} "
+                                            f"(strategy: {strategy.name})"
+                                        )
+                                except Exception as _hedge_exit_err:
+                                    logger.warning(f"Failed to close pairs hedge leg {_exit_partner}: {_hedge_exit_err}")
+
                             # Log the decision
                             self._log_signal_decision(
                                 session=session,
@@ -980,7 +1009,88 @@ class TradingScheduler:
                             # Track cumulative allocation
                             cumulative_allocated += validation_result.position_size
 
-                            # Promote BACKTESTED → DEMO on first order
+                            # ── PAIRS TRADING: Execute hedge leg ──────────────────────────
+                            # If this signal is from a pairs trading strategy, immediately
+                            # open the opposite leg on the partner symbol under the SAME
+                            # strategy ID. Both legs are market-neutral together.
+                            _pt_meta = signal.metadata or {}
+                            _pt_partner = _pt_meta.get("pair_partner")
+                            _pt_type = _pt_meta.get("template_type")
+                            if _pt_partner and _pt_type == "pairs_trading":
+                                try:
+                                    from src.models.enums import SignalAction as _SA
+                                    from src.models.dataclasses import TradingSignal as _TS
+
+                                    # Hedge direction is opposite to primary leg
+                                    if signal.action == _SA.ENTER_LONG:
+                                        _hedge_action = _SA.ENTER_SHORT
+                                        _hedge_dir = "SHORT"
+                                    elif signal.action == _SA.ENTER_SHORT:
+                                        _hedge_action = _SA.ENTER_LONG
+                                        _hedge_dir = "LONG"
+                                    else:
+                                        _hedge_action = None
+
+                                    if _hedge_action and (_pt_partner, _hedge_dir) not in orders_submitted_this_run:
+                                        _hedge_signal = _TS(
+                                            strategy_id=signal.strategy_id,
+                                            symbol=_pt_partner,
+                                            action=_hedge_action,
+                                            confidence=signal.confidence,
+                                            reasoning=f"Pairs Trading hedge leg: {_pt_partner} {_hedge_dir} (primary: {_sig_sym} {_sig_dir})",
+                                            generated_at=datetime.now(),
+                                            indicators=signal.indicators,
+                                            metadata={
+                                                **_pt_meta,
+                                                "is_hedge_leg": True,
+                                                "primary_symbol": _sig_sym,
+                                                "pair_partner": _sig_sym,  # partner of hedge is the primary
+                                            }
+                                        )
+
+                                        # Use same position size as primary leg
+                                        _hedge_order = self._order_executor.execute_signal(
+                                            signal=_hedge_signal,
+                                            position_size=validation_result.position_size,
+                                            stop_loss_pct=strategy.risk_params.stop_loss_pct,
+                                            take_profit_pct=strategy.risk_params.take_profit_pct,
+                                        )
+
+                                        # Save hedge order to DB under same strategy
+                                        _hedge_orm = OrderORM(
+                                            id=_hedge_order.id,
+                                            strategy_id=signal.strategy_id,
+                                            symbol=_pt_partner,
+                                            side=_hedge_order.side,
+                                            order_type=_hedge_order.order_type,
+                                            quantity=_hedge_order.quantity,
+                                            status=_hedge_order.status,
+                                            price=_hedge_order.price,
+                                            stop_price=_hedge_order.stop_price,
+                                            take_profit_price=_hedge_order.take_profit_price,
+                                            submitted_at=_hedge_order.submitted_at or datetime.now(),
+                                            filled_at=_hedge_order.filled_at,
+                                            filled_price=_hedge_order.filled_price,
+                                            filled_quantity=_hedge_order.filled_quantity,
+                                            etoro_order_id=_hedge_order.etoro_order_id,
+                                            expected_price=_hedge_order.expected_price,
+                                            slippage=_hedge_order.slippage,
+                                            fill_time_seconds=_hedge_order.fill_time_seconds,
+                                            order_action='entry',
+                                        )
+                                        session.add(_hedge_orm)
+                                        session.commit()
+
+                                        orders_submitted_this_run.add((_pt_partner, _hedge_dir))
+                                        cumulative_allocated += validation_result.position_size
+                                        orders_executed += 1
+
+                                        logger.info(
+                                            f"Pairs Trading hedge leg executed: {_pt_partner} {_hedge_dir} "
+                                            f"(strategy: {strategy.name}, primary: {_sig_sym} {_sig_dir})"
+                                        )
+                                except Exception as _hedge_err:
+                                    logger.warning(f"Pairs Trading hedge leg failed for {_pt_partner}: {_hedge_err}")
                             # Strategy proved it can trade — actual order placed on eToro
                             if strategy_orm.status == StrategyStatus.BACKTESTED:
                                 strategy_orm.status = StrategyStatus.DEMO
