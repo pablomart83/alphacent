@@ -58,6 +58,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     auth_manager.set_database(db)
     auth_manager.ensure_admin_exists("admin123")
 
+    # Initialize news sentiment provider
+    try:
+        import yaml as _yaml
+        from pathlib import Path as _Path
+        _cfg_path = _Path("config/autonomous_trading.yaml")
+        if _cfg_path.exists():
+            with open(_cfg_path) as _f:
+                _cfg = _yaml.safe_load(_f) or {}
+        _mx_cfg = _cfg.get('data_sources', {}).get('marketaux', {})
+        if _mx_cfg.get('enabled') and _mx_cfg.get('api_key'):
+            from src.data.news_sentiment_provider import init_news_sentiment_provider
+            init_news_sentiment_provider(_mx_cfg['api_key'])
+            logger.info("News sentiment provider initialized (Marketaux)")
+    except Exception as _e:
+        logger.warning(f"Could not initialize news sentiment provider: {_e}")
+
     # Restore system state (fast, DB read)
     from src.core.system_state_manager import get_system_state_manager
     state_manager = get_system_state_manager()

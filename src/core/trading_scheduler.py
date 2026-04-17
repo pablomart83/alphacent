@@ -596,10 +596,12 @@ class TradingScheduler:
                     
                     # ── REGIME GATE: Block equity shorts in non-bearish markets ──
                     # Shorting individual stocks in a rising/ranging market is a losing
-                    # game — you're fighting the tide. Only allow new SHORT entries when
-                    # the equity regime is clearly bearish (trending_down variants).
-                    # Forex, commodity, and index shorts are allowed in all regimes
-                    # (they have independent regime detection).
+                    # game — you're fighting the tide. Only allow new SHORT entries when:
+                    # (a) equity regime is clearly bearish (trending_down variants), OR
+                    # (b) the specific symbol has strongly bearish news sentiment (< -0.5)
+                    #     — bad news on a specific stock can justify a short even in a
+                    #     rising market (earnings miss, scandal, guidance cut, etc.)
+                    # Forex, commodity, and index shorts are allowed in all regimes.
                     if _sig_dir == "SHORT":
                         try:
                             from src.core.tradeable_instruments import (
@@ -622,20 +624,40 @@ class TradingScheduler:
                                 except Exception:
                                     pass
                                 if _current_regime not in _bearish_regimes:
-                                    logger.info(
-                                        f"Regime gate: blocking {_sig_sym} SHORT — equity regime "
-                                        f"is '{_current_regime}' (not bearish). Only short equities "
-                                        f"in trending_down/high_volatility regimes."
-                                    )
-                                    self._log_signal_decision(
-                                        session=session,
-                                        signal=signal,
-                                        strategy_name=strategy.name,
-                                        decision="REJECTED",
-                                        rejection_reason=f"Regime gate: equity SHORT blocked in {_current_regime} regime",
-                                    )
-                                    signals_rejected += 1
-                                    continue
+                                    # Check if symbol has strongly bearish news — override the regime gate
+                                    _sentiment_override = False
+                                    try:
+                                        from src.data.news_sentiment_provider import get_news_sentiment_provider
+                                        _sent_provider = get_news_sentiment_provider()
+                                        if _sent_provider:
+                                            _sent_score = _sent_provider.get_sentiment(_sig_sym)
+                                            # Strongly bearish news (< -0.5) justifies shorting
+                                            # even in a non-bearish market regime
+                                            if _sent_score < -0.5:
+                                                _sentiment_override = True
+                                                logger.info(
+                                                    f"Regime gate override: allowing {_sig_sym} SHORT "
+                                                    f"despite {_current_regime} regime — "
+                                                    f"news sentiment={_sent_score:.3f} (strongly bearish)"
+                                                )
+                                    except Exception:
+                                        pass
+
+                                    if not _sentiment_override:
+                                        logger.info(
+                                            f"Regime gate: blocking {_sig_sym} SHORT — equity regime "
+                                            f"is '{_current_regime}' (not bearish). Only short equities "
+                                            f"in trending_down/high_volatility regimes or on strongly bearish news."
+                                        )
+                                        self._log_signal_decision(
+                                            session=session,
+                                            signal=signal,
+                                            strategy_name=strategy.name,
+                                            decision="REJECTED",
+                                            rejection_reason=f"Regime gate: equity SHORT blocked in {_current_regime} regime",
+                                        )
+                                        signals_rejected += 1
+                                        continue
                         except Exception as _regime_err:
                             logger.debug(f"Regime gate check failed: {_regime_err}")
 

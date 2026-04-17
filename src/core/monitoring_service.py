@@ -1099,6 +1099,14 @@ class MonitoringService:
             # Only the background automatic sync sets this flag — manual syncs don't
             self._background_sync_completed = True
             self._price_sync_completed = True
+
+            # Trigger news sentiment sync after first price sync (populates DB on startup)
+            if not getattr(self, '_news_sentiment_synced_once', False):
+                try:
+                    self._sync_news_sentiment()
+                    self._news_sentiment_synced_once = True
+                except Exception as _e:
+                    logger.debug(f"News sentiment startup sync failed: {_e}")
             
         except Exception as e:
             logger.error(f"Price data sync failed: {e}")
@@ -1198,6 +1206,12 @@ class MonitoringService:
             self._save_equity_snapshot()
         except Exception as e:
             logger.warning(f"  Equity snapshot failed (non-critical): {e}")
+
+        # 5. News sentiment background sync (priority queue, respects 100 req/day)
+        try:
+            self._sync_news_sentiment()
+        except Exception as e:
+            logger.warning(f"  News sentiment sync failed (non-critical): {e}")
     
     def _save_equity_snapshot(self) -> None:
         """Save end-of-day equity snapshot.
@@ -3360,6 +3374,96 @@ class MonitoringService:
         except Exception as e:
             logger.error(f"Failed to get FundamentalDataProvider: {e}")
             return None
+
+    def _sync_news_sentiment(self) -> None:
+        """
+        Background news sentiment sync — runs as part of daily sync.
+
+        Priority queue (respects 100 req/day free tier):
+          1. Symbols with open positions (protect existing trades)
+          2. Active strategy symbols not yet in DB
+          3. Stale symbols (TTL expired)
+
+        Fetches up to 80 symbols per run (leaves 20 buffer for signal-time queuing).
+        """
+        try:
+            from src.data.news_sentiment_provider import get_news_sentiment_provider
+            provider = get_news_sentiment_provider()
+            if provider is None:
+                return
+
+            from src.models.orm import PositionORM, StrategyORM
+            from src.models.enums import StrategyStatus
+            from src.core.tradeable_instruments import (
+                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+                DEMO_ALLOWED_ETFS,
+            )
+            import json
+
+            non_stock = (
+                set(DEMO_ALLOWED_CRYPTO) | set(DEMO_ALLOWED_FOREX) |
+                set(DEMO_ALLOWED_INDICES) | set(DEMO_ALLOWED_COMMODITIES) |
+                set(DEMO_ALLOWED_ETFS)
+            )
+
+            session = self.db.get_session()
+            try:
+                # Priority 1: symbols with open positions
+                open_syms = {
+                    p.symbol for p in session.query(PositionORM).filter(
+                        PositionORM.closed_at.is_(None)
+                    ).all()
+                    if p.symbol and p.symbol.upper() not in non_stock
+                }
+
+                # Priority 2: active strategy symbols
+                active_syms = set()
+                for s in session.query(StrategyORM).filter(
+                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
+                ).all():
+                    if s.symbols:
+                        try:
+                            syms = json.loads(s.symbols) if isinstance(s.symbols, str) else s.symbols
+                            active_syms.update(
+                                sym for sym in syms
+                                if sym and sym.upper() not in non_stock
+                            )
+                        except Exception:
+                            pass
+            finally:
+                session.close()
+
+            # Build priority-ordered list, deduped
+            queue = list(open_syms)
+            for sym in active_syms:
+                if sym not in open_syms:
+                    queue.append(sym)
+
+            # Only process symbols that need refresh
+            to_fetch = [s for s in queue if provider.needs_refresh(s)]
+
+            if not to_fetch:
+                logger.info("[NewsSentiment] All symbols fresh — nothing to fetch")
+                return
+
+            # Cap at 80 to leave buffer
+            to_fetch = to_fetch[:80]
+            logger.info(f"[NewsSentiment] Syncing {len(to_fetch)} symbols "
+                        f"({len(open_syms)} with positions, {len(active_syms)} active strategies)")
+
+            fetched = 0
+            for sym in to_fetch:
+                score = provider.fetch_and_store(sym)
+                if score is not None:
+                    fetched += 1
+                else:
+                    break  # Rate limit hit — stop for today
+
+            logger.info(f"[NewsSentiment] Sync complete: {fetched}/{len(to_fetch)} symbols updated")
+
+        except Exception as e:
+            logger.warning(f"[NewsSentiment] Sync error: {e}")
 
     def _get_regime_and_sectors(self) -> tuple:
         """

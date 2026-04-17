@@ -1568,6 +1568,17 @@ class ApiClient {
     );
     return this.handleResponse(response);
   }
+
+  // Generic HTTP methods for endpoints not yet in the typed API
+  async get(path: string): Promise<any> {
+    const response = await this.client.get(path);
+    return response.data;
+  }
+
+  async post(path: string, data?: any): Promise<any> {
+    const response = await this.client.post(path, data);
+    return response.data;
+  }
 }
 
 // Export singleton instance

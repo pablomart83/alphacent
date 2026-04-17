@@ -1791,7 +1791,73 @@ The font normalization from Session 8 was partial — many inconsistencies remai
 
 ---
 
-## Current System State (April 17, 2026 — Updated Session 12)
+### Session Improvements (April 17, 2026 — Session 13: Data Page + Sentiment-Aware Short Gate)
+
+#### 128. Data Management Page — Fundamentals + News Columns ✅
+- Data quality table: replaced Score+Staleness with **Price** (quality score), **Fundamentals** (FMP score + age), **News** (sentiment -1 to +1 with bullish/bearish/neutral color)
+- FMP Fundamentals column: shows score 0-100 (decays over 30 days), age in days, "n/a" for ETFs/crypto/forex, "missing" if no data
+- News column: shows sentiment score with color (green=bullish, red=bearish, gray=neutral) + age in hours
+- BTC/ETH score=0 fix: quality reports stored as BTCUSD/ETHUSD but asset_class_map uses BTC/ETH — now tries both forms; also fixed quality_score=0 from empty-data reports (use staleness fallback instead)
+- **Files**: `frontend/src/pages/DataManagementNew.tsx`, `src/api/routers/data_management.py`
+
+#### 129. Data Source Health — Marketaux Added ✅
+- Data Source Health grid now shows 5 cards: eToro, Yahoo, FMP, FRED, **Marketaux**
+- Marketaux card shows: status (healthy/degraded/rate_limited), coverage %, requests remaining
+- Status derived from `newsSentimentStatus.requests_remaining`: >10 = healthy, >0 = degraded, 0 = rate_limited
+- **Files**: `frontend/src/pages/DataManagementNew.tsx`
+
+#### 130. News Sentiment Cache Panel ✅
+- New "News Sentiment (Marketaux)" section in Data Health side panel
+- Coverage bar (same pattern as FMP Fundamental Cache)
+- Shows: coverage %, fresh_24h, fresh_7d, requests remaining
+- "Refresh Sentiment" button (purple) triggers manual sync
+- Rate limit guard: button disabled when requests_remaining < 5
+- New backend endpoints: `GET /data/news-sentiment/status`, `POST /data/news-sentiment/trigger`
+- **Files**: `frontend/src/pages/DataManagementNew.tsx`, `src/api/routers/data_management.py`
+
+#### 131. Sentiment-Aware Short Gate ✅ (CRITICAL — Alpha Generation)
+- **Problem**: Regime gate was blocking ALL equity shorts in non-bearish markets, even when a specific symbol had strongly bearish news (earnings miss, scandal, guidance cut)
+- **Fix**: Added sentiment override — if `news_sentiment_score < -0.5` (strongly bearish), the regime gate is bypassed and the short is allowed
+- **Rationale**: Market regime is a macro signal; individual stock news is a micro signal. A stock with -0.9 sentiment in a rising market is a legitimate short — it's decoupling from the market. This is exactly how quants use news sentiment: to identify idiosyncratic shorts.
+- **Threshold**: -0.5 (moderately bearish not enough — requires strongly bearish to override macro regime)
+- **Log**: "Regime gate override: allowing {sym} SHORT despite {regime} — news sentiment={score} (strongly bearish)"
+- **Files**: `src/core/trading_scheduler.py`
+
+---
+
+## Current System State (April 17, 2026 — Updated Session 13)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables (added symbol_news_sentiment), 780K+ rows
+- **Account:** eToro DEMO, balance ~$14K, equity ~$470K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~114 DEMO
+- **Open positions:** ~190
+- **Market regime:** Equity: trending_up_weak, Crypto: trending_up
+- **News sentiment**: 40 symbols populated (DIS=-1.0, SCHW=-1.0, HD=-0.99, GOOGL=+0.45, GE=+0.43)
+- **Short gate**: Regime gate now has sentiment override — strongly bearish news (< -0.5) allows shorts even in non-bearish regimes
+- **Data page**: Fundamentals + News columns in quality table, Marketaux in Data Source Health, News Sentiment Cache panel
+
+---
+
+## Open Items (Updated Session 13)
+
+### News Sentiment
+- 40/~232 stock symbols populated (hit 100 req/day limit on first run)
+- Will fill remaining ~192 symbols over next 2-3 days (100 req/day)
+- Insider trading data still unavailable (FMP plan-gated) — `insider_net_buying` always 0 in conviction scorer
+
+### Trading Performance
+- Monitor win rate after all quant improvements (target: >50%)
+- Monitor sentiment-aware short gate: are strongly bearish news shorts profitable?
+- Track how many shorts are being closed by bull market gate vs allowed by sentiment override
+
+### Infrastructure
+- API key patching: SCP of `autonomous_trading.yaml` overwrites keys — need post-SCP hook
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+
+### From Previous Sessions
+- Risk controls — Portfolio-level VaR check before new positions
+- `/strategies/blacklisted-combos`, `/strategies/template-rankings`, `/strategies/idle-demotions` — 422/404 errors
 
 - **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
 - **Account:** eToro DEMO, balance ~$162K, equity ~$463K

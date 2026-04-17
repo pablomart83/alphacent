@@ -215,6 +215,11 @@ data_sources:
     enabled: true
     api_key: REPLACE_VIA_SECRETS_MANAGER
     cache_duration: 86400
+  marketaux:
+    enabled: true
+    api_key: nwpVfgSsnX2V5wkzXatGNIBMPEwZQr7Cwk8J12Th
+    # Free tier: 100 req/day. Sentiment cached in DB with TTL (6h-72h).
+    # Priority queue: open positions > pending signals > earnings week > background fill
   yahoo_finance:
     enabled: true
     cache_duration: 3600

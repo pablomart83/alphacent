@@ -1011,6 +1011,14 @@ class DataQualityEntry(BaseModel):
     data_source: str = "yahoo"
     active_issues: int = 0
     staleness_seconds: float = 0.0
+    # Fundamentals (FMP)
+    fmp_score: Optional[float] = None        # 0-100, None = not applicable
+    fmp_age_days: Optional[float] = None     # days since last FMP fetch
+    fmp_has_data: bool = False
+    # News sentiment (Marketaux)
+    sentiment_score: Optional[float] = None  # -1.0 to +1.0, None = no data
+    sentiment_age_hours: Optional[float] = None
+    sentiment_label: Optional[str] = None    # bullish / bearish / neutral
 
 
 class DataQualityResponse(BaseModel):
@@ -1022,17 +1030,16 @@ class DataQualityResponse(BaseModel):
 async def get_data_quality():
     """
     Get data quality scores for all tracked symbols.
-
-    Computes quality from DataQualityReportORM and historical_price_cache freshness.
-    Falls back to cache-based staleness when no quality report exists.
-
-    Validates: Requirements 19.1, 19.6, 19.10
+    Includes price quality, FMP fundamentals coverage, and news sentiment.
+    Fixes BTC/ETH score 0 by resolving BTCUSD/ETHUSD symbol mismatch.
     """
     from src.models.database import get_database
-    from src.models.orm import DataQualityReportORM, HistoricalPriceCacheORM
-    from sqlalchemy import func, text
+    from src.models.orm import DataQualityReportORM, FundamentalDataORM
+    from sqlalchemy import text
+    from src.data.fmp_cache_warmer import FMPCacheWarmer
 
     entries: List[DataQualityEntry] = []
+    no_fundamentals = FMPCacheWarmer.SKIP_FUNDAMENTALS
 
     # Load symbol universe for asset class mapping
     asset_class_map: dict[str, str] = {}
@@ -1045,7 +1052,6 @@ async def get_data_quality():
                 sym_config = yaml.safe_load(f) or {}
             for ac, items in sym_config.items():
                 if isinstance(items, list):
-                    # ac is like "stocks", "etfs", "forex", etc. — normalize
                     normalized = ac.rstrip("s") if ac.endswith("s") else ac
                     for item in items:
                         if isinstance(item, dict) and "symbol" in item:
@@ -1059,83 +1065,107 @@ async def get_data_quality():
         try:
             now = datetime.now()
 
-            # Get latest quality reports per symbol
+            # Quality reports (keyed by symbol, both BTC and BTCUSD forms)
             quality_reports: dict[str, DataQualityReportORM] = {}
-            reports = session.query(DataQualityReportORM).all()
-            for r in reports:
+            for r in session.query(DataQualityReportORM).all():
                 existing = quality_reports.get(r.symbol)
                 if not existing or (r.validated_at and existing.validated_at and r.validated_at > existing.validated_at):
                     quality_reports[r.symbol] = r
 
-            # Get latest price update per symbol from historical_price_cache
+            # Latest price per symbol from historical_price_cache
             latest_prices: dict[str, datetime] = {}
-            source_map: dict[str, str] = {}
-            rows = session.execute(text(
-                "SELECT symbol, MAX(fetched_at) as latest "
-                "FROM historical_price_cache "
-                "GROUP BY symbol"
-            )).fetchall()
-            for row in rows:
-                sym = row[0]
-                latest_ts = row[1]
-                if latest_ts:
-                    if isinstance(latest_ts, str):
-                        try:
-                            latest_prices[sym] = datetime.fromisoformat(latest_ts)
-                        except (ValueError, TypeError):
-                            pass
-                    elif isinstance(latest_ts, datetime):
-                        latest_prices[sym] = latest_ts
-                source_map[sym] = "yahoo"  # default; source column not reliably in GROUP BY
+            for row in session.execute(text(
+                "SELECT symbol, MAX(fetched_at) FROM historical_price_cache GROUP BY symbol"
+            )).fetchall():
+                sym, ts = row[0], row[1]
+                if ts:
+                    latest_prices[sym] = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
 
-            # Build entries — union of quality reports and price cache symbols
+            # FMP fundamentals: latest fetch per symbol
+            fmp_data: dict[str, FundamentalDataORM] = {}
+            for r in session.query(FundamentalDataORM).all():
+                existing = fmp_data.get(r.symbol)
+                if not existing or (r.fetched_at and existing.fetched_at and r.fetched_at > existing.fetched_at):
+                    fmp_data[r.symbol] = r
+
+            # News sentiment
+            sentiment_data: dict[str, dict] = {}
+            try:
+                for row in session.execute(text(
+                    "SELECT symbol, sentiment_score, fetched_at, ttl_hours FROM symbol_news_sentiment"
+                )).fetchall():
+                    sentiment_data[row[0]] = {"score": float(row[1]) if row[1] is not None else None,
+                                              "fetched_at": row[2], "ttl_hours": row[3]}
+            except Exception:
+                pass
+
             all_symbols = set(quality_reports.keys()) | set(latest_prices.keys()) | set(asset_class_map.keys())
 
             for sym in sorted(all_symbols):
-                qr = quality_reports.get(sym)
-                last_update = latest_prices.get(sym)
+                # Resolve crypto symbol mismatch (BTC vs BTCUSD, ETH vs ETHUSD)
+                alt = (sym + "USD") if (len(sym) <= 5 and not sym.endswith("USD") and not sym.endswith("D")) else sym.replace("USD", "")
+                qr = quality_reports.get(sym) or quality_reports.get(alt)
+                last_update = latest_prices.get(sym) or latest_prices.get(alt)
 
-                quality_score = 50.0  # default
+                # Price quality score
+                quality_score = 50.0
                 active_issues = 0
                 if qr:
-                    quality_score = qr.quality_score
+                    # Don't use score=0 from empty-data reports — use staleness fallback instead
+                    quality_score = qr.quality_score if qr.quality_score > 0 else 50.0
                     active_issues = qr.issue_count
-                elif last_update:
-                    # Estimate quality from staleness
-                    staleness = (now - last_update).total_seconds()
-                    if staleness < 3600:
-                        quality_score = 95.0
-                    elif staleness < 86400:
-                        quality_score = 80.0
-                    elif staleness < 604800:
-                        quality_score = 60.0
-                    else:
-                        quality_score = 30.0
-
-                staleness_seconds = 0.0
-                last_price_str = None
                 if last_update:
-                    staleness_seconds = max(0.0, (now - last_update).total_seconds())
-                    last_price_str = last_update.isoformat()
+                    staleness = (now - last_update).total_seconds()
+                    if not qr:
+                        quality_score = 95.0 if staleness < 3600 else 80.0 if staleness < 86400 else 60.0 if staleness < 604800 else 30.0
 
-                data_source = source_map.get(sym, "yahoo")
-                # Normalize source names
-                source_lower = data_source.lower()
-                if "fmp" in source_lower:
-                    data_source = "fmp"
-                elif "etoro" in source_lower:
-                    data_source = "etoro"
-                else:
-                    data_source = "yahoo"
+                staleness_seconds = max(0.0, (now - last_update).total_seconds()) if last_update else 0.0
+                last_price_str = last_update.isoformat() if last_update else None
+
+                # FMP fundamentals
+                fmp_score = None
+                fmp_age_days = None
+                fmp_has_data = False
+                if sym not in no_fundamentals:
+                    fd = fmp_data.get(sym)
+                    if fd and fd.fetched_at:
+                        fmp_has_data = True
+                        age_days = (now - fd.fetched_at).total_seconds() / 86400
+                        fmp_age_days = round(age_days, 1)
+                        fmp_score = round(max(0.0, 100.0 - (age_days / 30.0) * 100.0), 1)
+                    else:
+                        fmp_score = 0.0
+
+                # News sentiment
+                sentiment_score = None
+                sentiment_age_hours = None
+                sentiment_label = None
+                sent = sentiment_data.get(sym)
+                if sent and sent.get("score") is not None:
+                    sentiment_score = round(sent["score"], 3)
+                    fa = sent.get("fetched_at")
+                    if fa:
+                        if isinstance(fa, str):
+                            try: fa = datetime.fromisoformat(fa)
+                            except Exception: fa = None
+                        if fa:
+                            sentiment_age_hours = round((now - fa).total_seconds() / 3600, 1)
+                    sentiment_label = "bullish" if sentiment_score > 0.15 else "bearish" if sentiment_score < -0.15 else "neutral"
 
                 entries.append(DataQualityEntry(
                     symbol=sym,
                     asset_class=asset_class_map.get(sym, "stock"),
                     quality_score=round(quality_score, 1),
                     last_price_update=last_price_str,
-                    data_source=data_source,
+                    data_source="yahoo",
                     active_issues=active_issues,
                     staleness_seconds=round(staleness_seconds, 1),
+                    fmp_score=fmp_score,
+                    fmp_age_days=fmp_age_days,
+                    fmp_has_data=fmp_has_data,
+                    sentiment_score=sentiment_score,
+                    sentiment_age_hours=sentiment_age_hours,
+                    sentiment_label=sentiment_label,
                 ))
         finally:
             session.close()
@@ -1143,3 +1173,149 @@ async def get_data_quality():
         logger.error(f"Error computing data quality: {e}")
 
     return DataQualityResponse(entries=entries)
+
+
+# ============================================================================
+# News Sentiment Cache (Marketaux)
+# ============================================================================
+
+_news_sentiment_thread: Optional[threading.Thread] = None
+_news_sentiment_progress: dict = {
+    "running": False, "current": 0, "total": 0,
+    "fetched": 0, "failed": 0, "started_at": None,
+    "completed_at": None, "elapsed_s": None, "error": None,
+}
+
+
+def _compute_sentiment_coverage() -> dict:
+    """Compute Marketaux sentiment coverage stats from DB."""
+    try:
+        from src.models.database import get_database
+        from sqlalchemy import text
+        db = get_database()
+        session = db.get_session()
+        try:
+            row = session.execute(text(
+                "SELECT COUNT(*) as total, "
+                "SUM(CASE WHEN fetched_at > NOW() - INTERVAL '24 hours' THEN 1 ELSE 0 END) as fresh_24h, "
+                "SUM(CASE WHEN fetched_at > NOW() - INTERVAL '7 days' THEN 1 ELSE 0 END) as fresh_7d "
+                "FROM symbol_news_sentiment"
+            )).fetchone()
+            total_cached = row[0] if row else 0
+            fresh_24h = row[1] if row else 0
+            fresh_7d = row[2] if row else 0
+        finally:
+            session.close()
+
+        # Total applicable symbols (stocks only — ETFs/forex/crypto/indices don't have news)
+        from src.data.news_sentiment_provider import get_news_sentiment_provider
+        provider = get_news_sentiment_provider()
+        requests_today = provider._requests_today if provider else 0
+        requests_remaining = max(0, 95 - requests_today)
+
+        # Estimate total applicable symbols
+        from src.data.fmp_cache_warmer import FMPCacheWarmer
+        from src.core.tradeable_instruments import get_tradeable_symbols
+        from src.models.enums import TradingMode
+        all_syms = get_tradeable_symbols(TradingMode.DEMO)
+        applicable = [s for s in all_syms if s not in FMPCacheWarmer.SKIP_FUNDAMENTALS]
+        total_applicable = len(applicable)
+
+        return {
+            "total_cached": total_cached,
+            "fresh_24h": fresh_24h,
+            "fresh_7d": fresh_7d,
+            "total_applicable": total_applicable,
+            "coverage_pct": round(total_cached / total_applicable * 100, 1) if total_applicable > 0 else 0.0,
+            "requests_today": requests_today,
+            "requests_remaining": requests_remaining,
+        }
+    except Exception as e:
+        logger.warning(f"Could not compute sentiment coverage: {e}")
+        return {"total_cached": 0, "fresh_24h": 0, "fresh_7d": 0,
+                "total_applicable": 0, "coverage_pct": 0.0,
+                "requests_today": 0, "requests_remaining": 95}
+
+
+@router.get("/news-sentiment/status")
+async def get_news_sentiment_status():
+    """Get Marketaux news sentiment cache status and coverage."""
+    global _news_sentiment_thread, _news_sentiment_progress
+    coverage = _compute_sentiment_coverage()
+    thread_alive = _news_sentiment_thread is not None and _news_sentiment_thread.is_alive()
+    is_running = thread_alive or _news_sentiment_progress.get("running", False)
+    return {**_news_sentiment_progress, **coverage, "running": is_running}
+
+
+@router.post("/news-sentiment/trigger", response_model=SyncTriggerResponse)
+async def trigger_news_sentiment_sync():
+    """Manually trigger news sentiment sync for all applicable symbols."""
+    global _news_sentiment_thread, _news_sentiment_progress
+
+    if _news_sentiment_thread and _news_sentiment_thread.is_alive():
+        return SyncTriggerResponse(success=False, message="News sentiment sync already running")
+
+    _news_sentiment_progress.update({
+        "running": True, "current": 0, "total": 0,
+        "fetched": 0, "failed": 0,
+        "started_at": _time.time(), "completed_at": None,
+        "elapsed_s": None, "error": None,
+    })
+
+    def _run():
+        global _news_sentiment_progress
+        try:
+            from src.data.news_sentiment_provider import get_news_sentiment_provider
+            from src.data.fmp_cache_warmer import FMPCacheWarmer
+            from src.core.tradeable_instruments import get_tradeable_symbols
+            from src.models.enums import TradingMode
+
+            provider = get_news_sentiment_provider()
+            if not provider:
+                _news_sentiment_progress.update({"running": False, "error": "Provider not initialized"})
+                return
+
+            all_syms = get_tradeable_symbols(TradingMode.DEMO)
+            applicable = [s for s in all_syms if s not in FMPCacheWarmer.SKIP_FUNDAMENTALS]
+            to_fetch = [s for s in applicable if provider.needs_refresh(s)]
+
+            _news_sentiment_progress["total"] = len(to_fetch)
+            logger.info(f"Manual news sentiment sync: {len(to_fetch)} symbols to fetch")
+
+            fetched = 0
+            failed = 0
+            for i, sym in enumerate(to_fetch):
+                score = provider.fetch_and_store(sym)
+                if score is not None:
+                    fetched += 1
+                else:
+                    failed += 1
+                    if not provider._check_rate_limit():
+                        logger.info("News sentiment sync: rate limit reached, stopping")
+                        break
+                _news_sentiment_progress.update({
+                    "current": i + 1,
+                    "fetched": fetched,
+                    "failed": failed,
+                    "elapsed_s": round(_time.time() - _news_sentiment_progress["started_at"], 1),
+                })
+
+            elapsed = _time.time() - _news_sentiment_progress["started_at"]
+            _news_sentiment_progress.update({
+                "running": False, "current": fetched + failed,
+                "fetched": fetched, "failed": failed,
+                "completed_at": _time.time(), "elapsed_s": round(elapsed, 1),
+            })
+            logger.info(f"Manual news sentiment sync complete: {fetched} fetched, {failed} failed in {elapsed:.1f}s")
+
+        except Exception as e:
+            elapsed = _time.time() - (_news_sentiment_progress.get("started_at") or _time.time())
+            _news_sentiment_progress.update({
+                "running": False, "completed_at": _time.time(),
+                "elapsed_s": round(elapsed, 1), "error": str(e)[:200],
+            })
+            logger.error(f"News sentiment sync failed: {e}", exc_info=True)
+
+    _news_sentiment_thread = threading.Thread(target=_run, daemon=True, name="news-sentiment-sync")
+    _news_sentiment_thread.start()
+    return SyncTriggerResponse(success=True, message="News sentiment sync started")

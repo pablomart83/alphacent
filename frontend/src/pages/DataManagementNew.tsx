@@ -53,6 +53,8 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
   const [quickUpdating, setQuickUpdating] = useState(false);
   const [fmpCacheWarming, setFmpCacheWarming] = useState(false);
   const [fmpCacheStatus, setFmpCacheStatus] = useState<any>(null);
+  const [newsSentimentStatus, setNewsSentimentStatus] = useState<any>(null);
+  const [newsSentimentSyncing, setNewsSentimentSyncing] = useState(false);
   const [_error, setError] = useState<ReturnType<typeof classifyError> | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -68,11 +70,12 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
   const fetchStatus = useCallback(async () => {
     try {
       setError(null);
-      const [data, monData, dqData, fmpData] = await Promise.all([
+      const [data, monData, dqData, fmpData, sentData] = await Promise.all([
         apiClient.getDataSyncStatus() as Promise<SyncStatus>,
         apiClient.getMonitoringStatus().catch(() => null),
         apiClient.getDataQuality().catch(() => []),
         apiClient.getFmpCacheStatus().catch(() => null),
+        apiClient.get('/data/news-sentiment/status').catch(() => null),
       ]);
       setStatus(data);
       if (monData) setMonitoringStatus(monData);
@@ -80,6 +83,10 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
       if (fmpData) {
         setFmpCacheStatus(fmpData);
         setFmpCacheWarming(fmpData.running);
+      }
+      if (sentData) {
+        setNewsSentimentStatus(sentData);
+        setNewsSentimentSyncing(sentData.running);
       }
       setLastFetchedAt(new Date());
       return data;
@@ -196,6 +203,39 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
     } catch {
       toast.error('Failed to trigger FMP cache warm');
       setFmpCacheWarming(false);
+    }
+  };
+
+  const handleTriggerNewsSentimentSync = async () => {
+    setNewsSentimentSyncing(true);
+    try {
+      const result = await apiClient.post('/data/news-sentiment/trigger');
+      if (result.success) {
+        toast.success('News sentiment sync started...');
+        let notRunningCount = 0;
+        const poll = setInterval(async () => {
+          try {
+            const s = await apiClient.get('/data/news-sentiment/status');
+            setNewsSentimentStatus(s);
+            if (!s.running) {
+              notRunningCount++;
+              if (notRunningCount >= 2) {
+                clearInterval(poll);
+                setNewsSentimentSyncing(false);
+                if (s.error) toast.error(`Sentiment sync failed: ${s.error}`);
+                else if (s.completed_at) toast.success(`Sentiment sync complete — ${s.fetched} fetched (${s.coverage_pct?.toFixed(1)}% coverage)`);
+              }
+            } else { notRunningCount = 0; }
+          } catch { /* ignore */ }
+        }, 3000);
+        setTimeout(() => { clearInterval(poll); setNewsSentimentSyncing(false); }, 10 * 60 * 1000);
+      } else {
+        toast.error(result.message);
+        setNewsSentimentSyncing(false);
+      }
+    } catch {
+      toast.error('Failed to trigger sentiment sync');
+      setNewsSentimentSyncing(false);
     }
   };
 
@@ -335,11 +375,12 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                     {[
                       { key: 'symbol', label: 'Symbol' },
                       { key: 'asset_class', label: 'Class' },
-                      { key: 'quality_score', label: 'Score' },
-                      { key: 'last_price_update', label: 'Last Update' },
+                      { key: 'quality_score', label: 'Price' },
+                      { key: 'fmp_score', label: 'Fundamentals' },
+                      { key: 'sentiment_score', label: 'News' },
+                      { key: 'last_price_update', label: 'Updated' },
                       { key: 'data_source', label: 'Source' },
                       { key: 'active_issues', label: 'Issues' },
-                      { key: 'staleness_seconds', label: 'Staleness' },
                     ].map((col) => (
                       <th
                         key={col.key}
@@ -363,15 +404,42 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                         {row.quality_score < 60 && <span className="ml-1 text-red-400 text-xs" title="Low quality">⚠</span>}
                       </td>
                       <td className="py-1 px-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{row.asset_class || '—'}</td>
+                      {/* Price quality score */}
                       <td className="py-1 px-2 font-semibold" style={{ color: row.quality_score != null ? scoreColor(row.quality_score) : 'var(--color-text-secondary)' }}>
                         {row.quality_score != null ? row.quality_score : <span className="text-gray-500">—</span>}
+                      </td>
+                      {/* FMP Fundamentals */}
+                      <td className="py-1 px-2">
+                        {row.fmp_score == null ? (
+                          <span className="text-xs text-gray-600">n/a</span>
+                        ) : row.fmp_has_data ? (
+                          <span className="text-xs font-mono" style={{ color: scoreColor(row.fmp_score) }}>
+                            {row.fmp_score.toFixed(0)}
+                            {row.fmp_age_days != null && <span className="text-gray-500 ml-1">{row.fmp_age_days < 1 ? '<1d' : `${row.fmp_age_days.toFixed(0)}d`}</span>}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-red-400">missing</span>
+                        )}
+                      </td>
+                      {/* News sentiment */}
+                      <td className="py-1 px-2">
+                        {row.sentiment_score == null ? (
+                          <span className="text-xs text-gray-600">—</span>
+                        ) : (
+                          <span className="text-xs font-mono" style={{
+                            color: row.sentiment_label === 'bullish' ? '#22c55e' :
+                                   row.sentiment_label === 'bearish' ? '#ef4444' : '#9ca3af'
+                          }}>
+                            {row.sentiment_score > 0 ? '+' : ''}{row.sentiment_score.toFixed(2)}
+                            <span className="text-gray-600 ml-1">
+                              {row.sentiment_age_hours != null ? (row.sentiment_age_hours < 1 ? '<1h' : `${row.sentiment_age_hours.toFixed(0)}h`) : ''}
+                            </span>
+                          </span>
+                        )}
                       </td>
                       <td className="py-1 px-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{row.last_price_update ? formatAge(row.last_price_update) : '—'}</td>
                       <td className="py-1 px-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{row.data_source || '—'}</td>
                       <td className="py-1 px-2" style={{ color: (row.active_issues ?? 0) > 0 ? '#eab308' : 'var(--color-text-secondary)' }}>{row.active_issues ?? 0}</td>
-                      <td className="py-1 px-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                        {row.staleness_seconds != null ? (row.staleness_seconds < 3600 ? `${Math.round(row.staleness_seconds / 60)}m` : `${(row.staleness_seconds / 3600).toFixed(1)}h`) : '—'}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -410,6 +478,12 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                 { name: 'Yahoo', data: monitoringStatus?.system?.yahoo },
                 { name: 'FMP', data: monitoringStatus?.system?.fmp },
                 { name: 'FRED', data: monitoringStatus?.system?.fred },
+                { name: 'Marketaux', data: newsSentimentStatus ? {
+                    status: (newsSentimentStatus.requests_remaining ?? 95) > 10 ? 'healthy' :
+                            (newsSentimentStatus.requests_remaining ?? 95) > 0 ? 'degraded' : 'rate_limited',
+                    coverage: `${(newsSentimentStatus.coverage_pct ?? 0).toFixed(0)}%`,
+                    req_remaining: newsSentimentStatus.requests_remaining ?? '—',
+                  } : null },
               ].map(({ name, data }) => (
                 <div key={name} className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
                   <div className="flex items-center gap-1.5 mb-1">
@@ -417,7 +491,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                       data?.status === 'healthy' ? 'bg-green-400' :
                       data?.status === 'configured' ? 'bg-blue-400' :
                       data?.status === 'degraded' ? 'bg-amber-400' :
-                      data?.status === 'disabled' || data?.status === 'no_api_key' ? 'bg-gray-500' :
+                      data?.status === 'disabled' || data?.status === 'no_api_key' || data?.status === 'rate_limited' ? 'bg-gray-500' :
                       !data ? 'bg-gray-600' : 'bg-red-400'
                     }`} />
                     <span className="text-xs font-mono font-semibold" style={{ color: 'var(--color-text-primary)' }}>{name}</span>
@@ -430,6 +504,16 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                       'text-gray-500'
                     }>{data?.status ?? 'unknown'}</span>
                   </p>
+                  {data?.coverage != null && (
+                    <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      {data.coverage} coverage
+                    </p>
+                  )}
+                  {data?.req_remaining != null && (
+                    <p className="text-xs font-mono" style={{ color: (data.req_remaining as number) < 20 ? '#ef4444' : 'var(--color-text-secondary)' }}>
+                      {data.req_remaining} req left
+                    </p>
+                  )}
                   {data?.error_count != null && (
                     <p className="text-xs mt-0.5" style={{ color: data.error_count > 0 ? '#ef4444' : 'var(--color-text-secondary)' }}>
                       Err: {data.error_count}
@@ -648,6 +732,97 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
               {fmpCacheWarming
                 ? `⟳ Warming... ${fmpCacheStatus?.current ?? 0}/${fmpCacheStatus?.total ?? '?'}`
                 : '▶ Refresh Fundamentals'}
+            </button>
+          </div>
+
+          {/* News Sentiment Cache (Marketaux) */}
+          <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-gray-500 tracking-wide font-medium">News Sentiment (Marketaux)</div>
+              {newsSentimentStatus?.requests_remaining != null && (
+                <span className="text-xs font-mono" style={{ color: newsSentimentStatus.requests_remaining < 20 ? '#ef4444' : 'var(--color-text-secondary)' }}>
+                  {newsSentimentStatus.requests_remaining} req left
+                </span>
+              )}
+            </div>
+
+            {/* Coverage bar */}
+            {(() => {
+              const pct = newsSentimentSyncing
+                ? newsSentimentStatus?.total > 0 ? Math.round((newsSentimentStatus.current / newsSentimentStatus.total) * 100) : 0
+                : (newsSentimentStatus?.coverage_pct ?? 0);
+              const color = pct >= 80 ? '#22c55e' : pct >= 40 ? '#eab308' : '#ef4444';
+              const label = newsSentimentSyncing
+                ? `${newsSentimentStatus?.current ?? 0} / ${newsSentimentStatus?.total ?? '?'} symbols`
+                : `${newsSentimentStatus?.total_cached ?? 0} / ${newsSentimentStatus?.total_applicable ?? '?'} cached`;
+              return (
+                <div className="mb-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>Coverage</span>
+                    <span className="text-xs font-mono font-semibold" style={{ color }}>{pct.toFixed(1)}%</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <div className="h-full rounded-full transition-all duration-500" style={{
+                      width: `${Math.min(100, pct)}%`, backgroundColor: color,
+                      animation: newsSentimentSyncing ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                    }} />
+                  </div>
+                  <div className="flex justify-between text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span>{label}</span>
+                    {newsSentimentSyncing && newsSentimentStatus?.elapsed_s && <span>{newsSentimentStatus.elapsed_s}s</span>}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Stats: fresh 24h / 7d */}
+            {newsSentimentStatus && !newsSentimentSyncing && (
+              <div className="grid grid-cols-2 gap-1 mb-2">
+                {[
+                  { label: 'Fresh 24h', value: newsSentimentStatus.fresh_24h ?? 0, color: '#22c55e' },
+                  { label: 'Fresh 7d', value: newsSentimentStatus.fresh_7d ?? 0, color: '#3b82f6' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded p-1 text-center" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <div className="text-xs font-mono font-semibold" style={{ color }}>{value}</div>
+                    <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Progress during sync */}
+            {newsSentimentSyncing && newsSentimentStatus && (
+              <div className="grid grid-cols-2 gap-1 mb-2">
+                {[
+                  { label: 'Fetched', value: newsSentimentStatus.fetched ?? 0, color: '#22c55e' },
+                  { label: 'Failed', value: newsSentimentStatus.failed ?? 0, color: '#ef4444' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded p-1 text-center" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <div className="text-xs font-mono font-semibold" style={{ color }}>{value}</div>
+                    <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {newsSentimentStatus?.error && (
+              <div className="text-xs text-red-400 mb-2 font-mono truncate">{newsSentimentStatus.error}</div>
+            )}
+
+            <button
+              onClick={handleTriggerNewsSentimentSync}
+              disabled={newsSentimentSyncing || (newsSentimentStatus?.requests_remaining ?? 95) < 5}
+              className="w-full px-2 py-1.5 rounded text-xs font-mono transition-all duration-200 disabled:opacity-50"
+              style={{
+                backgroundColor: newsSentimentSyncing ? 'var(--color-dark-bg)' : '#8b5cf6',
+                color: newsSentimentSyncing ? 'var(--color-text-secondary)' : '#fff',
+              }}
+            >
+              {newsSentimentSyncing
+                ? `⟳ Syncing... ${newsSentimentStatus?.current ?? 0}/${newsSentimentStatus?.total ?? '?'}`
+                : (newsSentimentStatus?.requests_remaining ?? 95) < 5
+                  ? '⚠ Rate limit reached'
+                  : '▶ Refresh Sentiment'}
             </button>
           </div>
 

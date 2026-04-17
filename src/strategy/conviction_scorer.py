@@ -103,6 +103,11 @@ class ConvictionScorer:
         crypto_cycle_adjustment = self._score_crypto_cycle(signal)
         total_score += crypto_cycle_adjustment
 
+        # News sentiment adjustment (±8 points) — DB lookup only, never blocks
+        # 0.0 when no data yet (neutral, trade proceeds normally)
+        news_sentiment_adj = self._score_news_sentiment(signal)
+        total_score += news_sentiment_adj
+
         breakdown = {
             'walkforward_edge': {
                 'score': wf_score,
@@ -134,6 +139,11 @@ class ConvictionScorer:
                 'max': 15,
                 'details': self._get_fundamental_quality_details(signal, fundamental_report)
             },
+            'news_sentiment': {
+                'score': news_sentiment_adj,
+                'max': 8,
+                'details': {'symbol': signal.symbol, 'raw_score': news_sentiment_adj / 8.0 if news_sentiment_adj != 0 else 0.0},
+            },
             # Legacy keys for backward compatibility with frontend/analytics
             'signal_strength': {
                 'score': signal_score,
@@ -162,7 +172,8 @@ class ConvictionScorer:
             f"(wf_edge: {wf_score:.1f}, signal: {signal_score:.1f}, "
             f"regime: {regime_score:.1f}, asset: {asset_score:.1f}"
             f"{f', fundamental: {fundamental_quality_adj:+.1f}' if fundamental_quality_adj != 0 else ''}"
-            f"{f', carry: {carry_adjustment:+.1f}' if carry_adjustment != 0 else ''})"
+            f"{f', carry: {carry_adjustment:+.1f}' if carry_adjustment != 0 else ''}"
+            f"{f', news: {news_sentiment_adj:+.1f}' if news_sentiment_adj != 0 else ''})"
         )
 
         self._log_conviction_score(signal, strategy, conviction)
@@ -846,6 +857,74 @@ class ConvictionScorer:
                 for r in fundamental_report.results
             ],
         }
+
+    # ─── NEWS SENTIMENT (±8 points) ─────────────────────────────────────
+    def _score_news_sentiment(self, signal: TradingSignal) -> float:
+        """
+        Direction-aware news sentiment adjustment from Marketaux.
+
+        LONG + bullish news  → up to +8
+        LONG + bearish news  → down to -8
+        SHORT + bearish news → up to +8 (bad news = good short)
+        SHORT + bullish news → down to -8 (don't short on good news)
+
+        Returns 0.0 if no data — never blocks a trade.
+        Only applies to stocks. ETFs/forex/crypto/indices/commodities return 0.
+        """
+        sym = signal.symbol.upper().split(':')[0]
+
+        # Only stocks have meaningful per-ticker news sentiment
+        try:
+            from src.core.tradeable_instruments import (
+                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+                DEMO_ALLOWED_ETFS,
+            )
+            non_stock = (
+                set(DEMO_ALLOWED_CRYPTO) | set(DEMO_ALLOWED_FOREX) |
+                set(DEMO_ALLOWED_INDICES) | set(DEMO_ALLOWED_COMMODITIES) |
+                set(DEMO_ALLOWED_ETFS)
+            )
+            if sym in non_stock:
+                return 0.0
+        except ImportError:
+            pass
+
+        try:
+            from src.data.news_sentiment_provider import get_news_sentiment_provider
+            provider = get_news_sentiment_provider()
+            if provider is None:
+                return 0.0
+
+            # Pure DB lookup — no API call at signal time
+            raw_score = provider.get_sentiment(sym)  # -1.0 to +1.0, 0.0 = no data
+
+            if raw_score == 0.0:
+                # Queue for background fetch on next sync cycle
+                return 0.0
+
+            is_long = signal.action in (SignalAction.ENTER_LONG,)
+
+            # Direction-aware: flip for shorts
+            direction_score = raw_score if is_long else -raw_score
+
+            # Scale to ±8 points
+            adjusted = direction_score * 8.0
+            adjusted = max(-8.0, min(8.0, adjusted))
+
+            if abs(adjusted) >= 1.0:
+                label = "bullish" if raw_score > 0 else "bearish"
+                direction = "LONG" if is_long else "SHORT"
+                logger.info(
+                    f"[NewsSentiment] {sym} ({direction}): raw={raw_score:+.3f} ({label}) "
+                    f"→ conviction {adjusted:+.1f}"
+                )
+
+            return adjusted
+
+        except Exception as e:
+            logger.debug(f"[NewsSentiment] Error scoring {sym}: {e}")
+            return 0.0
 
     def _log_conviction_score(self, signal: TradingSignal, strategy: Strategy, conviction: ConvictionScore) -> None:
         """Log conviction score to database."""
