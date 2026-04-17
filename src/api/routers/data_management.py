@@ -841,37 +841,27 @@ async def get_monitoring_status():
             # FMP
             fmp_status = {"name": "FMP (Financial Modeling Prep)", "status": "unknown", "plan": "Starter (300/min)"}
             try:
-                from src.data.fundamental_data_provider import FundamentalDataProvider
-                # Try to get the singleton from the strategy engine or monitoring service
-                fdp = getattr(mon, '_fundamental_data_provider', None)
-                if not fdp:
-                    # Check if strategy engine has one
-                    from src.core.trading_scheduler import get_trading_scheduler
-                    sched = get_trading_scheduler()
-                    if sched and hasattr(sched, 'strategy_engine') and sched.strategy_engine:
-                        fdp = getattr(sched.strategy_engine, '_fundamental_data_provider', None)
+                from src.data.fundamental_data_provider import get_fundamental_data_provider
+                fdp = get_fundamental_data_provider()
                 
                 if not fdp:
-                    # Create a lightweight instance just to check API status
-                    import yaml
-                    from pathlib import Path
-                    config_path = Path("config/autonomous_trading.yaml")
-                    if config_path.exists():
-                        with open(config_path, 'r') as f:
-                            config = yaml.safe_load(f) or {}
-                        fmp_key = config.get('data_sources', {}).get('financial_modeling_prep', {}).get('api_key')
-                        if fmp_key:
-                            fmp_status.update({
-                                "status": "configured",
-                                "calls_today": 0,
-                                "max_calls": config.get('data_sources', {}).get('financial_modeling_prep', {}).get('rate_limit', 300),
-                                "usage_percent": 0,
-                                "remaining": config.get('data_sources', {}).get('financial_modeling_prep', {}).get('rate_limit', 300),
-                                "cache_size": 0,
-                                "note": "Provider initializes on first use",
-                            })
-                        else:
-                            fmp_status["status"] = "no_api_key"
+                    # Fallback: show configured status from config_loader
+                    from src.core.config_loader import load_config as _lc
+                    _cfg = _lc()
+                    fmp_key = _cfg.get('data_sources', {}).get('financial_modeling_prep', {}).get('api_key', '')
+                    rate_limit = _cfg.get('data_sources', {}).get('financial_modeling_prep', {}).get('rate_limit', 300)
+                    if fmp_key and fmp_key != 'REPLACE_VIA_SECRETS_MANAGER':
+                        fmp_status.update({
+                            "status": "configured",
+                            "calls_today": 0,
+                            "max_calls": rate_limit,
+                            "usage_percent": 0,
+                            "remaining": rate_limit,
+                            "cache_size": 0,
+                            "note": "Provider initializes on first signal generation cycle",
+                        })
+                    else:
+                        fmp_status["status"] = "no_api_key"
                 
                 if fdp:
                     usage = fdp.get_api_usage()
