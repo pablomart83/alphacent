@@ -1893,3 +1893,98 @@ The font normalization from Session 8 was partial — many inconsistencies remai
 ### From Previous Sessions
 - Risk controls — Portfolio-level VaR check before new positions
 - `/strategies/blacklisted-combos`, `/strategies/template-rankings`, `/strategies/idle-demotions` — 422/404 errors
+
+---
+
+### Session Improvements (April 17, 2026 — Session 13: News Sentiment + Data Page + Short Gate)
+
+#### 128. Marketaux News Sentiment System ✅ (New Alpha Signal)
+- **New**: `src/data/news_sentiment_provider.py` — Marketaux API client with DB-backed rolling cache
+- **DB table**: `symbol_news_sentiment` (symbol, sentiment_score -1 to +1, article_count, last_article_at, fetched_at, ttl_hours)
+- **TTL logic**: 6h (high news volume/earnings week), 24h (normal), 48h (weekend), 72h (quiet/no articles)
+- **Change detection**: if no new articles since last fetch, extends TTL without API call
+- **Returns 0.0 when no data** — never blocks a trade
+- **Priority queue sync**: open positions first → active strategy symbols → stale symbols
+- **100 req/day free tier**: caps at 80/run, leaves 20 buffer. Full universe in 3 days.
+- **First run**: 40 symbols populated (DIS=-1.0, SCHW=-1.0, HD=-0.99, RTX=-0.96, GOOGL=+0.45, GE=+0.43)
+- **Files**: `src/data/news_sentiment_provider.py`, `src/api/app.py`, `src/core/monitoring_service.py`
+
+#### 129. Conviction Scorer — News Sentiment Component ✅
+- `_score_news_sentiment()`: ±8 point adjustment, direction-aware
+- LONG + bullish news → +8, LONG + bearish news → -8
+- SHORT + bearish news → +8 (bad news = good short), SHORT + bullish news → -8
+- Pure DB lookup at signal time — zero API calls, zero latency
+- Only applies to stocks (ETFs/forex/crypto/indices/commodities return 0)
+- **Files**: `src/strategy/conviction_scorer.py`
+
+#### 130. Alpha Vantage Disabled ✅
+- Free tier: 25 req/day — exhausted in minutes, returns rate-limit message for every call after the first 25
+- All AV fallbacks removed from `get_fundamental_data()` and `get_earnings_calendar()`
+- All 42 ETFs added to `NON_FUNDAMENTAL_SYMBOLS` (were triggering FMP→AV fallback chain)
+- `enabled: false` in `config/autonomous_trading.yaml`
+- **Files**: `src/data/fundamental_data_provider.py`, `config/autonomous_trading.yaml`
+
+#### 131. Data Management Page — Fundamentals + News Columns ✅
+- Data quality table: replaced Score+Staleness with **Price** (quality score), **Fundamentals** (FMP score + age in days), **News** (sentiment -1 to +1 with color)
+- FMP column: score 0-100 (decays over 30 days), "n/a" for ETFs/crypto/forex, "missing" if no data
+- News column: +0.45 green (bullish), -0.99 red (bearish), age in hours
+- **BTC/ETH score=0 fix**: quality reports stored as BTCUSD/ETHUSD but asset_class_map uses BTC/ETH — now tries both forms; also fixed quality_score=0 from empty-data reports
+- **Files**: `frontend/src/pages/DataManagementNew.tsx`, `src/api/routers/data_management.py`
+
+#### 132. Data Source Health — Marketaux Card ✅
+- Data Source Health grid: 5th card added for Marketaux
+- Shows: status (healthy/degraded/rate_limited), coverage %, requests remaining today
+- **Files**: `frontend/src/pages/DataManagementNew.tsx`
+
+#### 133. News Sentiment Cache Panel ✅
+- New "News Sentiment (Marketaux)" section in Data Health side panel (same pattern as FMP Fundamental Cache)
+- Coverage bar, fresh_24h/7d stats, requests remaining, "Refresh Sentiment" button (purple)
+- Rate limit guard: button disabled when requests_remaining < 5
+- New backend endpoints: `GET /data/news-sentiment/status`, `POST /data/news-sentiment/trigger`
+- **Files**: `frontend/src/pages/DataManagementNew.tsx`, `src/api/routers/data_management.py`
+
+#### 134. Sentiment-Aware Short Gate ✅ (CRITICAL — Alpha Generation)
+- **Problem**: Regime gate was blocking ALL equity shorts in non-bearish markets, even when a specific symbol had strongly bearish news (earnings miss, scandal, guidance cut)
+- **Fix**: If `news_sentiment_score < -0.5` (strongly bearish), regime gate is bypassed and the short is allowed
+- **Rationale**: Market regime is macro; individual stock news is micro. A stock with -0.9 sentiment in a rising market is decoupling from the market — legitimate idiosyncratic short.
+- **Threshold**: -0.5 requires strongly bearish news. Mildly negative (-0.3) doesn't override macro regime.
+- **Log**: "Regime gate override: allowing {sym} SHORT despite {regime} — news sentiment={score} (strongly bearish)"
+- **Files**: `src/core/trading_scheduler.py`
+
+---
+
+## Current System State (April 17, 2026 — Updated Session 13)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables (added `symbol_news_sentiment`), 780K+ rows
+- **Account:** eToro DEMO, balance ~$14K, equity ~$470K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~114 DEMO
+- **Open positions:** ~190
+- **Market regime:** Equity: trending_up_weak, Crypto: trending_up
+- **News sentiment**: 40 symbols populated (DIS=-1.0, SCHW=-1.0, HD=-0.99, GOOGL=+0.45, GE=+0.43). Full coverage in ~3 days.
+- **Short gate**: Sentiment override active — strongly bearish news (< -0.5) allows shorts in non-bearish regimes
+- **Data page**: Price + Fundamentals + News columns, Marketaux health card, News Sentiment Cache panel
+- **Alpha Vantage**: Disabled (25 req/day useless)
+- **Conviction scorer**: 6 components — WF edge (40) + signal quality (25) + regime fit (20) + asset tradability (15) + fundamental quality (±15) + news sentiment (±8) + carry bias (±5) + crypto cycle (±5)
+
+---
+
+## Open Items (Updated Session 13)
+
+### News Sentiment
+- 40/~232 stock symbols populated (hit 100 req/day limit on first run)
+- Will fill remaining ~192 symbols over next 2-3 days (100 req/day free tier)
+- Insider trading data still unavailable (FMP plan-gated) — `insider_net_buying` always 0
+
+### Trading Performance
+- Monitor win rate after all quant improvements (target: >50%)
+- Monitor sentiment-aware short gate: are strongly bearish news shorts profitable?
+- Track how many shorts are allowed by sentiment override vs blocked by regime gate
+
+### Infrastructure
+- API key patching: SCP of `autonomous_trading.yaml` overwrites keys — need post-SCP hook
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+
+### From Previous Sessions
+- Risk controls — Portfolio-level VaR check before new positions
+- `/strategies/blacklisted-combos`, `/strategies/template-rankings`, `/strategies/idle-demotions` — 422/404 errors
