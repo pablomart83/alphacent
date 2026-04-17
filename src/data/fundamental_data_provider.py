@@ -655,10 +655,7 @@ class FundamentalDataProvider:
                     logger.error(f"FMP API rate limit exceeded (429) for {endpoint}")
                     self.fmp_rate_limiter.activate_circuit_breaker()
                 elif e.response.status_code == 403:
-                    logger.warning(f"FMP API 403 Forbidden for {endpoint} — endpoint not available on current plan, disabling for this session")
-                    # Mark insider trading as forbidden so we stop wasting tokens on it
-                    if "insider-trading" in endpoint:
-                        self._insider_trading_forbidden = True
+                    logger.warning(f"FMP API 403 Forbidden for {endpoint} — endpoint not available on current plan")
                 else:
                     logger.error(f"FMP API HTTP error for {endpoint}: {e}")
                 return None
@@ -1775,6 +1772,10 @@ class FundamentalDataProvider:
         """
         Fetch insider trading data from FMP /insider-trading endpoint.
 
+        NOTE: The v4 /insider-trading endpoint is a legacy endpoint (deprecated Aug 2025),
+        only available to pre-Aug 2025 subscribers. The stable API has no equivalent path.
+        This method returns [] immediately until a working endpoint is identified.
+
         Args:
             symbol: Stock ticker symbol
             months: Number of months of data to request (controls limit param)
@@ -1782,76 +1783,9 @@ class FundamentalDataProvider:
         Returns:
             List of dicts with keys: date, transaction_type, shares, price, name, title
         """
-        # If we've already detected that insider trading is not available on this plan, skip
-        if getattr(self, '_insider_trading_forbidden', False):
-            return []
-
-        # Check in-memory cache first (24h TTL)
-        cache_key = f"insider_{symbol}"
-        cached = self._insider_cache.get(cache_key)
-        if cached is not None:
-            cache_ts = self._insider_cache_timestamps.get(cache_key)
-            if cache_ts and (datetime.now() - cache_ts).total_seconds() < 86400:
-                return cached
-
-        if not self.fmp_enabled or not self.fmp_rate_limiter.can_make_call():
-            logger.warning(f"FMP unavailable for insider trading data of {symbol}")
-            return []
-
-        try:
-            limit = max(months * 20, 100)  # Rough estimate: ~20 transactions per month
-            raw = self._fmp_request(
-                "/insider-trading",
-                base_url="https://financialmodelingprep.com/api/v4",
-                symbol=symbol, limit=limit
-            )
-            if raw is None:
-                # API error — cache empty result to avoid retrying
-                self._insider_cache[cache_key] = []
-                self._insider_cache_timestamps[cache_key] = datetime.now()
-                return []
-
-            if not raw or not isinstance(raw, list):
-                logger.debug(f"No insider trading data from FMP for {symbol}")
-                result: List[Dict[str, Any]] = []
-                self._insider_cache[cache_key] = result
-                self._insider_cache_timestamps[cache_key] = datetime.now()
-                return result
-
-            result = []
-            for txn in raw:
-                tx_type_raw = txn.get("transactionType", "")
-                # Normalize transaction type
-                if "Purchase" in tx_type_raw or tx_type_raw == "P-Purchase":
-                    tx_type = "buy"
-                elif "Sale" in tx_type_raw or tx_type_raw == "S-Sale":
-                    tx_type = "sell"
-                else:
-                    tx_type = tx_type_raw.lower() if tx_type_raw else "unknown"
-
-                result.append({
-                    "date": txn.get("transactionDate", ""),
-                    "transaction_type": tx_type,
-                    "shares": txn.get("securitiesTransacted", 0),
-                    "price": txn.get("price", 0),
-                    "name": txn.get("reportingName", ""),
-                    "title": txn.get("typeOfOwner", ""),
-                })
-
-            # Cache with 24h TTL
-            self._insider_cache[cache_key] = result
-            self._insider_cache_timestamps[cache_key] = datetime.now()
-
-            logger.info(f"Fetched {len(result)} insider transactions for {symbol} from FMP")
-            return result
-
-        except Exception as e:
-            logger.error(f"Error fetching insider trading data for {symbol}: {e}")
-            return []
-
-
-
-
+        # v4 endpoint is legacy (403 for new accounts), stable API has no replacement yet.
+        # Return empty rather than burning rate limit tokens on guaranteed failures.
+        return []
 
 
     def get_insider_net_purchases(self, symbol: str, lookback_days: int = 90) -> Dict[str, Any]:
