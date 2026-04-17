@@ -51,6 +51,8 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [quickUpdating, setQuickUpdating] = useState(false);
+  const [fmpCacheWarming, setFmpCacheWarming] = useState(false);
+  const [fmpCacheStatus, setFmpCacheStatus] = useState<any>(null);
   const [_error, setError] = useState<ReturnType<typeof classifyError> | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -66,14 +68,19 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
   const fetchStatus = useCallback(async () => {
     try {
       setError(null);
-      const [data, monData, dqData] = await Promise.all([
+      const [data, monData, dqData, fmpData] = await Promise.all([
         apiClient.getDataSyncStatus() as Promise<SyncStatus>,
         apiClient.getMonitoringStatus().catch(() => null),
         apiClient.getDataQuality().catch(() => []),
+        apiClient.getFmpCacheStatus().catch(() => null),
       ]);
       setStatus(data);
       if (monData) setMonitoringStatus(monData);
       if (dqData) setDataQuality(dqData);
+      if (fmpData) {
+        setFmpCacheStatus(fmpData);
+        setFmpCacheWarming(fmpData.running);
+      }
       setLastFetchedAt(new Date());
       return data;
     } catch (err) {
@@ -147,6 +154,38 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
     } catch {
       toast.error('Failed to trigger quick update');
       setQuickUpdating(false);
+    }
+  };
+
+  const handleTriggerFmpCacheWarm = async () => {
+    setFmpCacheWarming(true);
+    try {
+      const result = await apiClient.triggerFmpCacheWarm();
+      if (result.success) {
+        toast.success('FMP cache warm started — polling for progress...');
+        // Poll every 3s while running
+        const poll = setInterval(async () => {
+          try {
+            const s = await apiClient.getFmpCacheStatus();
+            setFmpCacheStatus(s);
+            if (!s.running) {
+              clearInterval(poll);
+              setFmpCacheWarming(false);
+              if (s.error) {
+                toast.error(`FMP cache warm failed: ${s.error}`);
+              } else {
+                toast.success(`FMP cache warm complete — ${s.fetched} fetched, ${s.cached} cached (${s.coverage_pct}% coverage)`);
+              }
+            }
+          } catch { /* ignore poll errors */ }
+        }, 3000);
+      } else {
+        toast.error(result.message);
+        setFmpCacheWarming(false);
+      }
+    } catch {
+      toast.error('Failed to trigger FMP cache warm');
+      setFmpCacheWarming(false);
     }
   };
 
@@ -511,6 +550,95 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                 {quickUpdating ? '⟳ Updating...' : '▶ Quick'}
               </button>
             </div>
+          </div>
+
+          {/* FMP Fundamental Cache */}
+          <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-xs text-gray-500 tracking-wide font-medium">Fundamental Cache (FMP)</div>
+              {fmpCacheStatus?.last_warm_at && (
+                <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                  {formatAge(fmpCacheStatus.last_warm_at)}
+                </span>
+              )}
+            </div>
+
+            {/* Coverage bar */}
+            {(() => {
+              const pct = fmpCacheWarming
+                ? fmpCacheStatus?.total > 0
+                  ? Math.round((fmpCacheStatus.current / fmpCacheStatus.total) * 100)
+                  : 0
+                : (fmpCacheStatus?.coverage_pct ?? 0);
+              const color = pct >= 80 ? '#22c55e' : pct >= 50 ? '#eab308' : '#ef4444';
+              const label = fmpCacheWarming
+                ? `${fmpCacheStatus?.current ?? 0} / ${fmpCacheStatus?.total ?? '?'} symbols`
+                : `${fmpCacheStatus?.fresh_count ?? 0} / ${fmpCacheStatus?.total_symbols ?? '?'} fresh`;
+              return (
+                <div className="mb-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                      Coverage
+                    </span>
+                    <span className="text-xs font-mono font-semibold" style={{ color }}>
+                      {pct.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.min(100, pct)}%`,
+                        backgroundColor: color,
+                        animation: fmpCacheWarming ? 'pulse 1.5s ease-in-out infinite' : 'none',
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span>{label}</span>
+                    {fmpCacheWarming && fmpCacheStatus?.elapsed_s && (
+                      <span>{fmpCacheStatus.elapsed_s}s elapsed</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Stats row */}
+            {fmpCacheWarming && fmpCacheStatus && (
+              <div className="grid grid-cols-3 gap-1 mb-2">
+                {[
+                  { label: 'Fetched', value: fmpCacheStatus.fetched ?? 0, color: '#22c55e' },
+                  { label: 'Cached', value: fmpCacheStatus.cached ?? 0, color: '#3b82f6' },
+                  { label: 'Failed', value: fmpCacheStatus.failed ?? 0, color: '#ef4444' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded p-1 text-center" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <div className="text-xs font-mono font-semibold" style={{ color }}>{value}</div>
+                    <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {fmpCacheStatus?.error && (
+              <div className="text-xs text-red-400 mb-2 font-mono truncate" title={fmpCacheStatus.error}>
+                ✗ {fmpCacheStatus.error}
+              </div>
+            )}
+
+            <button
+              onClick={handleTriggerFmpCacheWarm}
+              disabled={fmpCacheWarming}
+              className="w-full px-2 py-1.5 rounded text-xs font-mono transition-all duration-200 disabled:opacity-50"
+              style={{
+                backgroundColor: fmpCacheWarming ? 'var(--color-dark-bg)' : '#3b82f6',
+                color: fmpCacheWarming ? 'var(--color-text-secondary)' : '#fff',
+              }}
+            >
+              {fmpCacheWarming
+                ? `⟳ Warming... ${fmpCacheStatus?.current ?? 0}/${fmpCacheStatus?.total ?? '?'}`
+                : '▶ Refresh Fundamentals'}
+            </button>
           </div>
 
           {/* DB Stats Summary */}

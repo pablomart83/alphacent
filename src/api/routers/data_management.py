@@ -191,6 +191,157 @@ async def trigger_quick_update():
     return SyncTriggerResponse(success=True, message="Quick price update started")
 
 
+# ── FMP Fundamental Cache ─────────────────────────────────────────────────────
+
+# Shared state for FMP cache warm progress
+_fmp_cache_thread: Optional[threading.Thread] = None
+_fmp_cache_progress: dict = {
+    "running": False,
+    "current": 0,
+    "total": 0,
+    "fetched": 0,
+    "cached": 0,
+    "failed": 0,
+    "started_at": None,
+    "completed_at": None,
+    "elapsed_s": None,
+    "last_warm_at": None,
+    "coverage_pct": 0.0,
+    "error": None,
+}
+
+
+def _compute_fmp_coverage() -> dict:
+    """Compute FMP cache coverage stats from DB."""
+    try:
+        from src.models.database import get_database
+        from src.models.orm import FundamentalDataORM
+        from src.data.fmp_cache_warmer import FMPCacheWarmer
+        from src.core.tradeable_instruments import get_tradeable_symbols
+        from src.models.enums import TradingMode
+        from datetime import datetime, timedelta
+
+        all_symbols = get_tradeable_symbols(TradingMode.DEMO)
+        stock_symbols = [s for s in all_symbols if s not in FMPCacheWarmer.SKIP_FUNDAMENTALS]
+        total = len(stock_symbols)
+
+        db = get_database()
+        session = db.get_session()
+        try:
+            fresh_cutoff = datetime.now() - timedelta(days=7)
+            fresh_count = session.query(FundamentalDataORM).filter(
+                FundamentalDataORM.fetched_at >= fresh_cutoff
+            ).count()
+            any_count = session.query(FundamentalDataORM).count()
+        finally:
+            session.close()
+
+        last_warm = FMPCacheWarmer.get_last_warm_timestamp()
+        return {
+            "total_symbols": total,
+            "fresh_count": fresh_count,
+            "any_count": any_count,
+            "coverage_pct": round(fresh_count / total * 100, 1) if total > 0 else 0.0,
+            "last_warm_at": last_warm.isoformat() if last_warm else None,
+        }
+    except Exception as e:
+        logger.debug(f"Could not compute FMP coverage: {e}")
+        return {"total_symbols": 0, "fresh_count": 0, "any_count": 0, "coverage_pct": 0.0, "last_warm_at": None}
+
+
+@router.get("/fmp-cache/status")
+async def get_fmp_cache_status():
+    """Get FMP fundamental cache status and coverage."""
+    global _fmp_cache_progress
+    coverage = _compute_fmp_coverage()
+    return {
+        **_fmp_cache_progress,
+        **coverage,
+        "running": _fmp_cache_thread is not None and _fmp_cache_thread.is_alive(),
+    }
+
+
+@router.post("/fmp-cache/trigger", response_model=SyncTriggerResponse)
+async def trigger_fmp_cache_warm():
+    """Manually trigger FMP fundamental data cache warm."""
+    global _fmp_cache_thread, _fmp_cache_progress
+
+    if _fmp_cache_thread and _fmp_cache_thread.is_alive():
+        return SyncTriggerResponse(success=False, message="FMP cache warm already running")
+
+    # Reset progress
+    _fmp_cache_progress.update({
+        "running": True,
+        "current": 0,
+        "total": 0,
+        "fetched": 0,
+        "cached": 0,
+        "failed": 0,
+        "started_at": _time.time(),
+        "completed_at": None,
+        "elapsed_s": None,
+        "error": None,
+    })
+
+    def _run():
+        global _fmp_cache_progress
+        try:
+            import yaml
+            from pathlib import Path
+            from src.data.fmp_cache_warmer import FMPCacheWarmer
+
+            config_path = Path("config/autonomous_trading.yaml")
+            config = {}
+            if config_path.exists():
+                with open(config_path) as f:
+                    config = yaml.safe_load(f) or {}
+
+            # Force warm (bypass 24h timestamp check)
+            warmer = FMPCacheWarmer(config)
+
+            def _progress(current, total, warm_stats):
+                _fmp_cache_progress.update({
+                    "current": current,
+                    "total": total,
+                    "fetched": warm_stats.get("fundamentals_fetched", 0),
+                    "cached": warm_stats.get("fundamentals_cached", 0),
+                    "failed": warm_stats.get("fundamentals_failed", 0),
+                    "elapsed_s": round(_time.time() - _fmp_cache_progress["started_at"], 1),
+                })
+
+            # Force warm by clearing the last warm timestamp first
+            warmer._save_last_warm_timestamp()  # Will be overwritten at end
+            stats = warmer.warm_all_symbols(progress_callback=_progress)
+
+            elapsed = _time.time() - _fmp_cache_progress["started_at"]
+            _fmp_cache_progress.update({
+                "running": False,
+                "current": stats.get("total_symbols", 0),
+                "total": stats.get("total_symbols", 0),
+                "fetched": stats.get("fundamentals_fetched", 0),
+                "cached": stats.get("fundamentals_cached", 0),
+                "failed": stats.get("fundamentals_failed", 0),
+                "completed_at": _time.time(),
+                "elapsed_s": round(elapsed, 1),
+            })
+            logger.info(f"Manual FMP cache warm complete in {elapsed:.1f}s: {stats}")
+
+        except Exception as e:
+            elapsed = _time.time() - (_fmp_cache_progress.get("started_at") or _time.time())
+            _fmp_cache_progress.update({
+                "running": False,
+                "completed_at": _time.time(),
+                "elapsed_s": round(elapsed, 1),
+                "error": str(e)[:200],
+            })
+            logger.error(f"FMP cache warm failed: {e}", exc_info=True)
+
+    _fmp_cache_thread = threading.Thread(target=_run, daemon=True, name="fmp-cache-warm")
+    _fmp_cache_thread.start()
+
+    return SyncTriggerResponse(success=True, message="FMP cache warm started")
+
+
 def _run_sync_with_logging(mon) -> None:
     """Run the price data sync with detailed per-symbol logging captured to _sync_log_lines."""
     global _last_sync_result

@@ -137,18 +137,15 @@ class FMPCacheWarmer:
             f"{len(stale_symbols)} stale/missing (fetching from API)"
         )
 
-        # Parallelize API fetches — 3 concurrent symbols (conservative).
-        # Each symbol internally makes ~6 FMP endpoints sequentially.
-        # With 300/min budget and 3 concurrent: ~18 req/s burst, well within limits.
-        # Previously 8 workers caused 401/429 errors by exhausting the rate limit.
-        # We also save a partial timestamp every 20 symbols so that if the process
-        # is interrupted, the next cycle skips already-warmed symbols.
+        # 8 concurrent workers — the token bucket in RateLimiter enforces 5 calls/sec
+        # (300/min) across all workers, so they can't burst past the limit.
+        # Each worker blocks on wait_for_token() when the bucket is empty.
+        # Expected throughput: ~5 symbols/sec = ~46s for 232 symbols (full 300/min used).
         import threading
         _stats_lock = threading.Lock()
-        completed_count = [0]  # Mutable for closure
+        completed_count = [0]
 
         def _warm_one_symbol(symbol, cache_age):
-            """Fetch fundamental data for one symbol."""
             result = {'fetched': False, 'earnings': False, 'error': None}
             try:
                 data = provider.get_fundamental_data(symbol, use_cache=False)
@@ -182,24 +179,18 @@ class FMPCacheWarmer:
                 completed_count[0] += 1
                 total_done = completed_count[0] + len(cached_symbols)
 
-                # Progress logging every 10 API fetches
                 if completed_count[0] % 10 == 0:
                     elapsed = time.time() - start_time
+                    rate = completed_count[0] / elapsed if elapsed > 0 else 0
+                    usage = provider.fmp_rate_limiter.get_usage()
                     logger.info(
-                        f"Cache warming progress: {total_done}/{len(stock_symbols)} symbols "
-                        f"({stats['fundamentals_fetched']} API fetched, "
-                        f"{stats['fundamentals_cached']} from DB cache, "
-                        f"{stats['fundamentals_failed']} failed) in {elapsed:.1f}s"
+                        f"Cache warming: {total_done}/{len(stock_symbols)} symbols "
+                        f"({stats['fundamentals_fetched']} fetched, {stats['fundamentals_failed']} failed) "
+                        f"in {elapsed:.1f}s @ {rate:.1f} sym/s | "
+                        f"FMP: {usage['calls_made']}/{usage['max_calls']} calls "
+                        f"({usage['tokens_available']:.0f} tokens)"
                     )
-                    # Save partial timestamp every 20 symbols so interrupted runs
-                    # don't restart from scratch on the next cycle.
-                    if completed_count[0] % 20 == 0:
-                        try:
-                            self._save_last_warm_timestamp()
-                        except Exception:
-                            pass
 
-                # Progress callback for UI
                 if progress_callback and completed_count[0] % 5 == 0:
                     try:
                         progress_callback(total_done, len(stock_symbols), stats)
@@ -208,15 +199,11 @@ class FMPCacheWarmer:
 
         if stale_symbols:
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            with ThreadPoolExecutor(max_workers=3) as executor:  # Reduced from 8 to stay within rate limits
-                futures = [
-                    executor.submit(_warm_one_symbol, sym, ca)
-                    for sym, ca in stale_symbols
-                ]
-                # Wait for all to complete
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                futures = [executor.submit(_warm_one_symbol, sym, ca) for sym, ca in stale_symbols]
                 for f in as_completed(futures):
                     try:
-                        f.result()  # Propagate exceptions for logging
+                        f.result()
                     except Exception as e:
                         logger.debug(f"Cache warming thread error: {e}")
 

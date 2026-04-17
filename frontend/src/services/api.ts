@@ -1295,6 +1295,31 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
+  async getFmpCacheStatus(): Promise<{
+    running: boolean;
+    current: number;
+    total: number;
+    fetched: number;
+    cached: number;
+    failed: number;
+    started_at: number | null;
+    completed_at: number | null;
+    elapsed_s: number | null;
+    total_symbols: number;
+    fresh_count: number;
+    coverage_pct: number;
+    last_warm_at: string | null;
+    error: string | null;
+  }> {
+    const response = await this.client.get<ApiResponse<any>>('/data/fmp-cache/status');
+    return this.handleResponse(response);
+  }
+
+  async triggerFmpCacheWarm(): Promise<{ success: boolean; message: string }> {
+    const response = await this.client.post<ApiResponse<{ success: boolean; message: string }>>('/data/fmp-cache/trigger');
+    return this.handleResponse(response);
+  }
+
   async getMonitoringStatus(): Promise<Record<string, any>> {
     const response = await this.client.get<ApiResponse<any>>('/data/monitoring/status');
     return this.handleResponse(response);

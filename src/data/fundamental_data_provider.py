@@ -69,16 +69,19 @@ class FundamentalData:
 
 
 class RateLimiter:
-    """Simple rate limiter for API calls with midnight UTC reset."""
+    """
+    Two-layer rate limiter for FMP API calls.
+
+    Layer 1 — Rolling window: enforces max_calls per period_seconds (e.g. 300/min).
+    Layer 2 — Token bucket: enforces a per-second burst cap so concurrent workers
+               can't fire all their calls in the first second of a window.
+
+    With 300/min and 8 workers each making 5 sequential calls:
+    - Without throttle: 40 calls fire in the first ~0.1s → 429 errors
+    - With token bucket at 5/s: calls spread evenly, 300/min fully utilized
+    """
 
     def __init__(self, max_calls: int, period_seconds: int = 86400):
-        """
-        Initialize rate limiter.
-
-        Args:
-            max_calls: Maximum number of calls allowed in the period
-            period_seconds: Time period in seconds (default: 24 hours)
-        """
         self.max_calls = max_calls
         self.period_seconds = period_seconds
         self.calls = []
@@ -86,77 +89,112 @@ class RateLimiter:
         self.circuit_breaker_active = False
         self.circuit_breaker_reset_time = None
 
+        # Token bucket: refill at max_calls/period_seconds per second
+        # e.g. 300/60 = 5 tokens/sec
+        self._tokens_per_sec = max_calls / max(period_seconds, 1)
+        self._bucket_tokens = float(max_calls)  # Start full
+        self._bucket_last_refill = time.time()
+        self._bucket_max = float(max_calls)
+
+    def _refill_bucket(self) -> None:
+        """Refill token bucket based on elapsed time. Must be called under lock."""
+        now = time.time()
+        elapsed = now - self._bucket_last_refill
+        self._bucket_tokens = min(
+            self._bucket_max,
+            self._bucket_tokens + elapsed * self._tokens_per_sec
+        )
+        self._bucket_last_refill = now
+
     def _get_next_midnight_utc(self) -> float:
-        """Get timestamp of next midnight UTC."""
         from datetime import timezone
         now_utc = datetime.now(timezone.utc)
         next_midnight = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         return next_midnight.timestamp()
 
     def _check_circuit_breaker_reset(self) -> None:
-        """Check if circuit breaker should be reset after the rate limit period."""
         if self.circuit_breaker_active and self.circuit_breaker_reset_time:
             if time.time() >= self.circuit_breaker_reset_time:
-                logger.info(f"Circuit breaker reset after {self.period_seconds}s cooldown - clearing rate limit")
+                logger.info(f"Circuit breaker reset after {self.period_seconds}s cooldown")
                 self.calls = []
+                self._bucket_tokens = self._bucket_max
                 self.circuit_breaker_active = False
                 self.circuit_breaker_reset_time = None
 
     def activate_circuit_breaker(self) -> None:
-        """Activate circuit breaker due to rate limit error.
-        
-        Resets after the rate limit period (e.g., 60s for per-minute limits)
-        instead of waiting until midnight UTC.
-        """
         with self.lock:
             self.circuit_breaker_active = True
-            # Reset after one full period instead of midnight
             self.circuit_breaker_reset_time = time.time() + self.period_seconds
-            # Fill calls list to max to block all requests
             current_time = time.time()
             self.calls = [current_time] * self.max_calls
+            self._bucket_tokens = 0.0
             reset_dt = datetime.fromtimestamp(self.circuit_breaker_reset_time)
-            logger.warning(f"Circuit breaker activated - will reset at {reset_dt} ({self.period_seconds}s from now)")
+            logger.warning(f"Circuit breaker activated — resets at {reset_dt}")
 
     def can_make_call(self) -> bool:
-        """Check if a call can be made without exceeding the limit."""
+        """Check if a call can be made (rolling window + token bucket)."""
         with self.lock:
-            # Check circuit breaker reset
             self._check_circuit_breaker_reset()
-
+            self._refill_bucket()
             now = time.time()
-            # Remove calls outside the current period
-            self.calls = [call_time for call_time in self.calls
-                         if now - call_time < self.period_seconds]
-            return len(self.calls) < self.max_calls
+            # Rolling window check
+            self.calls = [t for t in self.calls if now - t < self.period_seconds]
+            if len(self.calls) >= self.max_calls:
+                return False
+            # Token bucket check — must have at least 1 token
+            if self._bucket_tokens < 1.0:
+                return False
+            return True
+
+    def wait_for_token(self, timeout: float = 30.0) -> bool:
+        """
+        Block until a token is available or timeout expires.
+        Use this instead of can_make_call() in the cache warmer for smooth throttling.
+
+        Returns True if a token was acquired, False if timed out.
+        """
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            with self.lock:
+                self._check_circuit_breaker_reset()
+                self._refill_bucket()
+                now = time.time()
+                self.calls = [t for t in self.calls if now - t < self.period_seconds]
+                if len(self.calls) < self.max_calls and self._bucket_tokens >= 1.0:
+                    # Consume token and record call atomically
+                    self._bucket_tokens -= 1.0
+                    self.calls.append(now)
+                    return True
+            # Sleep for the time it takes to generate one token
+            sleep_time = max(0.01, 1.0 / max(self._tokens_per_sec, 0.1))
+            time.sleep(sleep_time)
+        return False
 
     def record_call(self) -> None:
-        """Record that a call was made."""
+        """Record a call (use only when NOT using wait_for_token)."""
         with self.lock:
+            self._bucket_tokens = max(0.0, self._bucket_tokens - 1.0)
             self.calls.append(time.time())
 
     def get_usage(self) -> Dict[str, Any]:
-        """Get current usage statistics."""
         with self.lock:
-            # Check circuit breaker reset
             self._check_circuit_breaker_reset()
-
+            self._refill_bucket()
             now = time.time()
-            self.calls = [call_time for call_time in self.calls
-                         if now - call_time < self.period_seconds]
-
-            usage = {
+            self.calls = [t for t in self.calls if now - t < self.period_seconds]
+            return {
                 'calls_made': len(self.calls),
                 'max_calls': self.max_calls,
                 'usage_percent': (len(self.calls) / self.max_calls) * 100,
                 'calls_remaining': self.max_calls - len(self.calls),
-                'circuit_breaker_active': self.circuit_breaker_active
+                'tokens_available': round(self._bucket_tokens, 1),
+                'tokens_per_sec': round(self._tokens_per_sec, 2),
+                'circuit_breaker_active': self.circuit_breaker_active,
+                **(
+                    {'circuit_breaker_reset_time': datetime.fromtimestamp(self.circuit_breaker_reset_time).isoformat()}
+                    if self.circuit_breaker_reset_time else {}
+                ),
             }
-
-            if self.circuit_breaker_reset_time:
-                usage['circuit_breaker_reset_time'] = datetime.fromtimestamp(self.circuit_breaker_reset_time).isoformat()
-
-            return usage
 
 
 
@@ -539,38 +577,32 @@ class FundamentalDataProvider:
             return None
     
     def _fmp_request(self, endpoint: str, base_url: Optional[str] = None, **params) -> Optional[Any]:
-            """Make a request to FMP API.
-            
-            Args:
-                endpoint: API endpoint path (e.g., "/income-statement")
-                base_url: Override base URL (for v4 endpoints not on stable API)
-                **params: Query parameters
+            """Make a request to FMP API with token-bucket throttling.
+
+            Blocks until a rate-limit token is available (up to 30s) rather than
+            immediately returning None. This lets concurrent workers naturally
+            spread their calls across the full 300/min budget instead of all
+            firing in the first second and hitting 429s.
             """
-            # Check rate limit before each individual request
-            if not self.fmp_rate_limiter.can_make_call():
-                logger.warning(f"FMP rate limit reached — skipping {endpoint}")
+            # Block until a token is available (handles both window + bucket)
+            if not self.fmp_rate_limiter.wait_for_token(timeout=30.0):
+                logger.warning(f"FMP rate limit — timed out waiting for token, skipping {endpoint}")
                 return None
 
             url = f"{base_url or self.fmp_base_url}{endpoint}"
             params['apikey'] = self.fmp_api_key
 
-            # Record the call BEFORE making it (conservative counting)
-            self.fmp_rate_limiter.record_call()
-
             try:
                 response = requests.get(url, params=params, timeout=10)
 
-                # Handle rate limit errors specifically
                 if response.status_code == 429:
                     logger.error(f"FMP API rate limit exceeded (429) for {endpoint}")
-                    # Activate circuit breaker to prevent further calls
                     self.fmp_rate_limiter.activate_circuit_breaker()
                     return None
 
                 response.raise_for_status()
                 data = response.json()
 
-                # Check for error messages
                 if isinstance(data, dict) and 'Error Message' in data:
                     logger.error(f"FMP API error for {endpoint}: {data['Error Message']}")
                     return None
