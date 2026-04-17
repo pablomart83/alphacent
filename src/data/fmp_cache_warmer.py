@@ -126,13 +126,6 @@ class FMPCacheWarmer:
         logger.info(f"Starting FMP cache warming for {len(stock_symbols)} stock symbols ({skipped} non-stock skipped)")
         start_time = time.time()
 
-        # P2 #11: Pre-warm sector performance data (once, not per-symbol)
-        try:
-            provider.get_sector_performance()
-            logger.info("Pre-warmed sector performance data for AE sector rotation")
-        except Exception as e:
-            logger.debug(f"Sector performance pre-warm failed: {e}")
-
         # Separate symbols into cached (skip) and stale (need API fetch)
         # so we can parallelize only the API-bound ones
         cached_symbols = []
