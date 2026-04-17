@@ -3042,6 +3042,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
             all_pairs=getattr(self, '_last_scored_pairs', []),
             assignments=template_symbol_assignments,
             watchlist_size=watchlist_size,
+            active_symbol_template_pairs=active_symbol_template_pairs,
         )
         logger.info(f"Built watchlists for {len(watchlists)} templates (size: {watchlist_size})")
 
@@ -4817,27 +4818,32 @@ Generate a CORRECTED strategy that addresses all errors:"""
         all_pairs: List[Tuple[float, 'StrategyTemplate', str]],
         assignments: List[Tuple['StrategyTemplate', str]],
         watchlist_size: int = 10,
+        active_symbol_template_pairs: set = None,
     ) -> Dict[str, List[str]]:
         """
         For each template in assignments, build a watchlist of symbols.
-        
+
         Priority order:
         1. Primary symbol (from the assignment) — always first, always WF-validated
         2. WF-validated symbols for this template (from persisted _wf_validated)
         3. Top-scored symbols from _score_symbol_for_template (unvalidated but promising)
-        
+
         All symbols restricted to the same asset class as the primary.
         Blacklisted (template, symbol) combos are excluded.
-        
+        Symbols already covered by another active strategy of the same template are excluded
+        (prevents the same symbol appearing in multiple strategies' watchlists for the same template).
+
         Args:
             all_pairs: All (score, template, symbol) triples, sorted descending by score
             assignments: The selected (template, symbol) pairs from _match_templates_to_symbols
             watchlist_size: Max symbols per strategy watchlist
-            
+            active_symbol_template_pairs: Set of (template_name, symbol) already in active pipeline
+
         Returns:
             Dict mapping template.name to ordered list of symbols (primary first)
         """
         watchlists: Dict[str, List[str]] = {}
+        _active_pairs = active_symbol_template_pairs or set()
         
         ASSET_CLASS_GROUPS = {
             'stock': {'stock', 'etf'},
@@ -4873,6 +4879,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 for (t, sym), v in self._wf_validated.items()
                 if t == tname and sym not in seen
                 and self._get_asset_class(sym) in allowed_classes
+                and (tname, sym) not in _active_pairs  # skip symbols already in active pipeline
             ]
             # Sort by Sharpe descending — best performers first
             validated_for_template.sort(reverse=True)
@@ -4895,6 +4902,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 if len(watchlist) >= watchlist_size:
                     break
                 if symbol in seen:
+                    continue
+                if (tname, symbol) in _active_pairs:  # skip symbols already in active pipeline
                     continue
                 sym_class = self._get_asset_class(symbol)
                 if sym_class not in allowed_classes:
@@ -5072,9 +5081,12 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 if template_indicator not in indicators:
                     indicators.append(template_indicator)
         
-        # Create unique name with variation and symbol
-        symbol_str = symbols[0] if len(symbols) == 1 else "Multi"
-        
+        # Create unique name: template + primary symbol + direction + key params
+        # No version number — the name should be meaningful to a trader.
+        # If a strategy with this name already exists, it will be caught by dedup.
+        symbol_str = symbols[0] if symbols else "Multi"
+        direction_str = "SHORT" if is_short_strategy else "LONG"
+
         # Add key parameter info to name for differentiation
         param_info = ""
         if 'oversold_threshold' in params and 'overbought_threshold' in params:
@@ -5083,8 +5095,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
             param_info = f" MA({params['fast_period']}/{params['slow_period']})"
         elif 'bb_period' in params and 'bb_std' in params:
             param_info = f" BB({params['bb_period']},{params['bb_std']})"
-        
-        strategy_name = f"{template.name} {symbol_str}{param_info} V{variation_number + 1}"
+
+        strategy_name = f"{template.name} {symbol_str} {direction_str}{param_info}"
         
         # Determine signal interval from params (set by _create_parameter_variation)
         signal_interval = params.get('signal_interval', '1d')

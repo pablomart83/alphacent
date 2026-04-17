@@ -628,6 +628,10 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
         const symbols = row.original.symbols || [];
         const primarySymbol = symbols[0] || '';
         const extraCount = symbols.length - 1;
+        const meta = row.original.metadata || {};
+        const isSuperseded = meta.superseded === true;
+        const isPendingRetirement = meta.pending_retirement === true;
+        const isDemotedFromActive = meta.demoted_from_active === true;
         return (
           <div>
             <RadixTooltipProvider delayDuration={300}>
@@ -637,13 +641,37 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 </RadixTooltipTrigger>
                 <RadixTooltipContent className="bg-gray-900 text-gray-100 border-gray-700 text-xs font-mono">
                   {row.original.name}
+                  {isSuperseded && meta.superseded_reason && (
+                    <div className="text-amber-400 mt-1">{meta.superseded_reason}</div>
+                  )}
+                  {isPendingRetirement && meta.pending_retirement_reason && (
+                    <div className="text-red-400 mt-1">{meta.pending_retirement_reason}</div>
+                  )}
+                  {isDemotedFromActive && meta.demotion_reason && (
+                    <div className="text-blue-400 mt-1">{meta.demotion_reason}</div>
+                  )}
                 </RadixTooltipContent>
               </RadixTooltip>
             </RadixTooltipProvider>
-            <div className="text-xs text-gray-500 font-mono">
-              <span className="font-semibold text-gray-400">{primarySymbol}</span>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className="text-xs text-gray-400 font-mono font-semibold">{primarySymbol}</span>
               {extraCount > 0 && (
-                <span className="ml-1 text-blue-400">(+{extraCount})</span>
+                <span className="text-xs text-blue-400 font-mono">(+{extraCount})</span>
+              )}
+              {isSuperseded && (
+                <span className="text-[10px] px-1 py-0 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono">
+                  Superseded
+                </span>
+              )}
+              {isPendingRetirement && !isSuperseded && (
+                <span className="text-[10px] px-1 py-0 rounded bg-red-500/20 text-red-400 border border-red-500/30 font-mono">
+                  Retiring
+                </span>
+              )}
+              {isDemotedFromActive && (
+                <span className="text-[10px] px-1 py-0 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 font-mono">
+                  Re-eval
+                </span>
               )}
             </div>
           </div>

@@ -1030,13 +1030,13 @@ class AutonomousStrategyManager:
                     ])
                 ).all()
 
-                # 2. RETIRED (legacy path — shouldn't exist since we now demote to BACKTESTED,
-                #    but clean up any that slipped through before this change)
-                for s in session.query(StrategyORM).filter(StrategyORM.status == StrategyStatus.RETIRED).all():
-                    age_days = (datetime.now() - s.retired_at).days if s.retired_at else 999
-                    if age_days > 14:
-                        stale_strategies.append(s)
-                        logger.info(f"    Cleaning up legacy RETIRED: {s.name} ({age_days}d old)")
+                # 2. RETIRED — permanently delete at cycle start.
+                # RETIRED is a terminal state set only by legacy code paths or manual intervention.
+                # Health/decay checks now demote to BACKTESTED directly, never setting RETIRED.
+                # Any RETIRED strategy here is stale and should be cleaned up immediately.
+                stale_strategies += session.query(StrategyORM).filter(
+                    StrategyORM.status == StrategyStatus.RETIRED
+                ).all()
 
                 # 3. BACKTESTED — keep approved and recently-demoted-from-active; delete the rest
                 for s in session.query(StrategyORM).filter(StrategyORM.status == StrategyStatus.BACKTESTED).all():
@@ -1723,18 +1723,79 @@ class AutonomousStrategyManager:
                 
                 # Cross-cycle dedup: skip if same template+symbol already active in DB
                 if activation_key in existing_active_combos:
-                    logger.info(
-                        f"      Skipping: {template_name} on {primary_sym} "
-                        f"already active from a previous cycle"
-                    )
-                    stats["rejected_details"].append({
-                        "name": strategy.name,
-                        "sharpe": strategy.backtest_results.sharpe_ratio if strategy.backtest_results else 0,
-                        "win_rate": strategy.backtest_results.win_rate if strategy.backtest_results else 0,
-                        "trades": strategy.backtest_results.total_trades if strategy.backtest_results else 0,
-                        "reason": f"Already active: {template_name} on {primary_sym}",
-                    })
-                    continue
+                    # Check if the new strategy is meaningfully better (>15% Sharpe improvement)
+                    # If so, supersede the existing strategy instead of skipping
+                    superseded = False
+                    try:
+                        new_sharpe = strategy.backtest_results.sharpe_ratio if strategy.backtest_results else 0
+                        if new_sharpe > 0:
+                            from src.models.database import get_database
+                            from src.models.orm import StrategyORM
+                            from sqlalchemy.orm.attributes import flag_modified as _flag_mod
+                            _db = get_database()
+                            _sess = _db.get_session()
+                            try:
+                                # Find the existing active strategy for this template+symbol
+                                existing_strats = _sess.query(StrategyORM).filter(
+                                    StrategyORM.status.in_(['DEMO', 'LIVE'])
+                                ).all()
+                                for _es in existing_strats:
+                                    _em = _es.strategy_metadata if isinstance(_es.strategy_metadata, dict) else {}
+                                    _et = _em.get('template_name', _es.name)
+                                    _ep = (_es.symbols[0] if isinstance(_es.symbols, list) and _es.symbols
+                                           else _es.symbols) if _es.symbols else 'unknown'
+                                    if isinstance(_ep, str) and _ep.startswith('['):
+                                        import json as _j
+                                        try: _ep = _j.loads(_ep)[0]
+                                        except: pass
+                                    if (_et, _ep) != activation_key:
+                                        continue
+                                    # Found the existing strategy — check if already superseded
+                                    if _em.get('superseded'):
+                                        break
+                                    # Get existing Sharpe from backtest_results
+                                    existing_bt = _es.backtest_results or {}
+                                    existing_sharpe = (existing_bt.get('sharpe_ratio', 0)
+                                                       if isinstance(existing_bt, dict)
+                                                       else getattr(existing_bt, 'sharpe_ratio', 0))
+                                    improvement = ((new_sharpe - existing_sharpe) / max(abs(existing_sharpe), 0.01))
+                                    if improvement > 0.15:  # >15% Sharpe improvement
+                                        # Supersede: stop old strategy from generating new signals
+                                        _em['superseded'] = True
+                                        _em['superseded_by'] = strategy.id
+                                        _em['superseded_at'] = datetime.now().isoformat()
+                                        _em['superseded_reason'] = (
+                                            f"Better calibration found: Sharpe {new_sharpe:.2f} vs {existing_sharpe:.2f} "
+                                            f"(+{improvement:.0%})"
+                                        )
+                                        _es.strategy_metadata = _em
+                                        _flag_mod(_es, 'strategy_metadata')
+                                        _sess.commit()
+                                        superseded = True
+                                        logger.info(
+                                            f"      Superseding {_es.name} with {strategy.name} "
+                                            f"(Sharpe {existing_sharpe:.2f} → {new_sharpe:.2f}, +{improvement:.0%})"
+                                        )
+                                    break
+                            finally:
+                                _sess.close()
+                    except Exception as _sup_err:
+                        logger.debug(f"Supersession check failed: {_sup_err}")
+
+                    if not superseded:
+                        logger.info(
+                            f"      Skipping: {template_name} on {primary_sym} "
+                            f"already active from a previous cycle"
+                        )
+                        stats["rejected_details"].append({
+                            "name": strategy.name,
+                            "sharpe": strategy.backtest_results.sharpe_ratio if strategy.backtest_results else 0,
+                            "win_rate": strategy.backtest_results.win_rate if strategy.backtest_results else 0,
+                            "trades": strategy.backtest_results.total_trades if strategy.backtest_results else 0,
+                            "reason": f"Already active: {template_name} on {primary_sym}",
+                        })
+                        continue
+                    # Superseded — fall through to activate the new strategy immediately
 
                 # Per-symbol AE concentration check: prevent too many AE strategies
                 # on the same primary symbol (e.g., 3 different AE templates all on ASML)
