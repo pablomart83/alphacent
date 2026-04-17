@@ -1816,7 +1816,7 @@ class FundamentalDataProvider:
         limit = months * 10  # ~10 transactions per month is generous
         try:
             data = self._fmp_request(
-                f"/stable/search-insider-trades",
+                "/search-insider-trades",
                 params={"symbol": symbol, "limit": limit},
             )
             if not data or not isinstance(data, list):

@@ -2513,14 +2513,12 @@ class StrategyTemplateLibrary:
                 MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[
-                "Rolling 60-day correlation > 0.7 between pair symbols",
-                "Z-score of price ratio > 2.0",
-                "LONG the underperformer, SHORT the outperformer",
+                "PRICE_CHANGE_PCT(60) > 0.0",
+                "CLOSE / SMA(50) > 1.02",
             ],
             exit_conditions=[
-                "Z-score returns to 0 (mean reversion)",
-                "Z-score > 3.0 (stop loss — spread widening further)",
-                "Max hold period 30 days",
+                "CLOSE / SMA(50) < 1.0",
+                "PRICE_CHANGE_PCT(30) < -0.03",
             ],
             required_indicators=["SMA:50"],
             default_parameters={

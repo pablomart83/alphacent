@@ -39,6 +39,7 @@ TRADING_DSL_GRAMMAR = r"""
 
     ?comparison: arith_expr COMPARATOR arith_expr -> compare
         | indicator CROSSOVER indicator -> crossover
+        | indicator CROSSOVER NUMBER -> crossover_number
         | "(" expression ")"
 
     ?arith_expr: term
@@ -219,6 +220,9 @@ INDICATOR_MAPPING = {
     
     # VWAP
     'VWAP': lambda params: f'VWAP_{params[0] if params else 0}',
+
+    # ADX — Average Directional Index (trend strength)
+    'ADX': lambda params: f'ADX_{params[0] if params else 14}',
 }
 
 
@@ -351,6 +355,8 @@ class DSLCodeGenerator:
             return self._handle_compare(node)
         elif node_type == 'crossover':
             return self._handle_crossover(node)
+        elif node_type == 'crossover_number':
+            return self._handle_crossover_number(node)
         elif node_type == 'add':
             return self._handle_add(node)
         elif node_type == 'subtract':
@@ -438,9 +444,9 @@ class DSLCodeGenerator:
         if "indicators[" in left and "indicators[" in right:
             # Both are indicators — align both to data.index, compare as Series
             return (
-                f"(pd.Series({left}, index=data.index).reindex(data.index).fillna(method='ffill') "
+                f"(pd.Series({left}, index=data.index).reindex(data.index).ffill() "
                 f"{comparator} "
-                f"pd.Series({right}, index=data.index).reindex(data.index).fillna(method='ffill'))"
+                f"pd.Series({right}, index=data.index).reindex(data.index).ffill())"
             )
         elif "indicators[" in left and "data[" in right:
             # Indicator vs data column — align indicator to data's index
@@ -483,8 +489,28 @@ class DSLCodeGenerator:
                    f"({ind1}.shift(1) >= {ind2}.shift(1))")
         else:
             raise ValueError(f"Unknown crossover type: {crossover_type}")
-    
-    def _handle_indicator_with_params(self, node: Tree) -> str:
+
+    def _handle_crossover_number(self, node: Tree) -> str:
+        """
+        Handle crossover against a scalar number (e.g., STOCH(14) CROSSES_ABOVE 30).
+
+        CROSSES_ABOVE number: indicator > number AND indicator.shift(1) <= number
+        CROSSES_BELOW number: indicator < number AND indicator.shift(1) >= number
+        """
+        indicator1 = self._visit_node(node.children[0])
+        crossover_type = str(node.children[1])
+        number = str(node.children[2])
+
+        ind1 = f"pd.Series({indicator1}, index=data.index)" if "indicators[" in indicator1 else indicator1
+
+        if crossover_type == 'CROSSES_ABOVE':
+            return (f"({ind1} > {number}) & "
+                    f"({ind1}.shift(1) <= {number})")
+        elif crossover_type == 'CROSSES_BELOW':
+            return (f"({ind1} < {number}) & "
+                    f"({ind1}.shift(1) >= {number})")
+        else:
+            raise ValueError(f"Unknown crossover type: {crossover_type}")(self, node: Tree) -> str:
         """
         Handle indicator with parameters (e.g., RSI(14), BB_LOWER(20, 2)).
         

@@ -3538,6 +3538,11 @@ class StrategyEngine:
                 "method": "VWAP",
                 "params": {"period": 0},
                 "keys": ["VWAP_0"]
+            },
+            "ADX": {
+                "method": "ADX",
+                "params": {"period": 14},
+                "keys": ["ADX_14"]
             }
         }
 
@@ -3590,7 +3595,7 @@ class StrategyEngine:
                     else:
                         params["period"] = period
                         # Update expected keys with custom period
-                        if indicator_name in ["RSI", "SMA", "EMA", "ATR", "Volume MA"]:
+                        if indicator_name in ["RSI", "SMA", "EMA", "ATR", "Volume MA", "ADX"]:
                             expected_keys = [f"{method_name}_{period}"]
                     logger.info(f"  Using custom period: {period}")
 

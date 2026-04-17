@@ -192,7 +192,7 @@ class MetaStrategyBacktester:
             aligned_curve = curve.reindex(common_dates, method='ffill')
             
             # If still have NaN at start, backfill
-            aligned_curve = aligned_curve.fillna(method='bfill')
+            aligned_curve = aligned_curve.bfill()
             
             aligned[sid] = aligned_curve
         
