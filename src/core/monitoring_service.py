@@ -114,6 +114,13 @@ class MonitoringService:
         self._last_scheduled_cycle_time: Optional[datetime] = None
         self._schedule_config = self._load_schedule_config()
 
+        # Regime-change tracking — retire BACKTESTED strategies that are incompatible
+        # with the new regime so they don't fire signals into the wrong market.
+        # Checked every 30 minutes alongside strategy health/decay.
+        self._last_known_regime: Optional[str] = None
+        self._last_regime_check: float = 0
+        self._regime_check_interval = 1800  # 30 minutes
+
         # Alert evaluation (every 60s)
         self._last_alert_check: float = 0
         self._alert_check_interval = 60
@@ -465,6 +472,14 @@ class MonitoringService:
                     )
             except Exception as e:
                 logger.error(f"Error checking strategy decay: {e}")
+
+            # Retire BACKTESTED strategies incompatible with current regime
+            if now - self._last_regime_check >= self._regime_check_interval:
+                try:
+                    regime_results = self._retire_regime_incompatible_backtested()
+                    self._last_regime_check = now
+                except Exception as e:
+                    logger.error(f"Error in regime-incompatible retirement: {e}")
         
         # Process pending closures (every 60s - auto-close positions flagged for closure)
         if now - self._last_pending_closure_check >= self._pending_closure_interval:
@@ -3267,6 +3282,164 @@ class MonitoringService:
             logger.error(f"Error in strategy decay check: {e}", exc_info=True)
             result["errors"].append(str(e))
         
+        return result
+
+    def _retire_regime_incompatible_backtested(self) -> Dict:
+        """
+        Retire BACKTESTED strategies whose template is not valid for the current regime.
+
+        When the market regime changes (e.g., ranging_low_vol → trending_up_weak),
+        strategies built for the old regime should not be allowed to fire signals.
+        They are demoted to RETIRED status so they don't clutter the BACKTESTED pool
+        and don't accidentally get activated by the signal scanner.
+
+        A strategy is regime-incompatible if its template_name is NOT in the set of
+        templates that support the current regime (as defined by StrategyTemplateLibrary).
+
+        Strategies with no template_name (legacy/manual) are left untouched.
+        Strategies that are valid for BOTH old and new regime are left untouched.
+
+        Returns:
+            Dict with checked/retired counts
+        """
+        result = {"checked": 0, "retired": 0, "regime": "unknown", "errors": []}
+
+        try:
+            from src.models.orm import StrategyORM
+            from src.models.enums import StrategyStatus
+            from sqlalchemy.orm.attributes import flag_modified
+            from src.strategy.strategy_templates import StrategyTemplateLibrary, MarketRegime
+            from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+            from src.data.market_data_manager import get_market_data_manager
+
+            # Detect current regime
+            current_regime_str = 'unknown'
+            try:
+                _mdm = get_market_data_manager()
+                if _mdm:
+                    _analyzer = MarketStatisticsAnalyzer(_mdm)
+                    sub_regime, confidence, _, _ = _analyzer.detect_sub_regime()
+                    current_regime_str = sub_regime.value
+            except Exception as _e:
+                logger.warning(f"[RegimeRetire] Could not detect regime: {_e}")
+                return result
+
+            result["regime"] = current_regime_str
+
+            # Only act on a known regime
+            if current_regime_str == 'unknown':
+                return result
+
+            # Check if regime changed since last run
+            regime_changed = (self._last_known_regime is not None and
+                              self._last_known_regime != current_regime_str)
+            self._last_known_regime = current_regime_str
+
+            if not regime_changed:
+                # No change — nothing to do
+                logger.debug(f"[RegimeRetire] Regime unchanged ({current_regime_str}), skipping")
+                return result
+
+            logger.info(
+                f"[RegimeRetire] Regime change detected: "
+                f"{result.get('prev_regime', 'unknown')} → {current_regime_str} — "
+                f"scanning BACKTESTED pool for incompatible strategies"
+            )
+
+            # Build set of template names valid for the current regime
+            try:
+                current_regime_enum = MarketRegime(current_regime_str)
+            except ValueError:
+                logger.warning(f"[RegimeRetire] Unknown regime enum value: {current_regime_str}")
+                return result
+
+            lib = StrategyTemplateLibrary()
+            valid_templates = {t.name for t in lib.get_templates_for_regime(current_regime_enum)}
+
+            # Also include parent regime templates (trending_up_weak → trending_up fallback)
+            parent_regime_map = {
+                'ranging_low_vol': 'ranging',
+                'ranging_high_vol': 'ranging',
+                'trending_up_strong': 'trending_up',
+                'trending_up_weak': 'trending_up',
+                'trending_down_strong': 'trending_down',
+                'trending_down_weak': 'trending_down',
+            }
+            parent_name = parent_regime_map.get(current_regime_str)
+            if parent_name:
+                try:
+                    parent_enum = MarketRegime(parent_name)
+                    for t in lib.get_templates_for_regime(parent_enum):
+                        valid_templates.add(t.name)
+                except ValueError:
+                    pass
+
+            logger.info(
+                f"[RegimeRetire] {len(valid_templates)} templates valid for {current_regime_str}"
+            )
+
+            session = self.db.get_session()
+            try:
+                backtested = session.query(StrategyORM).filter(
+                    StrategyORM.status == StrategyStatus.BACKTESTED
+                ).all()
+
+                for strat_orm in backtested:
+                    result["checked"] += 1
+                    meta = strat_orm.strategy_metadata if isinstance(strat_orm.strategy_metadata, dict) else {}
+                    template_name = meta.get('template_name')
+
+                    # Skip strategies with no template_name (legacy/manual)
+                    if not template_name:
+                        continue
+
+                    # Skip Alpha Edge strategies — they have their own regime logic
+                    if meta.get('strategy_category') == 'alpha_edge':
+                        continue
+
+                    # Skip if template is valid for current regime
+                    if template_name in valid_templates:
+                        continue
+
+                    # Template is not valid for current regime — retire it
+                    reason = (
+                        f"Regime change: template '{template_name}' is not valid for "
+                        f"{current_regime_str} (was valid for previous regime)"
+                    )
+                    logger.info(f"[RegimeRetire] Retiring {strat_orm.name}: {reason}")
+
+                    strat_orm.status = StrategyStatus.RETIRED
+                    strat_orm.retired_at = datetime.now()
+                    meta['activation_approved'] = False
+                    meta['regime_retired'] = True
+                    meta['regime_retirement_reason'] = reason
+                    meta['regime_retired_at'] = datetime.now().isoformat()
+                    meta['regime_retired_from'] = current_regime_str
+                    strat_orm.strategy_metadata = meta
+                    flag_modified(strat_orm, 'strategy_metadata')
+                    result["retired"] += 1
+
+                session.commit()
+
+                if result["retired"] > 0:
+                    logger.info(
+                        f"[RegimeRetire] Regime change {current_regime_str}: "
+                        f"checked {result['checked']}, retired {result['retired']} "
+                        f"incompatible BACKTESTED strategies"
+                    )
+                else:
+                    logger.info(
+                        f"[RegimeRetire] Regime change {current_regime_str}: "
+                        f"checked {result['checked']}, all compatible — nothing retired"
+                    )
+
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.error(f"[RegimeRetire] Error: {e}", exc_info=True)
+            result["errors"].append(str(e))
+
         return result
 
     def _demote_idle_strategies(self) -> None:
