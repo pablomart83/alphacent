@@ -700,10 +700,36 @@ class FundamentalDataProvider:
             return None
     
     def get_api_usage(self) -> Dict[str, Any]:
-        """Get API usage statistics."""
+        """Get API usage statistics — DB-backed for accuracy across restarts."""
+        rate_stats = self.fmp_rate_limiter.get_usage()
+
+        # DB cache coverage — the real picture
+        db_cache_total = 0
+        db_cache_fresh_7d = 0
+        db_cache_fresh_24h = 0
+        try:
+            from src.models.database import get_database
+            db = get_database()
+            with db.get_session() as session:
+                from sqlalchemy import text
+                row = session.execute(text(
+                    "SELECT COUNT(*) as total, "
+                    "COUNT(CASE WHEN fetched_at > NOW() - INTERVAL '7 days' THEN 1 END) as fresh_7d, "
+                    "COUNT(CASE WHEN fetched_at > NOW() - INTERVAL '24 hours' THEN 1 END) as fresh_24h "
+                    "FROM fundamental_data_cache"
+                )).fetchone()
+                if row:
+                    db_cache_total = row[0] or 0
+                    db_cache_fresh_7d = row[1] or 0
+                    db_cache_fresh_24h = row[2] or 0
+        except Exception:
+            db_cache_total = len(self.cache.cache)  # fallback to in-memory
+
         return {
-            'fmp': self.fmp_rate_limiter.get_usage(),
-            'cache_size': len(self.cache.cache)
+            'fmp': rate_stats,
+            'cache_size': db_cache_total,          # total symbols in DB cache
+            'cache_fresh_7d': db_cache_fresh_7d,   # fresh within 7 days
+            'cache_fresh_24h': db_cache_fresh_24h, # fresh within 24h
         }
     
     def clear_cache(self) -> None:

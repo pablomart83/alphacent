@@ -860,11 +860,13 @@ async def get_monitoring_status():
                     fmp_usage = usage.get('fmp', {})
                     fmp_status.update({
                         "status": "circuit_breaker" if fmp_usage.get('circuit_breaker_active') else "healthy",
-                        "calls_today": fmp_usage.get('calls_made', 0),
+                        "calls_today": fmp_usage.get('calls_made', 0),       # calls in last 60s window
                         "max_calls": fmp_usage.get('max_calls', 300),
                         "usage_percent": round(fmp_usage.get('usage_percent', 0), 1),
                         "remaining": fmp_usage.get('calls_remaining', 0),
-                        "cache_size": usage.get('cache_size', 0),
+                        "cache_size": usage.get('cache_size', 0),             # total symbols in DB
+                        "cache_fresh_7d": usage.get('cache_fresh_7d', 0),    # fresh within 7d
+                        "cache_fresh_24h": usage.get('cache_fresh_24h', 0),  # fresh within 24h
                     })
                     if fmp_usage.get('circuit_breaker_reset_time'):
                         fmp_status["circuit_breaker_reset"] = fmp_usage['circuit_breaker_reset_time']

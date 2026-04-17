@@ -532,10 +532,11 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
             <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
               <div className="text-xs text-gray-500 tracking-wide font-medium mb-2">FMP Cache</div>
               <div className="space-y-2">
+                {/* Rate limit — per-minute sliding window */}
                 <div className="flex items-center justify-between">
-                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>API Usage</span>
+                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Rate (per min)</span>
                   <span className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>
-                    {monitoringStatus.system.fmp.calls_today ?? 0}/{monitoringStatus.system.fmp.max_calls ?? '?'}
+                    {monitoringStatus.system.fmp.calls_today ?? 0}/{monitoringStatus.system.fmp.max_calls ?? 300}
                   </span>
                 </div>
                 <div className="w-full h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
@@ -547,16 +548,19 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                     }}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                {/* DB cache coverage — the real picture */}
+                <div className="grid grid-cols-3 gap-1.5">
                   <div className="rounded p-1.5" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Cache Size</p>
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>DB Total</p>
                     <p className="text-xs font-mono text-blue-400">{monitoringStatus.system.fmp.cache_size ?? 0}</p>
                   </div>
                   <div className="rounded p-1.5" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Remaining</p>
-                    <p className="text-xs font-mono" style={{ color: (monitoringStatus.system.fmp.max_calls - monitoringStatus.system.fmp.calls_today) < 50 ? '#ef4444' : 'var(--color-text-primary)' }}>
-                      {((monitoringStatus.system.fmp.max_calls ?? 0) - (monitoringStatus.system.fmp.calls_today ?? 0)).toLocaleString()}
-                    </p>
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Fresh 7d</p>
+                    <p className="text-xs font-mono text-green-400">{monitoringStatus.system.fmp.cache_fresh_7d ?? 0}</p>
+                  </div>
+                  <div className="rounded p-1.5" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Fresh 24h</p>
+                    <p className="text-xs font-mono text-green-400">{monitoringStatus.system.fmp.cache_fresh_24h ?? 0}</p>
                   </div>
                 </div>
                 {monitoringStatus.system.fmp.last_warm_time && (
