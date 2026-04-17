@@ -2139,7 +2139,7 @@ This session was a comprehensive audit against the "151 Trading Strategies" SSRN
 ### Infrastructure
 - Consider t3.small downgrade — waiting on CloudWatch memory data (1 week)
 - FMP Starter plan: insider trading plan-gated (404). Upgrade to Professional (~$79/month) to unlock `/stable/search-insider-trades`
-- Add `alphacent/marketaux-api-key` to AWS Secrets Manager (currently hardcoded in YAML as fallback)
+- Add `alphacent/marketaux-api-key` to AWS Secrets Manager (currently hardcoded in YAML as fallback) ✅ Done
 
 ### Strategy
 - Existing strategies still have old names (V38, V174, etc.) — new naming only applies to newly proposed strategies
