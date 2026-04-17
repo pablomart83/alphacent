@@ -48,10 +48,10 @@ class FMPCacheWarmer:
         self._earnings_ttl = earnings_config.get('earnings_calendar_ttl', 604800)  # 7 days
 
     def _get_provider(self):
-        """Lazy-init the FundamentalDataProvider singleton."""
+        """Get the shared FundamentalDataProvider singleton."""
         if self._provider is None:
-            from src.data.fundamental_data_provider import FundamentalDataProvider
-            self._provider = FundamentalDataProvider(self.config)
+            from src.data.fundamental_data_provider import get_fundamental_data_provider
+            self._provider = get_fundamental_data_provider(self.config)
         return self._provider
 
     def _get_db_cache_age(self, symbol: str) -> Optional[float]:

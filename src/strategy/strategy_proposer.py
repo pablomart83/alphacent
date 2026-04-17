@@ -248,20 +248,10 @@ class StrategyProposer:
         return True
 
     def _ensure_fundamental_data_provider(self):
-        """Lazily initialize the FundamentalDataProvider."""
+        """Get the shared FundamentalDataProvider singleton."""
         if self._fundamental_data_provider is None:
-            from src.data.fundamental_data_provider import FundamentalDataProvider
-            import yaml
-            from pathlib import Path
-            config = {}
-            try:
-                config_path = Path("config/autonomous_trading.yaml")
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = yaml.safe_load(f) or {}
-            except Exception:
-                pass
-            self._fundamental_data_provider = FundamentalDataProvider(config)
+            from src.data.fundamental_data_provider import get_fundamental_data_provider
+            self._fundamental_data_provider = get_fundamental_data_provider()
 
     def _ensure_fundamental_ranker(self):
         """Lazily initialize the FundamentalRanker."""

@@ -1297,7 +1297,7 @@ async def trigger_fundamental_check(
     logger.info(f"Manual fundamental check triggered by user {username}")
 
     try:
-        from src.data.fundamental_data_provider import FundamentalDataProvider
+        from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
         from src.risk.risk_manager import get_symbol_sector
 
         # Get open positions (stocks only)
@@ -1311,7 +1311,7 @@ async def trigger_fundamental_check(
 
         # Initialize FMP provider
         try:
-            fmp_provider = FundamentalDataProvider()
+            fmp_provider = get_fundamental_data_provider()
         except Exception as e:
             logger.warning(f"Could not initialize FundamentalDataProvider: {e}")
             return {

@@ -70,18 +70,8 @@ class FundamentalRanker:
 
     def _ensure_provider(self):
         if self._provider is None:
-            from src.data.fundamental_data_provider import FundamentalDataProvider
-            import yaml
-            from pathlib import Path
-            config = {}
-            try:
-                config_path = Path("config/autonomous_trading.yaml")
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = yaml.safe_load(f) or {}
-            except Exception:
-                pass
-            self._provider = FundamentalDataProvider(config)
+            from src.data.fundamental_data_provider import get_fundamental_data_provider
+            self._provider = get_fundamental_data_provider()
 
     def _get_regime_weights(self) -> Dict[str, float]:
         """

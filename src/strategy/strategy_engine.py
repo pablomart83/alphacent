@@ -4187,12 +4187,12 @@ class StrategyEngine:
                 
                 if fundamental_config.get('enabled', False):
                     # Initialize providers but don't filter yet - wait until we have signals
-                    from src.data.fundamental_data_provider import FundamentalDataProvider
+                    from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
                     from src.strategy.fundamental_filter import FundamentalFilter
                     
                     # Use singleton to preserve cache and rate limiter state across strategies
                     if not hasattr(self, '_fundamental_data_provider') or self._fundamental_data_provider is None:
-                        data_provider = FundamentalDataProvider(config)
+                        data_provider = get_fundamental_data_provider(config)
                         self._fundamental_data_provider = data_provider
                     else:
                         data_provider = self._fundamental_data_provider
@@ -5095,8 +5095,8 @@ class StrategyEngine:
                 if config_path.exists():
                     with open(config_path, 'r') as f:
                         config = yaml.safe_load(f) or {}
-                from src.data.fundamental_data_provider import FundamentalDataProvider
-                self._fundamental_data_provider = FundamentalDataProvider(config)
+                from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
+                self._fundamental_data_provider = get_fundamental_data_provider(config)
             except Exception as e:
                 validation_result["errors"].append(f"Cannot initialize FundamentalDataProvider: {e}")
                 validation_result["is_valid"] = False
@@ -5445,7 +5445,7 @@ class StrategyEngine:
         # Initialize fundamental data provider
         if not hasattr(self, '_fundamental_data_provider') or self._fundamental_data_provider is None:
             try:
-                from src.data.fundamental_data_provider import FundamentalDataProvider
+                from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
                 import yaml
                 from pathlib import Path
                 config = {}
@@ -5456,7 +5456,7 @@ class StrategyEngine:
                             config = yaml.safe_load(f) or {}
                 except Exception:
                     pass
-                self._fundamental_data_provider = FundamentalDataProvider(config)
+                self._fundamental_data_provider = get_fundamental_data_provider(config)
             except Exception as e:
                 result['details']['error'] = f'Cannot init FundamentalDataProvider: {e}'
                 return result
@@ -5825,7 +5825,7 @@ class StrategyEngine:
         quarterly_data = []
         try:
             if not hasattr(self, '_fundamental_data_provider') or self._fundamental_data_provider is None:
-                from src.data.fundamental_data_provider import FundamentalDataProvider
+                from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
                 import yaml
                 from pathlib import Path
                 config = {}
@@ -5836,7 +5836,7 @@ class StrategyEngine:
                             config = yaml.safe_load(f) or {}
                 except Exception:
                     pass
-                self._fundamental_data_provider = FundamentalDataProvider(config)
+                self._fundamental_data_provider = get_fundamental_data_provider(config)
             quarterly_data = self._fundamental_data_provider.get_historical_fundamentals(symbol, quarters=12)
             logger.info(f"Fetched {len(quarterly_data)} quarters of FMP data for {symbol}")
         except Exception as e:
@@ -6706,7 +6706,7 @@ class StrategyEngine:
         # Ensure we have a fundamental data provider
         if not hasattr(self, '_fundamental_data_provider') or self._fundamental_data_provider is None:
             try:
-                from src.data.fundamental_data_provider import FundamentalDataProvider
+                from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
                 import yaml
                 from pathlib import Path
                 config = {}
@@ -6717,7 +6717,7 @@ class StrategyEngine:
                             config = yaml.safe_load(f) or {}
                 except Exception:
                     pass
-                self._fundamental_data_provider = FundamentalDataProvider(config)
+                self._fundamental_data_provider = get_fundamental_data_provider(config)
             except Exception as e:
                 logger.warning(f"Could not initialize FundamentalDataProvider for sector rotation: {e}")
                 return self._simulate_with_price_proxy('sector_rotation', df, params, strategy)
@@ -8231,8 +8231,8 @@ class StrategyEngine:
         # Ensure we have a fundamental data provider
         if not hasattr(self, '_fundamental_data_provider') or self._fundamental_data_provider is None:
             try:
-                from src.data.fundamental_data_provider import FundamentalDataProvider
-                self._fundamental_data_provider = FundamentalDataProvider(config)
+                from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
+                self._fundamental_data_provider = get_fundamental_data_provider(config)
             except Exception as e:
                 logger.error(f"Could not initialize FundamentalDataProvider: {e}")
                 return None
@@ -10013,7 +10013,7 @@ class StrategyEngine:
             
             # Try to add fundamental data
             try:
-                from src.data.fundamental_data_provider import FundamentalDataProvider
+                from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
                 import yaml
                 from pathlib import Path
                 
@@ -10028,7 +10028,7 @@ class StrategyEngine:
                     if fundamental_config.get('enabled', False):
                         # Use singleton to preserve cache and rate limiter state
                         if not hasattr(self, '_fundamental_data_provider') or self._fundamental_data_provider is None:
-                            data_provider = FundamentalDataProvider(config)
+                            data_provider = get_fundamental_data_provider(config)
                             self._fundamental_data_provider = data_provider
                         else:
                             data_provider = self._fundamental_data_provider

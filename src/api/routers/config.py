@@ -696,7 +696,7 @@ async def get_api_usage(
     try:
         # Try to get usage from FundamentalDataProvider if available
         try:
-            from src.data.fundamental_data_provider import FundamentalDataProvider
+            from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
             import yaml
             from pathlib import Path
             _cfg = {}
@@ -704,7 +704,7 @@ async def get_api_usage(
             if _cfg_path.exists():
                 with open(_cfg_path, 'r') as _f:
                     _cfg = yaml.safe_load(_f) or {}
-            provider = FundamentalDataProvider(_cfg)
+            provider = get_fundamental_data_provider(_cfg)
             
             # Get FMP usage
             fmp_usage = {

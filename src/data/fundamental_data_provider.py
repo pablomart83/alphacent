@@ -238,21 +238,69 @@ class FundamentalDataCache:
             self.cache.clear()
 
 
+# ---------------------------------------------------------------------------
+# Module-level singleton — ONE shared instance across the entire process.
+#
+# Why this matters:
+# - Rate limiter: one shared token bucket enforces 300/min globally.
+#   Multiple instances each think they have 300 calls — combined they blow the limit.
+# - Memory cache: earnings_calendar_cache, FundamentalDataCache live on the instance.
+#   Multiple instances each have empty caches → every call hits FMP.
+# - DB cache: _get_from_database() is stateless (reads DB), so multiple instances
+#   don't cause DB duplication, but they do cause redundant DB reads.
+#
+# Usage:
+#   from src.data.fundamental_data_provider import get_fundamental_data_provider
+#   provider = get_fundamental_data_provider()
+# ---------------------------------------------------------------------------
+
+_singleton_instance: Optional['FundamentalDataProvider'] = None
+_singleton_lock = Lock()
+
+
 class FundamentalDataProvider:
     """
     Provides fundamental company data from multiple sources.
-    
+
     Primary source: Financial Modeling Prep (FMP)
     Fallback source: Alpha Vantage
+
+    Use get_fundamental_data_provider() to get the shared singleton instance.
+    Never instantiate directly — multiple instances means multiple rate limiters
+    and multiple memory caches, which causes redundant API calls.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any] = None):
         """
         Initialize provider.
-        
+
+        On first instantiation, registers itself as the module-level singleton so
+        all subsequent calls to get_fundamental_data_provider() return this instance.
+        This means any existing code that does FundamentalDataProvider(config) will
+        automatically become the singleton on first call.
+
         Args:
             config: Configuration dictionary with data_sources section
         """
+        global _singleton_instance
+        # Register as singleton on first creation (thread-safe via _singleton_lock)
+        with _singleton_lock:
+            if _singleton_instance is None:
+                _singleton_instance = self
+
+        if config is None:
+            try:
+                import yaml
+                from pathlib import Path
+                config_path = Path("config/autonomous_trading.yaml")
+                if config_path.exists():
+                    with open(config_path, 'r') as f:
+                        config = yaml.safe_load(f) or {}
+                else:
+                    config = {}
+            except Exception:
+                config = {}
+
         self.config = config
         
         # FMP configuration - using new stable API
@@ -807,25 +855,8 @@ class FundamentalDataProvider:
             return False
     
     def _get_earnings_calendar_cached(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """Get earnings calendar with caching."""
-        # Check memory cache
-        if symbol in self.earnings_calendar_cache:
-            cached_time = self.earnings_calendar_timestamps.get(symbol)
-            if cached_time:
-                age = (datetime.now() - cached_time).total_seconds()
-                if age < self.earnings_calendar_ttl:
-                    logger.debug(f"Using cached earnings calendar for {symbol} (age: {age:.0f}s)")
-                    return self.earnings_calendar_cache[symbol]
-        
-        # Fetch fresh earnings calendar
-        earnings_data = self.get_earnings_calendar(symbol)
-        
-        if earnings_data:
-            # Cache it
-            self.earnings_calendar_cache[symbol] = earnings_data
-            self.earnings_calendar_timestamps[symbol] = datetime.now()
-        
-        return earnings_data
+        """Get earnings calendar with caching. Delegates to get_earnings_calendar which handles cache."""
+        return self.get_earnings_calendar(symbol)
     
     def _save_to_database(self, data: FundamentalData) -> None:
         """Save fundamental data to database cache."""
@@ -894,12 +925,9 @@ class FundamentalDataProvider:
     def get_earnings_calendar(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
         Get earnings calendar data for a symbol.
-        
-        Args:
-            symbol: Stock symbol
-            
-        Returns:
-            Dictionary with earnings dates and estimates, or None if unavailable
+
+        Routes through _get_earnings_calendar_cached to avoid redundant API calls.
+        The in-memory cache has a 7-day TTL (earnings_calendar_ttl).
         """
         # Non-fundamental symbols don't have earnings — ETFs, crypto, forex, indices, commodities
         NON_FUNDAMENTAL_SYMBOLS = {
@@ -911,7 +939,7 @@ class FundamentalDataProvider:
             # Indices
             'SPX500', 'NSDQ100', 'DJ30', 'UK100', 'GER40',
             # Commodities
-            'GOLD', 'SILVER', 'OIL', 'COPPER', 'NATGAS',
+            'GOLD', 'SILVER', 'OIL', 'COPPER', 'NATGAS', 'PLATINUM', 'ALUMINUM', 'ZINC',
             # ETFs (broad market, sector, bond — none have individual earnings)
             'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO',
             'GLD', 'SLV', 'TLT', 'HYG', 'AGG',
@@ -919,21 +947,31 @@ class FundamentalDataProvider:
         }
         if symbol.upper() in NON_FUNDAMENTAL_SYMBOLS:
             return None
-        
-        # Try FMP first
-        if self.fmp_enabled and self.fmp_rate_limiter.can_make_call():
+
+        # Check memory cache first (7-day TTL)
+        if symbol in self.earnings_calendar_cache:
+            cached_time = self.earnings_calendar_timestamps.get(symbol)
+            if cached_time:
+                age = (datetime.now() - cached_time).total_seconds()
+                if age < self.earnings_calendar_ttl:
+                    logger.debug(f"Using cached earnings calendar for {symbol} (age: {age:.0f}s)")
+                    return self.earnings_calendar_cache[symbol]
+
+        # Fetch from FMP (uses wait_for_token internally via _fmp_request)
+        data = None
+        if self.fmp_enabled:
             data = self._fetch_earnings_calendar_fmp(symbol)
-            if data:
-                self.fmp_rate_limiter.record_call()
-                return data
-        
-        # Fallback to Alpha Vantage
-        if self.av_enabled:
+
+        if not data and self.av_enabled:
             logger.warning(f"FMP unavailable for earnings calendar {symbol}, falling back to Alpha Vantage")
-            return self._fetch_earnings_calendar_av(symbol)
-        
-        logger.error(f"Failed to fetch earnings calendar for {symbol}")
-        return None
+            data = self._fetch_earnings_calendar_av(symbol)
+
+        if data:
+            # Cache the result
+            self.earnings_calendar_cache[symbol] = data
+            self.earnings_calendar_timestamps[symbol] = datetime.now()
+
+        return data
     
     def _fetch_earnings_calendar_fmp(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Fetch earnings calendar from FMP stable API."""
@@ -2128,3 +2166,25 @@ class FundamentalDataProvider:
         except Exception as e:
             logger.debug(f"Could not fetch upgrades/downgrades for {symbol}: {e}")
             return []
+
+
+def get_fundamental_data_provider(config: Optional[Dict] = None) -> 'FundamentalDataProvider':
+    """
+    Get or create the shared FundamentalDataProvider singleton.
+
+    Args:
+        config: Optional config dict. Only used on first call (initialization).
+                Subsequent calls return the existing instance regardless of config.
+
+    Returns:
+        The shared FundamentalDataProvider instance.
+    """
+    global _singleton_instance
+    if _singleton_instance is not None:
+        return _singleton_instance
+
+    with _singleton_lock:
+        if _singleton_instance is not None:
+            return _singleton_instance
+        # Creating the instance will auto-register it via __init__
+        return FundamentalDataProvider(config)

@@ -492,8 +492,8 @@ async def warm_new_symbols_cache(new_symbols: list) -> Dict[str, Any]:
 
     # Warm fundamental data via FundamentalDataProvider
     try:
-        from src.data.fundamental_data_provider import FundamentalDataProvider
-        fdp = FundamentalDataProvider()
+        from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
+        fdp = get_fundamental_data_provider()
 
         for symbol in new_symbols:
             try:
