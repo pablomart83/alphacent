@@ -498,6 +498,30 @@ class TradingScheduler:
                                 )
                                 continue
 
+                            # Guard: low-confidence exit signals (< 0.40) should only fire
+                            # on profitable positions. A weak signal on a losing trade just
+                            # crystallizes the loss — let the SL handle it instead.
+                            EXIT_CONFIDENCE_THRESHOLD = 0.40
+                            if signal.confidence < EXIT_CONFIDENCE_THRESHOLD:
+                                _entry = pos_to_close.entry_price or 0
+                                _current = pos_to_close.current_price or _entry
+                                _side_str = str(pos_to_close.side).upper() if pos_to_close.side else 'LONG'
+                                _is_long_pos = 'LONG' in _side_str or 'BUY' in _side_str
+                                _is_profitable = (_current > _entry) if _is_long_pos else (_current < _entry)
+                                if not _is_profitable and _entry > 0:
+                                    logger.info(
+                                        f"Low-confidence exit signal ({signal.confidence:.2f} < {EXIT_CONFIDENCE_THRESHOLD}) "
+                                        f"for losing {signal.symbol} position — letting SL handle it"
+                                    )
+                                    self._log_signal_decision(
+                                        session=session,
+                                        signal=signal,
+                                        strategy_name=strategy.name,
+                                        decision="REJECTED",
+                                        rejection_reason=f"Low-confidence exit ({signal.confidence:.2f}) on losing position — SL will handle",
+                                    )
+                                    continue
+
                             # Mark position for closure with DSL exit reason
                             pos_to_close.pending_closure = True
                             exit_conditions = strategy.rules.get("exit_conditions", []) if strategy.rules else []
@@ -613,6 +637,62 @@ class TradingScheduler:
                         except Exception as _regime_err:
                             logger.debug(f"Regime gate check failed: {_regime_err}")
 
+                    # ── SHORT CONCENTRATION LIMIT ──────────────────────────────────
+                    # In non-bearish regimes, cap open equity shorts at 3 total.
+                    # Correlated shorts amplify losses when the market moves against them.
+                    # This prevents the April 13 scenario where 7 shorts were opened on
+                    # the same day and all moved against us simultaneously.
+                    if _sig_dir == "SHORT":
+                        try:
+                            from src.core.tradeable_instruments import (
+                                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                                DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_INDICES,
+                            )
+                            _is_equity_short = (_sig_sym not in set(DEMO_ALLOWED_CRYPTO)
+                                               and _sig_sym not in set(DEMO_ALLOWED_FOREX)
+                                               and _sig_sym not in set(DEMO_ALLOWED_COMMODITIES)
+                                               and _sig_sym not in set(DEMO_ALLOWED_INDICES))
+                            if _is_equity_short:
+                                _bearish_regimes = {'trending_down', 'trending_down_weak', 'trending_down_strong', 'high_volatility'}
+                                _current_regime_for_conc = 'unknown'
+                                try:
+                                    from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                                    _analyzer2 = MarketStatisticsAnalyzer(self._market_data)
+                                    _sub_regime2, _, _, _ = _analyzer2.detect_sub_regime()
+                                    _current_regime_for_conc = _sub_regime2.value.lower() if _sub_regime2 else 'unknown'
+                                except Exception:
+                                    pass
+                                if _current_regime_for_conc not in _bearish_regimes:
+                                    # Count open equity shorts
+                                    _open_equity_shorts = sum(
+                                        1 for p in position_dataclasses
+                                        if str(p.side).upper() in ('SHORT', 'SELL')
+                                        and p.symbol.upper() not in set(DEMO_ALLOWED_CRYPTO)
+                                        and p.symbol.upper() not in set(DEMO_ALLOWED_FOREX)
+                                        and p.symbol.upper() not in set(DEMO_ALLOWED_COMMODITIES)
+                                        and p.symbol.upper() not in set(DEMO_ALLOWED_INDICES)
+                                        and p.closed_at is None
+                                        and not getattr(p, 'pending_closure', False)
+                                    )
+                                    MAX_EQUITY_SHORTS_NON_BEARISH = 3
+                                    if _open_equity_shorts >= MAX_EQUITY_SHORTS_NON_BEARISH:
+                                        logger.info(
+                                            f"Short concentration limit: blocking {_sig_sym} SHORT — "
+                                            f"{_open_equity_shorts} equity shorts already open "
+                                            f"(max {MAX_EQUITY_SHORTS_NON_BEARISH} in {_current_regime_for_conc} regime)"
+                                        )
+                                        self._log_signal_decision(
+                                            session=session,
+                                            signal=signal,
+                                            strategy_name=strategy.name,
+                                            decision="REJECTED",
+                                            rejection_reason=f"Short concentration limit: {_open_equity_shorts} equity shorts open (max {MAX_EQUITY_SHORTS_NON_BEARISH} in non-bearish regime)",
+                                        )
+                                        signals_rejected += 1
+                                        continue
+                        except Exception as _conc_err:
+                            logger.debug(f"Short concentration check failed: {_conc_err}")
+
                     # Validate signal through risk manager
                     validation_result = self._risk_manager.validate_signal(
                         signal=signal,
@@ -677,6 +757,13 @@ class TradingScheduler:
                                         multiplier = multipliers.get('high_volatility', 0.5)
                                     elif 'low' in regime_name and 'vol' in regime_name:
                                         multiplier = multipliers.get('low_volatility', 1.0)
+                                    elif 'trending_up' in regime_name:
+                                        # In a bull market, size up longs and don't size up shorts
+                                        # (shorts are already blocked by regime gate above)
+                                        if _sig_dir == "LONG":
+                                            multiplier = multipliers.get('trending_up_long', multipliers.get('trending', 1.25))
+                                        else:
+                                            multiplier = multipliers.get('trending', 1.0)
                                     elif 'trending' in regime_name:
                                         multiplier = multipliers.get('trending', 1.2)
                                     elif 'ranging' in regime_name:

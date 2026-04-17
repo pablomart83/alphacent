@@ -353,6 +353,15 @@ class MonitoringService:
                 self._last_trailing_check = now
             except Exception as e:
                 logger.error(f"Error checking trailing stops: {e}")
+
+        # Bull market short closure: flag open equity shorts for closure when regime
+        # is clearly bullish. Runs every 5 minutes (same as trailing stops).
+        # This handles the case where shorts were opened before a regime shift.
+        if now - self._last_trailing_check < 2:  # Run right after trailing stops
+            try:
+                self._close_shorts_in_bull_market()
+            except Exception as e:
+                logger.error(f"Error in bull market short closure check: {e}")
         
         # Position-level health checks (same interval as trailing stops)
         # Flags individual bad positions for closure — independent of strategy.
@@ -2032,6 +2041,98 @@ class MonitoringService:
             logger.error(f"Unexpected error closing position {pos.id}: {e}")
             return None
 
+    def _close_shorts_in_bull_market(self) -> Dict:
+        """
+        Flag open equity SHORT positions for closure when the market regime is bullish.
+
+        In trending_up / trending_up_weak / trending_up_strong regimes, holding equity
+        shorts is fighting the tide. This method flags them for closure so the monitoring
+        service's pending closure processor can close them on eToro.
+
+        Only applies to equity shorts (stocks + ETFs). Forex, commodity, index, and
+        crypto shorts have independent regime detection and are not affected.
+
+        Returns:
+            Dict with 'checked' and 'flagged' counts.
+        """
+        # Detect current equity regime
+        bullish_regimes = {'trending_up', 'trending_up_weak', 'trending_up_strong'}
+        current_regime = 'unknown'
+        try:
+            from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+            from src.data.market_data_manager import MarketDataManager
+            import yaml as _yaml
+            from pathlib import Path as _Path
+            _cfg_path = _Path("config/autonomous_trading.yaml")
+            _cfg = {}
+            if _cfg_path.exists():
+                with open(_cfg_path) as _f:
+                    _cfg = _yaml.safe_load(_f) or {}
+            _mdm = MarketDataManager(_cfg)
+            _analyzer = MarketStatisticsAnalyzer(_mdm)
+            _sub_regime, _, _, _ = _analyzer.detect_sub_regime()
+            current_regime = _sub_regime.value.lower() if _sub_regime else 'unknown'
+        except Exception as _e:
+            logger.debug(f"Could not detect regime for bull market short check: {_e}")
+            return {"checked": 0, "flagged": 0, "regime": "unknown"}
+
+        if current_regime not in bullish_regimes:
+            return {"checked": 0, "flagged": 0, "regime": current_regime}
+
+        session = self.db.get_session()
+        checked = 0
+        flagged = 0
+
+        try:
+            from src.models.orm import PositionORM
+            from src.core.tradeable_instruments import (
+                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_INDICES,
+            )
+            _non_equity = set(DEMO_ALLOWED_CRYPTO) | set(DEMO_ALLOWED_FOREX) | \
+                          set(DEMO_ALLOWED_COMMODITIES) | set(DEMO_ALLOWED_INDICES)
+
+            # Find open SHORT positions that are equities
+            open_shorts = session.query(PositionORM).filter(
+                PositionORM.closed_at.is_(None),
+                PositionORM.pending_closure == False,
+                PositionORM.side == 'SHORT',
+            ).all()
+
+            for pos in open_shorts:
+                sym = (pos.symbol or '').upper()
+                if sym in _non_equity:
+                    continue  # Skip non-equity shorts
+                if pos.strategy_id in ("etoro_position", "manual", "external"):
+                    continue  # Skip external positions
+
+                checked += 1
+                pos.pending_closure = True
+                pos.closure_reason = (
+                    f"Bull market regime gate: closing equity SHORT in {current_regime} regime"
+                )
+                flagged += 1
+                logger.warning(
+                    f"[BullMarketGate] Flagging {pos.symbol} SHORT (position {pos.id}) "
+                    f"for closure — regime is {current_regime}"
+                )
+
+            if flagged > 0:
+                session.commit()
+                logger.info(
+                    f"[BullMarketGate] {flagged}/{checked} equity shorts flagged for closure "
+                    f"(regime: {current_regime})"
+                )
+
+            return {"checked": checked, "flagged": flagged, "regime": current_regime}
+
+        except Exception as e:
+            logger.error(f"Error in bull market short closure: {e}", exc_info=True)
+            session.rollback()
+            return {"checked": checked, "flagged": flagged, "error": str(e)}
+        finally:
+            session.close()
+
     def _load_fundamental_config(self) -> Dict:
         """Load fundamental monitoring config from autonomous_trading.yaml."""
         try:
@@ -2051,7 +2152,14 @@ class MonitoringService:
         2. Revenue decline: revenue growth turned negative
         3. Sector rotation: current regime no longer favors the position's sector
 
-        Positions that fail a check are flagged with pending_closure=True.
+        Guards applied:
+        - Regime stability: sector rotation exits only fire if the regime has been
+          stable for ≥ 3 days (prevents whipsawing on single-day regime blips).
+        - No exit at a loss for sector rotation: if the position is already losing,
+          let the SL handle it — sector rotation is a forward-looking signal, not
+          a reason to crystallize realized losses.
+        - Earnings miss exits only fire if the position is profitable OR the loss
+          is already severe (> 50% of SL distance consumed).
 
         Returns:
             Dict with 'checked' and 'flagged' counts.
@@ -2092,8 +2200,28 @@ class MonitoringService:
             # Detect current regime for sector rotation check
             current_regime = None
             optimal_sectors: List[str] = []
+            regime_stable = False  # Whether regime has been stable for ≥ 3 days
             if sector_rotation_exit:
                 current_regime, optimal_sectors = self._get_regime_and_sectors()
+                # Check regime stability: query regime_history for recent changes
+                try:
+                    from src.models.orm import RegimeHistoryORM
+                    from datetime import timedelta
+                    stability_window = datetime.utcnow() - timedelta(days=3)
+                    recent_changes = session.query(RegimeHistoryORM).filter(
+                        RegimeHistoryORM.detected_at >= stability_window,
+                        RegimeHistoryORM.regime_changed == True,
+                    ).count()
+                    regime_stable = (recent_changes == 0)
+                    if not regime_stable:
+                        logger.info(
+                            f"[FundamentalExit] Regime changed {recent_changes}x in last 3 days — "
+                            f"suppressing sector rotation exits (regime not stable)"
+                        )
+                except Exception as _re:
+                    # If we can't check stability, default to stable=True (don't suppress)
+                    regime_stable = True
+                    logger.debug(f"Could not check regime stability: {_re}")
 
             for pos in open_positions:
                 symbol = pos.symbol
@@ -2120,14 +2248,47 @@ class MonitoringService:
                 checked += 1
                 exit_reasons: List[str] = []
 
+                # Calculate position P&L percentage for profitability guards
+                entry = pos.entry_price or 0
+                current = pos.current_price or entry
+                side_str = str(pos.side).upper() if pos.side else 'LONG'
+                is_long = 'LONG' in side_str or 'BUY' in side_str
+                if entry > 0:
+                    pnl_pct = (current - entry) / entry if is_long else (entry - current) / entry
+                else:
+                    pnl_pct = 0.0
+                is_profitable = pnl_pct > 0
+
+                # How much of the SL distance has been consumed (0=at entry, 1=at stop)
+                sl_consumed = 0.0
+                if pos.stop_loss and entry > 0:
+                    if is_long:
+                        total_risk = entry - pos.stop_loss
+                        current_loss = entry - current
+                    else:
+                        total_risk = pos.stop_loss - entry
+                        current_loss = current - entry
+                    if total_risk > 0 and current_loss > 0:
+                        sl_consumed = current_loss / total_risk
+
                 # --- Check 1: Earnings miss ---
+                # Only exit on earnings miss if position is profitable OR loss is severe
+                # (> 50% of SL consumed). If already losing but not near SL, let SL handle it.
                 try:
                     surprise = fundamental_provider.calculate_earnings_surprise(symbol)
                     if surprise is not None and surprise < earnings_threshold:
-                        exit_reasons.append(
-                            f"Earnings miss: surprise {surprise:.1%} < {earnings_threshold:.1%}"
-                        )
-                        logger.info(f"[FundamentalExit] {symbol}: earnings miss ({surprise:.1%})")
+                        if is_profitable or sl_consumed >= 0.5:
+                            exit_reasons.append(
+                                f"Earnings miss: surprise {surprise:.1%} < {earnings_threshold:.1%}"
+                            )
+                            logger.info(f"[FundamentalExit] {symbol}: earnings miss ({surprise:.1%}), "
+                                       f"profitable={is_profitable}, sl_consumed={sl_consumed:.0%}")
+                        else:
+                            logger.debug(
+                                f"[FundamentalExit] {symbol}: earnings miss ({surprise:.1%}) but "
+                                f"position already losing ({pnl_pct:.1%}) and SL not near "
+                                f"({sl_consumed:.0%} consumed) — letting SL handle it"
+                            )
                 except Exception as e:
                     logger.debug(f"Could not check earnings for {symbol}: {e}")
 
@@ -2144,7 +2305,10 @@ class MonitoringService:
                         logger.debug(f"Could not check revenue for {symbol}: {e}")
 
                 # --- Check 3: Sector rotation ---
-                if sector_rotation_exit and current_regime and optimal_sectors:
+                # Only fire if:
+                # (a) regime has been stable for ≥ 3 days (no recent regime changes)
+                # (b) position is currently profitable (don't crystallize losses)
+                if sector_rotation_exit and current_regime and optimal_sectors and regime_stable:
                     try:
                         # Map the position's sector back to its ETF symbol
                         sector_to_etf = {
@@ -2154,16 +2318,24 @@ class MonitoringService:
                         }
                         position_etf = sector_to_etf.get(sector)
                         if position_etf and position_etf not in optimal_sectors:
-                            exit_reasons.append(
-                                f"Sector rotation: {sector} ({position_etf}) not in optimal sectors "
-                                f"for {current_regime} regime (optimal: {', '.join(optimal_sectors)})"
-                            )
-                            logger.info(
-                                f"[FundamentalExit] {symbol}: sector {sector} not favored "
-                                f"in {current_regime} regime"
-                            )
+                            if is_profitable:
+                                exit_reasons.append(
+                                    f"Sector rotation: {sector} ({position_etf}) not in optimal sectors "
+                                    f"for {current_regime} regime (optimal: {', '.join(optimal_sectors)})"
+                                )
+                                logger.info(
+                                    f"[FundamentalExit] {symbol}: sector {sector} not favored "
+                                    f"in {current_regime} regime (profitable={is_profitable:.1%})"
+                                )
+                            else:
+                                logger.debug(
+                                    f"[FundamentalExit] {symbol}: sector rotation would exit but "
+                                    f"position is losing ({pnl_pct:.1%}) — letting SL handle it"
+                                )
                     except Exception as e:
                         logger.debug(f"Could not check sector rotation for {symbol}: {e}")
+                elif sector_rotation_exit and not regime_stable:
+                    logger.debug(f"[FundamentalExit] {symbol}: sector rotation suppressed (regime unstable)")
 
                 # Flag position for closure if any check failed
                 if exit_reasons:
@@ -2300,7 +2472,8 @@ class MonitoringService:
                     # For non-crypto hourly strategies: extend to 48h if position is profitable.
                     # Stocks have overnight gaps, so 24h of wall-clock time = ~3h of actual trading.
                     # Cutting a winning intraday trade at 24h leaves money on the table.
-                    # Losing positions still get cut at the original limit.
+                    # Losing positions still get cut at the original limit — or immediately
+                    # if they've been losing for more than 50% of the hold limit.
                     effective_hold_max = strategy_hold_max
                     try:
                         from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
@@ -2320,6 +2493,14 @@ class MonitoringService:
                                 logger.info(
                                     f"[TimeBasedExit] {pos.symbol}: profitable hourly position, "
                                     f"extending hold limit from {strategy_hold_max}h to 48h"
+                                )
+                            elif not is_profitable and hold_hours > effective_hold_max * 0.5:
+                                # Losing position past 50% of hold limit — close immediately
+                                # Don't wait for the full limit; cut the loser early
+                                effective_hold_max = effective_hold_max * 0.5
+                                logger.info(
+                                    f"[TimeBasedExit] {pos.symbol}: losing hourly position past "
+                                    f"50% of hold limit — closing early at {effective_hold_max:.0f}h"
                                 )
                     except Exception:
                         pass
@@ -2535,7 +2716,11 @@ class MonitoringService:
                             details['realized_loss_severe'] = round(total_realized, 2)
                         
                         # Expectancy (only if we have enough closed trades to compute it)
-                        if n_closed >= 3:
+                        # Require at least 5 closed trades before expectancy scoring.
+                        # With fewer trades, a single bad trade can tank the score and
+                        # trigger premature retirement. 5 trades gives a statistically
+                        # meaningful sample while still catching genuinely broken strategies.
+                        if n_closed >= 5:
                             wins = [p.realized_pnl for p in closed if (p.realized_pnl or 0) > 0]
                             losses = [abs(p.realized_pnl) for p in closed if (p.realized_pnl or 0) < 0]
                             avg_win = sum(wins) / len(wins) if wins else 0
@@ -2574,7 +2759,10 @@ class MonitoringService:
                     result["scores_updated"] += 1
                     
                     # Retire if score 0 (None = no data, don't retire)
-                    if health_score is not None and health_score == 0:
+                    # Also require minimum 5 closed trades before retirement to prevent
+                    # premature retirement on a single bad trade.
+                    min_trades_for_retirement = 5
+                    if health_score is not None and health_score == 0 and n_closed >= min_trades_for_retirement:
                         retirement_reason = (
                             f"Health score 0: P&L ${total_pnl:,.2f}, "
                             f"{n_closed} closed, {n_open} open"

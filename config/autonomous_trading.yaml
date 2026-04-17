@@ -184,13 +184,13 @@ backtest:
   period_days: 730
   adaptive_risk:
     enabled: true
-    atr_sl_multiplier: 1.5
-    atr_tp_multiplier: 3.0
-    min_sl_pct: 0.01
-    max_sl_pct: 0.05
-    min_tp_pct: 0.02
-    max_tp_pct: 0.15
-    min_reward_risk_ratio: 1.5
+    atr_sl_multiplier: 2.5   # Raised from 1.5 — 2.5x ATR gives trades room to breathe
+    atr_tp_multiplier: 5.0   # Maintain ~2:1 R:R with wider SL
+    min_sl_pct: 0.02
+    max_sl_pct: 0.08
+    min_tp_pct: 0.04
+    max_tp_pct: 0.20
+    min_reward_risk_ratio: 2.0  # Raised from 1.5 — require 2:1 minimum
 data_sources:
   financial_modeling_prep:
     enabled: true
@@ -337,6 +337,11 @@ alpha_edge:
     earnings_miss_threshold: -0.05
     revenue_decline_exit: true
     sector_rotation_exit: true
+    # Regime stability: sector rotation exits only fire if regime has been
+    # stable for this many days (prevents whipsawing on single-day blips)
+    sector_rotation_regime_stability_days: 3
+    # Only exit on earnings miss if position is profitable OR SL is > 50% consumed
+    earnings_exit_only_if_profitable: true
 templates:
 - name: RSI Mean Reversion
   enabled: true
@@ -568,6 +573,7 @@ position_management:
       high_volatility: 0.5
       low_volatility: 1.2
       trending: 1.0
+      trending_up_long: 1.25   # Size up longs in bull markets (shorts blocked by regime gate)
       ranging: 1.0
   portfolio_balance:
     enabled: true
@@ -578,13 +584,19 @@ position_management:
     enabled: true
     adjacent_regime_reserve_pct: 0.2
     ranging:
-      min_long_pct: 0.55
+      min_long_pct: 0.70
       min_short_pct: 0.0
     ranging_low_vol:
-      min_long_pct: 0.60
+      min_long_pct: 0.75
       min_short_pct: 0.0
     trending_up:
-      min_long_pct: 0.7
+      min_long_pct: 0.85
+      min_short_pct: 0.0
+    trending_up_weak:
+      min_long_pct: 0.80
+      min_short_pct: 0.0
+    trending_up_strong:
+      min_long_pct: 0.90
       min_short_pct: 0.0
     trending_down:
       min_long_pct: 0.2

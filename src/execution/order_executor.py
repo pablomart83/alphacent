@@ -225,7 +225,12 @@ class OrderExecutor:
                                     if _tr_list:
                                         _atr14 = sum(_tr_list[-14:]) / min(14, len(_tr_list[-14:]))
                                         _atr_pct = _atr14 / current_price
-                                        _atr_floor = _atr_pct * 2.0  # SL must be at least 2x ATR
+                                        # SL must be at least 2.5x ATR (raised from 2x).
+                                        # In ranging_low_vol regime, 2x ATR is too tight —
+                                        # normal intraday noise consumes the entire stop distance.
+                                        # 2.5x gives the trade room to breathe without being
+                                        # so wide that the R:R ratio collapses.
+                                        _atr_floor = _atr_pct * 2.5
 
                                         if stop_loss_pct < _atr_floor:
                                             original_rr = (take_profit_pct / stop_loss_pct) if take_profit_pct and stop_loss_pct else 2.0
@@ -241,7 +246,7 @@ class OrderExecutor:
                                             logger.info(
                                                 f"ATR floor at order time for {normalized_symbol}: "
                                                 f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
-                                                f"(ATR={_atr_pct:.2%}, floor=2x ATR={_atr_floor:.2%}). "
+                                                f"(ATR={_atr_pct:.2%}, floor=2.5x ATR={_atr_floor:.2%}). "
                                                 f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x)"
                                             )
                         except Exception as _atr_err:

@@ -37,21 +37,31 @@ class PositionManager:
     # Distance = how far below current price (longs) or above (shorts) the stop sits.
     # The distance must be outside normal daily noise for that asset class.
     #
-    # Calibration logic:
-    # - Stocks: ~1-2% daily range → activate at 3%, trail at 5% (2.5-5x daily noise)
+    # Calibration logic (ATR-aware):
+    # - Stocks: ~1-2% daily ATR → activate at 5%, trail at 7% (3.5-7x daily noise)
     # - ETFs: similar to stocks but slightly tighter (diversified, less volatile)
-    # - Crypto: ~3-5% daily range → activate at 6%, trail at 8% (1.5-2.5x daily noise)
-    # - Forex: ~0.5-1% daily range → activate at 2%, trail at 3% (3-6x daily noise)
-    # - Commodities: ~1.5-3% daily range → activate at 4%, trail at 6% (2-4x daily noise)
-    # - Indices: ~1% daily range → activate at 3%, trail at 4% (3-4x daily noise)
+    # - Crypto: ~3-5% daily ATR → activate at 8%, trail at 10% (2-3x daily noise)
+    # - Forex: ~0.5-1% daily ATR → activate at 2%, trail at 3% (3-6x daily noise)
+    # - Commodities: ~1.5-3% daily ATR → activate at 5%, trail at 7% (2-4x daily noise)
+    # - Indices: ~1% daily ATR → activate at 4%, trail at 5% (4-5x daily noise)
+    #
+    # IMPORTANT: These are percentage-based FLOORS. The actual trail distance is
+    # max(distance_pct * price, ATR_MULTIPLIER * daily_ATR) to prevent penny-stop
+    # whipsaws on high-priced instruments. See check_trailing_stops() for ATR logic.
     TRAILING_STOP_PARAMS = {
-        "stock":     {"activation": 0.03, "distance": 0.05},
-        "etf":       {"activation": 0.03, "distance": 0.04},
-        "crypto":    {"activation": 0.06, "distance": 0.08},
+        "stock":     {"activation": 0.05, "distance": 0.07},
+        "etf":       {"activation": 0.04, "distance": 0.05},
+        "crypto":    {"activation": 0.08, "distance": 0.10},
         "forex":     {"activation": 0.02, "distance": 0.03},
-        "commodity": {"activation": 0.04, "distance": 0.06},
-        "index":     {"activation": 0.03, "distance": 0.04},
+        "commodity": {"activation": 0.05, "distance": 0.07},
+        "index":     {"activation": 0.04, "distance": 0.05},
     }
+
+    # ATR multiplier for minimum trail distance.
+    # Trail distance = max(distance_pct * price, ATR_TRAIL_MULTIPLIER * daily_ATR)
+    # This prevents penny-stop whipsaws on high-priced instruments where a fixed
+    # percentage produces a stop that's within normal intraday noise.
+    ATR_TRAIL_MULTIPLIER = 1.5
 
     def _get_asset_class(self, symbol: str) -> str:
         """Classify symbol for trailing stop parameter selection."""
@@ -139,11 +149,52 @@ class PositionManager:
                     )
                     continue
 
-                # Calculate new stop-loss level
+                # Calculate new stop-loss level using ATR-aware minimum trail distance.
+                # Trail distance = max(distance_pct * price, ATR_TRAIL_MULTIPLIER * daily_ATR)
+                # This prevents penny-stop whipsaws on high-priced instruments where a fixed
+                # percentage produces a stop within normal intraday noise.
+                effective_distance = distance_pct
+                try:
+                    from src.data.market_data_manager import MarketDataManager
+                    import yaml as _yaml
+                    from pathlib import Path as _Path
+                    from datetime import timedelta as _td
+                    _cfg_path = _Path("config/autonomous_trading.yaml")
+                    _cfg = {}
+                    if _cfg_path.exists():
+                        with open(_cfg_path) as _f:
+                            _cfg = _yaml.safe_load(_f) or {}
+                    _mdm = MarketDataManager(_cfg)
+                    from datetime import datetime as _dt
+                    _end = _dt.now()
+                    _start = _end - _td(days=20)
+                    _bars = _mdm.get_historical_data(position.symbol, _start, _end, interval="1d")
+                    if _bars and len(_bars) >= 5:
+                        _tr_list = []
+                        for _i in range(1, len(_bars)):
+                            _h = getattr(_bars[_i], 'high', None) or position.current_price
+                            _l = getattr(_bars[_i], 'low', None) or position.current_price
+                            _c_prev = getattr(_bars[_i - 1], 'close', None) or position.current_price
+                            _tr_val = max(_h - _l, abs(_h - _c_prev), abs(_l - _c_prev))
+                            _tr_list.append(_tr_val)
+                        if _tr_list:
+                            _atr = sum(_tr_list[-14:]) / min(14, len(_tr_list[-14:]))
+                            _atr_pct = _atr / position.current_price if position.current_price > 0 else 0
+                            _atr_floor = _atr_pct * self.ATR_TRAIL_MULTIPLIER
+                            if _atr_floor > effective_distance:
+                                logger.debug(
+                                    f"ATR trail floor for {position.symbol}: "
+                                    f"{effective_distance:.2%} → {_atr_floor:.2%} "
+                                    f"(ATR={_atr_pct:.2%}, {self.ATR_TRAIL_MULTIPLIER}x)"
+                                )
+                                effective_distance = _atr_floor
+                except Exception as _atr_err:
+                    logger.debug(f"Could not compute ATR trail floor for {position.symbol}: {_atr_err}")
+
                 if position.side.value == "LONG":
-                    new_stop_loss = position.current_price * (1 - distance_pct)
+                    new_stop_loss = position.current_price * (1 - effective_distance)
                 else:
-                    new_stop_loss = position.current_price * (1 + distance_pct)
+                    new_stop_loss = position.current_price * (1 + effective_distance)
 
                 # Only update if new stop is better than current
                 should_update = False
@@ -152,21 +203,21 @@ class PositionManager:
                     logger.info(
                         f"Position {position.id} ({position.symbol}) no stop-loss, "
                         f"setting trailing stop at {new_stop_loss:.2f} "
-                        f"({asset_class}: {distance_pct:.0%} distance)"
+                        f"({asset_class}: {effective_distance:.2%} distance)"
                     )
                 elif position.side.value == "LONG" and new_stop_loss > position.stop_loss:
                     should_update = True
                     logger.info(
                         f"Position {position.id} ({position.symbol}) trailing stop: "
                         f"{position.stop_loss:.2f} -> {new_stop_loss:.2f} "
-                        f"(profit: {profit_pct:.2%}, {asset_class}: {distance_pct:.0%} distance)"
+                        f"(profit: {profit_pct:.2%}, {asset_class}: {effective_distance:.2%} distance)"
                     )
                 elif position.side.value == "SHORT" and new_stop_loss < position.stop_loss:
                     should_update = True
                     logger.info(
                         f"Position {position.id} ({position.symbol}) trailing stop: "
                         f"{position.stop_loss:.2f} -> {new_stop_loss:.2f} "
-                        f"(profit: {profit_pct:.2%}, {asset_class}: {distance_pct:.0%} distance)"
+                        f"(profit: {profit_pct:.2%}, {asset_class}: {effective_distance:.2%} distance)"
                     )
 
                 if should_update:
