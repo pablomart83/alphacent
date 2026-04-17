@@ -2157,3 +2157,58 @@ This session was a comprehensive audit against the "151 Trading Strategies" SSRN
 - Existing strategies still have old names (V38, V174, etc.) — new naming only applies to newly proposed strategies
 - Portfolio-level VaR check before new positions — decided not to implement (complexity vs benefit unclear)
 - News sentiment: ~192 symbols still unpopulated (filling at 100 req/day, ~2 days remaining)
+
+---
+
+### Session Improvements (April 17, 2026 — Session 15: Data Integrity Fixes)
+
+#### 155. FMP Cache Display — DB-Backed Coverage ✅
+- **Bug**: "Cache Size" showed in-memory dict count (resets on restart → always 1). "API Usage" label was misleading (it's a per-minute sliding window, not a daily counter).
+- **Fix**: `get_api_usage()` now queries `fundamental_data_cache` DB table directly for real coverage stats.
+- **Frontend**: FMP Cache section now shows 3 metrics: **DB Total** (237), **Fresh 7d** (233), **Fresh 24h** (211). Rate bar relabeled "Rate (per min)" to clarify it's the 60s sliding window.
+- **Files**: `src/data/fundamental_data_provider.py`, `src/api/routers/data_management.py`, `frontend/src/pages/DataManagementNew.tsx`
+
+#### 156. Stale Singleton Lookups Fixed Across Routers ✅
+- `data_management.py` FMP cache warmer thread: was reading `autonomous_trading.yaml` directly → now uses `config_loader.load_config()` (gets real keys from `api_keys.yaml`)
+- `data_management.py` FRED status: was reading YAML directly + fragile `sched.strategy_engine.market_analyzer` attribute chain → now uses `config_loader` + `get_market_data_manager()` singleton
+- `data_management.py` price sync market data manager: was creating fresh `MarketDataManager` instance with empty cache → now uses `get_market_data_manager()` singleton
+- `config.py` API usage endpoint: was reading YAML directly, passing stale config to `get_fundamental_data_provider()`, reading non-existent attributes (`fmp_calls_today`) → now uses singleton + `get_api_usage()` with correct field names
+- **Files**: `src/api/routers/data_management.py`, `src/api/routers/config.py`
+
+---
+
+## Current System State (April 17, 2026 — Updated Session 15)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables, 780K+ rows
+- **Account:** eToro DEMO, equity ~$470K
+- **FMP cache**: 237 symbols in DB, 233 fresh within 7d (98% coverage), 211 fresh within 24h
+- **API keys**: All 4 providers (FMP, AV, FRED, Marketaux) in AWS Secrets Manager — zero hardcoded keys
+- **Backend**: Healthy, signal generation running, news sentiment scoring active
+
+---
+
+## Next Session — UI Audit & Bottom Widget Zone Overhaul
+
+### Priority 1: Full UI Audit
+Systematic pass across every page and component to identify:
+- **Incorrect data**: wrong calculations, stale values, misleading labels (like the FMP cache issue above)
+- **Math errors**: Sharpe, drawdown, win rate, P&L calculations that don't match the source data
+- **Indicator gaps**: metrics shown as 0/N/A that should have real values
+- **Consistency**: same metric showing different values on different pages (e.g. Sharpe was 5.0 on Analytics vs 0.95 on Overview)
+- **Missing data flows**: endpoints returning placeholder/empty data that the frontend silently swallows
+
+### Priority 2: Bottom Widget Zone Redesign
+The current bottom panel (BottomWidgetZone) wastes significant vertical space while showing low-density, low-value content. From the screenshot:
+- **Top Movers**: shows 5 gainers + 5 losers — useful but the layout is too tall
+- **Recent Signals**: shows strategy IDs (truncated UUIDs like `f0ce5e1d-974`) instead of readable names — not useful
+- **Market Regime**: shows "Overall: LV, Equities: LV, Crypto: LV, Forex: LV" — redundant with MetricsBar
+- **Strategy Alerts**: shows retirement events with truncated strategy IDs — not actionable
+- **Macro Pulse**: shows "VTI, USA, QQQ, COP, QQQ" — unclear what these represent
+
+Issues to fix:
+1. Recent Signals — show strategy name + symbol + direction + conviction score, not UUID
+2. Strategy Alerts — show human-readable strategy name + alert type + symbol
+3. Market Regime widget — either remove (already in MetricsBar) or show richer data (regime history, transition probability)
+4. Macro Pulse — clarify what each ticker represents (VTI=US Equities, GLD=Gold, etc.) or replace with actual macro indicators (VIX, 10Y yield, DXY, Oil)
+5. Overall height — reduce from ~200px to ~120px max, increase data density
+6. Consider replacing the 5-widget layout with 3 higher-value widgets: **Live Signals** (last 5 signals with full context), **P&L Pulse** (today's realized + unrealized by asset class), **Risk Alerts** (any active risk limit breaches)
