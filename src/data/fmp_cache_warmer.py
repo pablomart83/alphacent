@@ -48,10 +48,17 @@ class FMPCacheWarmer:
         self._earnings_ttl = earnings_config.get('earnings_calendar_ttl', 604800)  # 7 days
 
     def _get_provider(self):
-        """Get the shared FundamentalDataProvider singleton."""
+        """Get a dedicated FundamentalDataProvider for cache warming.
+
+        Uses its own instance (not the singleton) so the warmer has its own
+        rate limiter and doesn't compete with signal generation for tokens.
+        """
         if self._provider is None:
-            from src.data.fundamental_data_provider import get_fundamental_data_provider
-            self._provider = get_fundamental_data_provider(self.config)
+            from src.data.fundamental_data_provider import FundamentalDataProvider
+            # Deliberately NOT using get_fundamental_data_provider() singleton here.
+            # The warmer runs as a background task and should have its own rate limiter
+            # so it doesn't starve signal generation of API tokens.
+            self._provider = FundamentalDataProvider(self.config)
         return self._provider
 
     def _get_db_cache_age(self, symbol: str) -> Optional[float]:

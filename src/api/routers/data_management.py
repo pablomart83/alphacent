@@ -245,7 +245,7 @@ def _compute_fmp_coverage() -> dict:
             "last_warm_at": last_warm.isoformat() if last_warm else None,
         }
     except Exception as e:
-        logger.debug(f"Could not compute FMP coverage: {e}")
+        logger.warning(f"Could not compute FMP coverage: {e}")
         return {"total_symbols": 0, "fresh_count": 0, "any_count": 0, "coverage_pct": 0.0, "last_warm_at": None}
 
 
@@ -271,7 +271,14 @@ async def trigger_fmp_cache_warm():
     global _fmp_cache_thread, _fmp_cache_progress
 
     if _fmp_cache_thread and _fmp_cache_thread.is_alive():
-        return SyncTriggerResponse(success=False, message="FMP cache warm already running")
+        # If thread has been running for more than 10 minutes, it's probably stuck
+        started_at = _fmp_cache_progress.get("started_at")
+        if started_at and (_time.time() - started_at) > 600:
+            logger.warning("FMP cache warm thread appears stuck (>10min), allowing new trigger")
+            # Don't kill the thread — just allow a new one to start
+            # The old thread will eventually finish or timeout
+        else:
+            return SyncTriggerResponse(success=False, message="FMP cache warm already running")
 
     # Reset progress
     _fmp_cache_progress.update({
@@ -294,11 +301,15 @@ async def trigger_fmp_cache_warm():
             from pathlib import Path
             from src.data.fmp_cache_warmer import FMPCacheWarmer
 
+            logger.info("FMP cache warm thread started")
+
             config_path = Path("config/autonomous_trading.yaml")
             config = {}
             if config_path.exists():
                 with open(config_path) as f:
                     config = yaml.safe_load(f) or {}
+
+            logger.info(f"FMP cache warm: config loaded, FMP enabled={config.get('data_sources', {}).get('financial_modeling_prep', {}).get('enabled', False)}")
 
             # Force warm (bypass 24h timestamp check)
             warmer = FMPCacheWarmer(config)
