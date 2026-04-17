@@ -1001,6 +1001,14 @@ class MonitoringService:
             ]:
                 if not need_list:
                     continue
+
+                # Filter out symbols that only have reliable daily data
+                # (e.g., LME metals like ZINC, ALUMINUM, PLATINUM)
+                if interval != "1d":
+                    from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS
+                    need_list = [s for s in need_list if s.upper() not in DAILY_ONLY_SYMBOLS]
+                    if not need_list:
+                        continue
                 
                 # Convert to Yahoo tickers
                 sym_to_yf = {sym: to_yahoo_ticker(sym) for sym in need_list}

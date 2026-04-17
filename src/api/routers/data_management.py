@@ -314,8 +314,10 @@ async def trigger_fmp_cache_warm():
                 })
 
             # Force warm by clearing the last warm timestamp first
-            warmer._save_last_warm_timestamp()  # Will be overwritten at end
-            stats = warmer.warm_all_symbols(progress_callback=_progress)
+            # Manual trigger: use 24h TTL so anything older than 24h gets refreshed.
+            # The default 7-day TTL means a manual "Refresh" would do nothing if
+            # the cache was warmed recently. 24h ensures meaningful refresh.
+            stats = warmer.warm_all_symbols(progress_callback=_progress, force_ttl_hours=24)
 
             elapsed = _time.time() - _fmp_cache_progress["started_at"]
             _fmp_cache_progress.update({

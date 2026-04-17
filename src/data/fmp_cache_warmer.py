@@ -77,14 +77,17 @@ class FMPCacheWarmer:
         finally:
             session.close()
 
-    def warm_all_symbols(self, progress_callback=None) -> Dict:
+    def warm_all_symbols(self, progress_callback=None, force_ttl_hours: int = None) -> Dict:
         """
         Fetch fundamental data for all tradeable symbols.
-        
+
         Database-first: checks DB cache age per symbol, only calls API if stale.
 
         Args:
             progress_callback: Optional callable(current, total, stats_dict) called every 10 symbols
+            force_ttl_hours: If set, override the default TTL with this value in hours.
+                             Use 24 for manual refresh (re-fetch anything older than 24h).
+                             Use None to use the configured default (7 days).
 
         Returns:
             Dict with warming statistics
@@ -97,6 +100,9 @@ class FMPCacheWarmer:
 
         stock_symbols = [s for s in symbols if s not in self.SKIP_FUNDAMENTALS]
         skipped = len(symbols) - len(stock_symbols)
+
+        # Override TTL if force_ttl_hours is set
+        effective_ttl = (force_ttl_hours * 3600) if force_ttl_hours else self._fundamentals_ttl
 
         stats = {
             'total_symbols': len(stock_symbols),
@@ -126,7 +132,7 @@ class FMPCacheWarmer:
         stale_symbols = []
         for symbol in stock_symbols:
             cache_age = self._get_db_cache_age(symbol)
-            if cache_age is not None and cache_age < self._fundamentals_ttl:
+            if cache_age is not None and cache_age < effective_ttl:
                 cached_symbols.append(symbol)
                 stats['fundamentals_cached'] += 1
             else:

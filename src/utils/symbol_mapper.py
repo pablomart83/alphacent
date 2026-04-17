@@ -81,6 +81,16 @@ YAHOO_FINANCE_TICKERS: Dict[str, str] = {
 }
 
 
+# Symbols that only have reliable daily (1d) data on Yahoo Finance.
+# Requesting 1h or 4h data for these will fail or return empty results.
+# The monitoring service uses this to skip intraday batch downloads for these symbols.
+DAILY_ONLY_SYMBOLS = {
+    "ZINC",       # ZNC=F — CME zinc futures, no reliable 1h data on Yahoo
+    "ALUMINUM",   # ALI=F — CME aluminum futures, thin 1h data
+    "PLATINUM",   # PL=F — CME platinum futures, thin 1h data
+}
+
+
 def normalize_symbol(symbol: str) -> str:
     """Normalize symbol to eToro format.
     
