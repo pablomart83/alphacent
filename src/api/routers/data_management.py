@@ -324,11 +324,11 @@ async def trigger_fmp_cache_warm():
                     "elapsed_s": round(_time.time() - _fmp_cache_progress["started_at"], 1),
                 })
 
-            # Force warm by clearing the last warm timestamp first
-            # Manual trigger: use 24h TTL so anything older than 24h gets refreshed.
-            # The default 7-day TTL means a manual "Refresh" would do nothing if
-            # the cache was warmed recently. 24h ensures meaningful refresh.
-            stats = warmer.warm_all_symbols(progress_callback=_progress, force_ttl_hours=24)
+            # Use 7-day TTL matching the coverage display — only fetch symbols
+            # that are genuinely stale or missing. This means re-running 2-3 times
+            # will progressively fill in only the symbols that failed previously,
+            # without re-fetching symbols that were successfully cached this week.
+            stats = warmer.warm_all_symbols(progress_callback=_progress, force_ttl_hours=168)
 
             elapsed = _time.time() - _fmp_cache_progress["started_at"]
             _fmp_cache_progress.update({
