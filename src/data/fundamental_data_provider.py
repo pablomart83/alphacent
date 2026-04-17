@@ -466,8 +466,8 @@ class FundamentalDataProvider:
         """
         Check if fundamental data is complete enough to use.
         
-        Critical fields: EPS, revenue_growth, pe_ratio
-        At least 2 out of 3 must be present for data to be considered complete.
+        revenue_growth is structurally unavailable from a single-period FMP fetch
+        (requires 2 periods to compute), so we only require eps OR pe_ratio.
         
         Args:
             data: FundamentalData object to check
@@ -475,10 +475,8 @@ class FundamentalDataProvider:
         Returns:
             True if data is complete enough, False otherwise
         """
-        critical_fields = [data.eps, data.revenue_growth, data.pe_ratio]
-        present_count = sum(1 for field in critical_fields if field is not None)
-        
-        is_complete = present_count >= 2
+        # At least one of eps or pe_ratio must be present
+        is_complete = data.eps is not None or data.pe_ratio is not None
         
         if not is_complete:
             logger.debug(f"Data incomplete for {data.symbol}: EPS={data.eps}, "

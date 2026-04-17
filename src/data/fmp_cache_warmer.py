@@ -143,10 +143,10 @@ class FMPCacheWarmer:
             f"{len(stale_symbols)} stale/missing (fetching from API)"
         )
 
-        # 8 concurrent workers — the token bucket in RateLimiter enforces 5 calls/sec
-        # (300/min) across all workers, so they can't burst past the limit.
-        # Each worker blocks on wait_for_token() when the bucket is empty.
-        # Expected throughput: ~5 symbols/sec = ~46s for 232 symbols (full 300/min used).
+        # 3 concurrent workers — keeps FMP call rate well within 300/min budget.
+        # Each symbol costs ~5 FMP calls (income-stmt, balance-sheet, key-metrics,
+        # profile, earnings-surprise). 3 workers × 5 calls = 15 calls/burst max,
+        # giving ~60 symbols/min with headroom for signal generation running in parallel.
         import threading
         _stats_lock = threading.Lock()
         completed_count = [0]
@@ -205,7 +205,7 @@ class FMPCacheWarmer:
 
         if stale_symbols:
             from concurrent.futures import ThreadPoolExecutor, as_completed
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            with ThreadPoolExecutor(max_workers=3) as executor:
                 futures = [executor.submit(_warm_one_symbol, sym, ca) for sym, ca in stale_symbols]
                 for f in as_completed(futures):
                     try:
