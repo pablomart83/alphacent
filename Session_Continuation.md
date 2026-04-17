@@ -1,4 +1,4 @@
-# AlphaCent — Session Continuation Prompt
+can # AlphaCent — Session Continuation Prompt
 
 Read `#File:.kiro/steering/trading-system-context.md` for full system context, then read this prompt carefully before proceeding.
 
@@ -1562,3 +1562,115 @@ The font normalization from Session 8 was partial — many inconsistencies remai
 - `/strategies/blacklisted-combos` returns 422 — endpoint may need `mode` query parameter
 - `/strategies/template-rankings` returns 404 — endpoint may not be deployed
 - `/strategies/idle-demotions` returns 422 — same mode parameter issue
+
+---
+
+## Session Improvements (April 13-15, 2026 — Session 10: Trading System Audit & Bug Fixes)
+
+### Critical Bug Fixes
+
+#### 102. Trailing Stop Activation Fix ✅ (CRITICAL)
+- **Bug**: Config `activation_pct: 0.12` was overriding per-asset-class thresholds (3% stocks, 6% crypto, 2% forex) because the override check `!= 0.05` always fired when config had 0.12
+- **Fix**: Removed the config override entirely — per-asset-class thresholds always used
+- **Impact**: 7 positions immediately got tightened trailing stops (SLV, MRVL, QQQ, VTI, XLY, IWM, NSDQ100)
+- **Files**: `src/execution/position_manager.py`, `config/autonomous_trading.yaml`
+
+#### 103. Phantom Position Prevention ✅ (CRITICAL)
+- **Bug**: Position sync was creating SHORT positions for long-only strategies when eToro interpreted a close SELL order as opening a new SHORT. HD SHORT ($23K, -$198) was a ghost from this race condition.
+- **Fix 1**: Position sync now validates new positions against strategy direction — rejects positions where side contradicts strategy's `direction` field
+- **Fix 2**: Close orders are now excluded from the order-matching logic (skip `order_action='close'` when matching new positions to strategies)
+- **Fix 3**: Exit signal handler no longer creates a duplicate close order record — only sets `pending_closure=True`, letting `_process_pending_closures` handle the actual API call and order tracking
+- **DB cleanup**: Closed phantom HD SHORT; reassigned 19 mismatched positions to `etoro_position`
+- **Files**: `src/core/order_monitor.py`, `src/core/trading_scheduler.py`
+
+#### 104. Partial Exit API Fix ✅ (CRITICAL)
+- **Bug**: Partial exits called `place_order()` (market-open-orders endpoint) with opposite side, which opens a NEW position on eToro instead of reducing the existing one
+- **Fix**: Added `partial_close_position()` to EToroAPIClient using `market-close-orders` endpoint with `Amount` parameter; partial exit code now uses this
+- **Files**: `src/api/etoro_client.py`, `src/core/monitoring_service.py`
+
+#### 105. Position Sizing Fix ✅ (CRITICAL)
+- **Bug 1**: Strategy allocation used `cash_balance * allocation_pct` — with $81K cash and $461K equity, strategies got $400 allocations producing $95-170 position sizes that all failed the $2K minimum
+- **Fix**: Strategy allocation now uses `equity * allocation_pct` (correct target sizing); hard cap uses `account.balance` (actual cash) and `account.margin_used` (actual eToro margin)
+- **Bug 2**: `available_capital = equity - DB_exposure` was out of sync with eToro's actual margin ($377K DB vs $459K eToro), causing the system to think it had $85K available when it had $0.01
+- **Files**: `src/risk/risk_manager.py`
+
+#### 106. ATR Floor Fix for Commodities/Forex/Indices ✅
+- **Bug**: ATR floor at order execution used `yf.download(symbol)` which silently fails for OIL, GOLD, SILVER, COPPER, ZINC, forex pairs — their eToro symbols don't match Yahoo Finance tickers
+- **Impact**: OIL had 8.9% ATR but positions were placed with 3.1% SL — all 3 OIL longs on Apr 13 stopped out within hours
+- **Fix**: Now uses MarketDataManager (handles symbol mapping across all data sources); added 12% SL clamp for extremely volatile instruments
+- **Files**: `src/execution/order_executor.py`
+
+#### 107. Etoro Closed Mislabeling Fix ✅
+- **Bug**: When eToro executes a SL, the position disappears. By the time we detect it and fetch the live price, the market has bounced back — so we mislabeled SL hits as "Etoro Closed"
+- **Fix**: Three-layer detection: (1) live price past SL/TP, (2) loss ≥ 50% of SL distance → SL hit, (3) gain ≥ 50% of TP distance → TP hit. Also fetches live price at detection time for accurate P&L
+- **Retroactive fix**: 14 positions relabeled from "Etoro Closed" to "Stop Loss Hit", 1 to "Take Profit Hit"
+- **Files**: `src/core/order_monitor.py`
+
+#### 108. Mass Closure Safety Guard ✅
+- **Fix**: If >20% of positions disappear from eToro in a single sync cycle, skip the closure check entirely (possible DEMO reset or API glitch). Miss counters not incremented during mass events.
+- **Files**: `src/core/order_monitor.py`
+
+#### 109. Orders Page WebSocket Crash Fix ✅
+- **Bug**: `order_update` WebSocket messages with undefined `status` or `symbol` caused `Cannot read properties of undefined (reading 'toLowerCase')` crash
+- **Fix**: Null-safe fallbacks on toast notification and search filter
+- **Files**: `frontend/src/pages/OrdersNew.tsx`
+
+#### 110. API Keys Fix ✅
+- **Bug**: SCP-based deploys overwrite `autonomous_trading.yaml`, losing Secrets Manager patches. FRED key was missing (causing `Bad Request` errors). FMP and Alpha Vantage had the FRED key patched into all three slots.
+- **Fix**: Patched all three keys correctly on EC2 (FMP: `uisdNGDM...`, AV: `GF5H4ZM8...`, FRED: `d6a8d937...`)
+- **Note**: Any SCP of `autonomous_trading.yaml` requires re-patching keys from Secrets Manager
+
+---
+
+### Performance Analysis (April 2026)
+
+#### What the data shows
+- **156 closed trades in April**: 70 winners (45%), 86 losers (55%), net **+$2,078**
+- **LONGs**: 59 wins / 50 losses, net **+$4,210** ✅
+- **SHORTs**: 17 wins / 39 losses, net **-$1,397** ❌ — fighting a recovering market
+- **SPY performance Apr 1-15**: +5.4% ($654 → $690) — clear recovery rally
+- **Losers hit SL in median 33h** vs winners held median 121h — classic "cut winners short, let losers run" anti-pattern from tight SLs
+
+#### Root causes identified
+1. **Shorts fighting the trend**: 39 SHORT losers in a 5.4% rally. Shorting individual stocks in a rising market is a losing game.
+2. **ATR floor broken for commodities** (fixed in #106): OIL, SILVER, NATGAS all stopped out on normal intraday noise
+3. **Trailing stops not activating** (fixed in #102): 12% threshold meant no trailing stops on 3-8% winners
+4. **Position sizing too small** (fixed in #105): Most signals were generating $95-170 sizes, all rejected
+
+#### Open trading improvements
+- **Market regime gate for shorts**: In `trending_up` or `trending_up_weak` regime, suppress equity SHORT signals — only short when market is clearly trending down
+- **ATR-based dynamic SL**: Per-position SL based on current ATR rather than fixed percentage
+- **Short suppression**: `min_short_pct` should be 0% in trending_up regimes (currently 15%)
+
+---
+
+## Current System State (April 15, 2026)
+
+- **Database:** PostgreSQL 16 on EC2, 32 tables, 780K+ rows
+- **Account:** eToro DEMO, balance ~$0 (fully deployed), equity ~$462K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~98 DEMO
+- **Open positions:** 203 across 118 symbols (DB matches eToro exactly ✅)
+- **Market regime:** Equity: trending_up_weak (changed Apr 15), Crypto: trending_up
+- **Monitoring:** 24/7 + CloudWatch + EXIT signals + WebSocket streaming
+- **API keys:** FMP, Alpha Vantage, FRED all correctly patched on EC2
+- **Key fixes deployed:** Trailing stops, phantom positions, partial exits, position sizing, ATR floor, Etoro Closed labeling
+
+---
+
+## Open Items (Updated Session 10)
+
+### Trading Strategy (HIGH PRIORITY)
+- **Short suppression in uptrend**: Add regime gate — no new equity SHORTs when SPY > 20-day SMA or regime is trending_up/trending_up_weak
+- **ATR-based dynamic SL**: Replace fixed % SL with ATR-based floor per position at entry time
+- **Performance feedback**: Monitor win rate after all fixes (target: >50% from current 45%)
+- **Unconfirmed closure handling**: Implement "pending confirmation" state for positions that disappear — don't immediately book P&L, wait N hours before finalizing
+
+### Infrastructure
+- **API key patching**: SCP of `autonomous_trading.yaml` overwrites keys — need a post-SCP hook or separate key file
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+- FMP API rate limit (300/min) — monitor
+
+### From Previous Sessions
+- Risk controls — Portfolio-level VaR check before new positions
+- `/strategies/blacklisted-combos`, `/strategies/template-rankings`, `/strategies/idle-demotions` — 422/404 errors
