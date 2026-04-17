@@ -1464,9 +1464,9 @@ class ApiClient {
   // Position Detail (Task 9.5)
   // ============================================================================
 
-  async getPositionDetail(symbol: string, mode: TradingMode): Promise<any> {
+  async getPositionDetail(symbol: string, mode: TradingMode, interval: string = '1d'): Promise<any> {
     const response = await this.client.get<ApiResponse<any>>(
-      `/account/positions/${encodeURIComponent(symbol)}/detail?mode=${mode}`
+      `/account/positions/${encodeURIComponent(symbol)}/detail?mode=${mode}&interval=${interval}`
     );
     return this.handleResponse(response);
   }

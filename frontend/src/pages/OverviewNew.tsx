@@ -414,6 +414,11 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
               height={450}
+              trades={recentTrades.map(t => ({
+                date: (t.closed_at || '').slice(0, 10),
+                pnl: t.realized_pnl ?? 0,
+                symbol: t.symbol,
+              })).filter(t => t.date)}
             />
           ) : (
             <ChartSkeleton height={400} />

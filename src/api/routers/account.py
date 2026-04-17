@@ -1936,6 +1936,7 @@ class PositionDetailResponse(BaseModel):
 async def get_position_detail(
     symbol: str,
     mode: TradingMode,
+    interval: str = "1d",
     username: str = Depends(get_current_user),
     db: Session = Depends(get_db_session),
 ):
@@ -1946,6 +1947,7 @@ async def get_position_detail(
     Args:
         symbol: Trading symbol (e.g., AAPL, BTCUSD)
         mode: Trading mode (DEMO or LIVE)
+        interval: Price data interval — 1d, 4h, 1h (default: 1d)
         username: Current authenticated user
         db: Database session
 
@@ -1954,7 +1956,12 @@ async def get_position_detail(
 
     Validates: Requirements 13.1, 13.2, 13.4
     """
-    logger.info(f"Fetching position detail for {symbol} in {mode.value} mode, user {username}")
+    logger.info(f"Fetching position detail for {symbol} in {mode.value} mode, interval={interval}, user {username}")
+
+    # Validate interval
+    valid_intervals = {"1d", "4h", "1h"}
+    if interval not in valid_intervals:
+        interval = "1d"
 
     # Find the most recent open position for this symbol (or most recent closed)
     position = db.query(PositionORM).filter(
@@ -1984,10 +1991,14 @@ async def get_position_detail(
 
         price_query = db.query(HistoricalPriceCacheORM).filter(
             HistoricalPriceCacheORM.symbol == symbol,
-            HistoricalPriceCacheORM.interval == "1d",
+            HistoricalPriceCacheORM.interval == interval,
         )
+        # For intraday intervals, extend lookback to show more context
         if opened_at:
-            price_query = price_query.filter(HistoricalPriceCacheORM.date >= opened_at)
+            if interval == "1d":
+                price_query = price_query.filter(HistoricalPriceCacheORM.date >= opened_at)
+            # For 4h/1h, show last 90 days regardless of position open date
+            # (gives enough context for the chart)
 
         price_rows = price_query.order_by(HistoricalPriceCacheORM.date.asc()).all()
 

@@ -8,6 +8,7 @@ import { SectionLabel } from '../components/ui/SectionLabel';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { AssetPlot } from '../components/charts/AssetPlot';
+import { TvChart } from '../components/charts/TvChart';
 import { InteractiveChart } from '../components/charts/InteractiveChart';
 import { useTradingMode } from '../contexts/TradingModeContext';
 import { apiClient } from '../services/api';
@@ -29,6 +30,10 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null);
+
+  // Multi-timeframe data: 1d, 4h, 1h
+  const [mtfData, setMtfData] = useState<Record<string, any[]>>({});
+  const [mtfLoading, setMtfLoading] = useState(false);
 
   // Real-time price streaming via WebSocket
   const wsConnected = useWebSocketConnection();
@@ -77,10 +82,24 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
     try {
       setLoading(true);
       setError(null);
-      const data = await apiClient.getPositionDetail(symbol, tradingMode);
+      const data = await apiClient.getPositionDetail(symbol, tradingMode, '1d');
       setDetail(data);
       setLivePriceData([]); // Reset live ticks on fresh fetch
       lastTickRef.current = null;
+
+      // Fetch multi-timeframe data in background (non-blocking)
+      setMtfLoading(true);
+      Promise.all([
+        apiClient.getPositionDetail(symbol, tradingMode, '4h').catch(() => null),
+        apiClient.getPositionDetail(symbol, tradingMode, '1h').catch(() => null),
+      ]).then(([data4h, data1h]) => {
+        setMtfData({
+          '1d': data?.price_history || [],
+          '4h': data4h?.price_history || [],
+          '1h': data1h?.price_history || [],
+        });
+        setMtfLoading(false);
+      });
     } catch (err) {
       const classified = classifyError(err, 'position detail');
       setError(classified.message);
@@ -248,10 +267,78 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
               )}
             </div>
 
+            {/* Multi-Timeframe View — 2×2 grid of synchronized charts */}
+            <div className="border border-border rounded-md p-3">
+              <div className="flex items-center justify-between mb-2">
+                <SectionLabel className="mb-0">Multi-Timeframe — {symbol}</SectionLabel>
+                {mtfLoading && <span className="text-[10px] text-gray-500 font-mono">Loading...</span>}
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                {(['1d', '4h', '1h'] as const).map((tf) => {
+                  const tfData = tf === '1d' ? (detail?.price_history || []) : (mtfData[tf] || []);
+                  const series = tfData.length > 0 ? [{
+                    id: `price_${tf}`,
+                    type: 'area' as const,
+                    data: tfData.map((d: any) => ({
+                      time: d.date?.slice(0, 10) || d.date,
+                      value: d.close ?? d.price ?? 0,
+                    })).filter((d: any) => d.value > 0),
+                    lineColor: '#3b82f6',
+                    topColor: 'rgba(59,130,246,0.15)',
+                    bottomColor: 'transparent',
+                    lineWidth: 1,
+                  }] : [];
+                  return (
+                    <div key={tf} className="rounded border border-[var(--color-dark-border)] overflow-hidden">
+                      <div className="px-2 py-0.5 bg-[var(--color-dark-surface)] border-b border-[var(--color-dark-border)]">
+                        <span className="text-[10px] font-mono text-gray-400">{tf.toUpperCase()}</span>
+                      </div>
+                      {series.length > 0 ? (
+                        <TvChart height={120} series={series} showTimeScale={false} showPriceScale={true} />
+                      ) : (
+                        <div className="flex items-center justify-center h-[120px] text-[10px] text-gray-600 font-mono">
+                          {mtfLoading ? 'Loading...' : 'No data'}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {/* 4th pane: P&L chart */}
+                <div className="rounded border border-[var(--color-dark-border)] overflow-hidden">
+                  <div className="px-2 py-0.5 bg-[var(--color-dark-surface)] border-b border-[var(--color-dark-border)]">
+                    <span className="text-[10px] font-mono text-gray-400">P&L</span>
+                  </div>
+                  {(detail?.pnl_series || []).length > 0 ? (
+                    <TvChart
+                      height={120}
+                      series={[{
+                        id: 'pnl_mtf',
+                        type: 'baseline',
+                        data: (detail.pnl_series || []).map((d: any) => ({
+                          time: d.date?.slice(0, 10),
+                          value: d.pnl ?? 0,
+                        })).filter((d: any) => d.time),
+                        baseValue: 0,
+                        topFillColor1: 'rgba(34,197,94,0.2)',
+                        topFillColor2: 'rgba(34,197,94,0.02)',
+                        bottomFillColor1: 'rgba(239,68,68,0.02)',
+                        bottomFillColor2: 'rgba(239,68,68,0.2)',
+                        topLineColor: '#22c55e',
+                        bottomLineColor: '#ef4444',
+                        lineWidth: 1,
+                      }]}
+                      showTimeScale={false}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-[120px] text-[10px] text-gray-600 font-mono">No P&L data</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* P&L Time-Series Chart */}
             <div className="border border-border rounded-md p-4">
-              <SectionLabel>P&L Over Time</SectionLabel>
-              <p className="text-xs text-muted-foreground mb-2">Unrealized P&L for this position over its holding period</p>
+              <SectionLabel>P&L Over Time</SectionLabel>              <p className="text-xs text-muted-foreground mb-2">Unrealized P&L for this position over its holding period</p>
               {pnlHistory.length > 0 ? (
                 <InteractiveChart
                   data={pnlHistory}

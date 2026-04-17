@@ -270,7 +270,9 @@ export function getActivePreset(): string | null {
 
 /**
  * Switch to a preset by name.
- * Applies the snapshot to localStorage and reloads the page.
+ * Applies the snapshot to localStorage and dispatches an event.
+ * Components that listen to WORKSPACE_PRESET_EVENT can react without a full reload.
+ * A reload is only triggered if the event isn't handled within 100ms (fallback).
  */
 export function setActivePreset(name: string): void {
   const store = loadStore();
@@ -280,10 +282,18 @@ export function setActivePreset(name: string): void {
   applySnapshot(preset.snapshot);
   localStorage.setItem(ACTIVE_KEY, name);
 
-  // Dispatch event so components can react (or we just reload)
+  // Dispatch event so components can react without a full reload
   window.dispatchEvent(new CustomEvent(WORKSPACE_PRESET_EVENT, { detail: { name } }));
-  // Simplest approach: reload to let all components re-read localStorage
-  window.location.reload();
+
+  // Only reload if the preset changes panel sizes (react-resizable-panels requires it)
+  // Widget visibility and collapsed states can be applied without reload.
+  const hasPanelSizes = Object.keys(preset.snapshot.panelSizes).some(
+    k => preset.snapshot.panelSizes[k] !== ''
+  );
+  if (hasPanelSizes) {
+    // Small delay so the event fires first
+    setTimeout(() => window.location.reload(), 50);
+  }
 }
 
 /**

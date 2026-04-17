@@ -13,6 +13,8 @@ interface EquityCurveChartProps {
   period: string;
   onPeriodChange: (period: string) => void;
   height?: number | string;
+  /** Optional closed trades for trade markers on the equity curve */
+  trades?: Array<{ date: string; pnl: number; symbol?: string }>;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -51,6 +53,7 @@ function buildSeries(
   equityData: Array<{ date: string; equity: number }>,
   spyData: Array<{ date: string; close: number }> | undefined,
   period: string,
+  trades?: Array<{ date: string; pnl: number; symbol?: string }>,
 ) {
   // Filter equity data by period
   const filteredEquity = filterDataByPeriod(
@@ -133,6 +136,55 @@ function buildSeries(
     lineWidth: 2,
   });
 
+  // Trade markers — green dots for wins, red dots for losses, sized by |P&L|
+  // Rendered as a scatter-style line series with zero width (just markers)
+  const tradeMarkers: Array<{ time: string; value: number; color: string; size: number }> = [];
+  if (trades && trades.length > 0 && normPortfolio.length > 0) {
+    const equityMap = new Map(normPortfolio.map(d => [d.date, d.value]));
+    const filteredTrades = filterDataByPeriod(
+      trades.map(t => ({ ...t })),
+      'date',
+      period,
+    );
+    for (const trade of filteredTrades) {
+      const date = trade.date?.slice(0, 10);
+      if (!date) continue;
+      // Find nearest equity value for this date
+      const equityVal = equityMap.get(date) ?? [...equityMap.entries()]
+        .filter(([d]) => d <= date)
+        .sort(([a], [b]) => b.localeCompare(a))[0]?.[1];
+      if (equityVal === undefined) continue;
+      const absP = Math.abs(trade.pnl);
+      // Size: 1-4 based on P&L magnitude (capped at $500 for max size)
+      const size = Math.min(4, Math.max(1, Math.round(absP / 125)));
+      tradeMarkers.push({
+        time: date,
+        value: equityVal,
+        color: trade.pnl >= 0 ? '#22c55e' : '#ef4444',
+        size,
+      });
+    }
+  }
+
+  if (tradeMarkers.length > 0) {
+    mainSeries.push({
+      id: 'trade_markers',
+      type: 'line',
+      data: tradeMarkers.map(m => ({ time: m.time, value: m.value, color: m.color })),
+      color: 'transparent',
+      lineWidth: 0,
+    });
+    // Store markers for post-render attachment via __markers
+    (mainSeries[mainSeries.length - 1] as any).__tradeMarkers = tradeMarkers.map(m => ({
+      time: m.time,
+      position: 'inBar' as const,
+      color: m.color,
+      shape: 'circle' as const,
+      size: m.size,
+      text: '',
+    }));
+  }
+
   // ── Drawdown sub-chart series ──
   const drawdownRaw = computeDrawdown(
     filteredEquity.map((d) => ({ date: d.date, value: d.equity })),
@@ -163,10 +215,11 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
   period,
   onPeriodChange,
   height = 400,
+  trades,
 }) => {
   const { mainSeries, drawdownSeries } = useMemo(
-    () => buildSeries(equityData, spyData, period),
-    [equityData, spyData, period],
+    () => buildSeries(equityData, spyData, period, trades),
+    [equityData, spyData, period, trades],
   );
 
   const numericHeight = typeof height === 'number' ? height : 400;
