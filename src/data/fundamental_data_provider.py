@@ -2183,7 +2183,13 @@ def get_fundamental_data_provider(config: Optional[Dict] = None) -> 'Fundamental
     """
     global _singleton_instance
     if _singleton_instance is not None:
-        return _singleton_instance
+        # If the existing singleton has a placeholder key, reset it so it gets
+        # recreated with the real key from api_keys.yaml on next call.
+        if getattr(_singleton_instance, 'fmp_api_key', '') in ('', 'REPLACE_VIA_SECRETS_MANAGER'):
+            logger.info("FundamentalDataProvider singleton has placeholder FMP key — resetting to pick up real key")
+            _singleton_instance = None
+        else:
+            return _singleton_instance
 
     with _singleton_lock:
         # Double-checked locking: re-check inside the lock
