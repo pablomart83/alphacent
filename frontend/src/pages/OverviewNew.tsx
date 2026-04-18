@@ -203,6 +203,44 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     setEquityPeriod(periodMap[period] || '3M');
   }, []);
 
+  // ── Rolling Sharpe series (30-day rolling) ─────────────────────────────
+  const rollingSharpe30 = useMemo(() => {
+    const curve = dashboard?.equity_curve ?? [];
+    if (curve.length < 31) return [];
+    const returns: number[] = [];
+    for (let i = 1; i < curve.length; i++) {
+      const prev = curve[i - 1].equity;
+      const curr = curve[i].equity;
+      returns.push(prev > 0 ? (curr - prev) / prev : 0);
+    }
+    const result: Array<{ time: string; value: number }> = [];
+    for (let i = 29; i < returns.length; i++) {
+      const window = returns.slice(i - 29, i + 1);
+      const mean = window.reduce((s, v) => s + v, 0) / 30;
+      const std = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / 30) || 0.0001;
+      const sharpe = (mean / std) * Math.sqrt(252);
+      result.push({ time: curve[i + 1].date, value: Math.round(sharpe * 100) / 100 });
+    }
+    return result;
+  }, [dashboard?.equity_curve]);
+
+  // ── Daily P&L histogram ────────────────────────────────────────────────
+  const dailyPnlBars = useMemo(() => {
+    const table = (dashboard as any)?.daily_pnl_table as Array<{ date: string; daily_pnl: number }> | undefined;
+    if (table && table.length > 0) {
+      return table.map(r => ({
+        time: r.date,
+        value: r.daily_pnl,
+        color: r.daily_pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)',
+      }));
+    }
+    const curve = dashboard?.equity_curve ?? [];
+    return curve.slice(1).map((d, i) => {
+      const pnl = d.equity - curve[i].equity;
+      return { time: d.date, value: pnl, color: pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)' };
+    });
+  }, [dashboard]);
+
   // Build compact metrics for left panel
   const compactMetrics: CompactMetric[] = useMemo(() => {
     const d = dashboard;
@@ -357,45 +395,6 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
       </PanelHeader>
     </div>
   );
-
-  // ── Rolling Sharpe series (30-day rolling) ─────────────────────────────
-  const rollingSharpe30 = useMemo(() => {
-    const curve = dashboard?.equity_curve ?? [];
-    if (curve.length < 31) return [];
-    const returns: number[] = [];
-    for (let i = 1; i < curve.length; i++) {
-      const prev = curve[i - 1].equity;
-      const curr = curve[i].equity;
-      returns.push(prev > 0 ? (curr - prev) / prev : 0);
-    }
-    const result: Array<{ time: string; value: number }> = [];
-    for (let i = 29; i < returns.length; i++) {
-      const window = returns.slice(i - 29, i + 1);
-      const mean = window.reduce((s, v) => s + v, 0) / 30;
-      const std = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / 30) || 0.0001;
-      const sharpe = (mean / std) * Math.sqrt(252);
-      result.push({ time: curve[i + 1].date, value: Math.round(sharpe * 100) / 100 });
-    }
-    return result;
-  }, [dashboard?.equity_curve]);
-
-  // ── Daily P&L histogram ────────────────────────────────────────────────
-  const dailyPnlBars = useMemo(() => {
-    const table = (dashboard as any)?.daily_pnl_table as Array<{ date: string; daily_pnl: number }> | undefined;
-    if (table && table.length > 0) {
-      return table.map(r => ({
-        time: r.date,
-        value: r.daily_pnl,
-        color: r.daily_pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)',
-      }));
-    }
-    // Derive from equity curve
-    const curve = dashboard?.equity_curve ?? [];
-    return curve.slice(1).map((d, i) => {
-      const pnl = d.equity - curve[i].equity;
-      return { time: d.date, value: pnl, color: pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)' };
-    });
-  }, [dashboard]);
 
   // ── Center Panel Content ───────────────────────────────────────────────
   const centerPanel = (
