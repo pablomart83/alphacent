@@ -1165,6 +1165,13 @@ class OrderMonitor:
                 side_str = str(p.side).upper() if p.side else 'LONG'
                 key = (p.strategy_id, p.symbol, side_str)
                 db_by_strategy_symbol[key] = p
+
+            # Build a set of ALL etoro_position_ids (open AND closed) to prevent
+            # UniqueViolation when trying to assign an ID already held by a closed row.
+            all_etoro_ids_in_db: set = set(
+                row[0] for row in session.query(PositionORM.etoro_position_id)
+                .filter(PositionORM.etoro_position_id.isnot(None)).all()
+            )
             
             # Update/create positions that exist on eToro
             for pos in positions:
@@ -1310,11 +1317,8 @@ class OrderMonitor:
                         # If a closed duplicate holds it, skip the ID update to avoid UniqueViolation.
                         new_etoro_id = pos.etoro_position_id
                         id_already_taken = (
-                            new_etoro_id in db_by_etoro_id or
-                            session.query(PositionORM).filter(
-                                PositionORM.etoro_position_id == new_etoro_id,
-                                PositionORM.id != existing_by_strategy.id,
-                            ).count() > 0
+                            new_etoro_id in all_etoro_ids_in_db
+                            and new_etoro_id != existing_by_strategy.etoro_position_id
                         )
                         if id_already_taken:
                             logger.debug(
