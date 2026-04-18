@@ -3189,6 +3189,7 @@ class StrategyEngine:
         total_commission_cost = 0.0
         total_slippage_cost = 0.0
         total_spread_cost = 0.0
+        total_cost_pct = 0.0
         
         if commission > 0 or slippage_bps > 0:
             # Load spread from config — asset-class-aware

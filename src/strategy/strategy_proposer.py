@@ -1467,6 +1467,10 @@ class StrategyProposer:
                 if not (tv and tev and het and not ov):
                     mc_passed_ids.add(s.id)  # Already filtered out below — don't double-filter
                     continue
+                # wf may be None when loaded from 4-tuple disk cache
+                if wf is None:
+                    mc_passed_ids.add(s.id)
+                    continue
                 test_results = wf.get('test_results')
                 if test_results is None:
                     mc_passed_ids.add(s.id)
