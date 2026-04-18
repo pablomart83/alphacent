@@ -12,6 +12,8 @@ interface EquityCurveChartProps {
   spyData?: Array<{ date: string; close: number }>;
   period: string;
   onPeriodChange: (period: string) => void;
+  interval?: string;
+  onIntervalChange?: (interval: string) => void;
   height?: number | string;
   /** Optional closed trades for trade markers on the equity curve */
   trades?: Array<{ date: string; pnl: number; symbol?: string }>;
@@ -214,6 +216,8 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
   spyData,
   period,
   onPeriodChange,
+  interval = '1d',
+  onIntervalChange,
   height = 400,
   trades,
 }) => {
@@ -230,7 +234,7 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
 
   return (
     <div className={fillParent ? 'w-full h-full flex flex-col' : 'w-full'}>
-      {/* Header: Period selector + legend + benchmark badge */}
+      {/* Header: Period selector + interval selector + legend + benchmark badge */}
       <div className="flex items-center justify-between mb-1 shrink-0">
         <div className="flex items-center gap-3">
           <TvPeriodSelector
@@ -238,6 +242,24 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
             activePeriod={period}
             onPeriodChange={onPeriodChange}
           />
+          {/* Interval selector — only shown when handler is provided */}
+          {onIntervalChange && (
+            <div className="flex items-center gap-0.5">
+              {(['1d', '4h', '1h'] as const).map((iv) => (
+                <button
+                  key={iv}
+                  onClick={() => onIntervalChange(iv)}
+                  className={`px-1.5 py-0.5 text-[10px] font-mono rounded transition-colors ${
+                    interval === iv
+                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
+                  }`}
+                >
+                  {iv.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-3 text-xs font-mono">
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-0.5 bg-[#3b82f6] rounded" />

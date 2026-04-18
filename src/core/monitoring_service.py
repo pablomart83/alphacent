@@ -130,11 +130,10 @@ class MonitoringService:
         self._last_alert_check: float = 0
         self._alert_check_interval = 60
         
-        # Hourly price data sync — pre-fetches market data into cache so signal
-        # generation and manual cycles don't have to hit Yahoo Finance every time.
-        # Runs every ~55 minutes (just before the :05 signal generation run).
+        # Hourly price data sync — pre-warm cache for signal generation
+        # Runs in background thread to never block monitoring
         self._last_price_sync: float = 0  # Run on first loop iteration (in background thread)
-        self._price_sync_interval = 3300  # 55 minutes
+        self._price_sync_interval = 3600  # 60 minutes — aligned with hourly equity snapshots
         self._price_sync_retry_interval = 300  # 5 minutes — retry after skip
         self._price_sync_completed = False  # Flag for manual sync status polling (Data Management page)
         self._background_sync_completed = False  # Flag for trading scheduler — only set by automatic background sync

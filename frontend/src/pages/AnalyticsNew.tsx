@@ -24,6 +24,7 @@ import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
 import { SVGBarChart } from '../components/charts/SVGBarChart';
 import { TvChart } from '../components/charts/TvChart';
+import { EquityCurveChart } from '../components/charts/EquityCurveChart';
 import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
@@ -716,16 +717,6 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           <SelectItem value="ALL">All Time</SelectItem>
         </SelectContent>
       </Select>
-      <Select value={equityInterval} onValueChange={(value) => setEquityInterval(value as typeof equityInterval)}>
-        <SelectTrigger className="w-[72px] h-7 text-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="1d">1D</SelectItem>
-          <SelectItem value="4h">4H</SelectItem>
-          <SelectItem value="1h">1H</SelectItem>
-        </SelectContent>
-      </Select>
       <button onClick={handleExportCSV} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Export CSV">
         <Download className="h-3.5 w-3.5" />
       </button>
@@ -1186,30 +1177,16 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             <SectionLabel>Equity Curve</SectionLabel>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.1 }}>
-              <TvChart
-                height={300}
-                series={[{
-                  id: 'portfolio',
-                  type: 'area',
-                  data: (() => {
-                    const raw = perfStats?.equity_curve || performanceMetrics?.equity_curve || [];
-                    if (!raw.length) return [];
-                    // Deduplicate by date — keep last value per date, then sort ascending
-                    const byDate = new Map<string, number>();
-                    raw.forEach((d: any) => {
-                      const date = typeof d.date === 'string' ? d.date.slice(0, 10) : null;
-                      if (date) byDate.set(date, d.portfolio ?? d.value ?? 0);
-                    });
-                    return Array.from(byDate.entries())
-                      .sort(([a], [b]) => a.localeCompare(b))
-                      .filter(([, v]) => v > 0)
-                      .map(([date, value]) => ({ time: date, value }));
-                  })(),
-                  lineColor: '#10b981',
-                  topColor: 'rgba(16, 185, 129, 0.3)',
-                  bottomColor: 'rgba(16, 185, 129, 0)',
-                  lineWidth: 2,
-                }]}
+              <EquityCurveChart
+                equityData={(perfStats?.equity_curve || performanceMetrics?.equity_curve || []).map((d: any) => ({
+                  date: typeof d.date === 'string' ? d.date.slice(0, 10) : '',
+                  equity: d.portfolio ?? d.value ?? 0,
+                }))}
+                period={period}
+                onPeriodChange={(p) => setPeriod(p as typeof period)}
+                interval={equityInterval}
+                onIntervalChange={(iv: string) => setEquityInterval(iv as typeof equityInterval)}
+                height={320}
               />
             </motion.div>
 

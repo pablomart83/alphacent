@@ -13,15 +13,14 @@ import type { CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
 import { EquityCurveChart } from '../components/charts/EquityCurveChart';
-import { PeriodSelector } from '../components/charts/PeriodSelector';
 import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
+import { ActivityPanel } from '../components/ActivityPanel';
 import { useTradingMode } from '../contexts/TradingModeContext';
 import { usePolling } from '../hooks/usePolling';
 import { apiClient } from '../services/api';
 import { wsManager } from '../services/websocket';
-import { cn, formatCurrency } from '../lib/utils';
-import { formatDate } from '../lib/date-utils';
+import { cn } from '../lib/utils';
 import { classifyError } from '../lib/errors';
 import { toast } from 'sonner';
 import type { Position, Strategy } from '../types';
@@ -48,19 +47,6 @@ interface DashboardData {
 }
 
 // ── Asset class helpers ────────────────────────────────────────────────────
-
-const ASSET_CLASS_MAP: Record<string, string> = {
-  Technology: 'Stocks', Healthcare: 'Stocks', 'Consumer Cyclical': 'Stocks',
-  'Consumer Defensive': 'Stocks', Financial: 'Stocks', Industrials: 'Stocks',
-  Energy: 'Stocks', Utilities: 'Stocks', 'Real Estate': 'Stocks',
-  'Basic Materials': 'Stocks', 'Communication Services': 'Stocks',
-  ETF: 'ETFs', Forex: 'Forex', Crypto: 'Crypto',
-  Indices: 'Indices', Commodities: 'Commodities',
-};
-
-function classifyAssetClass(sector: string): string {
-  return ASSET_CLASS_MAP[sector] || 'Stocks';
-}
 
 // ── Strategy pipeline stages ───────────────────────────────────────────────
 
@@ -124,31 +110,6 @@ function calcReturnsFromEquityCurve(
   return result;
 }
 
-// ── Position summary by asset class ────────────────────────────────────────
-
-interface AssetClassSummary {
-  assetClass: string;
-  count: number;
-  totalPnl: number;
-}
-
-function buildAssetClassSummary(
-  sectorExposure: DashboardData['sector_exposure'],
-): AssetClassSummary[] {
-  const map = new Map<string, AssetClassSummary>();
-  for (const s of sectorExposure) {
-    const ac = classifyAssetClass(s.sector);
-    const existing = map.get(ac);
-    if (existing) {
-      existing.count += s.position_count;
-      existing.totalPnl += s.pnl;
-    } else {
-      map.set(ac, { assetClass: ac, count: s.position_count, totalPnl: s.pnl });
-    }
-  }
-  return Array.from(map.values()).sort((a, b) => b.count - a.count);
-}
-
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
@@ -164,6 +125,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const [_error, setError] = useState<string | null>(null);
   const [lastFetchedAt, setLastFetchedAt] = useState<Date | null>(null);
   const [equityPeriod, setEquityPeriod] = useState('3M');
+  const [equityInterval, setEquityInterval] = useState<'1d' | '4h' | '1h'>('1d');
   const [showBenchmark, setShowBenchmark] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -218,11 +180,6 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const multiTimeframeReturns = useMemo(
     () => calcReturnsFromEquityCurve(dashboard?.equity_curve ?? []),
     [dashboard?.equity_curve],
-  );
-
-  const assetClassSummary = useMemo(
-    () => buildAssetClassSummary(dashboard?.sector_exposure ?? []),
-    [dashboard?.sector_exposure],
   );
 
   const strategyCounts = useMemo(
@@ -330,10 +287,6 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   // ── Center panel toolbar actions ───────────────────────────────────────
   const centerToolbar = (
     <div className="flex items-center gap-2">
-      <PeriodSelector
-        activePeriod={equityPeriod}
-        onPeriodChange={setEquityPeriod}
-      />
       <button
         onClick={() => setShowBenchmark(!showBenchmark)}
         className={cn(
@@ -415,6 +368,8 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
               spyData={effectiveSpyData}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
+              interval={equityInterval}
+              onIntervalChange={(iv: string) => setEquityInterval(iv as '1d' | '4h' | '1h')}
               height={450}
               trades={recentTrades.map(t => ({
                 date: (t.closed_at || '').slice(0, 10),
@@ -434,70 +389,8 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const rightPanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Activity" panelId="overview-activity" onRefresh={refresh}>
-        <div className="flex flex-col gap-1.5 p-1.5">
-          {/* Recent Trades */}
-          <div>
-            <div className="text-xs font-medium text-gray-500 tracking-wide mb-1.5">
-              Recent Trades
-            </div>
-            {recentTrades.length > 0 ? (
-              <div className="space-y-1">
-                {recentTrades.map((trade) => (
-                  <div key={trade.id} className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-xs font-mono font-semibold text-gray-200 truncate">{trade.symbol}</span>
-                      <span className={cn(
-                        'text-xs font-mono px-1 py-0.5 rounded',
-                        trade.side === 'BUY' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400',
-                      )}>
-                        {trade.side}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className={cn(
-                        'text-xs font-mono font-semibold',
-                        (trade.realized_pnl ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red',
-                      )}>
-                        {(trade.realized_pnl ?? 0) >= 0 ? '+' : ''}{formatCurrency(trade.realized_pnl ?? 0)}
-                      </span>
-                      <span className="text-xs text-muted-foreground font-mono">
-                        {trade.closed_at ? formatDate(trade.closed_at, 'MMM d') : '—'}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground text-center py-4">No recent trades</p>
-            )}
-          </div>
-
-          {/* Position Summary by Asset Class */}
-          <div>
-            <div className="text-xs font-medium text-gray-500 tracking-wide mb-1.5">
-              Positions by Asset Class
-            </div>
-            {assetClassSummary.length > 0 ? (
-              <div className="space-y-1">
-                {assetClassSummary.map((ac) => (
-                  <div key={ac.assetClass} className="flex items-center justify-between py-1 border-b border-border/30 last:border-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs text-gray-200">{ac.assetClass}</span>
-                      <span className="text-xs text-muted-foreground font-mono">({ac.count})</span>
-                    </div>
-                    <span className={cn(
-                      'text-xs font-mono font-semibold',
-                      ac.totalPnl > 0 ? 'text-accent-green' : ac.totalPnl < 0 ? 'text-accent-red' : 'text-gray-400',
-                    )}>
-                      {ac.totalPnl >= 0 ? '+' : ''}{formatCurrency(ac.totalPnl)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground text-center py-4">No open positions</p>
-            )}
-          </div>
+        <div className="flex flex-col h-full min-h-0 overflow-hidden">
+          <ActivityPanel initialStrategies={strategies} />
         </div>
       </PanelHeader>
     </div>
