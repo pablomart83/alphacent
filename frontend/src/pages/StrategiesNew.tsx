@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { SectionLabel } from '../components/ui/SectionLabel';
 import { MetricGrid } from '../components/ui/MetricGrid';
 import { FilterBar } from '../components/ui/FilterBar';
+import { TvChart } from '../components/charts/TvChart';
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
@@ -1564,6 +1565,40 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 )}
               </div>
             </div>
+
+            {/* Strategy Equity Curves Overlay — normalized to 100 */}
+            {(() => {
+              const strategiesWithCurves = activeStrategies
+                .filter(s => s.backtest_results?.equity_curve && s.backtest_results.equity_curve.length >= 2)
+                .slice(0, 12);
+              if (strategiesWithCurves.length < 2) return null;
+              const CURVE_COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#f97316','#84cc16','#6366f1','#14b8a6','#a78bfa'];
+              const series = strategiesWithCurves.map((s, i) => {
+                const raw = s.backtest_results!.equity_curve!;
+                const base = raw[0].equity || 1;
+                return {
+                  id: `strat_${s.id}`,
+                  type: 'line' as const,
+                  data: raw.map(p => ({ time: p.timestamp.slice(0, 10), value: (p.equity / base) * 100 })),
+                  color: CURVE_COLORS[i % CURVE_COLORS.length],
+                  lineWidth: 1,
+                };
+              });
+              return (
+                <div className="border-t border-[var(--color-dark-border)] pt-2">
+                  <SectionLabel>Strategy Equity Curves (Normalized)</SectionLabel>
+                  <TvChart series={series} height={200} showTimeScale autoResize />
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 px-1">
+                    {strategiesWithCurves.map((s, i) => (
+                      <div key={s.id} className="flex items-center gap-1">
+                        <div className="w-2.5 h-0.5 rounded" style={{ backgroundColor: CURVE_COLORS[i % CURVE_COLORS.length] }} />
+                        <span className="text-[10px] font-mono text-gray-500 truncate max-w-[80px]">{s.symbols[0] || s.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </TabsContent>
 
           {/* Active Strategies Tab */}

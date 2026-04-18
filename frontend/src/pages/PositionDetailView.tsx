@@ -9,12 +9,10 @@ import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { AssetPlot } from '../components/charts/AssetPlot';
 import { TvChart } from '../components/charts/TvChart';
-import { InteractiveChart } from '../components/charts/InteractiveChart';
 import { useTradingMode } from '../contexts/TradingModeContext';
 import { apiClient } from '../services/api';
 import { cn, formatCurrency, formatPercentage } from '../lib/utils';
 import { classifyError } from '../lib/errors';
-import { colors as designColors } from '../lib/design-tokens';
 import { PageSkeleton } from '../components/ui/skeleton';
 import { useMarketData, useWebSocketConnection } from '../hooks/useWebSocket';
 
@@ -336,34 +334,113 @@ export const PositionDetailView: FC<PositionDetailViewProps> = ({ onLogout }) =>
               </div>
             </div>
 
-            {/* P&L Time-Series Chart */}
+            {/* P&L Over Time — TvChart baseline (green above 0, red below) */}
             <div className="border border-border rounded-md p-4">
-              <SectionLabel>P&L Over Time</SectionLabel>              <p className="text-xs text-muted-foreground mb-2">Unrealized P&L for this position over its holding period</p>
-              {pnlHistory.length > 0 ? (
-                <InteractiveChart
-                  data={pnlHistory}
-                  dataKeys={[{ key: 'pnl', color: designColors.green, type: 'area' }]}
-                  xAxisKey="date"
-                  height={250}
-                  tooltipFormatter={(v: number) => [formatCurrency(v), 'P&L']}
-                />
-              ) : priceData.length > 0 && position ? (
-                <InteractiveChart
-                  data={priceData.map((p: any) => ({
-                    date: p.date,
-                    pnl: ((p.price - (position.entry_price || p.price)) / (position.entry_price || 1)) * (position.invested_amount || position.quantity || 100),
-                  }))}
-                  dataKeys={[{ key: 'pnl', color: designColors.green, type: 'area' }]}
-                  xAxisKey="date"
-                  height={250}
-                  tooltipFormatter={(v: number) => [formatCurrency(v), 'P&L']}
-                />
-              ) : (
-                <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">
-                  No P&L history available
-                </div>
-              )}
+              <SectionLabel>P&L Over Time</SectionLabel>
+              <p className="text-xs text-muted-foreground mb-2">Unrealized P&L for this position over its holding period</p>
+              {(() => {
+                // Build P&L series from pnl_history or derive from price data
+                const pnlSeries = (() => {
+                  if (pnlHistory.length > 0) {
+                    return pnlHistory.map((p: any) => ({ time: (p.date || p.timestamp || '').slice(0, 10), value: p.pnl ?? 0 })).filter((d: any) => d.time);
+                  }
+                  if (priceData.length > 0 && position) {
+                    return priceData.map((p: any) => ({
+                      time: p.date.slice(0, 10),
+                      value: ((p.price - (position.entry_price || p.price)) / (position.entry_price || 1)) * (position.invested_amount || position.quantity || 100),
+                    }));
+                  }
+                  return [];
+                })();
+                if (pnlSeries.length < 2) {
+                  return <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">No P&L history available</div>;
+                }
+                return (
+                  <TvChart
+                    series={[{
+                      id: 'pnl_baseline',
+                      type: 'baseline',
+                      data: pnlSeries,
+                      baseValue: 0,
+                      topFillColor1: 'rgba(34,197,94,0.22)',
+                      topFillColor2: 'rgba(34,197,94,0.03)',
+                      bottomFillColor1: 'rgba(239,68,68,0.03)',
+                      bottomFillColor2: 'rgba(239,68,68,0.22)',
+                      topLineColor: '#22c55e',
+                      bottomLineColor: '#ef4444',
+                      lineWidth: 2,
+                    }]}
+                    height={220}
+                    showTimeScale
+                    autoResize
+                  />
+                );
+              })()}
             </div>
+
+            {/* ATR Volatility Context */}
+            {priceData.length >= 14 && (() => {
+              // Compute simple ATR-like band: rolling 14-period high-low range
+              const prices = priceData.map((p: any) => p.close ?? p.price ?? 0).filter((v: number) => v > 0);
+              if (prices.length < 14) return null;
+              const atrData: Array<{ time: string; upper: number; lower: number; mid: number }> = [];
+              for (let i = 13; i < priceData.length; i++) {
+                const window = prices.slice(i - 13, i + 1);
+                const hi = Math.max(...window);
+                const lo = Math.min(...window);
+                const mid = (hi + lo) / 2;
+                const atr = (hi - lo) / 2;
+                atrData.push({
+                  time: priceData[i].date.slice(0, 10),
+                  upper: mid + atr,
+                  lower: mid - atr,
+                  mid,
+                });
+              }
+              return (
+                <div className="border border-border rounded-md p-4">
+                  <SectionLabel>ATR Volatility Bands (14-period)</SectionLabel>
+                  <p className="text-xs text-muted-foreground mb-2">Price relative to 14-period high-low range — helps contextualise position behaviour</p>
+                  <TvChart
+                    series={[
+                      {
+                        id: 'atr_upper',
+                        type: 'line',
+                        data: atrData.map(d => ({ time: d.time, value: d.upper })),
+                        color: 'rgba(239,68,68,0.5)',
+                        lineWidth: 1,
+                        dashed: true,
+                      },
+                      {
+                        id: 'atr_lower',
+                        type: 'line',
+                        data: atrData.map(d => ({ time: d.time, value: d.lower })),
+                        color: 'rgba(34,197,94,0.5)',
+                        lineWidth: 1,
+                        dashed: true,
+                      },
+                      {
+                        id: 'atr_mid',
+                        type: 'area',
+                        data: priceData.slice(13).map((p: any) => ({ time: p.date.slice(0, 10), value: p.close ?? p.price ?? 0 })),
+                        lineColor: '#3b82f6',
+                        topColor: 'rgba(59,130,246,0.12)',
+                        bottomColor: 'transparent',
+                        lineWidth: 2,
+                      },
+                    ]}
+                    height={200}
+                    showTimeScale
+                    autoResize
+                  />
+                  <div className="flex items-center gap-4 mt-1 text-xs font-mono">
+                    <span className="flex items-center gap-1"><span className="w-3 h-px bg-[#ef4444] inline-block" style={{ borderTop: '1px dashed #ef4444' }} /> Upper band</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-px bg-[#22c55e] inline-block" style={{ borderTop: '1px dashed #22c55e' }} /> Lower band</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-[#3b82f6] inline-block rounded" /> Price</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Order History Table */}
             {hasOrders && (

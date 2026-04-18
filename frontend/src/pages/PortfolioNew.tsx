@@ -1362,6 +1362,43 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
               <p className="text-xs text-muted-foreground text-center py-2">No positions</p>
             )}
           </div>
+
+          {/* Thin separator */}
+          <div className="h-px bg-[var(--color-dark-border)] mx-2" />
+
+          {/* P&L Waterfall — positions sorted by unrealized P&L */}
+          <div className="px-2 py-2">
+            <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">P&L Waterfall</div>
+            {positions.length > 0 ? (() => {
+              const sorted = [...positions]
+                .sort((a, b) => b.unrealized_pnl - a.unrealized_pnl);
+              const maxAbs = Math.max(...sorted.map(p => Math.abs(p.unrealized_pnl)), 1);
+              return (
+                <div className="space-y-0.5">
+                  {sorted.slice(0, 15).map(p => {
+                    const pct = (Math.abs(p.unrealized_pnl) / maxAbs) * 100;
+                    const isWin = p.unrealized_pnl >= 0;
+                    return (
+                      <div key={p.id} className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono text-gray-400 w-12 truncate">{p.symbol}</span>
+                        <div className="flex-1 h-2.5 bg-gray-800 rounded-sm overflow-hidden">
+                          <div
+                            className="h-full rounded-sm"
+                            style={{ width: `${pct}%`, backgroundColor: isWin ? 'rgba(34,197,94,0.65)' : 'rgba(239,68,68,0.65)' }}
+                          />
+                        </div>
+                        <span className={cn('text-[10px] font-mono w-14 text-right', isWin ? 'text-accent-green' : 'text-accent-red')}>
+                          {p.unrealized_pnl >= 0 ? '+' : ''}{formatCurrency(p.unrealized_pnl)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })() : (
+              <p className="text-xs text-muted-foreground text-center py-2">No positions</p>
+            )}
+          </div>
         </div>
       </PanelHeader>
     </div>

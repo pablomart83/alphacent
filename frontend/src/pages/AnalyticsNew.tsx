@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 import { SVGBarChart } from '../components/charts/SVGBarChart';
 import { TvChart } from '../components/charts/TvChart';
 import { EquityCurveChart } from '../components/charts/EquityCurveChart';
+import { UnderwaterPlot } from '../components/charts/UnderwaterPlot';
 import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
@@ -1130,6 +1131,53 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             )}
 
             {/* Expectancy & Profit Factor */}
+            <SectionLabel>Expectancy & Profit Factor</SectionLabel>
+            {/* Underwater Plot — drawdown duration */}
+            {performanceMetrics && performanceMetrics.drawdown_curve.length > 1 && (
+              <>
+                <SectionLabel>Drawdown Duration (Underwater Plot)</SectionLabel>
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.04 }}>
+                  <UnderwaterPlot
+                    data={performanceMetrics.drawdown_curve.map(d => ({ date: d.date, drawdown_pct: d.drawdown }))}
+                    height={160}
+                  />
+                </motion.div>
+              </>
+            )}
+
+            {/* Regime Performance Waterfall */}
+            {regimeAnalysis && regimeAnalysis.performance_by_regime.length > 0 && (
+              <>
+                <SectionLabel>P&L by Market Regime</SectionLabel>
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.042 }}>
+                  <TvChart
+                    series={[{
+                      id: 'regime_pnl',
+                      type: 'histogram',
+                      data: regimeAnalysis.performance_by_regime.map((r, i) => ({
+                        time: String(i + 1) as any,
+                        value: r.return,
+                        color: r.return >= 0 ? 'rgba(34,197,94,0.75)' : 'rgba(239,68,68,0.75)',
+                      })),
+                      priceScaleId: '',
+                    }]}
+                    height={130}
+                    showTimeScale={false}
+                    autoResize
+                  />
+                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 px-1">
+                    {regimeAnalysis.performance_by_regime.map((r, i) => (
+                      <div key={r.regime} className="flex items-center gap-1 text-xs font-mono">
+                        <span className={cn('font-semibold', r.return >= 0 ? 'text-accent-green' : 'text-accent-red')}>{i + 1}.</span>
+                        <span className="text-gray-400">{r.regime.replace(/_/g, ' ')}</span>
+                        <span className={cn('font-semibold', r.return >= 0 ? 'text-accent-green' : 'text-accent-red')}>{r.return >= 0 ? '+' : ''}{r.return.toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              </>
+            )}
+
             <SectionLabel>Expectancy & Profit Factor</SectionLabel>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.05 }} className="grid grid-cols-1 md:grid-cols-2 gap-3">

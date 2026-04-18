@@ -14,6 +14,7 @@ import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator'
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
 import { EquityCurveChart } from '../components/charts/EquityCurveChart';
 import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
+import { TvChart } from '../components/charts/TvChart';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 import { ActivityPanel } from '../components/ActivityPanel';
 import { useTradingMode } from '../contexts/TradingModeContext';
@@ -357,11 +358,50 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     </div>
   );
 
+  // ── Rolling Sharpe series (30-day rolling) ─────────────────────────────
+  const rollingSharpe30 = useMemo(() => {
+    const curve = dashboard?.equity_curve ?? [];
+    if (curve.length < 31) return [];
+    const returns: number[] = [];
+    for (let i = 1; i < curve.length; i++) {
+      const prev = curve[i - 1].equity;
+      const curr = curve[i].equity;
+      returns.push(prev > 0 ? (curr - prev) / prev : 0);
+    }
+    const result: Array<{ time: string; value: number }> = [];
+    for (let i = 29; i < returns.length; i++) {
+      const window = returns.slice(i - 29, i + 1);
+      const mean = window.reduce((s, v) => s + v, 0) / 30;
+      const std = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / 30) || 0.0001;
+      const sharpe = (mean / std) * Math.sqrt(252);
+      result.push({ time: curve[i + 1].date, value: Math.round(sharpe * 100) / 100 });
+    }
+    return result;
+  }, [dashboard?.equity_curve]);
+
+  // ── Daily P&L histogram ────────────────────────────────────────────────
+  const dailyPnlBars = useMemo(() => {
+    const table = (dashboard as any)?.daily_pnl_table as Array<{ date: string; daily_pnl: number }> | undefined;
+    if (table && table.length > 0) {
+      return table.map(r => ({
+        time: r.date,
+        value: r.daily_pnl,
+        color: r.daily_pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)',
+      }));
+    }
+    // Derive from equity curve
+    const curve = dashboard?.equity_curve ?? [];
+    return curve.slice(1).map((d, i) => {
+      const pnl = d.equity - curve[i].equity;
+      return { time: d.date, value: pnl, color: pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)' };
+    });
+  }, [dashboard]);
+
   // ── Center Panel Content ───────────────────────────────────────────────
   const centerPanel = (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-auto">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
-        <div className="p-2 h-full">
+        <div className="p-2 flex flex-col gap-3">
           {d ? (
             <EquityCurveChart
               equityData={d.equity_curve}
@@ -370,7 +410,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
               onPeriodChange={setEquityPeriod}
               interval={equityInterval}
               onIntervalChange={(iv: string) => setEquityInterval(iv as '1d' | '4h' | '1h')}
-              height={450}
+              height={380}
               trades={recentTrades.map(t => ({
                 date: (t.closed_at || '').slice(0, 10),
                 pnl: t.realized_pnl ?? 0,
@@ -378,7 +418,50 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
               })).filter(t => t.date)}
             />
           ) : (
-            <ChartSkeleton height={400} />
+            <ChartSkeleton height={380} />
+          )}
+
+          {/* Daily P&L Histogram */}
+          {dailyPnlBars.length > 1 && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">Daily P&L</div>
+              <TvChart
+                series={[{
+                  id: 'daily_pnl',
+                  type: 'histogram',
+                  data: dailyPnlBars,
+                  priceScaleId: '',
+                }]}
+                height={90}
+                showTimeScale={false}
+                autoResize
+              />
+            </div>
+          )}
+
+          {/* Rolling 30-day Sharpe */}
+          {rollingSharpe30.length > 1 && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">Rolling Sharpe (30d)</div>
+              <TvChart
+                series={[{
+                  id: 'rolling_sharpe',
+                  type: 'baseline',
+                  data: rollingSharpe30,
+                  baseValue: 1,
+                  topFillColor1: 'rgba(34,197,94,0.18)',
+                  topFillColor2: 'rgba(34,197,94,0.02)',
+                  bottomFillColor1: 'rgba(239,68,68,0.02)',
+                  bottomFillColor2: 'rgba(239,68,68,0.18)',
+                  topLineColor: '#22c55e',
+                  bottomLineColor: '#ef4444',
+                  lineWidth: 1,
+                }]}
+                height={90}
+                showTimeScale
+                autoResize
+              />
+            </div>
           )}
         </div>
       </PanelHeader>

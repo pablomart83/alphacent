@@ -28,7 +28,6 @@ import { usePolling } from '../hooks/usePolling';
 import { apiClient } from '../services/api';
 import { wsManager } from '../services/websocket';
 import { cn, formatCurrency, formatPercentage } from '../lib/utils';
-import { utcToLocal } from '../lib/date-utils';
 import { classifyError, type ClassifiedError } from '../lib/errors';
 import { CorrelationHeatmap } from '../components/charts/CorrelationHeatmap';
 import { colors as designColors } from '../lib/design-tokens';
@@ -158,11 +157,8 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
       
       if (historyData && historyData.history) {
         setRiskHistory(historyData.history.map((item: any) => ({
-          date: utcToLocal(item.timestamp).toLocaleDateString('en-US', { 
-            month: 'short', 
-            day: 'numeric',
-            ...(timePeriod === '1D' ? { hour: '2-digit' } : {})
-          }),
+          // TvChart requires YYYY-MM-DD format — use ISO slice, not locale string
+          date: item.timestamp ? item.timestamp.slice(0, 10) : new Date().toISOString().slice(0, 10),
           exposure: item.exposure || item.leverage || 0,
           drawdown: item.drawdown || 0,
           var_95: item.var_95 || item.var || 0,
@@ -730,21 +726,25 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                   </div>
                   {riskHistory.length > 0 ? (
                     <>
-                      <SectionLabel>VaR Over Time</SectionLabel>
+                      <SectionLabel>VaR (95%) Over Time</SectionLabel>
                       <TvChart
-                        height={180}
+                        height={160}
                         series={[{
                           id: 'var95',
-                          type: 'line',
+                          type: 'area',
                           data: riskHistoryData.map(d => ({ time: d.date, value: d.var_95 })),
-                          color: '#ef4444',
+                          lineColor: '#ef4444',
+                          topColor: 'rgba(239,68,68,0.25)',
+                          bottomColor: 'transparent',
                           lineWidth: 2,
                         }]}
+                        showTimeScale={false}
+                        autoResize
                       />
 
                       <SectionLabel>Drawdown Over Time</SectionLabel>
                       <TvChart
-                        height={180}
+                        height={160}
                         series={[{
                           id: 'drawdown',
                           type: 'area',
@@ -754,6 +754,24 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                           bottomColor: 'transparent',
                           lineWidth: 2,
                         }]}
+                        showTimeScale={false}
+                        autoResize
+                      />
+
+                      <SectionLabel>Exposure Over Time</SectionLabel>
+                      <TvChart
+                        height={140}
+                        series={[{
+                          id: 'exposure',
+                          type: 'area',
+                          data: riskHistoryData.map(d => ({ time: d.date, value: d.exposure })),
+                          lineColor: '#3b82f6',
+                          topColor: 'rgba(59,130,246,0.2)',
+                          bottomColor: 'transparent',
+                          lineWidth: 1.5,
+                        }]}
+                        showTimeScale
+                        autoResize
                       />
                     </>
                   ) : (
@@ -782,40 +800,61 @@ export const RiskNew: FC<RiskNewProps> = ({ onLogout }) => {
                     <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No position data</div>
                   )}
 
-                  {/* Long/Short Exposure */}
-                  <SectionLabel>Long/Short Exposure</SectionLabel>
-                  {riskHistory.length > 0 ? (
-                    <TvChart
-                      height={200}
-                      series={[
-                        {
-                          id: 'long',
+                  {/* Exposure Ladder — positions ranked by size */}
+                  <SectionLabel>Exposure Ladder (Top 15)</SectionLabel>
+                  {positions.length > 0 ? (() => {
+                    const sorted = [...positions]
+                      .sort((a, b) => Math.abs((b as any).invested_amount || b.quantity) - Math.abs((a as any).invested_amount || a.quantity))
+                      .slice(0, 15);
+                    const maxVal = Math.abs((sorted[0] as any).invested_amount || sorted[0].quantity);
+                    return (
+                      <div className="space-y-1">
+                        {sorted.map((p, i) => {
+                          const val = Math.abs((p as any).invested_amount || p.quantity);
+                          const pct = maxVal > 0 ? (val / maxVal) * 100 : 0;
+                          const isWin = p.unrealized_pnl >= 0;
+                          return (
+                            <div key={p.id} className="flex items-center gap-2">
+                              <span className="text-xs font-mono text-gray-500 w-4 text-right">{i + 1}</span>
+                              <span className="text-xs font-mono text-gray-300 w-14 truncate">{p.symbol}</span>
+                              <div className="flex-1 h-3 bg-gray-800 rounded-sm overflow-hidden">
+                                <div
+                                  className="h-full rounded-sm transition-all"
+                                  style={{ width: `${pct}%`, backgroundColor: isWin ? 'rgba(34,197,94,0.6)' : 'rgba(239,68,68,0.6)' }}
+                                />
+                              </div>
+                              <span className="text-xs font-mono text-gray-400 w-16 text-right">{formatCurrency(val)}</span>
+                              <span className={cn('text-xs font-mono w-14 text-right', isWin ? 'text-accent-green' : 'text-accent-red')}>
+                                {p.unrealized_pnl >= 0 ? '+' : ''}{formatCurrency(p.unrealized_pnl)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })() : (
+                    <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No positions</div>
+                  )}
+
+                  {/* Long/Short Exposure History */}
+                  {riskHistory.length > 0 && (
+                    <>
+                      <SectionLabel>Exposure History</SectionLabel>
+                      <TvChart
+                        height={160}
+                        series={[{
+                          id: 'exposure_hist',
                           type: 'area',
-                          data: riskHistory.map((h: any) => ({
-                            time: h.date,
-                            value: Math.abs(h.exposure || 0) * 0.7,
-                          })),
+                          data: riskHistory.map(h => ({ time: h.date, value: h.exposure })),
                           lineColor: designColors.green,
                           topColor: `${designColors.green}33`,
                           bottomColor: 'transparent',
-                          lineWidth: 2,
-                        },
-                        {
-                          id: 'short',
-                          type: 'area',
-                          data: riskHistory.map((h: any) => ({
-                            time: h.date,
-                            value: -(Math.abs(h.exposure || 0) * 0.3),
-                          })),
-                          lineColor: designColors.red,
-                          topColor: 'transparent',
-                          bottomColor: `${designColors.red}33`,
-                          lineWidth: 2,
-                        },
-                      ]}
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-32 text-xs text-muted-foreground">No exposure history data</div>
+                          lineWidth: 1.5,
+                        }]}
+                        showTimeScale
+                        autoResize
+                      />
+                    </>
                   )}
                 </TabsContent>
               </div>
