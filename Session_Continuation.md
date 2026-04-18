@@ -2531,3 +2531,62 @@ Replaced thin "Recent Trades" + "Positions by Asset Class" with full tabbed `Act
 - Consider t3.small downgrade — waiting on CloudWatch memory data
 - FMP Starter plan: insider trading plan-gated (404)
 - News sentiment: ~192 symbols still unpopulated (filling at 100 req/day)
+
+---
+
+### Session Improvements (April 18, 2026 — Session 17: UI Fixes & Intraday Equity Curve)
+
+#### 168. Position Detail — Fallback for Missing Price Data ✅
+- **Bug**: Symbols with positions opened today (e.g. SPX500, NSDQ100 opened April 17) showed "No price data available" because `date >= opened_at` returned 0 rows — the daily bar for today hadn't been written to cache yet.
+- **Fix**: When the date-filtered query returns 0 rows, fall back to the last 60 bars regardless of position open date. Chart always has context.
+- **Files**: `src/api/routers/account.py`
+
+#### 169. Hourly Equity Snapshots ✅
+- **New**: `_save_hourly_equity_snapshot()` writes a snapshot every 60 minutes with key `"YYYY-MM-DD HH:00"` to `equity_snapshots` table.
+- **DB migration**: Added `snapshot_type` column (`daily`/`hourly`), unique constraint changed from `date` alone to `(date, snapshot_type)`.
+- **`_save_equity_snapshot` refactored** into `_write_equity_snapshot(type)` — shared logic for both daily and hourly.
+- **Price sync interval**: Changed from 3300s (55 min) to 3600s (60 min) — aligned with hourly snapshots, 24 snapshots/day not 26.
+- **Files**: `src/models/orm.py`, `src/core/monitoring_service.py`
+
+#### 170. Intraday Equity Curve — 1D / 4H / 1H Resolution ✅
+- **`/analytics/performance`**: Added `interval` param (`1d`/`4h`/`1h`). Queries hourly snapshots for `1h`/`4h`, downsamples 4h from hourly (every 4th hour), falls back to daily if no hourly data yet. Added `1W` to period_map.
+- **`EquityCurveChart`**: Added `interval`/`onIntervalChange` props. Renders `1D / 4H / 1H` toggle buttons inline next to the period selector — only shown when `onIntervalChange` is provided.
+- **`api.ts`**: Added `AnalyticsPeriod` type alias (`1W|1M|3M|6M|1Y|ALL`), `getPerformanceAnalytics` takes `interval` param.
+- **Files**: `src/api/routers/analytics.py`, `frontend/src/components/charts/EquityCurveChart.tsx`, `frontend/src/services/api.ts`
+
+#### 171. Duplicate Period Selector Removed from Overview ✅
+- **Bug**: Overview equity curve showed two period selectors — one in the `PanelHeader` toolbar (`PeriodSelector` component) and one built into `EquityCurveChart` (`TvPeriodSelector`).
+- **Fix**: Removed `PeriodSelector` from the toolbar. `EquityCurveChart` owns the period selector. Toolbar now only has benchmark toggle + fullscreen. Added `equityInterval` state and passes `interval`/`onIntervalChange` to the chart.
+- **Files**: `frontend/src/pages/OverviewNew.tsx`
+
+#### 172. Analytics Equity Curve Upgraded ✅
+- **Bug**: Analytics Performance tab used a raw `TvChart` with no period selector, no interval selector, no SPY benchmark, no drawdown sub-chart.
+- **Fix**: Replaced with `EquityCurveChart` — gets period selector, `1D/4H/1H` interval buttons, SPY benchmark overlay, and drawdown sub-chart. Removed duplicate interval `Select` from the page header.
+- **Files**: `frontend/src/pages/AnalyticsNew.tsx`
+
+---
+
+## Current System State (April 18, 2026 — Updated Session 17)
+
+- **Equity snapshots**: Now written hourly (`YYYY-MM-DD HH:00`) + daily (`YYYY-MM-DD`). Intraday equity curve available after first hour of data accumulates.
+- **Price sync**: Every 60 minutes (was 55 min). 24 hourly snapshots/day.
+- **Equity curve**: Both Overview and Analytics now show `1D / 4H / 1H` interval selector inline in the chart header. `4H`/`1H` fall back to daily until hourly data accumulates.
+- **Position detail**: All symbols now show price charts (fallback to last 60 bars when today's bar not yet written).
+
+---
+
+## Open Items (Updated Session 17)
+
+### Pending
+- 14 duplicate positions close at Monday market open (9:30 ET)
+- Hourly equity data accumulates from this point forward — `4H`/`1H` views will be meaningful within a day
+- Regime decay penalties now active — watch for strategies being retired over next few days
+
+### Trading Performance
+- Monitor win rate after all quant improvements (target: >50%)
+- Monitor pairs trading two-leg execution
+- News sentiment: ~192 symbols still unpopulated (filling at 100 req/day)
+
+### Infrastructure
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+- FMP Starter plan: insider trading plan-gated (404)
