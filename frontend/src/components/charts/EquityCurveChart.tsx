@@ -3,6 +3,7 @@ import { TvChart, type TvSeriesConfig } from './TvChart';
 import { TvPeriodSelector } from './TvPeriodSelector';
 import { filterDataByPeriod } from '../../lib/chart-utils';
 import { Badge } from '../ui/Badge';
+import { cn } from '../../lib/utils';
 import { chartTheme } from '../../lib/design-tokens';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -249,11 +250,12 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
                 <button
                   key={iv}
                   onClick={() => onIntervalChange(iv)}
-                  className={`px-1.5 py-0.5 text-[10px] font-mono rounded transition-colors ${
+                  className={cn(
+                    'px-2 py-0.5 text-xs font-mono font-medium rounded transition-colors',
                     interval === iv
-                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800'
-                  }`}
+                      ? 'bg-gray-700 text-gray-100'
+                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                  )}
                 >
                   {iv.toUpperCase()}
                 </button>
