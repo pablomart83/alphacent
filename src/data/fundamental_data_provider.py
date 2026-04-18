@@ -300,7 +300,7 @@ class FundamentalDataProvider:
         # FMP configuration - using new stable API
         fmp_config = config.get('data_sources', {}).get('financial_modeling_prep', {})
         self.fmp_enabled = fmp_config.get('enabled', False)
-        self.fmp_api_key = fmp_config.get('api_key', '')
+        self._fmp_api_key_cached: Optional[str] = fmp_config.get('api_key', '') or ''
         self.fmp_base_url = "https://financialmodelingprep.com/stable"  # Updated to stable API
         
         # Alpha Vantage configuration (fallback)
@@ -354,6 +354,29 @@ class FundamentalDataProvider:
         logger.info(f"FundamentalDataProvider initialized - FMP: {self.fmp_enabled}, "
                    f"AV: {self.av_enabled}, Rate limit: {fmp_rate_limit}/{period_label}, "
                    f"Cache strategy: {self.cache_strategy}")
+
+    @property
+    def fmp_api_key(self) -> str:
+        """Lazy-load FMP API key — re-reads api_keys.yaml if cached value is a placeholder.
+        This ensures the key is always fresh even if the singleton was created before
+        api_keys.yaml was written by the startup patch script."""
+        if self._fmp_api_key_cached and self._fmp_api_key_cached != 'REPLACE_VIA_SECRETS_MANAGER':
+            return self._fmp_api_key_cached
+        try:
+            from src.core.config_loader import load_config
+            cfg = load_config(force_reload=True)
+            key = cfg.get('data_sources', {}).get('financial_modeling_prep', {}).get('api_key', '')
+            if key and key != 'REPLACE_VIA_SECRETS_MANAGER':
+                self._fmp_api_key_cached = key
+                logger.info("FMP API key refreshed from api_keys.yaml")
+                return key
+        except Exception:
+            pass
+        return self._fmp_api_key_cached or ''
+
+    @fmp_api_key.setter
+    def fmp_api_key(self, value: str) -> None:
+        self._fmp_api_key_cached = value
     
     def get_fundamental_data(self, symbol: str, use_cache: bool = True) -> Optional[FundamentalData]:
         """

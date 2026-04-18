@@ -448,6 +448,9 @@ class StrategyProposer:
                     tv_val = not (isinstance(ts_val, float) and (ts_val != ts_val or ts_val == float('inf')))
                     tev_val = not (isinstance(tes_val, float) and (tes_val != tes_val or tes_val == float('inf')))
                     result_tuple = (ts_val, tes_val, het_val, ov_val, tv_val, tev_val, None)
+                elif len(result_tuple) == 6:
+                    # New format: 6 scalars, wf_results not stored (can't serialize)
+                    result_tuple = result_tuple + (None,)
                 self._wf_results_cache[key] = (result_tuple, cached_at)
                 loaded += 1
             if loaded:
@@ -473,7 +476,7 @@ class StrategyProposer:
                     entries.append({
                         'template': t,
                         'symbol': s,
-                        'result': list(result[:4]),  # Only store the 4 fields we check
+                        'result': list(result[:6]),  # Store 6 scalar fields (skip wf_results dict)
                         'cached_at': cached_at,
                     })
             path = Path(self._wf_failed_path)
@@ -1381,6 +1384,18 @@ class StrategyProposer:
                         _min_trades = _at_cfg.get('min_trades_dsl', 15)
                     
                     has_enough_trades = test_trades >= _min_trades and train_trades >= max(2, _min_trades // 3)
+
+                    # Sharpe-weighted exception: high-conviction strategies (test Sharpe ≥ 2.0)
+                    # with at least 3 test trades pass even if below the min_trades threshold.
+                    # A Sharpe of 2.0+ with 3+ trades is statistically more meaningful than
+                    # a Sharpe of 0.5 with 15 trades. Low-frequency strategies (forex, commodities)
+                    # naturally produce fewer trades in a 120-180 day test window.
+                    if not has_enough_trades and test_trades >= 3 and test_sharpe >= 2.0:
+                        has_enough_trades = True
+                        logger.info(
+                            f"Sharpe exception: {strategy.name} — test_sharpe={test_sharpe:.2f} ≥ 2.0 "
+                            f"with {test_trades} trades (below {_min_trades} threshold but high conviction)"
+                        )
                     
                     # Update zero-trade blacklist: track template+symbol combos that produce 0 trades
                     if test_trades == 0 or train_trades == 0:
@@ -1462,7 +1477,7 @@ class StrategyProposer:
             mc_passed_ids = set()
             MC_ITERATIONS = 1000
             MC_MIN_P5_SHARPE = 0.2
-            MC_MIN_TRADES_FOR_BOOTSTRAP = 5
+            MC_MIN_TRADES_FOR_BOOTSTRAP = 15  # Raised from 5 — too few trades makes bootstrap meaningless
             for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
                 if not (tv and tev and het and not ov):
                     mc_passed_ids.add(s.id)  # Already filtered out below — don't double-filter
