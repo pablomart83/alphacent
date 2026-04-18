@@ -1164,6 +1164,170 @@ async def toggle_template(
     )
 
 
+# ============================================================================
+# Static-path GET routes — MUST be defined before /{strategy_id} wildcard
+# ============================================================================
+
+class TemplateRankingResponse(BaseModel):
+    name: str
+    win_rate: Optional[float] = None
+    avg_sharpe: Optional[float] = None
+    total_trades: int = 0
+    active_count: int = 0
+    last_proposal_date: Optional[str] = None
+
+class TemplateRankingsListResponse(BaseModel):
+    rankings: List[TemplateRankingResponse]
+    total: int
+
+class BlacklistEntry(BaseModel):
+    template: str
+    symbol: str
+    count: int
+    timestamp: str
+    type: str
+
+class BlacklistResponse(BaseModel):
+    entries: List[BlacklistEntry]
+    total: int
+
+class IdleDemotionEntry(BaseModel):
+    name: str
+    strategy_id: str
+    timestamp: str
+    reason: str
+
+class IdleDemotionsResponse(BaseModel):
+    entries: List[IdleDemotionEntry]
+    total: int
+
+
+@router.get("/template-rankings", response_model=TemplateRankingsListResponse)
+async def get_template_rankings(
+    mode: TradingMode,
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """Get template performance rankings with aggregate metrics."""
+    logger.info(f"Fetching template rankings for {mode.value} mode, user {username}")
+    try:
+        all_strategies = session.query(StrategyORM).all()
+        from sqlalchemy import func as _tf
+        pos_counts = session.query(
+            PositionORM.strategy_id, _tf.count(PositionORM.id),
+        ).filter(PositionORM.closed_at.is_(None)).group_by(PositionORM.strategy_id).all()
+        open_positions_by_strategy = {sid: cnt for sid, cnt in pos_counts}
+        template_data: Dict[str, Dict[str, Any]] = {}
+        for s in all_strategies:
+            md = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
+            tname = md.get("template_name", "")
+            if not tname:
+                name = s.name or ""
+                tname = re.sub(r'\s+V\d+$', '', name).strip()
+            if not tname:
+                continue
+            if tname not in template_data:
+                template_data[tname] = {"win_rates": [], "sharpes": [], "total_trades": 0, "active_count": 0, "last_proposal_date": None}
+            td = template_data[tname]
+            td["active_count"] += open_positions_by_strategy.get(s.id, 0)
+            perf = s.performance if isinstance(s.performance, dict) else {}
+            wr = perf.get("win_rate", 0)
+            sharpe = perf.get("sharpe_ratio", 0)
+            trades = perf.get("total_trades", 0)
+            if s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE"):
+                if wr and not (math.isnan(wr) or math.isinf(wr)):
+                    td["win_rates"].append(wr)
+                if sharpe and not (math.isnan(sharpe) or math.isinf(sharpe)):
+                    td["sharpes"].append(sharpe)
+                td["total_trades"] += trades
+            created = str(s.created_at) if s.created_at else None
+            if created and (not td["last_proposal_date"] or created > td["last_proposal_date"]):
+                td["last_proposal_date"] = created
+        rankings = []
+        for tname, td in template_data.items():
+            win_rates = td["win_rates"]
+            sharpes = td["sharpes"]
+            rankings.append(TemplateRankingResponse(
+                name=tname,
+                win_rate=round(sum(win_rates) / len(win_rates), 4) if win_rates else None,
+                avg_sharpe=round(sum(sharpes) / len(sharpes), 2) if sharpes else None,
+                total_trades=td["total_trades"],
+                active_count=td["active_count"],
+                last_proposal_date=td["last_proposal_date"],
+            ))
+        rankings.sort(key=lambda r: r.avg_sharpe if r.avg_sharpe is not None else float('-inf'), reverse=True)
+        return TemplateRankingsListResponse(rankings=rankings, total=len(rankings))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch template rankings: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/blacklisted-combos", response_model=BlacklistResponse)
+async def get_blacklisted_combos(
+    username: str = Depends(get_current_user),
+):
+    """Get all blacklisted template+symbol combinations from config files."""
+    import json
+    from pathlib import Path
+    entries: List[BlacklistEntry] = []
+    rej_path = Path("config/.rejection_blacklist.json")
+    if rej_path.exists():
+        try:
+            with open(rej_path) as f:
+                data = json.load(f)
+            for e in data.get("entries", []):
+                if e.get("count", 0) >= 3:
+                    entries.append(BlacklistEntry(template=e.get("template", ""), symbol=e.get("symbol", ""), count=e.get("count", 0), timestamp=e.get("timestamp", ""), type="rejection"))
+        except Exception as ex:
+            logger.warning(f"Failed to load rejection blacklist: {ex}")
+    zt_path = Path("config/.zero_trade_blacklist.json")
+    if zt_path.exists():
+        try:
+            with open(zt_path) as f:
+                data = json.load(f)
+            for e in data.get("entries", []):
+                entries.append(BlacklistEntry(template=e.get("template", ""), symbol=e.get("symbol", ""), count=e.get("count", 0), timestamp=e.get("timestamp", ""), type="zero_trade"))
+        except Exception as ex:
+            logger.warning(f"Failed to load zero-trade blacklist: {ex}")
+    entries.sort(key=lambda e: e.timestamp, reverse=True)
+    return BlacklistResponse(entries=entries, total=len(entries))
+
+
+@router.get("/idle-demotions", response_model=IdleDemotionsResponse)
+async def get_idle_demotions(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """Get recently demoted strategies."""
+    from src.models.orm import StrategyRetirementORM
+    entries: List[IdleDemotionEntry] = []
+    demoted = session.query(StrategyORM).filter(StrategyORM.status == "BACKTESTED").all()
+    for s in demoted:
+        md = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
+        if md.get("demoted") or md.get("demotion_reason"):
+            entries.append(IdleDemotionEntry(
+                name=s.name or "",
+                strategy_id=s.id,
+                timestamp=md.get("demoted_at", str(s.created_at) if s.created_at else ""),
+                reason=md.get("demotion_reason", "Idle — no positions or orders"),
+            ))
+    retirements = session.query(StrategyRetirementORM).order_by(StrategyRetirementORM.retired_at.desc()).limit(50).all()
+    for r in retirements:
+        reason = r.reason if hasattr(r, 'reason') else ""
+        if reason and ("idle" in reason.lower() or "inactiv" in reason.lower() or "no trade" in reason.lower()):
+            strat = session.query(StrategyORM).filter(StrategyORM.id == r.strategy_id).first()
+            entries.append(IdleDemotionEntry(
+                name=strat.name if strat else r.strategy_id,
+                strategy_id=r.strategy_id,
+                timestamp=r.retired_at.isoformat() if r.retired_at else "",
+                reason=reason,
+            ))
+    entries.sort(key=lambda e: e.timestamp, reverse=True)
+    return IdleDemotionsResponse(entries=entries, total=len(entries))
+
+
 @router.get("/{strategy_id}", response_model=StrategyResponse)
 async def get_strategy(
     strategy_id: str,
@@ -3289,126 +3453,6 @@ async def reset_all_strategies(
 
 
 # ============================================================================
-# Template Rankings Endpoint (Task 9.6)
-# ============================================================================
-
-class TemplateRankingResponse(BaseModel):
-    """Template ranking entry with aggregate performance metrics."""
-    name: str
-    win_rate: Optional[float] = None
-    avg_sharpe: Optional[float] = None
-    total_trades: int = 0
-    active_count: int = 0
-    last_proposal_date: Optional[str] = None
-
-
-class TemplateRankingsListResponse(BaseModel):
-    """Template rankings list response."""
-    rankings: List[TemplateRankingResponse]
-    total: int
-
-
-@router.get("/template-rankings", response_model=TemplateRankingsListResponse)
-async def get_template_rankings(
-    mode: TradingMode,
-    username: str = Depends(get_current_user),
-    session: Session = Depends(get_db_session),
-):
-    """
-    Get template performance rankings with aggregate metrics.
-
-    Returns an array of template performance data grouped by template name,
-    including win rate, average Sharpe, total trades, active count, and last
-    proposal date.
-
-    Validates: Requirement 18.1
-    """
-    logger.info(f"Fetching template rankings for {mode.value} mode, user {username}")
-
-    try:
-        all_strategies = session.query(StrategyORM).all()
-
-        # Count open positions per strategy for active_count
-        from sqlalchemy import func as _tf
-        pos_counts = session.query(
-            PositionORM.strategy_id,
-            _tf.count(PositionORM.id),
-        ).filter(
-            PositionORM.closed_at.is_(None),
-        ).group_by(PositionORM.strategy_id).all()
-        open_positions_by_strategy = {sid: cnt for sid, cnt in pos_counts}
-
-        # Aggregate per template
-        template_data: Dict[str, Dict[str, Any]] = {}
-
-        for s in all_strategies:
-            md = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
-            tname = md.get("template_name", "")
-            if not tname:
-                name = s.name or ""
-                tname = re.sub(r'\s+V\d+$', '', name).strip()
-            if not tname:
-                continue
-
-            if tname not in template_data:
-                template_data[tname] = {
-                    "win_rates": [],
-                    "sharpes": [],
-                    "total_trades": 0,
-                    "active_count": 0,
-                    "last_proposal_date": None,
-                }
-
-            td = template_data[tname]
-
-            # Active count = open positions for strategies using this template
-            td["active_count"] += open_positions_by_strategy.get(s.id, 0)
-
-            perf = s.performance if isinstance(s.performance, dict) else {}
-            wr = perf.get("win_rate", 0)
-            sharpe = perf.get("sharpe_ratio", 0)
-            trades = perf.get("total_trades", 0)
-
-            if s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE"):
-                if wr and not (math.isnan(wr) or math.isinf(wr)):
-                    td["win_rates"].append(wr)
-                if sharpe and not (math.isnan(sharpe) or math.isinf(sharpe)):
-                    td["sharpes"].append(sharpe)
-                td["total_trades"] += trades
-
-            created = str(s.created_at) if s.created_at else None
-            if created and (not td["last_proposal_date"] or created > td["last_proposal_date"]):
-                td["last_proposal_date"] = created
-
-        rankings = []
-        for tname, td in template_data.items():
-            win_rates = td["win_rates"]
-            sharpes = td["sharpes"]
-            rankings.append(TemplateRankingResponse(
-                name=tname,
-                win_rate=round(sum(win_rates) / len(win_rates), 4) if win_rates else None,
-                avg_sharpe=round(sum(sharpes) / len(sharpes), 2) if sharpes else None,
-                total_trades=td["total_trades"],
-                active_count=td["active_count"],
-                last_proposal_date=td["last_proposal_date"],
-            ))
-
-        # Sort by avg_sharpe descending (None values last)
-        rankings.sort(key=lambda r: r.avg_sharpe if r.avg_sharpe is not None else float('-inf'), reverse=True)
-
-        return TemplateRankingsListResponse(rankings=rankings, total=len(rankings))
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to fetch template rankings: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to fetch template rankings: {str(e)}",
-        )
-
-
-# ============================================================================
 # Walk-Forward Analytics Endpoint (Task 9.7)
 # ============================================================================
 
@@ -3525,143 +3569,3 @@ async def get_walk_forward_analytics(
             detail=f"Failed to fetch walk-forward analytics: {str(e)}",
         )
 
-
-# ============================================================================
-# Blacklisted Combos Endpoint
-# ============================================================================
-
-class BlacklistEntry(BaseModel):
-    """A blacklisted template+symbol combo."""
-    template: str
-    symbol: str
-    count: int
-    timestamp: str
-    type: str = "rejection"
-
-
-class BlacklistResponse(BaseModel):
-    """Blacklist response."""
-    entries: List[BlacklistEntry]
-    total: int
-
-
-@router.get("/blacklisted-combos", response_model=BlacklistResponse)
-async def get_blacklisted_combos(
-    username: str = Depends(get_current_user),
-):
-    """
-    Get all blacklisted template+symbol combinations from config files.
-    Merges rejection blacklist and zero-trade blacklist.
-    """
-    import json
-    from pathlib import Path
-
-    entries: List[BlacklistEntry] = []
-
-    # Load rejection blacklist
-    rej_path = Path("config/.rejection_blacklist.json")
-    if rej_path.exists():
-        try:
-            with open(rej_path) as f:
-                data = json.load(f)
-            for e in data.get("entries", []):
-                if e.get("count", 0) >= 3:  # Only show actually blacklisted (threshold reached)
-                    entries.append(BlacklistEntry(
-                        template=e.get("template", ""),
-                        symbol=e.get("symbol", ""),
-                        count=e.get("count", 0),
-                        timestamp=e.get("timestamp", ""),
-                        type="rejection",
-                    ))
-        except Exception as ex:
-            logger.warning(f"Failed to load rejection blacklist: {ex}")
-
-    # Load zero-trade blacklist
-    zt_path = Path("config/.zero_trade_blacklist.json")
-    if zt_path.exists():
-        try:
-            with open(zt_path) as f:
-                data = json.load(f)
-            for e in data.get("entries", []):
-                entries.append(BlacklistEntry(
-                    template=e.get("template", ""),
-                    symbol=e.get("symbol", ""),
-                    count=e.get("count", 0),
-                    timestamp=e.get("timestamp", ""),
-                    type="zero_trade",
-                ))
-        except Exception as ex:
-            logger.warning(f"Failed to load zero-trade blacklist: {ex}")
-
-    # Sort by timestamp descending
-    entries.sort(key=lambda e: e.timestamp, reverse=True)
-
-    return BlacklistResponse(entries=entries, total=len(entries))
-
-
-# ============================================================================
-# Idle Demotions Endpoint
-# ============================================================================
-
-class IdleDemotionEntry(BaseModel):
-    """An idle demotion record."""
-    name: str
-    strategy_id: str
-    timestamp: str
-    reason: str
-
-
-class IdleDemotionsResponse(BaseModel):
-    """Idle demotions response."""
-    entries: List[IdleDemotionEntry]
-    total: int
-
-
-@router.get("/idle-demotions", response_model=IdleDemotionsResponse)
-async def get_idle_demotions(
-    username: str = Depends(get_current_user),
-    session: Session = Depends(get_db_session),
-):
-    """
-    Get recently demoted strategies (BACKTESTED with demotion metadata or recently retired due to inactivity).
-    """
-    from src.models.orm import StrategyRetirementORM
-
-    entries: List[IdleDemotionEntry] = []
-
-    # Check strategies with demotion metadata
-    demoted = session.query(StrategyORM).filter(
-        StrategyORM.status == "BACKTESTED"
-    ).all()
-
-    for s in demoted:
-        md = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
-        if md.get("demoted") or md.get("demotion_reason"):
-            entries.append(IdleDemotionEntry(
-                name=s.name or "",
-                strategy_id=s.id,
-                timestamp=md.get("demoted_at", str(s.created_at) if s.created_at else ""),
-                reason=md.get("demotion_reason", "Idle — no positions or orders"),
-            ))
-
-    # Also check recent retirements with idle/inactivity reason
-    retirements = session.query(StrategyRetirementORM).order_by(
-        StrategyRetirementORM.retired_at.desc()
-    ).limit(50).all()
-
-    for r in retirements:
-        reason = r.reason if hasattr(r, 'reason') else ""
-        if reason and ("idle" in reason.lower() or "inactiv" in reason.lower() or "no trade" in reason.lower()):
-            # Try to get strategy name from the strategies table
-            strat = session.query(StrategyORM).filter(StrategyORM.id == r.strategy_id).first()
-            strat_name = strat.name if strat else r.strategy_id
-            entries.append(IdleDemotionEntry(
-                name=strat_name,
-                strategy_id=r.strategy_id,
-                timestamp=r.retired_at.isoformat() if r.retired_at else "",
-                reason=reason,
-            ))
-
-    entries.sort(key=lambda e: e.timestamp, reverse=True)
-
-    return IdleDemotionsResponse(entries=entries, total=len(entries))
