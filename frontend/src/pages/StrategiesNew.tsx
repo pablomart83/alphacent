@@ -840,6 +840,22 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
       ),
     },
     {
+      id: 'alpha_vs_spy',
+      header: () => <div className="text-right">Alpha</div>,
+      cell: ({ row }) => {
+        const alpha = (row.original as any).alpha_vs_spy;
+        if (alpha == null) return <div className="text-right font-mono text-xs text-gray-600">—</div>;
+        return (
+          <div className={cn(
+            'text-right font-mono text-xs font-semibold',
+            alpha >= 0 ? 'text-accent-green' : 'text-accent-red'
+          )}>
+            {alpha >= 0 ? '+' : ''}{(alpha * 100).toFixed(1)}%
+          </div>
+        );
+      },
+    },
+    {
       id: 'win_rate',
       header: () => <div className="text-right">Win Rate</div>,
       cell: ({ row }) => {
@@ -2047,6 +2063,40 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
               </table>
             )}
           </div>
+
+          {/* Strategy Allocation Viz (Sprint 7.4) */}
+          {activeStrategies.length > 0 && (
+            <div className="border-t border-[var(--color-dark-border)] pt-1.5">
+              <SectionLabel>Allocation vs Deployed</SectionLabel>
+              <div className="space-y-1 overflow-auto max-h-[200px]">
+                {activeStrategies.slice(0, 10).map((s: any) => {
+                  const allocated = s.allocated_capital ?? 0;
+                  const deployed = s.deployed_capital ?? 0;
+                  const pct = allocated > 0 ? Math.min(deployed / allocated, 1.5) : 0;
+                  const isOver = pct > 1.0;
+                  const isNear = pct > 0.9 && !isOver;
+                  return (
+                    <div key={s.id} className="px-1">
+                      <div className="flex items-center justify-between text-[10px] font-mono mb-0.5">
+                        <span className="text-gray-400 truncate max-w-[120px]">{s.name?.replace(/ V\d+$/, '') || s.id.slice(0, 8)}</span>
+                        <div className="flex items-center gap-1">
+                          {isOver && <span className="text-accent-red font-bold">OVER</span>}
+                          {isNear && <span className="text-yellow-400 font-bold">90%+</span>}
+                          <span className="text-gray-500">{allocated > 0 ? `$${(deployed/1000).toFixed(0)}k/$${(allocated/1000).toFixed(0)}k` : '—'}</span>
+                        </div>
+                      </div>
+                      <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                        <div
+                          className={cn('h-full rounded-full transition-all', isOver ? 'bg-accent-red' : isNear ? 'bg-yellow-400' : 'bg-accent-green')}
+                          style={{ width: `${Math.min(pct * 100, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Recent Lifecycle Events — direct list, no nested PanelHeader */}
           <div className="border-t border-[var(--color-dark-border)] pt-1.5">

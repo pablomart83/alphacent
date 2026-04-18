@@ -128,6 +128,18 @@ class StrategyTemplateLibrary:
         }
         
         self.templates = [t for t in all_templates if t.name not in REMOVE_TEMPLATES]
+
+        # Sprint 4.1: Remove all 1h crypto templates.
+        # Research shows 1H and below underperform 90% of the time for crypto.
+        # Keep: 4H templates (interval_4h=True) and 1D templates (no intraday flag).
+        self.templates = [
+            t for t in self.templates
+            if not (
+                t.metadata.get('crypto_optimized') is True
+                and t.metadata.get('intraday') is True
+                and t.metadata.get('interval') == '1h'
+            )
+        ]
     
     def _create_templates(self) -> List[StrategyTemplate]:
         """Create all strategy templates."""

@@ -150,6 +150,11 @@ class StrategyResponse(BaseModel):
     requires_fundamental_data: Optional[bool] = None
     requires_earnings_data: Optional[bool] = None
     traded_symbols: Optional[List[str]] = None  # Symbols with open positions/orders (not the full watchlist)
+    # Sprint 7.3: Alpha vs SPY
+    alpha_vs_spy: Optional[float] = None  # strategy_return - spy_return over same period
+    # Sprint 7.4: Deployed capital
+    deployed_capital: Optional[float] = None  # Sum of open position invested_amounts
+    allocated_capital: Optional[float] = None  # equity * allocation_pct
 
 
 class StrategiesResponse(BaseModel):
@@ -471,6 +476,40 @@ async def get_strategies(
         if symbol not in traded_symbols_map[strat_id]:
             traded_symbols_map[strat_id].append(symbol)
 
+    # Sprint 7.4: Deployed capital per strategy (sum of open position invested_amounts)
+    deployed_rows = session.query(
+        PositionORM.strategy_id,
+        sa_func.coalesce(sa_func.sum(PositionORM.invested_amount), 0.0)
+    ).filter(
+        PositionORM.closed_at.is_(None),
+        PositionORM.pending_closure == False
+    ).group_by(PositionORM.strategy_id).all()
+    deployed_capital_map = {sid: float(amt) for sid, amt in deployed_rows}
+
+    # Sprint 7.3: Fetch current equity for allocation_pct → dollar conversion
+    # and SPY price series for alpha computation
+    current_equity = 0.0
+    spy_prices: dict = {}  # date → close
+    try:
+        from src.models.orm import EquitySnapshotORM, HistoricalPriceCacheORM
+        eq_row = (
+            session.query(EquitySnapshotORM.equity)
+            .filter(EquitySnapshotORM.snapshot_type == "daily")
+            .order_by(EquitySnapshotORM.date.desc())
+            .first()
+        )
+        if eq_row:
+            current_equity = float(eq_row.equity)
+        spy_rows = (
+            session.query(HistoricalPriceCacheORM.date, HistoricalPriceCacheORM.close)
+            .filter(HistoricalPriceCacheORM.symbol == "SPY")
+            .order_by(HistoricalPriceCacheORM.date)
+            .all()
+        )
+        spy_prices = {r.date: float(r.close) for r in spy_rows if r.close}
+    except Exception:
+        pass
+
     # Convert ORM models to response models
     strategy_responses = []
     for strategy in strategies:
@@ -547,6 +586,29 @@ async def get_strategies(
         pos_stat = position_stats.get(strategy_id, {"count": 0, "pnl": 0.0})
         traded_syms = traded_symbols_map.get(strategy_id, [])
 
+        # Sprint 7.3: Compute alpha vs SPY
+        alpha_vs_spy: Optional[float] = None
+        try:
+            activated_at_str = strategy_dict.get("activated_at")
+            if activated_at_str and spy_prices:
+                # Find closest SPY date at or after activation
+                spy_dates = sorted(spy_prices.keys())
+                start_date = activated_at_str[:10]
+                end_date = sorted(spy_prices.keys())[-1]
+                start_spy = next((spy_prices[d] for d in spy_dates if d >= start_date), None)
+                end_spy = spy_prices.get(end_date)
+                if start_spy and end_spy and start_spy > 0:
+                    spy_return = (end_spy - start_spy) / start_spy
+                    strat_return = strategy_dict["performance"].get("total_return", 0.0) or 0.0
+                    alpha_vs_spy = round(strat_return - spy_return, 4)
+        except Exception:
+            pass
+
+        # Sprint 7.4: Deployed and allocated capital
+        deployed_cap = deployed_capital_map.get(strategy_id, 0.0)
+        alloc_pct = strategy_dict.get("allocation_percent", 0.0) or 0.0
+        allocated_cap = round(current_equity * alloc_pct / 100.0, 2) if current_equity > 0 else None
+
         strategy_responses.append(StrategyResponse(
             id=strategy_id,
             name=strategy_dict["name"],
@@ -591,6 +653,9 @@ async def get_strategies(
             requires_fundamental_data=requires_fundamental_data,
             requires_earnings_data=requires_earnings_data,
             traded_symbols=traded_syms if traded_syms else None,
+            alpha_vs_spy=alpha_vs_spy,
+            deployed_capital=round(deployed_cap, 2),
+            allocated_capital=allocated_cap,
         ))
     
     return StrategiesResponse(

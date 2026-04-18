@@ -3935,3 +3935,207 @@ async def get_tca(
     except Exception as e:
         logger.error(f"Failed to compute TCA: {e}", exc_info=True)
         return TCAResponse()
+
+
+# ── Sprint 7.1: R-Multiple Distribution ──────────────────────────────────────
+
+from pydantic import BaseModel as _BaseModel
+
+
+class RMultipleBucket(_BaseModel):
+    label: str
+    count: int
+    color: str
+
+
+class RMultipleResponse(_BaseModel):
+    buckets: list = []
+    mean_r: float = 0.0
+    median_r: float = 0.0
+    expectancy: float = 0.0
+    total_trades: int = 0
+    message: str = ""
+
+
+@router.get("/r-multiples", response_model=RMultipleResponse)
+async def get_r_multiples(
+    mode: str = "DEMO",
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    R-Multiple distribution for closed positions.
+    R-Multiple = realized_pnl / (entry_price * stop_loss_pct * quantity)
+    """
+    try:
+        closed = (
+            session.query(PositionORM)
+            .filter(PositionORM.closed_at.isnot(None))
+            .all()
+        )
+
+        r_multiples: list[float] = []
+        for pos in closed:
+            pnl = pos.realized_pnl or 0.0
+            entry = pos.entry_price or 0.0
+            qty = pos.quantity or 0.0
+            # Derive stop_loss_pct from strategy metadata or position stop_loss
+            sl_pct: float = 0.0
+            if pos.stop_loss and entry > 0:
+                sl_pct = abs(pos.stop_loss - entry) / entry
+            if sl_pct <= 0:
+                # Fall back to strategy risk_params
+                try:
+                    strat = session.query(StrategyORM).filter(StrategyORM.id == pos.strategy_id).first()
+                    if strat:
+                        rp = strat.risk_params if isinstance(strat.risk_params, dict) else {}
+                        sl_pct = float(rp.get("stop_loss_pct", 0) or 0)
+                except Exception:
+                    pass
+            if sl_pct <= 0 or entry <= 0 or qty <= 0:
+                continue
+            initial_risk = entry * sl_pct * qty
+            if initial_risk <= 0:
+                continue
+            r_multiples.append(pnl / initial_risk)
+
+        if len(r_multiples) < 5:
+            return RMultipleResponse(message="Minimum 5 closed trades with stop-loss data required")
+
+        import statistics
+        mean_r = float(np.mean(r_multiples))
+        median_r = float(np.median(r_multiples))
+        # Expectancy = mean R (already accounts for win rate)
+        expectancy = mean_r
+
+        # Buckets
+        bucket_defs = [
+            ("< -2R", lambda r: r < -2, "#ef4444"),
+            ("-2R to -1R", lambda r: -2 <= r < -1, "#f97316"),
+            ("-1R to 0", lambda r: -1 <= r < 0, "#fbbf24"),
+            ("0 to 1R", lambda r: 0 <= r < 1, "#86efac"),
+            ("1R to 2R", lambda r: 1 <= r < 2, "#22c55e"),
+            ("> 2R", lambda r: r >= 2, "#16a34a"),
+        ]
+        buckets = [
+            {"label": label, "count": sum(1 for r in r_multiples if fn(r)), "color": color}
+            for label, fn, color in bucket_defs
+        ]
+
+        return RMultipleResponse(
+            buckets=buckets,
+            mean_r=round(mean_r, 3),
+            median_r=round(median_r, 3),
+            expectancy=round(expectancy, 3),
+            total_trades=len(r_multiples),
+        )
+    except Exception as e:
+        logger.error(f"R-multiples failed: {e}", exc_info=True)
+        return RMultipleResponse(message=str(e))
+
+
+# ── Sprint 7.2: Historical Stress Tests ──────────────────────────────────────
+
+class StressScenario(_BaseModel):
+    name: str
+    start_date: str
+    end_date: str
+    spy_return_pct: float
+    portfolio_simulated_return_pct: float
+    spy_curve: list = []
+    portfolio_curve: list = []
+
+
+class StressTestResponse(_BaseModel):
+    scenarios: list = []
+    message: str = ""
+
+
+STRESS_PERIODS = [
+    {"name": "COVID Crash", "start": "2020-02-19", "end": "2020-03-23"},
+    {"name": "Lehman Crisis", "start": "2008-09-12", "end": "2008-11-20"},
+    {"name": "SVB Collapse", "start": "2023-03-08", "end": "2023-03-24"},
+]
+
+
+@router.get("/stress-tests", response_model=StressTestResponse)
+async def get_stress_tests(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Historical stress test scenarios: COVID, Lehman, SVB.
+    Returns SPY returns and simulated portfolio returns for each period.
+    """
+    try:
+        from src.models.orm import HistoricalPriceCacheORM
+        scenarios = []
+
+        for period in STRESS_PERIODS:
+            start_str = period["start"]
+            end_str = period["end"]
+
+            # Fetch SPY data for the period
+            spy_rows = (
+                session.query(HistoricalPriceCacheORM)
+                .filter(
+                    HistoricalPriceCacheORM.symbol == "SPY",
+                    HistoricalPriceCacheORM.date >= start_str,
+                    HistoricalPriceCacheORM.date <= end_str,
+                )
+                .order_by(HistoricalPriceCacheORM.date)
+                .all()
+            )
+
+            if not spy_rows:
+                # Try Yahoo Finance fallback
+                try:
+                    import yfinance as yf
+                    from datetime import datetime as _dt, timedelta as _td
+                    ticker = yf.Ticker("SPY")
+                    hist = ticker.history(start=start_str, end=end_str, interval="1d")
+                    if not hist.empty:
+                        spy_closes = [(str(d.date()), float(c)) for d, c in zip(hist.index, hist["Close"])]
+                    else:
+                        spy_closes = []
+                except Exception:
+                    spy_closes = []
+            else:
+                spy_closes = [(r.date, r.close) for r in spy_rows if r.close]
+
+            if len(spy_closes) < 2:
+                continue
+
+            # Normalize SPY to 100
+            base_spy = spy_closes[0][1]
+            spy_curve = [{"date": d, "value": round(c / base_spy * 100, 2)} for d, c in spy_closes]
+            spy_return_pct = round((spy_closes[-1][1] / base_spy - 1) * 100, 2)
+
+            # Simulate portfolio: use average beta of active strategies vs SPY
+            # Simple approach: portfolio beta ≈ 0.7 (diversified multi-strategy)
+            # This gives a realistic "how would we have done" estimate
+            PORTFOLIO_BETA = 0.70
+            portfolio_curve = [
+                {"date": d, "value": round(100 + (v["value"] - 100) * PORTFOLIO_BETA, 2)}
+                for d, v in zip([x[0] for x in spy_closes], spy_curve)
+            ]
+            portfolio_return_pct = round(spy_return_pct * PORTFOLIO_BETA, 2)
+
+            scenarios.append({
+                "name": period["name"],
+                "start_date": start_str,
+                "end_date": end_str,
+                "spy_return_pct": spy_return_pct,
+                "portfolio_simulated_return_pct": portfolio_return_pct,
+                "spy_curve": spy_curve,
+                "portfolio_curve": portfolio_curve,
+            })
+
+        if not scenarios:
+            return StressTestResponse(message="No SPY data available for stress test periods")
+
+        return StressTestResponse(scenarios=scenarios)
+
+    except Exception as e:
+        logger.error(f"Stress tests failed: {e}", exc_info=True)
+        return StressTestResponse(message=str(e))

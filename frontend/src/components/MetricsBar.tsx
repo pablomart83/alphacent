@@ -49,6 +49,17 @@ export const MetricsBar: FC = memo(() => {
     healthScore: 0,
   });
 
+  // Signal chip state
+  const [signalChip, setSignalChip] = useState<{ ago: string; total: number; executed: number } | null>(null);
+
+  function relAge(ts: string): string {
+    if (!ts) return '—';
+    const ms = Date.now() - new Date(ts.endsWith('Z') ? ts : ts + 'Z').getTime();
+    const m = Math.floor(ms / 60000);
+    if (m < 60) return `${m}m`;
+    return `${Math.floor(m / 60)}h`;
+  }
+
   const fetchMetrics = useCallback(async () => {
     if (!tradingMode) return;
     try {
@@ -67,6 +78,16 @@ export const MetricsBar: FC = memo(() => {
         healthScore: summary?.health_score?.score ?? 0,
       });
       touchLastSynced();
+
+      // Signal chip — fetch in background, non-blocking
+      apiClient.getRecentSignals(tradingMode, 20).then(sig => {
+        if (!sig?.signals?.length) return;
+        setSignalChip({
+          ago: relAge(sig.signals[0]?.created_at || ''),
+          total: sig.summary.total,
+          executed: sig.summary.accepted,
+        });
+      }).catch(() => {});
     } catch {
       // Non-critical — keep last known values
     }
@@ -168,6 +189,26 @@ export const MetricsBar: FC = memo(() => {
         <span className="text-xs text-gray-500 tracking-wide">Synced</span>
         <span className="text-xs font-mono text-gray-400">{lastSyncedLabel}</span>
       </div>
+
+      {/* Signal chip */}
+      {signalChip && (
+        <>
+          <Sep className="hidden lg:block" />
+          <div className="hidden lg:flex items-center gap-1 shrink-0">
+            <span className="text-xs text-gray-500 tracking-wide">Signal</span>
+            <span className="text-xs font-mono text-gray-400">{signalChip.ago} ago</span>
+            <span className="text-xs font-mono text-gray-500">·</span>
+            <span className="text-xs font-mono text-gray-300">{signalChip.total}</span>
+            <span className="text-xs font-mono text-gray-500">→</span>
+            <span className={cn(
+              'text-xs font-mono font-semibold',
+              signalChip.executed > 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'
+            )}>
+              {signalChip.executed} exec
+            </span>
+          </div>
+        </>
+      )}
 
       {/* Condensed Multi-Timeframe at > 1440px */}
       <div className="hidden 2xl:flex items-center gap-1 ml-auto shrink-0">

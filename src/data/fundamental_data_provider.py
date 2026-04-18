@@ -639,8 +639,8 @@ class FundamentalDataProvider:
                 if e.response.status_code == 429:
                     logger.error(f"FMP API rate limit exceeded (429) for {endpoint}")
                     self.fmp_rate_limiter.activate_circuit_breaker()
-                elif e.response.status_code == 403:
-                    logger.warning(f"FMP API 403 Forbidden for {endpoint} — endpoint not available on current plan")
+                elif e.response.status_code in (403, 404):
+                    logger.debug(f"FMP API {e.response.status_code} for {endpoint} — endpoint not available on current plan")
                 else:
                     logger.error(f"FMP API HTTP error for {endpoint}: {e}")
                 return None
@@ -1790,10 +1790,11 @@ class FundamentalDataProvider:
 
     def get_insider_trading(self, symbol: str, months: int = 6) -> List[Dict[str, Any]]:
         """
-        Fetch insider trading data from FMP stable API.
+        Fetch insider trading data from FMP API.
 
-        Uses /stable/search-insider-trades endpoint (available on Starter plan).
-        Falls back gracefully if plan-gated (404) or rate-limited.
+        NOTE: /stable/search-insider-trades returns 404 and /api/v4/insider-trading
+        returns 403 on the current FMP plan. This method returns [] silently.
+        404/403 responses are logged at DEBUG level only to avoid log spam.
 
         Args:
             symbol: Stock ticker symbol

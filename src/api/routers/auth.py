@@ -9,6 +9,8 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from src.core.auth import AuthenticationManager, ROLE_PERMISSIONS
 from src.api.dependencies import get_auth_manager, get_current_user, require_action
@@ -16,6 +18,9 @@ from src.api.dependencies import get_auth_manager, get_current_user, require_act
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+
+# Rate limiter — 5 login attempts per minute per IP (Sprint 6.3)
+_limiter = Limiter(key_func=get_remote_address)
 
 
 # --- Request/Response Models ---
@@ -62,15 +67,17 @@ class ResetPasswordRequest(BaseModel):
 # --- Auth Endpoints ---
 
 @router.post("/login", response_model=LoginResponse)
+@_limiter.limit("5/minute")
 async def login(
-    request: LoginRequest,
+    request: Request,
+    login_request: LoginRequest,
     response: Response,
     auth_manager: AuthenticationManager = Depends(get_auth_manager)
 ):
-    """User login — creates session and sets cookie."""
-    logger.info(f"Login attempt for user: {request.username}")
+    """User login — creates session and sets cookie. Rate limited to 5/minute per IP."""
+    logger.info(f"Login attempt for user: {login_request.username}")
 
-    session_id = auth_manager.authenticate(request.username, request.password)
+    session_id = auth_manager.authenticate(login_request.username, login_request.password)
     if not session_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
 
@@ -84,12 +91,12 @@ async def login(
     )
 
     session = auth_manager.sessions.get(session_id)
-    logger.info(f"Login successful for user: {request.username}")
+    logger.info(f"Login successful for user: {login_request.username}")
 
     return LoginResponse(
         success=True,
         message="Login successful",
-        username=request.username,
+        username=login_request.username,
         role=session.role if session else None,
         permissions=session.permissions if session else None,
     )

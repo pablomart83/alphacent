@@ -5,12 +5,18 @@ Provides REST API and WebSocket endpoints for the trading platform.
 Validates: Requirements 16.1, 16.6
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from src.core.logging_config import LoggingConfig
 from src.core.auth import AuthenticationManager, SessionManager
@@ -25,6 +31,39 @@ logger = logging.getLogger(__name__)
 # Global instances
 auth_manager: AuthenticationManager = None
 session_manager: SessionManager = None
+
+
+# ── Sprint 6.2: Request Timeout Middleware ────────────────────────────────────
+# Wraps each request in asyncio.wait_for to prevent hung FMP/DB calls from
+# blocking connections indefinitely. Returns 504 if exceeded.
+# Excluded: long-running autonomous cycle endpoint and WebSocket connections.
+
+_TIMEOUT_EXEMPT_PREFIXES = (
+    "/strategies/autonomous/cycle",
+    "/ws",
+)
+_REQUEST_TIMEOUT_SECONDS = 30.0
+
+
+class TimeoutMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        path = request.url.path
+        if any(path.startswith(p) for p in _TIMEOUT_EXEMPT_PREFIXES):
+            return await call_next(request)
+        # WebSocket upgrade — skip timeout
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+        try:
+            return await asyncio.wait_for(
+                call_next(request),
+                timeout=_REQUEST_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Request timeout ({_REQUEST_TIMEOUT_SECONDS}s): {request.method} {path}")
+            return JSONResponse(
+                status_code=504,
+                content={"detail": f"Request timed out after {_REQUEST_TIMEOUT_SECONDS:.0f}s"},
+            )
 
 
 
@@ -188,6 +227,11 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan
     )
+
+    # Register SlowAPI rate limiter (Sprint 6.3)
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     
     # Configure CORS middleware
     app.add_middleware(
@@ -204,6 +248,9 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     
+    # Add timeout middleware (before auth — catches all routes)
+    app.add_middleware(TimeoutMiddleware)
+
     # Add authentication middleware
     app.add_middleware(AuthenticationMiddleware)
     

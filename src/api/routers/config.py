@@ -337,7 +337,7 @@ async def update_risk_config(
         if request.stale_order_hours is not None:
             risk_config_dict['stale_order_hours'] = request.stale_order_hours
         
-        # Save to JSON file directly
+        # Save to JSON file (backup / fallback)
         import json
         from pathlib import Path
         
@@ -349,9 +349,84 @@ async def update_risk_config(
             all_configs = {}
         
         all_configs[request.mode.value] = risk_config_dict
-        
         risk_config_file.write_text(json.dumps(all_configs, indent=2))
-        
+
+        # Also persist to database (primary source — load_risk_config reads DB first)
+        try:
+            from src.models.database import get_database
+            from src.models.orm import RiskConfigORM
+
+            db = get_database()
+            session = db.get_session()
+            try:
+                existing = session.query(RiskConfigORM).filter(
+                    RiskConfigORM.mode == request.mode
+                ).first()
+                if existing:
+                    existing.max_position_size_pct = request.max_position_size_pct
+                    existing.max_exposure_pct = request.max_exposure_pct
+                    existing.max_daily_loss_pct = request.max_daily_loss_pct
+                    existing.max_drawdown_pct = request.max_drawdown_pct
+                    if hasattr(existing, 'position_risk_pct') and request.position_risk_pct is not None:
+                        existing.position_risk_pct = request.position_risk_pct
+                    if hasattr(existing, 'stop_loss_pct') and request.stop_loss_pct is not None:
+                        existing.stop_loss_pct = request.stop_loss_pct
+                    if hasattr(existing, 'take_profit_pct') and request.take_profit_pct is not None:
+                        existing.take_profit_pct = request.take_profit_pct
+                    if request.trailing_stop_enabled is not None:
+                        existing.trailing_stop_enabled = int(request.trailing_stop_enabled)
+                    if request.trailing_stop_activation_pct is not None:
+                        existing.trailing_stop_activation_pct = request.trailing_stop_activation_pct
+                    if request.trailing_stop_distance_pct is not None:
+                        existing.trailing_stop_distance_pct = request.trailing_stop_distance_pct
+                    if request.partial_exit_enabled is not None:
+                        existing.partial_exit_enabled = int(request.partial_exit_enabled)
+                    if request.partial_exit_levels is not None:
+                        existing.partial_exit_levels = request.partial_exit_levels
+                    if request.correlation_adjustment_enabled is not None:
+                        existing.correlation_adjustment_enabled = int(request.correlation_adjustment_enabled)
+                    if request.correlation_threshold is not None:
+                        existing.correlation_threshold = request.correlation_threshold
+                    if request.correlation_reduction_factor is not None:
+                        existing.correlation_reduction_factor = request.correlation_reduction_factor
+                    if request.regime_based_sizing_enabled is not None:
+                        existing.regime_based_sizing_enabled = int(request.regime_based_sizing_enabled)
+                    if request.regime_multipliers is not None:
+                        existing.regime_multipliers = request.regime_multipliers
+                    if request.cancel_stale_orders is not None:
+                        existing.cancel_stale_orders = int(request.cancel_stale_orders)
+                    if request.stale_order_hours is not None:
+                        existing.stale_order_hours = request.stale_order_hours
+                else:
+                    session.add(RiskConfigORM(
+                        mode=request.mode,
+                        max_position_size_pct=request.max_position_size_pct,
+                        max_exposure_pct=request.max_exposure_pct,
+                        max_daily_loss_pct=request.max_daily_loss_pct,
+                        max_drawdown_pct=request.max_drawdown_pct,
+                        position_risk_pct=request.position_risk_pct or 0.01,
+                        stop_loss_pct=request.stop_loss_pct or 0.03,
+                        take_profit_pct=request.take_profit_pct or 0.06,
+                        trailing_stop_enabled=int(request.trailing_stop_enabled or False),
+                        trailing_stop_activation_pct=request.trailing_stop_activation_pct or 0.05,
+                        trailing_stop_distance_pct=request.trailing_stop_distance_pct or 0.03,
+                        partial_exit_enabled=int(request.partial_exit_enabled or False),
+                        partial_exit_levels=request.partial_exit_levels,
+                        correlation_adjustment_enabled=int(request.correlation_adjustment_enabled if request.correlation_adjustment_enabled is not None else True),
+                        correlation_threshold=request.correlation_threshold or 0.7,
+                        correlation_reduction_factor=request.correlation_reduction_factor or 0.5,
+                        regime_based_sizing_enabled=int(request.regime_based_sizing_enabled or False),
+                        regime_multipliers=request.regime_multipliers,
+                        cancel_stale_orders=int(request.cancel_stale_orders if request.cancel_stale_orders is not None else True),
+                        stale_order_hours=request.stale_order_hours or 24,
+                    ))
+                session.commit()
+                logger.info(f"Risk config saved to database for {request.mode.value} mode")
+            finally:
+                session.close()
+        except Exception as db_err:
+            logger.warning(f"Failed to save risk config to database: {db_err} — JSON file saved as fallback")
+
         logger.info(f"Risk config saved for {request.mode.value} mode")
         
         return CredentialsResponse(
@@ -885,6 +960,12 @@ async def update_autonomous_config(
         if 'signal_generation' not in full_config:
             full_config['signal_generation'] = {}
         full_config['signal_generation']['dynamic_symbol_additions'] = request.dynamic_symbol_additions
+
+    # Update signal generation interval
+    if request.signal_generation_interval is not None:
+        if 'signal_generation' not in full_config:
+            full_config['signal_generation'] = {}
+        full_config['signal_generation']['interval_seconds'] = request.signal_generation_interval
 
     # Update activation thresholds
     if 'activation_thresholds' not in full_config:

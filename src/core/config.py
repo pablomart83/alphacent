@@ -174,6 +174,18 @@ class Configuration:
                     existing.position_risk_pct = risk_config.position_risk_pct
                     existing.stop_loss_pct = risk_config.stop_loss_pct
                     existing.take_profit_pct = risk_config.take_profit_pct
+                    existing.trailing_stop_enabled = int(risk_config.trailing_stop_enabled)
+                    existing.trailing_stop_activation_pct = risk_config.trailing_stop_activation_pct
+                    existing.trailing_stop_distance_pct = risk_config.trailing_stop_distance_pct
+                    existing.partial_exit_enabled = int(risk_config.partial_exit_enabled)
+                    existing.partial_exit_levels = risk_config.partial_exit_levels
+                    existing.correlation_adjustment_enabled = int(risk_config.correlation_adjustment_enabled)
+                    existing.correlation_threshold = getattr(risk_config, 'correlation_threshold', 0.7)
+                    existing.correlation_reduction_factor = getattr(risk_config, 'correlation_reduction_factor', 0.5)
+                    existing.regime_based_sizing_enabled = int(risk_config.regime_based_sizing_enabled)
+                    existing.regime_multipliers = risk_config.regime_size_multipliers
+                    existing.cancel_stale_orders = int(getattr(risk_config, 'cancel_stale_orders', True))
+                    existing.stale_order_hours = getattr(risk_config, 'stale_order_hours', 24)
                 else:
                     # Create new
                     new_config = RiskConfigORM(
@@ -184,7 +196,19 @@ class Configuration:
                         max_drawdown_pct=risk_config.max_drawdown_pct,
                         position_risk_pct=risk_config.position_risk_pct,
                         stop_loss_pct=risk_config.stop_loss_pct,
-                        take_profit_pct=risk_config.take_profit_pct
+                        take_profit_pct=risk_config.take_profit_pct,
+                        trailing_stop_enabled=int(risk_config.trailing_stop_enabled),
+                        trailing_stop_activation_pct=risk_config.trailing_stop_activation_pct,
+                        trailing_stop_distance_pct=risk_config.trailing_stop_distance_pct,
+                        partial_exit_enabled=int(risk_config.partial_exit_enabled),
+                        partial_exit_levels=risk_config.partial_exit_levels,
+                        correlation_adjustment_enabled=int(risk_config.correlation_adjustment_enabled),
+                        correlation_threshold=getattr(risk_config, 'correlation_threshold', 0.7),
+                        correlation_reduction_factor=getattr(risk_config, 'correlation_reduction_factor', 0.5),
+                        regime_based_sizing_enabled=int(risk_config.regime_based_sizing_enabled),
+                        regime_multipliers=risk_config.regime_size_multipliers,
+                        cancel_stale_orders=int(getattr(risk_config, 'cancel_stale_orders', True)),
+                        stale_order_hours=getattr(risk_config, 'stale_order_hours', 24),
                     )
                     session.add(new_config)
                 
@@ -249,7 +273,19 @@ class Configuration:
                         max_drawdown_pct=risk_config_orm.max_drawdown_pct,
                         position_risk_pct=risk_config_orm.position_risk_pct,
                         stop_loss_pct=risk_config_orm.stop_loss_pct,
-                        take_profit_pct=risk_config_orm.take_profit_pct
+                        take_profit_pct=risk_config_orm.take_profit_pct,
+                        trailing_stop_enabled=bool(getattr(risk_config_orm, 'trailing_stop_enabled', False)),
+                        trailing_stop_activation_pct=getattr(risk_config_orm, 'trailing_stop_activation_pct', 0.05),
+                        trailing_stop_distance_pct=getattr(risk_config_orm, 'trailing_stop_distance_pct', 0.03),
+                        partial_exit_enabled=bool(getattr(risk_config_orm, 'partial_exit_enabled', False)),
+                        partial_exit_levels=getattr(risk_config_orm, 'partial_exit_levels', None),
+                        correlation_adjustment_enabled=bool(getattr(risk_config_orm, 'correlation_adjustment_enabled', True)),
+                        correlation_threshold=getattr(risk_config_orm, 'correlation_threshold', 0.7),
+                        correlation_reduction_factor=getattr(risk_config_orm, 'correlation_reduction_factor', 0.5),
+                        regime_based_sizing_enabled=bool(getattr(risk_config_orm, 'regime_based_sizing_enabled', False)),
+                        regime_size_multipliers=getattr(risk_config_orm, 'regime_multipliers', None),
+                        cancel_stale_orders=bool(getattr(risk_config_orm, 'cancel_stale_orders', True)),
+                        stale_order_hours=getattr(risk_config_orm, 'stale_order_hours', 24),
                     )
             finally:
                 session.close()

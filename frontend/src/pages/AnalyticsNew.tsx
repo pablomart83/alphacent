@@ -230,6 +230,14 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   const [tearSheetLoading, setTearSheetLoading] = useState(false);
   const [tearSheetError, setTearSheetError] = useState<string | null>(null);
 
+  // Stress tests state (Sprint 7.2)
+  const [stressTests, setStressTests] = useState<any | null>(null);
+  const [stressTestsLoading, setStressTestsLoading] = useState(false);
+  const [stressTestsError, setStressTestsError] = useState<string | null>(null);
+
+  // R-Multiples state (Sprint 7.1)
+  const [rMultiples, setRMultiples] = useState<any | null>(null);
+
   // TCA state
   const [tcaData, setTcaData] = useState<TCAData | null>(null);
   const [tcaLoading, setTcaLoading] = useState(false);
@@ -461,8 +469,12 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
         setTearSheetLoading(true);
         setTearSheetError(null);
         try {
-          const ts = await apiClient.getTearSheetData(tradingMode, period);
+          const [ts, rm] = await Promise.all([
+            apiClient.getTearSheetData(tradingMode, period),
+            apiClient.get(`/analytics/r-multiples?mode=${tradingMode}`).catch(() => null),
+          ]);
           setTearSheet(ts);
+          if (rm) setRMultiples(rm);
         } catch (e: any) {
           setTearSheetError(e?.message || 'Failed to load tear sheet data');
         } finally {
@@ -479,6 +491,19 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           setTcaError(e?.message || 'Failed to load TCA data');
         } finally {
           setTcaLoading(false);
+        }
+      }
+
+      if (currentTab === 'stress-tests') {
+        setStressTestsLoading(true);
+        setStressTestsError(null);
+        try {
+          const data = await apiClient.get('/analytics/stress-tests');
+          setStressTests(data);
+        } catch (e: any) {
+          setStressTestsError(e?.message || 'Failed to load stress tests');
+        } finally {
+          setStressTestsLoading(false);
         }
       }
       
@@ -907,6 +932,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               { value: 'perf-attribution', label: 'Attribution' },
               { value: 'tear-sheet', label: 'Tear Sheet' },
               { value: 'tca', label: 'TCA' },
+              { value: 'stress-tests', label: 'Stress Tests' },
             ].map((tab) => (
               <button
                 key={tab.value}
@@ -2315,6 +2341,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               data={tearSheet}
               loading={tearSheetLoading}
               error={tearSheetError}
+              rMultiples={rMultiples}
               onRetry={() => handleTabChange('tear-sheet')}
             />
           </TabsContent>
@@ -2327,6 +2354,74 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               period={period}
               onRetry={() => handleTabChange('tca')}
             />
+          </TabsContent>
+
+          {/* ═══════════════════════════════════════════════════════════════
+              STRESS TESTS TAB (Sprint 7.2)
+              ═══════════════════════════════════════════════════════════════ */}
+          <TabsContent value="stress-tests" className="space-y-3">
+            {stressTestsLoading ? (
+              <div className="flex items-center justify-center h-48 text-sm text-muted-foreground">Loading stress tests...</div>
+            ) : stressTestsError ? (
+              <div className="text-sm text-accent-red p-4">{stressTestsError}</div>
+            ) : stressTests?.message && !stressTests?.scenarios?.length ? (
+              <div className="text-sm text-muted-foreground p-4">{stressTests.message}</div>
+            ) : stressTests?.scenarios?.length ? (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Simulated portfolio performance during major market crashes (β=0.70 vs SPY).
+                  SPY data from historical cache.
+                </p>
+                {stressTests.scenarios.map((scenario: any) => (
+                  <div key={scenario.name} className="border border-border rounded-md p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-semibold">{scenario.name}</span>
+                      <div className="flex items-center gap-4 text-xs font-mono">
+                        <span className="text-muted-foreground">{scenario.start_date} → {scenario.end_date}</span>
+                        <span className={scenario.spy_return_pct >= 0 ? 'text-accent-green' : 'text-accent-red'}>
+                          SPY: {scenario.spy_return_pct >= 0 ? '+' : ''}{scenario.spy_return_pct.toFixed(1)}%
+                        </span>
+                        <span className={scenario.portfolio_simulated_return_pct >= 0 ? 'text-accent-green' : 'text-accent-red'}>
+                          Portfolio: {scenario.portfolio_simulated_return_pct >= 0 ? '+' : ''}{scenario.portfolio_simulated_return_pct.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                    {scenario.spy_curve?.length > 1 && (
+                      <TvChart
+                        height={180}
+                        series={[
+                          {
+                            id: `spy_${scenario.name}`,
+                            type: 'line',
+                            data: scenario.spy_curve.map((p: any) => ({ time: p.date, value: p.value })),
+                            color: '#9ca3af',
+                            lineWidth: 1,
+                            dashed: true,
+                          },
+                          {
+                            id: `port_${scenario.name}`,
+                            type: 'area',
+                            data: scenario.portfolio_curve.map((p: any) => ({ time: p.date, value: p.value })),
+                            lineColor: '#3b82f6',
+                            topColor: 'rgba(59,130,246,0.15)',
+                            bottomColor: 'transparent',
+                            lineWidth: 2,
+                          },
+                        ]}
+                        showTimeScale
+                        autoResize
+                      />
+                    )}
+                    <div className="flex items-center gap-4 mt-1 text-[10px] font-mono text-muted-foreground">
+                      <span className="flex items-center gap-1"><span className="w-4 h-px bg-gray-400 inline-block" style={{ borderTop: '1px dashed #9ca3af' }} /> SPY</span>
+                      <span className="flex items-center gap-1"><span className="w-4 h-0.5 bg-blue-500 inline-block rounded" /> Portfolio (simulated)</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground p-4">Click the Stress Tests tab to load data.</div>
+            )}
           </TabsContent>
         </Tabs>
       </motion.div>

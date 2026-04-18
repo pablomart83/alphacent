@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useCallback, useMemo } from 'react';
+import { type FC, useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
@@ -9,9 +9,9 @@ import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
 import { ResizablePanelLayout } from '../components/layout/ResizablePanelLayout';
 import { PanelHeader } from '../components/layout/PanelHeader';
-import { CompactMetricRow, type CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataTable } from '../components/trading/DataTable';
 import { TradingCyclePipeline } from '../components/trading/TradingCyclePipeline';
+import { CycleIntelligencePanel } from '../components/CycleIntelligencePanel';
 // Card imports removed — using PanelHeader sections instead
 import { Button } from '../components/ui/Button';
 import { Tabs, TabsContent } from '../components/ui/tabs';
@@ -67,6 +67,10 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
     activated: number;
     strategies_retired: number;
   } | null>(null);
+
+  // Full cycle history for Cycle Intelligence panel
+  const [cycleHistoryFull, setCycleHistoryFull] = useState<any[]>([]);
+  const [proposalCount, setProposalCount] = useState<number>(200);
   
   const [_currentCycleMetrics, setCurrentCycleMetrics] = useState({
     proposed: 0,
@@ -155,14 +159,15 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
     try {
       setRefreshing(true);
       setError(null);
-      const [autoStatus, sysStatus, strategiesData, ordersData, signalResult, scheduleResult, cyclesResult] = await Promise.all([
+      const [autoStatus, sysStatus, strategiesData, ordersData, signalResult, scheduleResult, cyclesResult, autonomousConfigResult] = await Promise.all([
         apiClient.getAutonomousStatus(),
         apiClient.getSystemStatus(),
         apiClient.getStrategies(tradingMode, false),
         apiClient.getOrders(tradingMode),
         apiClient.getRecentSignals(tradingMode, 100).catch(() => null),
         apiClient.getAutonomousSchedule().catch(() => null),
-        apiClient.getAutonomousCycles(1).catch(() => null),
+        apiClient.getAutonomousCycles(10).catch(() => null),
+        apiClient.getAutonomousConfig().catch(() => null),
       ]);
 
       setAutonomousStatus(autoStatus);
@@ -191,6 +196,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
       // Apply last cycle data from cycle history
       if (cyclesResult) {
         const cycles = Array.isArray(cyclesResult) ? cyclesResult : (cyclesResult.data || []);
+        setCycleHistoryFull(cycles);
         if (cycles.length > 0) {
           const lastCycle = cycles[0];
           setLastCycleData({
@@ -202,6 +208,12 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             strategies_retired: lastCycle.strategies_retired ?? 0,
           });
         }
+      }
+
+      // Extract proposal count from autonomous config
+      if (autonomousConfigResult) {
+        const pc = autonomousConfigResult?.proposal_count ?? autonomousConfigResult?.autonomous?.proposal_count;
+        if (pc) setProposalCount(Number(pc));
       }
       
       setLoading(false);
@@ -521,33 +533,6 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   };
 
   // Helper functions
-  const getConfidenceLabel = (confidence: number): { label: string; color: string } => {
-    if (confidence >= 0.15) return { label: 'Strong', color: 'text-accent-green' };
-    if (confidence >= 0.08) return { label: 'Moderate', color: 'text-yellow-400' };
-    if (confidence >= 0.03) return { label: 'Mild', color: 'text-orange-400' };
-    return { label: 'Weak', color: 'text-gray-400' };
-  };
-
-  const getRegimeColor = (regime: string): string => {
-    switch (regime.toUpperCase()) {
-      case 'TRENDING_UP': return 'text-accent-green';
-      case 'TRENDING_DOWN': return 'text-accent-red';
-      case 'RANGING': return 'text-blue-400';
-      case 'VOLATILE': return 'text-yellow-400';
-      default: return 'text-gray-400';
-    }
-  };
-
-  const getRegimeIcon = (regime: string): string => {
-    switch (regime.toUpperCase()) {
-      case 'TRENDING_UP': return '↗️';
-      case 'TRENDING_DOWN': return '↘️';
-      case 'RANGING': return '↔️';
-      case 'VOLATILE': return '⚡';
-      default: return '📊';
-    }
-  };
-
   const getTradingStateColor = (state: SystemState): string => {
     switch (state) {
       case 'ACTIVE': return 'bg-accent-green/20 text-accent-green border-accent-green/30';
@@ -793,26 +778,6 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
       ),
     },
   ];
-
-  // ── Side panel compact metrics ─────────────────────────────────────────
-  const cycleStatusLabel = autonomousStatus?.enabled
-    ? (cycleProgress > 0 && cycleProgress < 100 ? 'Running' : 'Idle')
-    : 'Disabled';
-  const cycleStatusTrend = autonomousStatus?.enabled ? 'up' as const : 'neutral' as const;
-
-  const wfPassRate = useMemo(() => {
-    if (!lastCycleData || lastCycleData.backtested === 0) return '—';
-    return `${((lastCycleData.backtest_passed / lastCycleData.backtested) * 100).toFixed(0)}%`;
-  }, [lastCycleData]);
-
-  const proposalsThisWeek = lastCycleData?.proposals_generated ?? 0;
-
-  const sideMetrics: CompactMetric[] = useMemo(() => [
-    { label: 'Cycle', value: cycleStatusLabel, trend: cycleStatusTrend },
-    { label: 'Pass Rate', value: wfPassRate, trend: wfPassRate !== '—' && parseInt(wfPassRate) >= 50 ? 'up' as const : 'down' as const },
-    { label: 'Proposals', value: proposalsThisWeek },
-    { label: 'Active', value: lifecycleCounts.active, trend: 'up' as const },
-  ], [cycleStatusLabel, cycleStatusTrend, wfPassRate, proposalsThisWeek, lifecycleCounts.active]);
 
   // ── Loading state ──────────────────────────────────────────────────────
   if (tradingModeLoading || loading) {
@@ -1645,167 +1610,16 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   const sidePanel = (
     <div className="flex flex-col h-full">
       <PanelHeader title="Cycle Intelligence" panelId="autonomous-side" onRefresh={fetchData}>
-        <div className="flex flex-col gap-1 p-1.5">
-          {/* Compact Metric Row */}
-          <CompactMetricRow metrics={sideMetrics} className="flex-wrap h-auto min-h-0 max-h-none" />
-
-          {/* Cycle Progress Indicator */}
-          <div>
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-              Cycle Progress
-            </div>
-            <div className="bg-muted rounded-lg p-3">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-gray-300 font-mono">
-                  {cycleProgress > 0 && cycleProgress < 100 ? 'Running' : cycleProgress === 100 ? 'Complete' : 'Idle'}
-                </span>
-                <span className="text-xs font-mono font-semibold text-gray-200">{cycleProgress}%</span>
-              </div>
-              <div className="w-full bg-dark-bg rounded-full h-2 overflow-hidden">
-                <div
-                  className={cn(
-                    'h-full rounded-full transition-all duration-500',
-                    cycleProgress === 100 ? 'bg-accent-green' :
-                    cycleProgress > 0 ? 'bg-blue-500' : 'bg-gray-600'
-                  )}
-                  style={{ width: `${cycleProgress}%` }}
-                />
-              </div>
-              {lastCycleData && (
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <div>
-                    <div className="text-xs text-muted-foreground">Duration</div>
-                    <div className="text-xs font-mono font-semibold">
-                      {lastCycleData.duration_seconds != null
-                        ? lastCycleData.duration_seconds < 60
-                          ? `${lastCycleData.duration_seconds.toFixed(0)}s`
-                          : `${Math.floor(lastCycleData.duration_seconds / 60)}m ${Math.floor(lastCycleData.duration_seconds % 60)}s`
-                        : '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">Proposals</div>
-                    <div className="text-xs font-mono font-semibold text-blue-400">{lastCycleData.proposals_generated}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">BT Pass Rate</div>
-                    <div className="text-xs font-mono font-semibold text-purple-400">
-                      {lastCycleData.backtested > 0
-                        ? `${((lastCycleData.backtest_passed / lastCycleData.backtested) * 100).toFixed(0)}%`
-                        : '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">Net Activations</div>
-                    <div className={cn('text-xs font-mono font-semibold',
-                      (lastCycleData.activated - lastCycleData.strategies_retired) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
-                      {lastCycleData.activated - lastCycleData.strategies_retired >= 0 ? '+' : ''}{lastCycleData.activated - lastCycleData.strategies_retired}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* WF Pass Rate Sparkline */}
-          <div>
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-              WF Pass Rate Trend
-            </div>
-            {walkForwardData?.pass_rate_history && walkForwardData.pass_rate_history.length > 0 ? (
-              <div className="bg-muted rounded-lg p-2">
-                <InteractiveChart
-                  data={walkForwardData.pass_rate_history.slice(-20)}
-                  dataKeys={[{ key: 'pass_rate', color: designColors.green, type: 'line' }]}
-                  xAxisKey="date"
-                  height={100}
-                  tooltipFormatter={(v: number) => [`${v.toFixed(1)}%`, 'Pass Rate']}
-                />
-              </div>
-            ) : (
-              <div className="bg-muted rounded-lg p-3 text-center text-xs text-muted-foreground">
-                No pass rate history
-              </div>
-            )}
-          </div>
-
-          {/* System Status Summary */}
-          {autonomousStatus && (
-            <div>
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-                Market Regime
-              </div>
-              <div className="bg-muted rounded-lg p-3">
-                <div className={cn(
-                  'text-sm font-mono font-semibold flex items-center gap-2',
-                  getRegimeColor(autonomousStatus.market_regime)
-                )}>
-                  {getRegimeIcon(autonomousStatus.market_regime)} {autonomousStatus.market_regime}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  Confidence: <span className={getConfidenceLabel(autonomousStatus.market_confidence).color}>
-                    {getConfidenceLabel(autonomousStatus.market_confidence).label}
-                  </span> ({(autonomousStatus.market_confidence * 100).toFixed(0)}%)
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Recent Similarity Rejections */}
-          <div>
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-              Recent Similarity Rejections
-            </div>
-            {walkForwardData?.similarity_rejections && walkForwardData.similarity_rejections.length > 0 ? (
-              <div className="space-y-1.5">
-                {walkForwardData.similarity_rejections.slice(0, 5).map((r: any, idx: number) => (
-                  <div key={idx} className="bg-muted rounded-lg p-2 flex items-center justify-between">
-                    <div className="min-w-0">
-                      <div className="text-xs font-mono text-gray-300 truncate">{r.rejected_name || '—'}</div>
-                      <div className="text-xs text-muted-foreground truncate">vs {r.existing_name || '—'}</div>
-                    </div>
-                    <span className="text-xs font-mono font-semibold text-accent-red shrink-0 ml-2">
-                      {r.similarity != null ? `${(r.similarity * 100).toFixed(0)}%` : '—'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="bg-muted rounded-lg p-3 text-center text-xs text-muted-foreground">
-                No similarity rejections
-              </div>
-            )}
-          </div>
-
-          {/* Cumulative Stats */}
-          {autonomousStatus && (
-            <div>
-              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
-                Cumulative Stats
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-xs text-muted-foreground">Last Cycle</div>
-                  <div className="text-xs font-mono font-semibold text-gray-200">
-                    {autonomousStatus.last_cycle_time ? formatTimestamp(autonomousStatus.last_cycle_time) : '—'}
-                  </div>
-                </div>
-                <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-xs text-muted-foreground">Activated</div>
-                  <div className="text-lg font-mono font-semibold text-accent-green">
-                    {autonomousStatus.cycle_stats.activated_count}
-                  </div>
-                </div>
-                <div className="bg-muted rounded-lg p-2 text-center">
-                  <div className="text-xs text-muted-foreground">Retired</div>
-                  <div className="text-lg font-mono font-semibold text-accent-red">
-                    {autonomousStatus.cycle_stats.retired_count}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+        <CycleIntelligencePanel
+          autonomousStatus={autonomousStatus}
+          cycleHistory={cycleHistoryFull}
+          cycleProgress={cycleProgress}
+          cycleStage={_cycleStage}
+          lastCycleData={lastCycleData}
+          signalData={signalData}
+          walkForwardData={walkForwardData}
+          proposalCount={proposalCount}
+        />
       </PanelHeader>
     </div>
   );

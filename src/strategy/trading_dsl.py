@@ -510,7 +510,9 @@ class DSLCodeGenerator:
             return (f"({ind1} < {number}) & "
                     f"({ind1}.shift(1) >= {number})")
         else:
-            raise ValueError(f"Unknown crossover type: {crossover_type}")(self, node: Tree) -> str:
+            raise ValueError(f"Unknown crossover type: {crossover_type}")
+
+    def _handle_indicator_with_params(self, node: Tree) -> str:
         """
         Handle indicator with parameters (e.g., RSI(14), BB_LOWER(20, 2)).
         
