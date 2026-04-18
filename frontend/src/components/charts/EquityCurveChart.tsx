@@ -245,22 +245,25 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
           />
           {/* Interval selector — only shown when handler is provided */}
           {onIntervalChange && (
-            <div className="flex items-center gap-0.5">
-              {(['1d', '4h', '1h'] as const).map((iv) => (
-                <button
-                  key={iv}
-                  onClick={() => onIntervalChange(iv)}
-                  className={cn(
-                    'px-2 py-0.5 text-xs font-mono font-medium rounded transition-colors',
-                    interval === iv
-                      ? 'bg-gray-700 text-gray-100'
-                      : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
-                  )}
-                >
-                  {iv.toUpperCase()}
-                </button>
-              ))}
-            </div>
+            <>
+              <span className="text-gray-700 select-none">|</span>
+              <div className="flex items-center gap-0.5">
+                {(['1d', '4h', '1h'] as const).map((iv) => (
+                  <button
+                    key={iv}
+                    onClick={() => onIntervalChange(iv)}
+                    className={cn(
+                      'px-2 py-0.5 text-xs font-mono font-medium rounded transition-colors',
+                      interval === iv
+                        ? 'bg-gray-700 text-gray-100'
+                        : 'text-gray-500 hover:text-gray-300 hover:bg-gray-800/50'
+                    )}
+                  >
+                    {iv.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
           <div className="flex items-center gap-3 text-xs font-mono">
             <span className="flex items-center gap-1.5">

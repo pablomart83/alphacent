@@ -1175,8 +1175,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
             {/* Equity Curve */}
             <SectionLabel>Equity Curve</SectionLabel>
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.1 }}>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: 0.1 }}
+              style={{ minHeight: 320 }}
+            >
               <EquityCurveChart
                 equityData={(perfStats?.equity_curve || performanceMetrics?.equity_curve || []).map((d: any) => ({
                   date: typeof d.date === 'string' ? d.date.slice(0, 10) : '',
