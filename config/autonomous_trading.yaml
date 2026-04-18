@@ -24,11 +24,11 @@ activation_thresholds:
   min_win_rate_crypto: 0.3
   min_win_rate_commodity: 0.35
   min_trades: 2
-  min_trades_alpha_edge: 10
-  min_trades_dsl: 15
-  min_trades_dsl_1h: 20
-  min_trades_dsl_4h: 12
-  min_trades_commodity: 8
+  min_trades_alpha_edge: 8      # Was 10 — alpha edge strategies are lower frequency by design
+  min_trades_dsl: 8             # Was 15 — too strict; selective 1d strategies fire 6-10x/6mo
+  min_trades_dsl_1h: 20         # Keep — 1h crypto removed anyway; non-crypto 1h needs density
+  min_trades_dsl_4h: 8          # Was 12 — 4h strategies in 180-day test window: 8 is sufficient
+  min_trades_commodity: 6       # Was 8 — commodities are inherently lower frequency
   min_return_per_trade:
     stock: 0.0015
     etf: 0.001
@@ -200,7 +200,8 @@ backtest:
     max_sl_pct: 0.08
     min_tp_pct: 0.04
     max_tp_pct: 0.20
-    min_reward_risk_ratio: 2.0  # Raised from 1.5 — require 2:1 minimum
+    min_reward_risk_ratio: 1.5  # Relaxed from 2.0 — mean-reversion at 65%+ WR is fine at 1.5:1
+    # Note: trend-following strategies enforce 2:1 via strategy_proposer asset-class overrides
 data_sources:
   financial_modeling_prep:
     enabled: true
