@@ -1374,13 +1374,13 @@ async def get_cio_risk(
             from src.strategy.fundamental_ranker import FundamentalRanker
             weights_map = FundamentalRanker.REGIME_WEIGHTS
             
-            # Detect current regime
-            from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-            from src.data.market_data_manager import MarketDataManager
-            mdm = MarketDataManager()
-            analyzer = MarketStatisticsAnalyzer(mdm)
-            sub_regime, _, _, _ = analyzer.detect_sub_regime()
-            regime_str = sub_regime.value if hasattr(sub_regime, 'value') else str(sub_regime)
+            # Detect current regime — MarketStatisticsAnalyzer needs an etoro_client,
+            # so we skip live detection here and use the stored regime from the DB instead.
+            from src.models.orm import StrategyORM as _SO
+            latest_strategy = session.query(_SO).filter(
+                _SO.market_regime.isnot(None)
+            ).order_by(_SO.updated_at.desc()).first()
+            regime_str = (latest_strategy.market_regime or "ranging_low_vol") if latest_strategy else "ranging_low_vol"
             
             # Get current weights for this regime
             regime_key = regime_str.lower()

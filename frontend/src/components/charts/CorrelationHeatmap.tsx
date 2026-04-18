@@ -1,5 +1,4 @@
 import { type FC } from 'react';
-import { cn } from '../../lib/utils';
 import { chartTheme } from '../../lib/design-tokens';
 
 export interface CorrelationHeatmapProps {
@@ -37,7 +36,8 @@ export const CorrelationHeatmap: FC<CorrelationHeatmapProps> = ({ data, symbols 
     }
   });
 
-  const displaySymbols = symbols.slice(0, 20);
+  // Cap at 15 symbols to keep the heatmap readable in its container
+  const displaySymbols = symbols.slice(0, 15);
 
   if (displaySymbols.length === 0) {
     return (
@@ -47,19 +47,23 @@ export const CorrelationHeatmap: FC<CorrelationHeatmapProps> = ({ data, symbols 
     );
   }
 
+  // Cell size scales down with more symbols
+  const cellSize = displaySymbols.length > 10 ? 24 : displaySymbols.length > 7 ? 28 : 32;
+  const labelWidth = 36;
+
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-auto max-h-[280px]">
       <table className="border-collapse text-xs font-mono" style={{ fontFamily: chartTheme.fontFamily }}>
         <thead>
           <tr>
-            <th className="p-1 text-right text-muted-foreground w-16" />
+            <th style={{ width: labelWidth, minWidth: labelWidth }} />
             {displaySymbols.map((sym) => (
               <th
                 key={sym}
-                className="p-1 text-center text-muted-foreground w-12"
-                style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', maxHeight: 60 }}
+                style={{ width: cellSize, minWidth: cellSize, writingMode: 'vertical-rl', transform: 'rotate(180deg)', maxHeight: 50, padding: '2px 1px' }}
+                className="text-center text-muted-foreground"
               >
-                {sym.slice(0, 5)}
+                {sym.slice(0, 4)}
               </th>
             ))}
           </tr>
@@ -67,17 +71,17 @@ export const CorrelationHeatmap: FC<CorrelationHeatmapProps> = ({ data, symbols 
         <tbody>
           {displaySymbols.map((rowSym) => (
             <tr key={rowSym}>
-              <td className="p-1 text-right text-muted-foreground truncate max-w-[60px]">{rowSym.slice(0, 5)}</td>
+              <td style={{ width: labelWidth, minWidth: labelWidth, padding: '1px 2px' }} className="text-right text-muted-foreground truncate">{rowSym.slice(0, 4)}</td>
               {displaySymbols.map((colSym) => {
                 const val = rowSym === colSym ? 1 : (lookup.get(`${rowSym}:${colSym}`) ?? 0);
                 return (
                   <td
                     key={colSym}
-                    className={cn('p-1 text-center w-12 h-8 border border-dark-border/30 cursor-default')}
-                    style={{ backgroundColor: getCorrelationBg(val) }}
+                    style={{ width: cellSize, height: cellSize, backgroundColor: getCorrelationBg(val), padding: 0 }}
+                    className="text-center border border-dark-border/20 cursor-default"
                     title={`${rowSym} × ${colSym}: ${val.toFixed(2)}`}
                   >
-                    <span className="text-xs text-white/80">{val.toFixed(1)}</span>
+                    <span style={{ fontSize: 9 }} className="text-white/80">{val.toFixed(1)}</span>
                   </td>
                 );
               })}

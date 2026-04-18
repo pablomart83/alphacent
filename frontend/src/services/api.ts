@@ -728,10 +728,19 @@ class ApiClient {
   }
 
   async getRiskConfig(mode: TradingMode): Promise<RiskParams> {
-    const response = await this.client.get<ApiResponse<RiskParams>>(
+    const response = await this.client.get<ApiResponse<any>>(
       `/config/risk?mode=${mode}`
     );
-    return this.handleResponse(response);
+    const raw = this.handleResponse(response);
+    // API returns _pct suffix fields as fractions (0.05 = 5%)
+    // RiskParams expects max_position_size, max_portfolio_exposure, max_daily_loss
+    return {
+      max_position_size: raw.max_position_size ?? raw.max_position_size_pct ?? 0.05,
+      max_portfolio_exposure: raw.max_portfolio_exposure ?? raw.max_exposure_pct ?? 0.5,
+      max_daily_loss: raw.max_daily_loss ?? raw.max_daily_loss_pct ?? 0.03,
+      risk_per_trade: raw.risk_per_trade ?? raw.position_risk_pct ?? 0.02,
+      ...raw,
+    } as RiskParams;
   }
 
   async updateRiskConfig(params: RiskParams & { mode: TradingMode }): Promise<{ success: boolean; message: string }> {

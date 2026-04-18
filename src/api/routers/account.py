@@ -371,6 +371,22 @@ async def get_positions(
     for pos in position_orms:
         d = pos.to_dict()
         d['strategy_name'] = strategy_name_map.get(pos.strategy_id)
+        # Enrich with sector and asset_class from symbol registry
+        try:
+            from src.risk.risk_manager import get_symbol_sector, SYMBOL_SECTOR_MAP
+            from src.core.symbol_registry import SymbolRegistry
+            sector = get_symbol_sector(pos.symbol)
+            d['sector'] = sector if sector != 'Unknown' else 'Other'
+            # Derive asset_class from sector
+            sector_to_ac = {
+                'Crypto': 'Crypto', 'Forex': 'Forex', 'Indices': 'Indices',
+                'Commodities': 'Commodities', 'Commodities ETF': 'Commodities',
+                'ETF': 'ETF',
+            }
+            d['asset_class'] = sector_to_ac.get(sector, 'Stocks')
+        except Exception:
+            d.setdefault('sector', 'Other')
+            d.setdefault('asset_class', 'Stocks')
         position_responses.append(PositionResponse(**d))
     
     logger.info(f"Returning {len(position_responses)} positions + {pending_orders_count} pending")

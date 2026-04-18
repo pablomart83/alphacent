@@ -84,6 +84,8 @@ class TradeAnalyticsResponse(BaseModel):
     largest_win: float
     largest_loss: float
     win_loss_distribution: Dict[str, int]
+    pnl_by_day: Dict[str, float] = {}
+    pnl_by_hour: Dict[str, float] = {}
 
 
 class RegimePerformanceResponse(BaseModel):
@@ -151,8 +153,8 @@ def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.02) -
     
     sharpe = float(np.mean(excess_returns) / std * np.sqrt(252))
     
-    # Cap to sane range
-    return max(-5.0, min(5.0, round(sharpe, 2)))
+    # Cap to sane range — values above 10 indicate data quality issues (too few trades)
+    return max(-10.0, min(10.0, round(sharpe, 2)))
 
 
 def calculate_sortino_ratio(returns: List[float], risk_free_rate: float = 0.02) -> float:
@@ -360,12 +362,26 @@ async def get_trade_analytics(
         'medium_losses': len([l for l in losses if avg_loss <= l <= avg_loss * 2]) if avg_loss > 0 else 0,
         'large_losses': len([l for l in losses if l > avg_loss * 2]) if avg_loss > 0 else 0,
     }
+
+    # P&L by day of week and hour
+    DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    pnl_by_day: Dict[str, float] = {d: 0.0 for d in DAY_ORDER}
+    pnl_by_hour: Dict[str, float] = {str(h): 0.0 for h in range(24)}
+    for pos in positions:
+        pnl = _position_pnl(pos)
+        if pos.closed_at:
+            day_name = pos.closed_at.strftime('%A')
+            pnl_by_day[day_name] = round(pnl_by_day.get(day_name, 0.0) + pnl, 2)
+            hour_key = str(pos.closed_at.hour)
+            pnl_by_hour[hour_key] = round(pnl_by_hour.get(hour_key, 0.0) + pnl, 2)
     
     return TradeAnalyticsResponse(
         total_trades=total_trades, winning_trades=winning_trades, losing_trades=losing_trades,
         win_rate=win_rate, avg_win=avg_win, avg_loss=avg_loss, profit_factor=profit_factor,
         avg_holding_time_hours=avg_holding_time, largest_win=largest_win, largest_loss=largest_loss,
-        win_loss_distribution=distribution
+        win_loss_distribution=distribution,
+        pnl_by_day=pnl_by_day,
+        pnl_by_hour=pnl_by_hour,
     )
 
 
@@ -549,7 +565,7 @@ async def get_comprehensive_regime_analysis(
         for p in all_positions:
             positions_by_strategy.setdefault(p.strategy_id, []).append(p)
 
-        regime_perf = defaultdict(lambda: {'returns': [], 'trades': 0, 'wins': 0})
+        regime_perf = defaultdict(lambda: {'returns': [], 'trades': 0, 'wins': 0, 'invested': 0.0})
 
         for strategy in strategies:
             meta = strategy.strategy_metadata if isinstance(strategy.strategy_metadata, dict) else {}
@@ -561,20 +577,30 @@ async def get_comprehensive_regime_analysis(
                 continue
 
             strat_pnl = sum(_position_pnl(p) for p in strat_positions)
+            strat_invested = sum(_get_position_value(p) for p in strat_positions)
             strat_wins = sum(1 for p in strat_positions if _position_pnl(p) > 0)
 
             regime_perf[regime]['returns'].append(strat_pnl)
             regime_perf[regime]['trades'] += len(strat_positions)
             regime_perf[regime]['wins'] += strat_wins
+            regime_perf[regime]['invested'] += strat_invested
 
         perf_list = []
         for regime, data in sorted(regime_perf.items(), key=lambda x: sum(x[1]['returns']), reverse=True):
             total_trades = data['trades']
             wins = data['wins']
-            total_return = sum(data['returns'])
+            total_pnl = sum(data['returns'])
+            total_invested = data.get('invested', 0)
+            # Express as % return on invested capital; fall back to raw P&L if no invested data
+            if total_invested > 0:
+                total_return_pct = round(total_pnl / total_invested * 100, 2)
+            else:
+                # Normalise by number of strategies to get a per-strategy average P&L
+                n = len(data['returns'])
+                total_return_pct = round(total_pnl / n, 2) if n > 0 else 0.0
             perf_list.append({
                 'regime': regime,
-                'total_return': round(total_return, 2),
+                'total_return': total_return_pct,
                 'sharpe': round(calculate_sharpe_ratio(data['returns']), 2) if len(data['returns']) > 1 else 0.0,
                 'trades': total_trades,
                 'win_rate': round(wins / total_trades * 100, 1) if total_trades > 0 else 0.0,

@@ -50,10 +50,16 @@ class RiskConfig:
     
     # Correlation-adjusted position sizing
     correlation_adjustment_enabled: bool = True  # Enable correlation-based position size reduction
+    correlation_threshold: float = 0.7  # Correlation threshold for position size reduction
+    correlation_reduction_factor: float = 0.5  # Factor to reduce position size by when correlated
     
     # Market regime-based position sizing
     regime_based_sizing_enabled: bool = False  # Enable regime-based position size adjustment
     regime_size_multipliers: Dict[str, float] = None  # Multipliers for different market regimes
+
+    # Stale order cancellation
+    cancel_stale_orders: bool = True
+    stale_order_hours: int = 24
     
     def __post_init__(self):
         """Initialize default partial exit levels and regime multipliers if not provided."""

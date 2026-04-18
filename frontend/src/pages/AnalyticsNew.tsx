@@ -521,8 +521,14 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             value: 0
           })),
           holding_periods: holdingPeriods,
-          pnl_by_hour: [],
-          pnl_by_day: [],
+          pnl_by_hour: Object.entries(tradeData.pnl_by_hour || {}).map(([hour, pnl]) => ({
+            hour: parseInt(hour),
+            pnl: pnl as number,
+          })).sort((a, b) => a.hour - b.hour),
+          pnl_by_day: Object.entries(tradeData.pnl_by_day || {}).map(([day, pnl]) => ({
+            day,
+            pnl: pnl as number,
+          })),
           trade_statistics: {
             total_trades: tradeData.total_trades || 0,
             winning_trades: tradeData.winning_trades || 0,
