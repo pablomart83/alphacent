@@ -260,11 +260,15 @@ const TvChartInner: FC<TvChartProps> = ({
         s = chart.addSeries(def, opts as any);
         seriesMapRef.current.set(cfg.id, s);
 
-        // Volume scale margins
-        if (cfg.type === 'histogram' && (cfg.priceScaleId === 'volume' || !cfg.priceScaleId)) {
-          chart.priceScale('volume').applyOptions({
-            scaleMargins: { top: 0.8, bottom: 0 },
-          });
+        // Volume/histogram scale margins — only apply when the scale ID exists
+        if (cfg.type === 'histogram' && cfg.priceScaleId && cfg.priceScaleId !== '') {
+          try {
+            chart.priceScale(cfg.priceScaleId).applyOptions({
+              scaleMargins: { top: 0.1, bottom: 0 },
+            });
+          } catch {
+            // scale may not exist yet on first render — ignore
+          }
         }
       } else {
         s.applyOptions(opts as any);
@@ -272,24 +276,43 @@ const TvChartInner: FC<TvChartProps> = ({
 
       // Set data
       if (cfg.data.length > 0) {
-        const chartData = cfg.data.map((d) => {
-          const t = toChartTime(d.time);
-          if (cfg.type === 'candlestick') {
-            return { time: t, open: d.open ?? 0, high: d.high ?? 0, low: d.low ?? 0, close: d.close ?? 0 };
-          }
-          if (cfg.type === 'histogram') {
-            return { time: t, value: d.value ?? d.close ?? 0, color: d.color };
-          }
-          return { time: t, value: d.value ?? d.close ?? 0 };
-        });
+        const chartData = cfg.data
+          .map((d) => {
+            const t = toChartTime(d.time);
+            if (cfg.type === 'candlestick') {
+              return { time: t, open: d.open ?? 0, high: d.high ?? 0, low: d.low ?? 0, close: d.close ?? 0 };
+            }
+            if (cfg.type === 'histogram') {
+              const v = d.value ?? d.close ?? 0;
+              return { time: t, value: v, color: d.color };
+            }
+            const v = d.value ?? d.close ?? 0;
+            return { time: t, value: v };
+          })
+          // lightweight-charts throws "Value is null" on null/undefined/NaN values
+          .filter((d) => {
+            if ('value' in d) return d.value != null && !Number.isNaN(d.value);
+            if ('close' in d) return (d as any).close != null && !Number.isNaN((d as any).close);
+            return true;
+          });
 
+        // Sort by time ascending (required by lightweight-charts)
         chartData.sort((a, b) => {
           const ta = typeof a.time === 'string' ? a.time : String(a.time);
           const tb = typeof b.time === 'string' ? b.time : String(b.time);
           return ta.localeCompare(tb);
         });
 
-        s.setData(chartData as any);
+        // Deduplicate by time — keep last value for each timestamp
+        const seen = new Map<string, typeof chartData[0]>();
+        for (const d of chartData) {
+          seen.set(String(d.time), d);
+        }
+        const deduped = Array.from(seen.values());
+
+        if (deduped.length > 0) {
+          s.setData(deduped as any);
+        }
       }
     }
 

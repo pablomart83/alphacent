@@ -206,7 +206,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   // ── Rolling Sharpe series (30-day rolling) ─────────────────────────────
   const rollingSharpe30 = useMemo(() => {
     const curve = dashboard?.equity_curve ?? [];
-    if (curve.length < 31) return [];
+    if (curve.length < 32) return [];
     const returns: number[] = [];
     for (let i = 1; i < curve.length; i++) {
       const prev = curve[i - 1].equity;
@@ -215,11 +215,16 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     }
     const result: Array<{ time: string; value: number }> = [];
     for (let i = 29; i < returns.length; i++) {
+      const dateIdx = i + 1; // returns[i] corresponds to curve[i+1]
+      if (dateIdx >= curve.length) break;
       const window = returns.slice(i - 29, i + 1);
       const mean = window.reduce((s, v) => s + v, 0) / 30;
       const std = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / 30) || 0.0001;
       const sharpe = (mean / std) * Math.sqrt(252);
-      result.push({ time: curve[i + 1].date, value: Math.round(sharpe * 100) / 100 });
+      const val = Math.round(sharpe * 100) / 100;
+      if (Number.isFinite(val)) {
+        result.push({ time: curve[dateIdx].date, value: val });
+      }
     }
     return result;
   }, [dashboard?.equity_curve]);
@@ -429,7 +434,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                   id: 'daily_pnl',
                   type: 'histogram',
                   data: dailyPnlBars,
-                  priceScaleId: '',
+                  priceScaleId: 'pnl_scale',
                 }]}
                 height={90}
                 showTimeScale={false}

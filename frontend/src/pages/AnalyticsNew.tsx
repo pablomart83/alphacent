@@ -1150,29 +1150,31 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               <>
                 <SectionLabel>P&L by Market Regime</SectionLabel>
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.042 }}>
-                  <TvChart
-                    series={[{
-                      id: 'regime_pnl',
-                      type: 'histogram',
-                      data: regimeAnalysis.performance_by_regime.map((r, i) => ({
-                        time: String(i + 1) as any,
-                        value: r.return,
-                        color: r.return >= 0 ? 'rgba(34,197,94,0.75)' : 'rgba(239,68,68,0.75)',
-                      })),
-                      priceScaleId: '',
-                    }]}
-                    height={130}
-                    showTimeScale={false}
-                    autoResize
-                  />
-                  <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 px-1">
-                    {regimeAnalysis.performance_by_regime.map((r, i) => (
-                      <div key={r.regime} className="flex items-center gap-1 text-xs font-mono">
-                        <span className={cn('font-semibold', r.return >= 0 ? 'text-accent-green' : 'text-accent-red')}>{i + 1}.</span>
-                        <span className="text-gray-400">{r.regime.replace(/_/g, ' ')}</span>
-                        <span className={cn('font-semibold', r.return >= 0 ? 'text-accent-green' : 'text-accent-red')}>{r.return >= 0 ? '+' : ''}{r.return.toFixed(1)}%</span>
-                      </div>
-                    ))}
+                  {/* Use SVG bars instead of TvChart — regime data has no time axis */}
+                  <div className="space-y-1.5">
+                    {(() => {
+                      const maxAbs = Math.max(...regimeAnalysis.performance_by_regime.map(r => Math.abs(r.return)), 0.01);
+                      return regimeAnalysis.performance_by_regime.map((r) => (
+                        <div key={r.regime} className="flex items-center gap-2">
+                          <span className="text-xs font-mono text-gray-400 w-36 truncate">{r.regime.replace(/_/g, ' ')}</span>
+                          <div className="flex-1 h-4 bg-gray-800 rounded-sm overflow-hidden relative">
+                            <div
+                              className="h-full rounded-sm absolute top-0"
+                              style={{
+                                width: `${(Math.abs(r.return) / maxAbs) * 100}%`,
+                                left: r.return >= 0 ? '50%' : `calc(50% - ${(Math.abs(r.return) / maxAbs) * 50}%)`,
+                                backgroundColor: r.return >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)',
+                              }}
+                            />
+                            <div className="absolute top-0 bottom-0 w-px bg-gray-600" style={{ left: '50%' }} />
+                          </div>
+                          <span className={cn('text-xs font-mono w-14 text-right font-semibold', r.return >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                            {r.return >= 0 ? '+' : ''}{r.return.toFixed(1)}%
+                          </span>
+                          <span className="text-xs font-mono text-gray-500 w-10 text-right">{r.trades}t</span>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 </motion.div>
               </>
