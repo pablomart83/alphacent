@@ -285,7 +285,7 @@ class FundamentalDataProvider:
         if config is None:
             try:
                 from src.core.config_loader import load_config
-                config = load_config()
+                config = load_config(force_reload=True)
             except Exception:
                 try:
                     import yaml

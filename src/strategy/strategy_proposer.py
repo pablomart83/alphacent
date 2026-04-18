@@ -1471,7 +1471,13 @@ class StrategyProposer:
                 if test_results is None:
                     mc_passed_ids.add(s.id)
                     continue
-                trades_list = getattr(test_results, 'trades', None) or []
+                trades_list = getattr(test_results, 'trades', None)
+                # trades may be a DataFrame or a list — handle both
+                if trades_list is None:
+                    trades_list = []
+                elif hasattr(trades_list, 'to_dict'):
+                    # It's a DataFrame — convert to list of dicts
+                    trades_list = trades_list.to_dict('records') if not trades_list.empty else []
                 n_trades = len(trades_list)
                 if n_trades < MC_MIN_TRADES_FOR_BOOTSTRAP:
                     # Too few trades to bootstrap — pass through (min_trades gate handles this)
@@ -1482,7 +1488,11 @@ class StrategyProposer:
                     # Extract per-trade returns
                     trade_returns = []
                     for t in trades_list:
-                        ret = t.get('return') or t.get('pnl_pct') or t.get('return_pct')
+                        # Handle both dict and object formats
+                        if isinstance(t, dict):
+                            ret = t.get('Return') or t.get('return') or t.get('pnl_pct') or t.get('return_pct')
+                        else:
+                            ret = getattr(t, 'Return', None) or getattr(t, 'return', None) or getattr(t, 'pnl_pct', None)
                         if ret is not None:
                             trade_returns.append(float(ret))
                     if len(trade_returns) < MC_MIN_TRADES_FOR_BOOTSTRAP:
