@@ -1588,11 +1588,14 @@ class EToroAPIClient:
     def close_position(self, position_id: str, instrument_id: int = None, amount: float = None) -> Dict[str, Any]:
         """Close an open position.
 
+        Per eToro API docs (api-portal.etoro.com/guides/market-orders):
+        - Full close: POST to market-close-orders/positions/{positionId} with NO UnitsToDeduct
+        - Partial close: include UnitsToDeduct in the payload
+
         Args:
             position_id: eToro position ID
             instrument_id: eToro instrument ID (required for demo close endpoint)
-            amount: Dollar amount to close (required — without it eToro creates a
-                    stuck order with unitsToDeduct=0.0). Pass invested_amount.
+            amount: Ignored for full close — full close omits UnitsToDeduct entirely
 
         Returns:
             Close order response
@@ -1609,13 +1612,12 @@ class EToroAPIClient:
             if self.mode == TradingMode.DEMO:
                 endpoint = f"/api/v1/trading/execution/demo/market-close-orders/positions/{position_id}"
             else:
-                endpoint = f"/api/v1/trading/positions/{position_id}/close"
+                endpoint = f"/api/v1/trading/execution/market-close-orders/positions/{position_id}"
 
+            # Full close: only send InstrumentID, omit UnitsToDeduct entirely
             payload = {}
             if instrument_id is not None:
                 payload["InstrumentID"] = instrument_id
-            if amount is not None and amount > 0:
-                payload["Amount"] = amount
 
             data = self._make_request(
                 method="POST",
@@ -1661,7 +1663,7 @@ class EToroAPIClient:
             else:
                 endpoint = f"/api/v1/trading/positions/{position_id}/close"
 
-            payload = {"Amount": amount}
+            payload = {"UnitsToDeduct": amount}
             if instrument_id is not None:
                 payload["InstrumentID"] = instrument_id
 

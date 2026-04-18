@@ -1804,8 +1804,13 @@ class MonitoringService:
             logger.info(f"Processing {len(pending_positions)} positions pending closure")
 
             for pos in pending_positions:
-                # Skip if market is closed for this symbol — close order will fail
-                if not self._is_symbol_market_open(pos.symbol):
+                # Skip if market is closed for this symbol — UNLESS this is an
+                # intentional closure (has a closure_reason). In that case, submit
+                # the close order anyway so eToro queues it for market open.
+                # Normal SL/TP exits are handled by eToro-side orders, so we only
+                # need to bypass the market check for system-initiated closures.
+                has_closure_reason = bool(getattr(pos, 'closure_reason', None))
+                if not has_closure_reason and not self._is_symbol_market_open(pos.symbol):
                     skipped += 1
                     continue
 
