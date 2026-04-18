@@ -440,6 +440,14 @@ class StrategyProposer:
                     continue  # Expired — allow re-testing
                 key = (entry['template'], entry['symbol'])
                 result_tuple = tuple(entry['result'])
+                # Pad to 7 elements if loaded from old 4-element format:
+                # (train_sharpe, test_sharpe, has_enough_trades, is_overfitted,
+                #  train_sharpe_valid, test_sharpe_valid, wf_results)
+                if len(result_tuple) == 4:
+                    ts_val, tes_val, het_val, ov_val = result_tuple
+                    tv_val = not (isinstance(ts_val, float) and (ts_val != ts_val or ts_val == float('inf')))
+                    tev_val = not (isinstance(tes_val, float) and (tes_val != tes_val or tes_val == float('inf')))
+                    result_tuple = (ts_val, tes_val, het_val, ov_val, tv_val, tev_val, None)
                 self._wf_results_cache[key] = (result_tuple, cached_at)
                 loaded += 1
             if loaded:
