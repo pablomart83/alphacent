@@ -2659,3 +2659,200 @@ Replaced thin "Recent Trades" + "Positions by Asset Class" with full tabbed `Act
 - Consider t3.small downgrade — waiting on CloudWatch memory data
 - FMP Starter plan: insider trading plan-gated (404)
 - Old `venv/` still on disk: `rm -rf /home/ubuntu/alphacent/venv`
+
+---
+
+## Session Improvements (April 18, 2026 — Audit Sprint 1+2)
+
+### Audit & Remediation — Full System Audit Against Institutional Best Practices
+
+A comprehensive end-to-end audit was performed comparing AlphaCent against top hedge fund practices (QuantConnect, AQR, Two Sigma standards). The audit covered: alpha generation, backtesting, signal quality, risk management, infrastructure, data management, frontend, middleware, and cost management.
+
+#### Sprint 1 — Security & Correctness ✅
+
+##### S1.1. `ensure_admin_exists("admin123")` Fixed ✅
+- Changed hardcoded default password to `"changeme_on_first_login"` — only fires on empty DB (fresh install)
+- **Files**: `src/api/app.py`
+
+##### S1.2. CORS — Removed Plain HTTP EC2 Origin ✅
+- Removed `http://34.252.61.149` from CORS allowed origins — all traffic must be HTTPS
+- **Files**: `src/api/app.py`
+
+##### S1.3. `/health/deep` Endpoint ✅
+- New public endpoint (no auth required) that checks: DB connectivity, monitoring service liveness (last cycle < 3 min), eToro circuit breaker states
+- Returns 200 `{"status":"healthy"}` when all checks pass, 503 `{"status":"degraded","issues":[...]}` when degraded
+- Added `/health/deep` to `PUBLIC_PATHS` in middleware so CloudWatch can call it without a session
+- **Files**: `src/api/app.py`, `src/api/middleware.py`
+
+##### S1.4. Position Sizing Bump Guard 10x → 3x ✅ (CRITICAL)
+- `calculate_position_size`: `MAX_BUMP_RATIO = 10.0 → 3.0` — a strategy that calculates $200 (because vol-scaling says it should be small) no longer gets bumped to $2K (10x the intended risk). Now rejects if bump > 3x.
+- `validate_signal` post-adjustment check: same fix, `MAX_BUMP_RATIO_POST = 10.0 → 3.0`
+- **Files**: `src/risk/risk_manager.py`
+
+#### Sprint 2 — Statistical Rigor ✅
+
+##### S2.1. Minimum Trade Counts Raised ✅ (CRITICAL)
+- `min_trades_dsl: 4 → 15` — at 4 trades, a 50% win rate has a 95% CI of [6%, 94%] — statistically meaningless
+- `min_trades_dsl_1h: 5 → 20` — intraday strategies need more trades to prove edge
+- `min_trades_dsl_4h: 3 → 12`
+- `min_trades_alpha_edge: 2 → 10`
+- `min_trades_commodity: 2 → 8`
+- `has_enough_trades` in `strategy_proposer.py` now reads these config values (interval + asset-class aware) instead of hardcoded `>= 2`
+- **Files**: `config/autonomous_trading.yaml`, `src/strategy/strategy_proposer.py`, `src/strategy/autonomous_strategy_manager.py`
+
+##### S2.2. Monte Carlo Bootstrap ✅ (CRITICAL)
+- Applied to all strategies with ≥5 OOS test trades before the direction-aware threshold pass
+- 1000 iterations of random trade resampling (with replacement)
+- Requires 5th-percentile Sharpe > 0.2 — strategies that got lucky on the specific OOS period are filtered out
+- Fails open (never blocks on MC error) — if numpy unavailable or trades list empty, strategy passes through
+- **Files**: `src/strategy/strategy_proposer.py`
+
+##### S2.3. Overnight Financing Cost Model ✅
+- Added `overnight_financing_pct_per_day` to backtest transaction costs per asset class:
+  - Stocks/ETFs: 0.02%/night (eToro CFD overnight fee)
+  - Forex: 0.01%/night (swap rates vary)
+  - Crypto: 0% (no overnight fee on eToro)
+  - Indices: 0.015%/night
+  - Commodities: 0.02%/night
+- Applied in `backtest_strategy()` using estimated average holding period from trade list
+- For a 7-day stock hold: adds 0.14% to costs — meaningful for strategies targeting 1-2% returns
+- **Files**: `config/autonomous_trading.yaml`, `src/strategy/strategy_engine.py`
+
+---
+
+## Current System State (April 18, 2026 — Post-Audit Sprint 1+2)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables
+- **Account:** eToro DEMO, equity ~$470K
+- **Security**: No hardcoded passwords, CORS HTTPS-only, `/health/deep` live
+- **Position sizing**: Bump guard 3x (was 10x) — vol-scaled sizes respected
+- **Backtesting**: Min trades 15 (was 4), Monte Carlo bootstrap, overnight financing costs
+- **Conviction scorer**: 7 components — WF edge (40) + signal quality (25) + regime fit (20) + asset tradability (15) + fundamental quality (±15) + news sentiment (±8) + carry bias (±5) + crypto cycle (±5) + factor exposure (±6)
+
+---
+
+## Open Items — Remaining Audit Remediation
+
+### Sprint 3 — Risk Management & Position Sizing (Next Session)
+
+#### 3.1 Pre-Trade Portfolio VaR Check
+- **What**: Before accepting any new ENTRY signal, compute 1-day 95% historical simulation VaR for the portfolio including the proposed position. Reject if VaR > 2% of equity.
+- **How**: Use 1-year of daily equity snapshots from `equity_snapshots` table. Compute daily returns. For the new position, estimate its contribution using the symbol's 1-year daily return series (from `historical_price_cache`). Combine using simple correlation-weighted approach.
+- **Where**: `src/risk/risk_manager.py` → new `check_portfolio_var()` method called from `validate_signal()` before `check_position_limits()`
+- **Config**: Add `portfolio_var: { enabled: true, confidence: 0.95, max_var_pct: 0.02, lookback_days: 252 }` to `autonomous_trading.yaml`
+- **Fail open**: If equity snapshots < 30 days or price history unavailable, skip VaR check (never block on data absence)
+
+#### 3.2 Drawdown-Based Position Sizing
+- **What**: If portfolio is in >5% drawdown from its rolling 30-day peak equity, reduce all new position sizes by 50%. If >10% drawdown, reduce by 75%.
+- **How**: In `calculate_position_size()`, after computing `strategy_allocated_capital`, fetch the peak equity from `equity_snapshots` (max over last 30 days). Compute current drawdown. Apply multiplier.
+- **Where**: `src/risk/risk_manager.py` → `calculate_position_size()`
+- **Config**: Add `drawdown_sizing: { enabled: true, threshold_5pct: 0.5, threshold_10pct: 0.25 }` to `autonomous_trading.yaml`
+
+#### 3.3 ATR-Based Trailing Stop Distance (Consistent Application)
+- **What**: The `ATR_TRAIL_MULTIPLIER = 1.5` in `position_manager.py` is correct but the ATR fetch uses `yf.download()` directly in some paths, which fails for OIL/GOLD/SILVER/forex. Ensure the ATR floor uses `get_market_data_manager()` singleton consistently.
+- **Current bug**: `_check_trailing_stops()` in `monitoring_service.py` calls `position_manager.check_trailing_stops()` which has its own ATR fetch — verify it uses the singleton MDM, not a fresh Yahoo call.
+- **Where**: `src/execution/position_manager.py` → `check_trailing_stops()` ATR fetch block
+- **Also**: Raise `ATR_TRAIL_MULTIPLIER` from 1.5 to 2.0 — 1.5x ATR is still within normal intraday noise for ranging markets
+
+#### 3.4 Conviction Score Cap at 100
+- **What**: The conviction scorer has 7 components with a theoretical max of 40+25+20+15+15+8+5+5+6 = 139. The threshold of 60 is therefore ~43% of max, not 60%. This makes the threshold semantically misleading and allows low-quality signals to pass if they stack enough bonuses.
+- **How**: After computing `total_score`, normalize: `total_score = min(100.0, total_score * (100.0 / 139.0))`. This maps the true max to 100 and makes the 60 threshold mean "60% of maximum possible evidence".
+- **Where**: `src/strategy/conviction_scorer.py` → `score_signal()` after all adjustments are summed
+- **Note**: The threshold `min_conviction_score: 60` in config stays the same — the normalization makes it meaningful
+
+#### 3.5 Smarter Position Sizing — Kelly / Volatility Targeting
+- **VOL_SCALE_MIN 0.25 → 0.10**: Current floor means a crypto position with 60% vol still gets sized at 25% of base — that's 2.5x the risk-adjusted target. Lower to 0.10 so high-vol assets get properly small positions.
+- **VOL_SCALE_MAX 2.5 → 1.5**: Forex (8% vol) currently gets 2.5x base size — over-concentrates in low-vol assets. Cap at 1.5x.
+- **Confidence scaling floor**: `min_position_pct = 0.20` means a signal with confidence=0.01 still gets 20% of strategy allocation. Change to: if `signal.confidence < 0.30`, return 0 (reject outright — the conviction scorer already filtered weak signals, this is a safety net). Otherwise scale linearly from 0% at 0.30 to 100% at 1.0.
+- **Per-symbol concentration cap**: Add hard cap — no single symbol can exceed 5% of equity regardless of vol-scaling, confidence, or strategy allocation. Check `existing_symbol_exposure + position_size > equity * 0.05` and clamp.
+- **Sector soft cap at sizing time**: If the symbol's sector already represents >30% of equity, halve the calculated position size (soft penalty, not hard reject). Currently sector limits are only checked in `check_portfolio_balance()` which runs separately — this makes the sizing proactive.
+- **Where**: `src/risk/risk_manager.py` → `calculate_position_size()`
+
+#### 3.6 Dynamic Hedge Ratio for Pairs Trading
+- **What**: The live pairs trading signal handler (`_handle_pairs_trading()` in `strategy_engine.py`) computes a static OLS hedge ratio β using the full lookback window. This means β is stale — for NVDA/AMD in a semiconductor cycle, the relationship drifts significantly over months.
+- **How**: Replace the static OLS with a rolling 60-day OLS (same as the backtest simulation already does in `_simulate_pairs_trading_trades()`). Store the current β in the signal metadata so the scheduler can use it for position sizing the hedge leg.
+- **Where**: `src/strategy/strategy_engine.py` → `_handle_pairs_trading()` (line ~7699)
+- **Also**: Store `hedge_ratio` in signal metadata so the trading scheduler can size the hedge leg proportionally (currently it uses a fixed 1:1 ratio for the hedge leg)
+
+### Sprint 4 — Template Library Cleanup
+
+#### 4.1 Remove 56 1h Crypto Templates
+- **What**: 56 of 77 crypto templates run on 1h timeframe. Session notes acknowledge "1H and below underperform 90% of the time" for crypto. These generate noise, consume WF compute, and produce low-quality signals.
+- **How**: In `strategy_templates.py`, identify all templates with `metadata.get('intraday') == True` and `metadata.get('crypto_optimized') == True` and `metadata.get('interval') == '1h'`. Add them to the `REMOVE_TEMPLATES` set in `StrategyTemplateLibrary.__init__()`.
+- **Keep**: All 10 4h crypto templates and 11 1d crypto templates
+- **Where**: `src/strategy/strategy_templates.py`
+
+#### 4.2 Cull Low-Activation Templates
+- **What**: 241 templates is too many — more templates = more multiple testing = more false positives. Target: ~100 templates.
+- **How**: Read `config/.proposal_tracker.json`. For each template with `proposed >= 20` and `approved / proposed < 0.10` (less than 10% activation rate), add to `config/.disabled_templates.json`. The existing `_is_template_disabled()` check in `strategy_proposer.py` will skip them automatically.
+- **Where**: New utility script `scripts/utilities/cull_low_activation_templates.py` + update `config/.disabled_templates.json`
+- **Threshold**: `proposed >= 20` (enough data) AND `approved / proposed < 0.10` (consistently failing WF)
+
+### Sprint 5 — Broken Endpoints
+
+#### 5.1 `/strategies/template-rankings` Returns 404
+- **Root cause**: The endpoint exists in `strategies.py` at line 1205 and requires `mode` query param. The frontend calls it without `mode` → FastAPI returns 422 (Unprocessable Entity), not 404. The 404 may be a routing issue — the endpoint is defined AFTER `/{strategy_id}` catch-all in some versions.
+- **Fix**: Verify the endpoint is registered before `/{strategy_id}` in the router (it is at line 1205, before line 1360 where `/{strategy_id}` is). The frontend call in `api.ts` must pass `?mode=DEMO`. Check `frontend/src/services/api.ts` → `getTemplateRankings()` call.
+- **Where**: `frontend/src/services/api.ts`, `src/api/routers/strategies.py`
+
+#### 5.2 `/strategies/blacklisted-combos` Returns 422
+- **Root cause**: Frontend is passing `?mode=DEMO` but the endpoint signature has no `mode` parameter → FastAPI rejects with 422. The endpoint at line 1267 only takes `username`.
+- **Fix**: Either (a) add `mode: TradingMode = TradingMode.DEMO` to the endpoint signature and ignore it, or (b) remove `mode` from the frontend call. Option (b) is cleaner.
+- **Where**: `frontend/src/services/api.ts` → remove `mode` from the call
+
+#### 5.3 `/strategies/idle-demotions` Returns 422
+- **Root cause**: Same as 5.2 — frontend passes `?mode=DEMO` but endpoint at line 1298 has no `mode` param.
+- **Fix**: Same as 5.2 — remove `mode` from the frontend call.
+- **Where**: `frontend/src/services/api.ts` → remove `mode` from the call
+
+### Sprint 6 — Database & API Layer
+
+#### 6.1 Database Indexes
+- **What**: The `positions` table is queried by `strategy_id`, `closed_at`, and `pending_closure` on every monitoring cycle (every 5 seconds). Without indexes, these are full table scans. With 780K+ rows and growing, this will degrade.
+- **How**: Run migrations on EC2:
+  ```sql
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_positions_strategy_id ON positions(strategy_id);
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_positions_closed_at ON positions(closed_at);
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_positions_pending_closure ON positions(pending_closure) WHERE pending_closure = true;
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_status ON orders(status);
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_orders_strategy_id ON orders(strategy_id);
+  CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DESC);
+  ```
+- **Where**: New migration script `migrations/add_performance_indexes.py`
+
+#### 6.2 Request Timeout Middleware
+- **What**: A hung FMP call or slow DB query inside a route handler can block a connection indefinitely. The Axios client has a 60s timeout but the backend has no server-side timeout.
+- **How**: Add a `TimeoutMiddleware` to FastAPI that wraps each request in `asyncio.wait_for(..., timeout=30.0)`. Return 504 Gateway Timeout if exceeded.
+- **Where**: `src/api/app.py` → add middleware before `AuthenticationMiddleware`
+- **Exclude**: `/strategies/autonomous/cycle` (long-running, needs 30+ min timeout), WebSocket endpoints
+
+#### 6.3 Rate Limiting on `/auth/login`
+- **What**: No rate limiting on the login endpoint — brute force is possible.
+- **How**: Add `slowapi` (`pip install slowapi`). Apply `@limiter.limit("5/minute")` to the `/auth/login` endpoint. Use client IP as the key.
+- **Where**: `src/api/routers/auth.py`, `src/api/app.py` (register SlowAPI middleware), `requirements.txt`
+
+### Sprint 7 — Analytics & UI
+
+#### 7.1 R-Multiple Distribution Chart
+- **What**: The most important diagnostic for a systematic trading system. Shows whether the system is cutting winners short or letting losers run. R-Multiple = actual P&L / initial risk (SL distance × position size).
+- **How**: Backend: new endpoint `GET /analytics/r-multiples` — for each closed position, compute `r_multiple = realized_pnl / (entry_price * stop_loss_pct * quantity)`. Return distribution buckets (< -2R, -2R to -1R, -1R to 0, 0 to 1R, 1R to 2R, > 2R) + mean R, median R, expectancy.
+- **Frontend**: Add histogram to Analytics → Tear Sheet tab using `SVGBarChart`. Show mean R as vertical line. Color negative bars red, positive green.
+- **Where**: `src/api/routers/analytics.py`, `frontend/src/pages/analytics/TearSheetTab.tsx`
+
+#### 7.2 Historical Stress Tests
+- **What**: Overlay portfolio equity curve against major market crashes to show how the system would have performed. COVID (-34%, Feb-Mar 2020), Lehman (-57%, Sep-Nov 2008), SVB (-15%, Mar 2023).
+- **How**: Backend: new endpoint `GET /analytics/stress-tests` — for each stress period, fetch SPY returns from `historical_price_cache` (or Yahoo fallback). Scale to portfolio equity at the start of each period. Return simulated equity curve for each scenario.
+- **Frontend**: Add stress test tab or section in Analytics. Show 3 overlaid equity curves (COVID, Lehman, SVB) vs actual portfolio performance during those periods.
+- **Where**: `src/api/routers/analytics.py`, `frontend/src/pages/AnalyticsNew.tsx`
+
+#### 7.3 Benchmark-Relative Performance Per Strategy
+- **What**: Each strategy on the Strategies page shows absolute return but not alpha vs SPY. A strategy with +5% return in a month where SPY was +8% is actually underperforming.
+- **How**: Backend: extend `GET /strategies` response to include `alpha_vs_spy` field — compute as `strategy_return - spy_return_over_same_period`. Use `activated_at` as the start date and current date as end. Fetch SPY return from `historical_price_cache`.
+- **Frontend**: Add "Alpha" column to the strategies table. Color green if positive, red if negative.
+- **Where**: `src/api/routers/strategies.py`, `frontend/src/pages/StrategiesNew.tsx`
+
+#### 7.4 Strategy Allocation Visualization
+- **What**: Strategy allocation percentages are invisible in the UI. Operators cannot see how capital is distributed across strategies or which strategies have exhausted their allocation.
+- **How**: Add a bar chart to the Strategies page side panel showing: for each active strategy, `allocated_capital` (equity × allocation_pct) vs `deployed_capital` (sum of open position invested_amounts). Color the bar yellow if >90% deployed, red if >100%.
+- **Also**: Add an alert badge on the strategy row when allocation >90% deployed.
+- **Where**: `frontend/src/pages/StrategiesNew.tsx`, `src/api/routers/strategies.py` (add `deployed_capital` to response)
