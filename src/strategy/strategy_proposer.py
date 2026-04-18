@@ -1543,7 +1543,10 @@ class StrategyProposer:
             validated_strategies = []
             for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
                 if s.id not in mc_passed_ids:
-                    continue  # Filtered by Monte Carlo bootstrap                if not (tv and tev and het and not ov):
+                    continue  # Filtered by Monte Carlo bootstrap
+                if wf is None:
+                    continue  # Loaded from 4-tuple disk cache — no wf_results dict
+                if not (tv and tev and het and not ov):
                     continue
                 direction = self._detect_strategy_direction(s)
                 thresholds = self._get_direction_aware_thresholds(direction, market_regime)
@@ -1585,6 +1588,8 @@ class StrategyProposer:
                 cl = get_cycle_logger()
                 wf_log_results = []
                 for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
+                    if wf is None:
+                        continue
                     te_results = wf.get('test_results')
                     tr_results = wf.get('train_results')
                     passed = any(s.id == vs.id for vs, _ in validated_strategies) if validated_strategies else False
