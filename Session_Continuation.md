@@ -2590,3 +2590,72 @@ Replaced thin "Recent Trades" + "Positions by Asset Class" with full tabbed `Act
 ### Infrastructure
 - Consider t3.small downgrade — waiting on CloudWatch memory data
 - FMP Starter plan: insider trading plan-gated (404)
+
+---
+
+### Session Improvements (April 18, 2026 — Session 18: Institutional Charts, Bug Fixes & Close Mechanism Verification)
+
+#### 173. Institutional TradingView Charts Added Across All Pages ✅
+- **Research**: Surveyed what quants and top hedge funds (QuantConnect, Bloomberg, AQR, Citadel) visualise. Identified 22 chart opportunities across 6 pages.
+- **Overview**: Rolling 30-day Sharpe baseline chart (green above 1.0, red below) + daily P&L histogram — both below the equity curve. `useMemo` hooks correctly placed before early return (Rules of Hooks fix).
+- **Analytics**: Underwater plot (drawdown duration) wired in from existing component. Regime P&L waterfall replaced with SVG diverging bar chart (TvChart histogram rejected — no time axis for categorical data).
+- **Risk**: Fixed critical date format bug — history dates were formatted as locale strings ("Apr 12") instead of ISO YYYY-MM-DD, causing TvChart to silently fail. History tab now shows 3 synchronized charts (VaR area, drawdown area, exposure area). Exposure tab: added Exposure Ladder (positions ranked by size with P&L color coding).
+- **Strategies**: Strategy equity curves overlay in Overview tab — up to 12 active strategies normalized to 100, multi-line TvChart, color-coded by index.
+- **Portfolio**: P&L waterfall in side panel — all open positions ranked by unrealized P&L as horizontal bars.
+- **Position Detail**: Replaced Recharts `InteractiveChart` P&L section with TvChart `baseline` series (green above 0, red below). Added ATR volatility bands (14-period high-low range).
+- **TvChart global fix**: Added null/NaN value filter and timestamp deduplication before `setData` — prevents "Value is null" errors from any chart. Histogram scale handling hardened.
+- **Files**: `frontend/src/pages/OverviewNew.tsx`, `frontend/src/pages/AnalyticsNew.tsx`, `frontend/src/pages/RiskNew.tsx`, `frontend/src/pages/StrategiesNew.tsx`, `frontend/src/pages/PortfolioNew.tsx`, `frontend/src/pages/PositionDetailView.tsx`, `frontend/src/components/charts/TvChart.tsx`
+
+#### 174. Strategy Route Ordering Fix ✅ (CRITICAL)
+- **Bug**: `/strategies/template-rankings`, `/strategies/blacklisted-combos`, `/strategies/idle-demotions` all returning 404/422. FastAPI matches routes in definition order — all three were defined after `/{strategy_id}` wildcard, so `template-rankings` was treated as a strategy ID.
+- **Fix**: Moved all three handlers + their Pydantic models to before the `/{strategy_id}` route. Removed duplicate definitions from bottom of file. Syntax verified with `ast.parse`.
+- **Files**: `src/api/routers/strategies.py`
+
+#### 175. Multiple Data/Display Bug Fixes ✅
+- **RiskConfig missing fields**: `correlation_threshold`, `correlation_reduction_factor`, `cancel_stale_orders`, `stale_order_hours` added to `RiskConfig` dataclass — fixes repeated `unexpected keyword argument` warning on every risk config load.
+- **Positions sector/asset_class**: `get_positions` now enriches each position with `sector` and `asset_class` from symbol registry — fixes "Unknown (183)" and "Other" in Portfolio page.
+- **MarketDataManager init error**: `MarketDataManager()` in CIO risk endpoint was missing required `etoro_client` arg — replaced with DB query for latest strategy's stored regime.
+- **P&L by day of week**: Added `pnl_by_day` and `pnl_by_hour` to `TradeAnalyticsResponse` — fixes "No data" in Trade Analytics.
+- **Regime performance values**: `total_return` was raw P&L in dollars (showing "+11846%") — now expressed as % of invested capital.
+- **Sharpe cap**: Raised from 5.0 → 10.0.
+- **Risk Limits NaN%**: `getRiskConfig` in api.ts was returning `max_position_size_pct` but component expected `max_position_size` — field name mismatch fixed in API client mapping.
+- **Correlation heatmap**: Capped at 15 symbols, cells scale with count, `max-height` + scroll added so it fits its container.
+- **Files**: `src/models/dataclasses.py`, `src/api/routers/account.py`, `src/api/routers/risk.py`, `src/api/routers/analytics.py`, `frontend/src/pages/AnalyticsNew.tsx`, `frontend/src/services/api.ts`, `frontend/src/components/charts/CorrelationHeatmap.tsx`
+
+#### 176. Browser Tab Title Fixed ✅
+- Changed from "frontend" to "AlphaCent". Added `<meta name="description">`.
+- **Files**: `frontend/index.html`
+
+#### 177. Close Mechanism Verified ✅
+- **Test**: Flagged BTC LONG position (`97439273`, +$87.57, +3.71%) via direct DB update (`pending_closure = true`), approved via Portfolio → Pending tab.
+- **Result**: `etoro_client.close_position()` called `POST /api/v1/trading/execution/demo/market-close-orders/positions/{id}` — proper close, not a SELL order. Position closed with `realized_pnl = $224.45`.
+- **Confirmed**: The 14 duplicate positions use the identical code path (`_submit_close_order` in monitoring service → same `etoro_client.close_position()` call). The SELL order records in DB are internal audit trail only — `etoro_order_id = NULL` is expected (close API doesn't return an order ID).
+- **The 14 duplicates**: All have `closed_at` set in DB with `realized_pnl` recorded. eToro shows "Received" (statusID=11) — will execute at Monday market open.
+
+---
+
+## Current System State (April 18, 2026 — Updated Session 18)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables
+- **Account:** eToro DEMO, equity ~$470K
+- **Open positions:** ~183 legitimate + 14 pending closure (Monday market open)
+- **BTC**: 2 open positions remaining (1 closed in test, +$224 realized)
+- **Close mechanism**: Verified working — `market-close-orders` API, not SELL orders
+- **UI**: Browser tab shows "AlphaCent". All 6 pages have institutional charts. Risk Limits, sector/asset_class, P&L by day all fixed.
+- **RiskConfig**: No more `unexpected keyword argument` warnings in logs
+
+## Open Items (Updated Session 18)
+
+### Pending
+- 14 duplicate positions execute at Monday 9:30 ET market open — verify they disappear from eToro and Portfolio page
+- Hourly equity data accumulating — `4H`/`1H` views meaningful within a day
+- Regime decay penalties active — watch for strategy retirements over next few days
+
+### Trading Performance
+- Monitor win rate after all quant improvements (target: >50%)
+- News sentiment: ~192 symbols still unpopulated (filling at 100 req/day)
+
+### Infrastructure
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+- FMP Starter plan: insider trading plan-gated (404)
+- Old `venv/` still on disk: `rm -rf /home/ubuntu/alphacent/venv`
