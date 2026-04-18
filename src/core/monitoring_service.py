@@ -121,6 +121,11 @@ class MonitoringService:
         self._last_regime_check: float = 0
         self._regime_check_interval = 1800  # 30 minutes
 
+        # Hourly equity snapshot — captures portfolio value every hour for
+        # intraday equity curve resolution in the UI.
+        self._last_hourly_snapshot: float = 0
+        self._hourly_snapshot_interval = 3600  # 1 hour
+
         # Alert evaluation (every 60s)
         self._last_alert_check: float = 0
         self._alert_check_interval = 60
@@ -510,6 +515,15 @@ class MonitoringService:
                 self._last_daily_sync = now
             except Exception as e:
                 logger.error(f"Error in daily sync: {e}")
+
+        # Hourly equity snapshot — runs every hour alongside the price sync.
+        # Enables intraday equity curve resolution (1h/4h) in the UI.
+        if now - self._last_hourly_snapshot >= self._hourly_snapshot_interval:
+            try:
+                self._save_hourly_equity_snapshot()
+                self._last_hourly_snapshot = now
+            except Exception as e:
+                logger.error(f"Error saving hourly equity snapshot: {e}")
 
         # Log circuit breaker states if any are non-CLOSED, and actively probe half-open breakers
         try:
@@ -1229,7 +1243,7 @@ class MonitoringService:
             logger.warning(f"  News sentiment sync failed (non-critical): {e}")
     
     def _save_equity_snapshot(self) -> None:
-        """Save end-of-day equity snapshot.
+        """Save end-of-day equity snapshot (daily resolution).
         
         Stores current equity, balance, unrealized P&L, and cumulative realized P&L
         so the overview page can compute accurate period P&L:
@@ -1237,22 +1251,40 @@ class MonitoringService:
         - This Week = current_equity - last Sunday's snapshot equity
         - This Month = current_equity - last day of previous month's snapshot equity
         """
+        self._write_equity_snapshot(snapshot_type='daily')
+
+    def _save_hourly_equity_snapshot(self) -> None:
+        """Save hourly equity snapshot for intraday equity curve resolution.
+        
+        Stores equity at the current hour boundary (HH:00) so the equity curve
+        can be rendered at 1h or 4h resolution in addition to daily.
+        """
+        self._write_equity_snapshot(snapshot_type='hourly')
+
+    def _write_equity_snapshot(self, snapshot_type: str = 'daily') -> None:
+        """Write an equity snapshot with the given type (daily or hourly)."""
         from src.models.orm import EquitySnapshotORM, PositionORM, AccountInfoORM
         from sqlalchemy import func
-        
+
         session = self.db.get_session()
         try:
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            
+            now = datetime.now()
+            if snapshot_type == 'hourly':
+                # Key: "YYYY-MM-DD HH:00" — one row per hour
+                date_key = now.strftime("%Y-%m-%d %H:00")
+            else:
+                # Key: "YYYY-MM-DD" — one row per day
+                date_key = now.strftime("%Y-%m-%d")
+
             # Get current account state
             account = session.query(AccountInfoORM).first()
             if not account:
-                logger.warning("  Equity snapshot: no account info found")
+                logger.warning(f"  Equity snapshot ({snapshot_type}): no account info found")
                 return
-            
+
             equity = account.equity or account.balance
             balance = account.balance
-            
+
             # Current unrealized P&L
             unrealized = sum(
                 p.unrealized_pnl or 0
@@ -1260,20 +1292,22 @@ class MonitoringService:
                     PositionORM.closed_at.is_(None)
                 ).all()
             )
-            
+
             # Cumulative realized P&L (all time)
             realized_cum = float(
                 session.query(func.sum(PositionORM.realized_pnl)).filter(
                     PositionORM.closed_at.isnot(None)
                 ).scalar() or 0
             )
-            
+
             positions_count = session.query(PositionORM).filter(
                 PositionORM.closed_at.is_(None)
             ).count()
-            
-            # Upsert: update if today's snapshot exists, insert if not
-            existing = session.query(EquitySnapshotORM).filter_by(date=today_str).first()
+
+            # Upsert: update if this date+type snapshot exists, insert if not
+            existing = session.query(EquitySnapshotORM).filter_by(
+                date=date_key, snapshot_type=snapshot_type
+            ).first()
             if existing:
                 existing.equity = equity
                 existing.balance = balance
@@ -1282,25 +1316,25 @@ class MonitoringService:
                 existing.positions_count = positions_count
             else:
                 snapshot = EquitySnapshotORM(
-                    date=today_str,
+                    date=date_key,
+                    snapshot_type=snapshot_type,
                     equity=equity,
                     balance=balance,
                     unrealized_pnl=unrealized,
                     realized_pnl_cumulative=realized_cum,
                     positions_count=positions_count,
-                    created_at=datetime.now(),
+                    created_at=now,
                 )
                 session.add(snapshot)
-            
+
             session.commit()
-            logger.info(
-                f"  Equity snapshot saved: {today_str} equity=${equity:,.2f} "
-                f"balance=${balance:,.2f} unrealized=${unrealized:,.2f} "
-                f"realized_cum=${realized_cum:,.2f} positions={positions_count}"
+            logger.debug(
+                f"  Equity snapshot ({snapshot_type}) saved: {date_key} "
+                f"equity=${equity:,.2f} positions={positions_count}"
             )
         except Exception as e:
             session.rollback()
-            logger.warning(f"  Equity snapshot save failed: {e}")
+            logger.warning(f"  Equity snapshot ({snapshot_type}) save failed: {e}")
         finally:
             session.close()
     

@@ -336,23 +336,30 @@ class AccountInfoORM(Base):
 
 
 class EquitySnapshotORM(Base):
-    """Daily equity snapshots for accurate P&L period calculations.
+    """Equity snapshots for P&L period calculations.
     
-    Stores equity at end of each day so we can compute:
-    - Today = current_equity - yesterday's snapshot
-    - This Week = current_equity - last Sunday's snapshot
-    - This Month = current_equity - last day of previous month's snapshot
+    Supports two resolutions:
+    - daily: date = "YYYY-MM-DD", one per day (end-of-day)
+    - hourly: date = "YYYY-MM-DD HH:00", one per hour (intraday)
+    
+    Daily snapshots are used for period P&L (today/week/month).
+    Hourly snapshots enable intraday equity curve resolution.
     """
     __tablename__ = "equity_snapshots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    date = Column(String, nullable=False, unique=True, index=True)  # YYYY-MM-DD
+    date = Column(String, nullable=False, index=True)  # YYYY-MM-DD or YYYY-MM-DD HH:00
+    snapshot_type = Column(String, nullable=False, default='daily')  # 'daily' or 'hourly'
     equity = Column(Float, nullable=False)
     balance = Column(Float, nullable=False)
     unrealized_pnl = Column(Float, nullable=False, default=0.0)
     realized_pnl_cumulative = Column(Float, nullable=False, default=0.0)
     positions_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint('date', 'snapshot_type', name='uq_equity_snapshot_date_type'),
+    )
 
 
 class RiskConfigORM(Base):
@@ -373,6 +380,16 @@ class RiskConfigORM(Base):
     trailing_stop_distance_pct = Column(Float, nullable=False, default=0.03)
     partial_exit_enabled = Column(Integer, nullable=False, default=0)  # SQLite uses 0/1 for boolean
     partial_exit_levels = Column(JSON, nullable=True, default=None)  # List of profit levels and exit percentages
+    # Correlation-adjusted position sizing
+    correlation_adjustment_enabled = Column(Integer, nullable=False, default=1)  # 1 = True
+    correlation_threshold = Column(Float, nullable=False, default=0.7)
+    correlation_reduction_factor = Column(Float, nullable=False, default=0.5)
+    # Regime-based position sizing
+    regime_based_sizing_enabled = Column(Integer, nullable=False, default=0)
+    regime_multipliers = Column(JSON, nullable=True, default=None)
+    # Stale order cancellation
+    cancel_stale_orders = Column(Integer, nullable=False, default=1)  # 1 = True
+    stale_order_hours = Column(Integer, nullable=False, default=24)
 
 
 
@@ -888,6 +905,7 @@ class AutonomousCycleRunORM(Base):
     avg_sharpe = Column(Float, nullable=True)
     avg_win_rate = Column(Float, nullable=True)
     activated = Column(Integer, nullable=False, default=0)
+    promoted_to_demo = Column(Integer, nullable=False, default=0)  # Strategies that got first order → DEMO status
     total_active = Column(Integer, nullable=False, default=0)
     total_backtested = Column(Integer, nullable=False, default=0)
     signals_generated = Column(Integer, nullable=False, default=0)
@@ -925,6 +943,7 @@ class AutonomousCycleRunORM(Base):
             "avg_sharpe": self.avg_sharpe,
             "avg_win_rate": self.avg_win_rate,
             "activated": self.activated,
+            "promoted_to_demo": self.promoted_to_demo,
             "total_active": self.total_active,
             "total_backtested": self.total_backtested,
             "signals_generated": self.signals_generated,

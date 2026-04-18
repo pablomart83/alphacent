@@ -18,6 +18,9 @@ import type {
   AutonomousStatus,
 } from '../types';
 
+// Period type used across analytics endpoints
+type AnalyticsPeriod = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 /**
@@ -917,7 +920,7 @@ class ApiClient {
   // Performance Dashboard Endpoints
   // ============================================================================
 
-  async getPerformanceMetrics(period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
+  async getPerformanceMetrics(period?: AnalyticsPeriod): Promise<any> {
     const params = period ? `?period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(
       `/performance/metrics${params}`
@@ -1007,7 +1010,7 @@ class ApiClient {
   // Analytics Endpoints
   // ============================================================================
 
-  async getStrategyAttribution(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any[]> {
+  async getStrategyAttribution(mode: TradingMode, period?: AnalyticsPeriod): Promise<any[]> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any[]>>(
       `/analytics/strategy-attribution?mode=${mode}${params}`
@@ -1015,7 +1018,7 @@ class ApiClient {
     return this.extractArrayFromResponse<any>(response, 'attributions');
   }
 
-  async getTradeAnalytics(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
+  async getTradeAnalytics(mode: TradingMode, period?: AnalyticsPeriod): Promise<any> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(
       `/analytics/trade-analytics?mode=${mode}${params}`
@@ -1037,10 +1040,12 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async getPerformanceAnalytics(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
-    const params = period ? `&period=${period}` : '';
+  async getPerformanceAnalytics(mode: TradingMode, period?: '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL', interval?: '1d' | '4h' | '1h'): Promise<any> {
+    const params = new URLSearchParams({ mode });
+    if (period) params.set('period', period);
+    if (interval) params.set('interval', interval);
     const response = await this.client.get<ApiResponse<any>>(
-      `/analytics/performance?mode=${mode}${params}`
+      `/analytics/performance?${params.toString()}`
     );
     return this.handleResponse(response);
   }
@@ -1049,7 +1054,7 @@ class ApiClient {
   // Alpha Edge Analytics Endpoints
   // ============================================================================
 
-  async getFundamentalFilterStats(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
+  async getFundamentalFilterStats(mode: TradingMode, period?: AnalyticsPeriod): Promise<any> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(
       `/analytics/alpha-edge/fundamental-stats?mode=${mode}${params}`
@@ -1057,7 +1062,7 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async getMLFilterStats(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
+  async getMLFilterStats(mode: TradingMode, period?: AnalyticsPeriod): Promise<any> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(
       `/analytics/alpha-edge/ml-stats?mode=${mode}${params}`
@@ -1065,7 +1070,7 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async getConvictionDistribution(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
+  async getConvictionDistribution(mode: TradingMode, period?: AnalyticsPeriod): Promise<any> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(
       `/analytics/alpha-edge/conviction-distribution?mode=${mode}${params}`
@@ -1073,7 +1078,7 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async getTemplatePerformance(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any[]> {
+  async getTemplatePerformance(mode: TradingMode, period?: AnalyticsPeriod): Promise<any[]> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any[]>>(
       `/analytics/alpha-edge/template-performance?mode=${mode}${params}`
@@ -1110,7 +1115,7 @@ class ApiClient {
     return response.data;
   }
 
-  async getTransactionCostSavings(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
+  async getTransactionCostSavings(mode: TradingMode, period?: AnalyticsPeriod): Promise<any> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(
       `/analytics/alpha-edge/transaction-cost-savings?mode=${mode}${params}`
@@ -1118,7 +1123,7 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async getPerformanceStats(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
+  async getPerformanceStats(mode: TradingMode, period?: AnalyticsPeriod): Promise<any> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(
       `/analytics/performance-stats?mode=${mode}${params}`
@@ -1130,7 +1135,7 @@ class ApiClient {
   // CIO Dashboard Endpoints (Institutional-Grade)
   // ============================================================================
 
-  async getCIODashboard(mode: TradingMode, period?: '1M' | '3M' | '6M' | '1Y' | 'ALL'): Promise<any> {
+  async getCIODashboard(mode: TradingMode, period?: AnalyticsPeriod): Promise<any> {
     const params = period ? `&period=${period}` : '';
     const response = await this.client.get<ApiResponse<any>>(
       `/analytics/cio-dashboard?mode=${mode}${params}`

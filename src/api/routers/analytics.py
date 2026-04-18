@@ -654,6 +654,7 @@ async def get_comprehensive_regime_analysis(
 async def get_performance_analytics(
     mode: TradingMode,
     period: str = "1M",
+    interval: str = "1d",  # "1d", "4h", "1h" — resolution of equity curve
     username: str = Depends(get_current_user),
     session: Session = Depends(get_db_session)
 ):
@@ -663,15 +664,17 @@ async def get_performance_analytics(
     Args:
         mode: Trading mode (DEMO or LIVE)
         period: Time period (1M, 3M, 6M, 1Y, ALL)
+        interval: Equity curve resolution — 1d (daily), 4h (4-hourly), 1h (hourly)
         username: Current authenticated user
         session: Database session
         
     Returns:
         Comprehensive performance analytics with equity curve
     """
-    logger.info(f"Getting performance analytics for {mode.value} mode, period {period}, user {username}")
+    logger.info(f"Getting performance analytics for {mode.value} mode, period {period}, interval {interval}, user {username}")
     
     period_map = {
+        '1W': timedelta(days=7),
         '1M': timedelta(days=30),
         '3M': timedelta(days=90),
         '6M': timedelta(days=180),
@@ -689,13 +692,50 @@ async def get_performance_analytics(
     account_equity = getattr(account, 'equity', None) or getattr(account, 'balance', 100000.0) if account else 100000.0
     
     # ── PRIMARY: Use equity_snapshots table for accurate daily returns ──────────
-    # equity_snapshots records actual account equity at end of each day.
-    # This is the correct input for Sharpe — it captures all P&L sources
-    # (realized + unrealized changes) without double-counting or distortion.
+    # equity_snapshots records actual account equity at end of each day (daily)
+    # or each hour (hourly). Use hourly snapshots for 1h/4h interval requests.
     from src.models.orm import EquitySnapshotORM
-    snapshot_rows = session.query(EquitySnapshotORM).filter(
-        EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d')
-    ).order_by(EquitySnapshotORM.date.asc()).all()
+
+    if interval in ('1h', '4h'):
+        # Use hourly snapshots — format "YYYY-MM-DD HH:00"
+        snapshot_rows = session.query(EquitySnapshotORM).filter(
+            EquitySnapshotORM.snapshot_type == 'hourly',
+            EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d %H:00'),
+        ).order_by(EquitySnapshotORM.date.asc()).all()
+
+        # For 4h: downsample hourly to every 4th hour
+        if interval == '4h' and snapshot_rows:
+            downsampled = []
+            for row in snapshot_rows:
+                try:
+                    hour = int(row.date[11:13])  # "YYYY-MM-DD HH:00" → HH
+                    if hour % 4 == 0:
+                        downsampled.append(row)
+                except Exception:
+                    downsampled.append(row)
+            # Always include the last point
+            if snapshot_rows and (not downsampled or downsampled[-1] != snapshot_rows[-1]):
+                downsampled.append(snapshot_rows[-1])
+            snapshot_rows = downsampled
+
+        # Fall back to daily if no hourly data yet
+        if not snapshot_rows:
+            snapshot_rows = session.query(EquitySnapshotORM).filter(
+                EquitySnapshotORM.snapshot_type == 'daily',
+                EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d'),
+            ).order_by(EquitySnapshotORM.date.asc()).all()
+    else:
+        # Daily snapshots
+        snapshot_rows = session.query(EquitySnapshotORM).filter(
+            EquitySnapshotORM.snapshot_type == 'daily',
+            EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d'),
+        ).order_by(EquitySnapshotORM.date.asc()).all()
+
+        # Fall back to any snapshot type if no daily data
+        if not snapshot_rows:
+            snapshot_rows = session.query(EquitySnapshotORM).filter(
+                EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d'),
+            ).order_by(EquitySnapshotORM.date.asc()).all()
 
     equity_curve = []
     daily_returns = []

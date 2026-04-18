@@ -189,7 +189,8 @@ const MaeMfeScatter: FC<{
 export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
   const { tradingMode, isLoading: tradingModeLoading } = useTradingMode();
   const [loading, setLoading] = useState(true);
-  const [period, setPeriod] = useState<'1M' | '3M' | '6M' | '1Y' | 'ALL'>('3M');
+  const [period, setPeriod] = useState<'1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL'>('3M');
+  const [equityInterval, setEquityInterval] = useState<'1d' | '4h' | '1h'>('1d');
   const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
   const [strategyAttribution, setStrategyAttribution] = useState<StrategyAttribution[]>([]);
   const [tradeAnalytics, setTradeAnalytics] = useState<TradeAnalytics | null>(null);
@@ -343,7 +344,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       
       if (!dataIsFresh) {
         const [perfAnalytics, perfStatsData, cioDashboardData, regimeDataPhase1] = await Promise.all([
-          apiClient.getPerformanceAnalytics(tradingMode, period),
+          apiClient.getPerformanceAnalytics(tradingMode, period, equityInterval),
           apiClient.getPerformanceStats(tradingMode, period).catch(() => null),
           apiClient.getCIODashboard(tradingMode, period).catch(() => null),
           apiClient.getComprehensiveRegimeAnalysis().catch(() => null),
@@ -544,7 +545,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, [tradingMode, period, activeTab, rollingWindow, attributionGroupBy]);
+  }, [tradingMode, period, equityInterval, activeTab, rollingWindow, attributionGroupBy]);
 
   const fetchTradeJournalData = async () => {
     try {
@@ -707,11 +708,22 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
+          <SelectItem value="1W">1 Week</SelectItem>
           <SelectItem value="1M">1 Month</SelectItem>
           <SelectItem value="3M">3 Months</SelectItem>
           <SelectItem value="6M">6 Months</SelectItem>
           <SelectItem value="1Y">1 Year</SelectItem>
           <SelectItem value="ALL">All Time</SelectItem>
+        </SelectContent>
+      </Select>
+      <Select value={equityInterval} onValueChange={(value) => setEquityInterval(value as typeof equityInterval)}>
+        <SelectTrigger className="w-[72px] h-7 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="1d">1D</SelectItem>
+          <SelectItem value="4h">4H</SelectItem>
+          <SelectItem value="1h">1H</SelectItem>
         </SelectContent>
       </Select>
       <button onClick={handleExportCSV} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors" title="Export CSV">
