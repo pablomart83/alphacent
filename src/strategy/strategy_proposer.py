@@ -1340,7 +1340,29 @@ class StrategyProposer:
                     
                     test_trades = wf_results['test_results'].total_trades if wf_results.get('test_results') else 0
                     train_trades = wf_results['train_results'].total_trades if wf_results.get('train_results') else 0
-                    has_enough_trades = test_trades >= 2 and train_trades >= 2
+                    
+                    # Load min_trades thresholds from config — asset-class and timeframe aware
+                    _at_cfg = self.config.get('activation_thresholds', {})
+                    _interval = (strategy.metadata or {}).get('interval', '1d')
+                    _is_crypto = False
+                    _is_commodity = False
+                    try:
+                        from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_COMMODITIES
+                        _sym = strategy.symbols[0].upper() if strategy.symbols else ''
+                        _is_crypto = _sym in set(DEMO_ALLOWED_CRYPTO)
+                        _is_commodity = _sym in set(DEMO_ALLOWED_COMMODITIES)
+                    except Exception:
+                        pass
+                    if _is_commodity:
+                        _min_trades = _at_cfg.get('min_trades_commodity', 8)
+                    elif _interval == '1h':
+                        _min_trades = _at_cfg.get('min_trades_dsl_1h', 20)
+                    elif _interval == '4h':
+                        _min_trades = _at_cfg.get('min_trades_dsl_4h', 12)
+                    else:
+                        _min_trades = _at_cfg.get('min_trades_dsl', 15)
+                    
+                    has_enough_trades = test_trades >= _min_trades and train_trades >= max(2, _min_trades // 3)
                     
                     # Update zero-trade blacklist: track template+symbol combos that produce 0 trades
                     if test_trades == 0 or train_trades == 0:
@@ -1414,13 +1436,82 @@ class StrategyProposer:
                         pass
                     continue
             
+            # Monte Carlo Bootstrap — filter out strategies whose OOS edge is likely noise.
+            # For each strategy that has test trades, we resample the trade P&L 1000 times
+            # and require the 5th-percentile Sharpe > 0.2. This catches strategies that
+            # happened to get lucky on the specific OOS period but have no real edge.
+            # Strategies with < 5 test trades are skipped (not enough data to bootstrap).
+            mc_passed_ids = set()
+            MC_ITERATIONS = 1000
+            MC_MIN_P5_SHARPE = 0.2
+            MC_MIN_TRADES_FOR_BOOTSTRAP = 5
+            for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
+                if not (tv and tev and het and not ov):
+                    mc_passed_ids.add(s.id)  # Already filtered out below — don't double-filter
+                    continue
+                test_results = wf.get('test_results')
+                if test_results is None:
+                    mc_passed_ids.add(s.id)
+                    continue
+                trades_list = getattr(test_results, 'trades', None) or []
+                n_trades = len(trades_list)
+                if n_trades < MC_MIN_TRADES_FOR_BOOTSTRAP:
+                    # Too few trades to bootstrap — pass through (min_trades gate handles this)
+                    mc_passed_ids.add(s.id)
+                    continue
+                try:
+                    import numpy as _np_mc
+                    # Extract per-trade returns
+                    trade_returns = []
+                    for t in trades_list:
+                        ret = t.get('return') or t.get('pnl_pct') or t.get('return_pct')
+                        if ret is not None:
+                            trade_returns.append(float(ret))
+                    if len(trade_returns) < MC_MIN_TRADES_FOR_BOOTSTRAP:
+                        mc_passed_ids.add(s.id)
+                        continue
+                    arr = _np_mc.array(trade_returns)
+                    # Bootstrap: resample with replacement, compute Sharpe each iteration
+                    bootstrap_sharpes = []
+                    for _ in range(MC_ITERATIONS):
+                        sample = _np_mc.random.choice(arr, size=len(arr), replace=True)
+                        std = sample.std()
+                        if std > 0:
+                            # Annualise: assume ~252/holding_days trades per year
+                            # Use a conservative 252 scaling (daily returns equivalent)
+                            sharpe = (sample.mean() / std) * _np_mc.sqrt(len(arr))
+                            bootstrap_sharpes.append(sharpe)
+                    if not bootstrap_sharpes:
+                        mc_passed_ids.add(s.id)
+                        continue
+                    p5_sharpe = float(_np_mc.percentile(bootstrap_sharpes, 5))
+                    if p5_sharpe >= MC_MIN_P5_SHARPE:
+                        mc_passed_ids.add(s.id)
+                        logger.info(
+                            f"MC bootstrap PASS: {s.name} — p5_sharpe={p5_sharpe:.2f} "
+                            f"(n={n_trades} trades, {MC_ITERATIONS} iterations)"
+                        )
+                    else:
+                        logger.info(
+                            f"MC bootstrap FAIL: {s.name} — p5_sharpe={p5_sharpe:.2f} < {MC_MIN_P5_SHARPE} "
+                            f"(n={n_trades} trades) — likely noise, rejected"
+                        )
+                except Exception as _mc_err:
+                    logger.debug(f"Monte Carlo bootstrap failed for {s.name}: {_mc_err}")
+                    mc_passed_ids.add(s.id)  # Fail open — don't block on MC error
+
+            mc_filtered = len(all_wf_results) - len(mc_passed_ids)
+            if mc_filtered > 0:
+                logger.info(f"Monte Carlo bootstrap: filtered {mc_filtered} strategies as likely noise")
+
             # Pass 1: Direction-aware thresholds
             # The TEST period is more recent and more relevant for live trading.
             # Train Sharpe matters for confirming the strategy isn't random, but
             # a weak train period doesn't invalidate strong OOS performance.
             validated_strategies = []
             for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
-                if not (tv and tev and het and not ov):
+                if s.id not in mc_passed_ids:
+                    continue  # Filtered by Monte Carlo bootstrap                if not (tv and tev and het and not ov):
                     continue
                 direction = self._detect_strategy_direction(s)
                 thresholds = self._get_direction_aware_thresholds(direction, market_regime)

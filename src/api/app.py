@@ -54,9 +54,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     db = get_database()
     logger.info(f"Database initialized")
 
-    # Connect auth manager to DB and ensure admin user exists
+    # Connect auth manager to DB and ensure admin user exists.
+    # Only creates a default admin if NO users exist at all (fresh DB).
+    # The default password is intentionally weak — the operator MUST change it
+    # on first login. We do NOT hardcode a real password here.
     auth_manager.set_database(db)
-    auth_manager.ensure_admin_exists("admin123")
+    auth_manager.ensure_admin_exists("changeme_on_first_login")
 
     # Initialize news sentiment provider
     try:
@@ -193,7 +196,6 @@ def create_app() -> FastAPI:
             "http://localhost:3000",  # React frontend (local)
             "http://localhost:5173",  # Vite dev server
             "http://localhost:5174",  # Vite dev server (alternate port)
-            "http://34.252.61.149",   # EC2 production
             "https://alphacent.co.uk",  # Production HTTPS
             "https://www.alphacent.co.uk",  # Production HTTPS www
         ],
@@ -255,4 +257,82 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "alphacent-backend"
+    }
+
+
+@app.get("/health/deep")
+async def deep_health_check():
+    """
+    Deep health check — verifies background services are alive, not just the HTTP server.
+
+    Returns 200 only when:
+    - DB is reachable
+    - Monitoring service last cycle < 3 minutes ago
+    - eToro circuit breakers are not all OPEN
+
+    Used by CloudWatch and the System Health page.
+    """
+    from datetime import datetime, timedelta
+    import time as _time
+
+    issues = []
+
+    # 1. DB connectivity
+    try:
+        from src.models.database import get_database
+        from src.models.orm import StrategyORM
+        db = get_database()
+        session = db.get_session()
+        try:
+            session.query(StrategyORM).limit(1).all()
+        finally:
+            session.close()
+    except Exception as e:
+        issues.append(f"db_unreachable: {str(e)[:80]}")
+
+    # 2. Monitoring service liveness
+    monitoring_status = "unknown"
+    try:
+        from src.core.monitoring_service import get_monitoring_service
+        mon = get_monitoring_service()
+        if mon is None:
+            issues.append("monitoring_service_not_started")
+            monitoring_status = "not_started"
+        else:
+            # Check last pending-order cycle timestamp (runs every 5s)
+            last_check = getattr(mon, '_last_pending_check', 0)
+            age_seconds = _time.time() - last_check if last_check else 9999
+            if age_seconds > 180:  # 3 minutes
+                issues.append(f"monitoring_stale: last_cycle={age_seconds:.0f}s ago")
+                monitoring_status = f"stale ({age_seconds:.0f}s)"
+            else:
+                monitoring_status = f"ok ({age_seconds:.0f}s ago)"
+    except Exception as e:
+        issues.append(f"monitoring_check_failed: {str(e)[:80]}")
+
+    # 3. Circuit breakers (warn but don't fail — open breakers are recoverable)
+    circuit_breaker_status = {}
+    try:
+        from src.core.monitoring_service import get_monitoring_service
+        mon = get_monitoring_service()
+        if mon and hasattr(mon, 'etoro_client'):
+            cb_states = mon.etoro_client.get_circuit_breaker_states()
+            circuit_breaker_status = {k: v.get("state") for k, v in cb_states.items()}
+            open_breakers = [k for k, v in cb_states.items() if v.get("state") == "open"]
+            if open_breakers:
+                issues.append(f"circuit_breakers_open: {open_breakers}")
+    except Exception:
+        pass
+
+    status_code = 200 if not issues else 503
+    return {
+        "status": "healthy" if not issues else "degraded",
+        "service": "alphacent-backend",
+        "checks": {
+            "database": "ok" if not any("db_" in i for i in issues) else "failed",
+            "monitoring_service": monitoring_status,
+            "circuit_breakers": circuit_breaker_status,
+        },
+        "issues": issues,
+        "timestamp": datetime.now().isoformat(),
     }

@@ -419,7 +419,7 @@ class RiskManager:
             MINIMUM_ORDER_SIZE_POST = 2000.0
 
             if 0 < position_size < MINIMUM_ORDER_SIZE_POST:
-                MAX_BUMP_RATIO_POST = 10.0
+                MAX_BUMP_RATIO_POST = 3.0
                 if position_size > 0 and MINIMUM_ORDER_SIZE_POST / position_size > MAX_BUMP_RATIO_POST:
                     logger.warning(
                         f"Post-adjustment size ${position_size:.2f} below eToro minimum "
@@ -644,17 +644,17 @@ class RiskManager:
         MINIMUM_ORDER_SIZE = 2000.0
 
         if position_size < MINIMUM_ORDER_SIZE:
-            # Bump to minimum if the calculated size is at least $200 (10x guard).
-            # A strategy that wants to trade with $400-$500 gets bumped to $2K —
-            # that's acceptable, the strategy has conviction and we want meaningful
-            # position sizes. Only reject truly tiny allocations (<$200).
-            MAX_BUMP_RATIO = 10.0
+            # Bump to minimum only if the calculated size is at least $667 (3x guard).
+            # A strategy that calculates $700+ gets bumped to $2K — acceptable.
+            # A strategy that calculates $200 would need a 10x bump — that means the
+            # volatility-scaled sizing decided this position should be tiny. Respect that.
+            MAX_BUMP_RATIO = 3.0
             if available_capital >= MINIMUM_ORDER_SIZE and remaining_exposure >= MINIMUM_ORDER_SIZE:
                 if position_size > 0 and MINIMUM_ORDER_SIZE / position_size > MAX_BUMP_RATIO:
                     logger.warning(
                         f"Position size ${position_size:.2f} below eToro minimum ${MINIMUM_ORDER_SIZE:.0f} "
                         f"for {getattr(signal, 'symbol', '?')} — bump would be {MINIMUM_ORDER_SIZE/position_size:.1f}x "
-                        f"(>{MAX_BUMP_RATIO:.0f}x max). Rejecting to avoid over-sizing. "
+                        f"(>{MAX_BUMP_RATIO:.0f}x max). Rejecting — vol-scaling says position should be small. "
                         f"Strategy allocation too small for this asset class."
                     )
                     return 0.0

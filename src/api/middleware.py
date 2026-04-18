@@ -28,6 +28,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     PUBLIC_PATHS = {
         "/",
         "/health",
+        "/health/deep",
         "/docs",
         "/openapi.json",
         "/auth/login",

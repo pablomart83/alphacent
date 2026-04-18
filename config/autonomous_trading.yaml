@@ -24,11 +24,11 @@ activation_thresholds:
   min_win_rate_crypto: 0.3
   min_win_rate_commodity: 0.35
   min_trades: 2
-  min_trades_alpha_edge: 2
-  min_trades_dsl: 4
-  min_trades_dsl_1h: 5
-  min_trades_dsl_4h: 3
-  min_trades_commodity: 2
+  min_trades_alpha_edge: 10
+  min_trades_dsl: 15
+  min_trades_dsl_1h: 20
+  min_trades_dsl_4h: 12
+  min_trades_commodity: 8
   min_return_per_trade:
     stock: 0.0015
     etf: 0.001
@@ -156,31 +156,41 @@ backtest:
     commission_percent: 0.001
     slippage_percent: 0.0005
     spread_percent: 0.0002
+    # Overnight financing: eToro charges ~0.02% per night on CFD positions (1x leverage).
+    # Applied as: overnight_cost_pct * expected_holding_days at backtest time.
+    # This is the single biggest cost gap vs live trading for multi-day holds.
+    overnight_financing_pct_per_day: 0.0002  # 0.02% per night
     per_asset_class:
       stock:
         commission_percent: 0.0
         spread_percent: 0.0015
         slippage_percent: 0.0002
+        overnight_financing_pct_per_day: 0.0002  # ~0.02%/night on CFDs
       etf:
         commission_percent: 0.0
         spread_percent: 0.0015
         slippage_percent: 0.0002
+        overnight_financing_pct_per_day: 0.0002
       forex:
         commission_percent: 0.0
         spread_percent: 0.00015
         slippage_percent: 0.00005
+        overnight_financing_pct_per_day: 0.0001  # Forex swap rates vary; 0.01% conservative
       crypto:
         commission_percent: 0.01
         spread_percent: 0.0
         slippage_percent: 0.001
+        overnight_financing_pct_per_day: 0.0  # Crypto: no overnight fee on eToro
       index:
         commission_percent: 0.0
         spread_percent: 0.00015
         slippage_percent: 0.0001
+        overnight_financing_pct_per_day: 0.00015  # Indices: ~0.015%/night
       commodity:
         commission_percent: 0.0
         spread_percent: 0.0004
         slippage_percent: 0.0002
+        overnight_financing_pct_per_day: 0.0002
   period_days: 730
   adaptive_risk:
     enabled: true

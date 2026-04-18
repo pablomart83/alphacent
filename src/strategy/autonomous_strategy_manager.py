@@ -647,8 +647,8 @@ class AutonomousStrategyManager:
                 pass  # Keep the pre-signal-gen count if query fails
 
             # Save completed cycle to DB
-            # Use promoted_to_demo as the real "activated" count (strategies that actually became DEMO)
-            # and total_active is re-queried after signal gen to include the new promotions
+            # activated = strategies that passed activation criteria → BACKTESTED status
+            # promoted_to_demo = strategies that got their first order executed → DEMO status
             stats["strategies_activated_to_demo"] = promoted_to_demo
             self._update_cycle_run(cycle_id, "completed", cycle_end, cycle_duration, stats, {
                 "symbols_checked": symbols_checked,
@@ -983,7 +983,8 @@ class AutonomousStrategyManager:
                 run.backtest_failed = extra.get("bt_failed", 0)
                 run.avg_sharpe = extra.get("avg_sharpe")
                 run.avg_win_rate = extra.get("avg_win_rate")
-                run.activated = stats.get("strategies_activated_to_demo", 0)
+                run.activated = stats.get("strategies_activated", 0)  # passed activation → BACKTESTED
+                run.promoted_to_demo = stats.get("strategies_activated_to_demo", 0)  # got first order → DEMO
                 run.total_active = extra.get("total_active", 0)
                 run.total_backtested = extra.get("total_backtested", 0)
                 run.errors = stats.get("errors", []) if stats.get("errors") else None
@@ -1330,9 +1331,9 @@ class AutonomousStrategyManager:
                     # fall back to factor-based validation. Fundamental strategies fire
                     # quarterly — expecting 2+ trades in a 2-year window on a single symbol
                     # is unrealistic. Instead, validate the underlying factor's edge.
-                    min_ae_trades = 2
+                    min_ae_trades = 10
                     try:
-                        min_ae_trades = self.config.get('activation_thresholds', {}).get('min_trades_alpha_edge', 2)
+                        min_ae_trades = self.config.get('activation_thresholds', {}).get('min_trades_alpha_edge', 10)
                     except Exception:
                         pass
                     

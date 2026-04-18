@@ -3232,8 +3232,54 @@ class StrategyEngine:
             spread_per_trade = avg_trade_value * spread_pct
             total_spread_cost = total_trades * 2 * spread_per_trade  # Entry + Exit
             
+            # Overnight financing cost: eToro charges ~0.02%/night on CFD positions.
+            # We estimate this from the average holding period and the per-asset-class rate.
+            total_overnight_cost = 0.0
+            overnight_cost_pct_total = 0.0
+            try:
+                import yaml
+                from pathlib import Path as _Path
+                _cfg_path = _Path("config/autonomous_trading.yaml")
+                if _cfg_path.exists():
+                    with open(_cfg_path, 'r') as _f:
+                        _cfg = yaml.safe_load(_f)
+                    _tx = _cfg.get('backtest', {}).get('transaction_costs', {})
+                    _primary = strategy.symbols[0] if strategy.symbols else ''
+                    _ac = self._get_asset_class(_primary) if _primary else 'stock'
+                    _ac_costs = _tx.get('per_asset_class', {}).get(_ac, {})
+                    overnight_rate = _ac_costs.get(
+                        'overnight_financing_pct_per_day',
+                        _tx.get('overnight_financing_pct_per_day', 0.0002)
+                    )
+                    if overnight_rate > 0 and total_trades > 0:
+                        # Estimate avg holding period from trades list if available
+                        avg_hold_days = 7.0  # Conservative default
+                        if trades:
+                            hold_days_list = []
+                            for t in trades:
+                                entry_dt = t.get('entry_date') or t.get('entry_time')
+                                exit_dt = t.get('exit_date') or t.get('exit_time')
+                                if entry_dt and exit_dt:
+                                    try:
+                                        delta = (exit_dt - entry_dt).days
+                                        if delta > 0:
+                                            hold_days_list.append(delta)
+                                    except Exception:
+                                        pass
+                            if hold_days_list:
+                                avg_hold_days = sum(hold_days_list) / len(hold_days_list)
+                        total_overnight_cost = total_trades * avg_trade_value * overnight_rate * avg_hold_days
+                        overnight_cost_pct_total = total_overnight_cost / init_cash
+                        logger.info(
+                            f"Overnight financing: {overnight_rate:.4%}/night × "
+                            f"{avg_hold_days:.1f}d avg hold × {total_trades} trades = "
+                            f"${total_overnight_cost:,.2f} ({overnight_cost_pct_total:.4%})"
+                        )
+            except Exception as _oc_err:
+                logger.debug(f"Could not compute overnight financing cost: {_oc_err}")
+            
             # Total transaction costs
-            total_tx_costs = total_commission_cost + total_slippage_cost + total_spread_cost
+            total_tx_costs = total_commission_cost + total_slippage_cost + total_spread_cost + total_overnight_cost
             
             # Calculate costs as percentage of initial capital
             commission_cost_pct = total_commission_cost / init_cash
@@ -3257,6 +3303,8 @@ class StrategyEngine:
             logger.info(f"Commission cost: ${total_commission_cost:,.2f} ({commission_cost_pct:.4%})")
             logger.info(f"Slippage cost: ${total_slippage_cost:,.2f} ({slippage_cost_pct:.4%})")
             logger.info(f"Spread cost: ${total_spread_cost:,.2f} ({spread_cost_pct:.4%})")
+            if overnight_cost_pct_total > 0:
+                logger.info(f"Overnight financing: ${total_overnight_cost:,.2f} ({overnight_cost_pct_total:.4%})")
             logger.info(f"Total transaction costs: ${total_tx_costs:,.2f} ({total_cost_pct:.4%})")
             logger.info(f"Costs as % of gross returns: {costs_pct_of_returns:.2f}%")
             logger.info(f"Gross return (before costs): {gross_return:.2%}")
@@ -3431,6 +3479,23 @@ class StrategyEngine:
                 if "Rolling Low" not in indicator_list:
                     indicator_list.append("Rolling Low")
                     referenced_indicators.add("Rolling Low")
+
+            # Check for PRICE_CHANGE_PCT references — auto-add with correct period
+            if "PRICE_CHANGE_PCT" in condition:
+                import re as _re_pcp
+                for match in _re_pcp.finditer(r'PRICE_CHANGE_PCT\((\d+)\)', condition):
+                    period = int(match.group(1))
+                    spec = f"Price Change %:{period}"
+                    if spec not in indicator_list and not any(
+                        i == spec or i == "Price Change %" for i in indicator_list
+                    ):
+                        indicator_list.append(spec)
+                        referenced_indicators.add(spec)
+                # Fallback: no period found, add default
+                if not _re_pcp.search(r'PRICE_CHANGE_PCT\(\d+\)', condition):
+                    if "Price Change %" not in indicator_list:
+                        indicator_list.append("Price Change %")
+                        referenced_indicators.add("Price Change %")
             
             # Check for Bollinger Bands references
             if any(bb_ref in condition for bb_ref in ["Lower_Band", "Upper_Band", "Middle_Band", "Bollinger"]):
