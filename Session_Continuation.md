@@ -2212,3 +2212,322 @@ Issues to fix:
 4. Macro Pulse — clarify what each ticker represents (VTI=US Equities, GLD=Gold, etc.) or replace with actual macro indicators (VIX, 10Y yield, DXY, Oil)
 5. Overall height — reduce from ~200px to ~120px max, increase data density
 6. Consider replacing the 5-widget layout with 3 higher-value widgets: **Live Signals** (last 5 signals with full context), **P&L Pulse** (today's realized + unrealized by asset class), **Risk Alerts** (any active risk limit breaches)
+
+---
+
+### Session Improvements (April 17, 2026 — Session 16: Signals, UI Overhaul, Infra)
+
+#### 157. DSL Syntax Error Fix (trading_dsl.py line 513) ✅
+- `_handle_crossover_number` method had introduced a syntax error that merged with `_handle_indicator_with_params` definition
+- Fix was already applied in previous session — confirmed clean on arrival, deployed to EC2
+- **Impact**: Was killing ALL backtests and signal generation (0 signals, 0 orders)
+- **Files**: `src/strategy/trading_dsl.py`
+
+#### 158. Settings UI → Runtime Config Persistence Fix ✅
+- **Root cause**: `PUT /config/risk` was saving to `risk_config.json` only, but `load_risk_config()` reads from DB first — so UI changes were silently ignored
+- **Fix**: `update_risk_config` router now writes to both DB and JSON. DB write includes all 7 core fields + 7 position management fields (trailing stops, partial exits, correlation, regime sizing, stale orders)
+- **DB migration**: Added 7 missing columns to `risk_config` table: `correlation_adjustment_enabled`, `correlation_threshold`, `correlation_reduction_factor`, `regime_based_sizing_enabled`, `regime_multipliers`, `cancel_stale_orders`, `stale_order_hours`
+- **Signal generation interval**: Was hardcoded at 3600s in `TradingScheduler.__init__`. Now reads `signal_generation.interval_seconds` from `autonomous_trading.yaml`
+- **Autonomous/Alpha Edge configs**: Confirmed these read YAML fresh on every cycle — no restart needed for changes
+- **Files**: `src/api/routers/config.py`, `src/core/config.py`, `src/models/orm.py`, `src/core/trading_scheduler.py`
+
+#### 159. FMP Insider Trading 404 Silenced ✅
+- `/stable/search-insider-trades` returns 404, `/api/v4/insider-trading` returns 403 on current plan
+- Changed `_fmp_request` to log 404 and 403 at DEBUG level (was ERROR) — eliminates log spam
+- Updated `get_insider_trading` docstring to document the plan limitation
+- **Files**: `src/data/fundamental_data_provider.py`
+
+#### 160. Altcoin Strategy Cleanup ✅
+- 27 strategies still had removed altcoins (LTC, BCH, XRP, ADA, DOT, LINK, SOL, AVAX, MATIC, NEAR) in their `symbols` JSON column
+- **4 strategies retired** (all symbols were bad altcoins — no valid symbols remaining)
+- **26 strategies stripped** (bad altcoins removed, valid symbols kept — BTC, ETH, stocks, forex retained)
+- **Root cause**: Session 72 removed altcoins from `symbols.yaml` (blocking new proposals) but didn't clean existing DB strategies
+- **Files**: DB-only fix via SQL
+
+#### 161. Orphaned Altcoin Positions Fix ✅
+- 7 open positions with `ID_100005`, `ID_100017`, etc. symbols — raw eToro instrument IDs stored because symbol wasn't in mapping at open time
+- **Root cause of close failure**: `_resolve_instrument_id()` was calling `SYMBOL_TO_INSTRUMENT_ID.get("ID_100005")` → `None` → eToro rejected close with "InstrumentId does not exist"
+- **Fix**: Added `_resolve_instrument_id()` helper that extracts numeric ID from `ID_XXXXXX` prefix directly
+- Applied to all 4 close call sites in `account.py`
+- Positions re-flagged as `pending_closure = true` with reason logged
+- **Files**: `src/api/routers/account.py`
+
+#### 162. Bottom Widget Zone — Full Redesign ✅
+Replaced 5 low-value widgets with 6 focused, high-signal widgets:
+
+| Widget | Purpose | Width |
+|--------|---------|-------|
+| **Book Pulse** | Open positions sorted by move — L/S, P&L %, P&L $, days open | flex-[3] |
+| **System Feed** | Unified event stream — orders, signals, lifecycle with relative timestamps | flex-[3] |
+| **Market Pulse** | 4 asset class regimes (Equity/Crypto/Forex/Commodity) with confidence | flex-[2] |
+| **Strategy Pulse** | Pipeline counts (Proposed/Backtested/Active/Retired) + last lifecycle event | flex-[2] |
+| **Signal Stats** | Last run time, total/executed/rejected, acceptance rate bar, top rejection | flex-[2] |
+| **Risk Pulse** | Exposure % with bar, daily P&L, position count, largest position | flex-[2] |
+
+- Collapse bar replaced with single "Trading Console" label + chevron (no widget name duplication)
+- Individual panel headers removed — widget name shown as tiny 9px label inside content area
+- Each panel individually hideable with X button, restore via "+N hidden" link
+- Collapse state persisted to localStorage
+- **Files**: `frontend/src/components/BottomWidgetZone.tsx`, `frontend/src/components/widgets/BookPulseWidget.tsx`, `frontend/src/components/widgets/SystemFeedWidget.tsx`, `frontend/src/components/widgets/RiskPulseWidget.tsx`, `frontend/src/components/widgets/StrategyPulseWidget.tsx`, `frontend/src/components/widgets/SignalStatsWidget.tsx`, `frontend/src/components/widgets/MarketPulseWidget.tsx`
+
+#### 163. MetricsBar — Signal Chip ✅
+- Added "Signal: 14m ago · 16 → 0 exec" chip to the persistent top bar (visible at lg breakpoint)
+- Reads from `getRecentSignals` in background, non-blocking
+- Green if any executed, red if all rejected
+- **Files**: `frontend/src/components/MetricsBar.tsx`
+
+#### 164. Overview Right Panel — ActivityPanel ✅
+Replaced thin "Recent Trades" + "Positions by Asset Class" lists with a full tabbed `ActivityPanel`:
+
+| Tab | Content |
+|-----|---------|
+| **Trades** | Last 20 closed trades, sortable by date or P&L |
+| **Opened** | Last 20 opened positions sorted by entry time |
+| **Closed** | Last 20 closed positions with entry→exit price + holding time |
+| **Top P&L** | Best 10 winners + worst 10 losers |
+| **Strategies** | Last 20 lifecycle events (ACTIVATED/BACKTESTED/RETIRED) with Sharpe + age |
+
+- **Files**: `frontend/src/components/ActivityPanel.tsx`, `frontend/src/pages/OverviewNew.tsx`
+
+#### 165. Infrastructure Upgrades ✅
+- **Node.js**: v20.20.2 (EOL April 2026) → v22.22.2 LTS
+- **Python venv**: 3.11.0rc1 → 3.12.13 stable (new venv at `venv_312/`, systemd updated)
+- **Python packages**: FastAPI 0.136, Pydantic 2.13, uvicorn 0.44, SQLAlchemy 2.0.49, yfinance 1.3, cryptography 46.0
+- **npm packages**: react 19.2.5, react-router-dom 7.14, vite 8.0.8, tailwindcss 4.2, framer-motion 12.38
+- **Skipped** (breaking): pandas 3.0, lucide-react 1.x, typescript 6.0, eslint 10
+- `requirements.txt` updated to reflect new venv state
+- **Files**: `/etc/systemd/system/alphacent.service` (venv path updated), `requirements.txt`
+
+---
+
+## Current System State (April 17, 2026 — Updated Session 16)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables
+- **Account:** eToro DEMO, equity ~$474K, ~187 open positions
+- **Python**: 3.12.13 stable (venv_312)
+- **Node.js**: v22.22.2 LTS
+- **Signal generation**: Running — DSL syntax error fixed, signals generating correctly
+- **Risk config**: UI changes now persist to DB correctly (max_exposure_pct = 95%)
+- **Altcoin cleanup**: All 27 strategies cleaned, 7 orphaned positions flagged for closure
+- **Bottom panel**: 6 widgets — Book Pulse, System Feed, Market Pulse, Strategy Pulse, Signal Stats, Risk Pulse
+
+## Open Items (Updated)
+
+### Infrastructure
+- ~~Node.js v20 EOL~~ ✅ Upgraded to v22 LTS
+- ~~Python 3.11.0rc1~~ ✅ Upgraded to 3.12.13 stable
+- Old `venv/` still on disk — can delete once stable: `rm -rf /home/ubuntu/alphacent/venv`
+- pandas 2→3 upgrade pending (breaking changes, needs testing)
+- lucide-react 0.5→1.x pending (icon names changed)
+
+### Trading
+- 7 orphaned altcoin positions (ID_100005 etc.) flagged for pending closure — approve from Portfolio page
+- `_resolve_instrument_id` fix deployed — close should now work correctly
+- FMP insider trading endpoint not available on current plan — silenced at DEBUG level
+
+### UI
+- ActivityPanel on Overview fetches closed positions with limit=20 — consider making this configurable
+- Market Pulse `current_regimes` key confirmed — was using wrong key `per_asset_class_regimes`
+
+---
+
+### Session Improvements (April 17, 2026 — Session 17: Cycle Intelligence + DSL + UI Polish)
+
+#### 166. PRICE_CHANGE_PCT DSL Indicator Auto-Detection ✅
+- Strategy `Pairs Trading Market Neutral COPPER LONG` used `PRICE_CHANGE_PCT(60)` in conditions but only had `SMA:50` in its indicators list
+- The `_calculate_indicators_from_strategy` auto-detection handled STOCH, BB, Support/Resistance but not `PRICE_CHANGE_PCT`
+- **Fix**: Added `PRICE_CHANGE_PCT` pattern detection to the condition scanner — extracts period from `PRICE_CHANGE_PCT(N)` and auto-adds `Price Change %:N` to the indicator list
+- `PRICE_CHANGE_PCT` was already implemented in `IndicatorLibrary` and `INDICATOR_MAPPING` — just wasn't being auto-detected
+- **Files**: `src/strategy/strategy_engine.py`
+
+#### 167. Cycle Intelligence Panel — Full Redesign ✅
+Replaced the old panel (progress bar + WF sparkline + market regime + similarity rejections + cumulative stats) with a proper 6-section intelligence panel:
+
+**Correct Funnel (7 stages):**
+```
+Proposed   200  (195 DSL + 5 AE)
+Validated  200  (DSL→Walk-Forward train/test · AE→Fundamental+Backtest)
+Passed WF   23  (survived Sharpe/WR/overfitting checks)
+Backtested  23  (saved as BACKTESTED status, ready to trade on first signal)
+Activated    0  (got first order executed → promoted to DEMO — 0 due to exposure limit)
+Signals      0
+Trades       0
+```
+
+**Key findings from cycle log analysis:**
+- `proposals_generated=25` in DB was wrong — it recorded only *new* strategies saved to DB, not the 200 proposed. Fixed by using `proposals_template` (195) for WF Run count
+- `activated=0` in all historical cycles was wrong — it was recording `promoted_to_demo` (BACKTESTED→DEMO on first order) which is always 0 when exposure limit blocks orders
+- **Fix**: `activated` now = `strategies_activated` (passed activation criteria → BACKTESTED). `promoted_to_demo` is a new separate field for DEMO promotions
+- 148 historical cycles backfilled with correct `activated` values using `backtest_passed` as proxy
+
+**DB changes:**
+- Added `promoted_to_demo` column to `autonomous_cycle_runs`
+- `autonomous_strategy_manager.py`: `activated` = `strategies_activated`, `promoted_to_demo` = actual DEMO promotions
+
+**Other panel improvements:**
+- Replaced `InteractiveChart` sparklines (designed for full-size charts) with clean inline SVG sparklines — no axes, no labels, just the line
+- Fixed `Allocation 14700%` — `total_allocation` is stored as raw number (147), not ratio (0-1)
+- Fixed `Portfolio Sharpe` and `Avg Correlation` showing `—` when value is 0
+- Cycle history table now shows `+N` net activations correctly
+- Font changed to `font-mono` throughout to match platform design language
+- Bar alignment fixed — all bars use same scale (Proposed = 200 = 100%), zero values show as truly empty
+- **Files**: `frontend/src/components/CycleIntelligencePanel.tsx`, `src/models/orm.py`, `src/strategy/autonomous_strategy_manager.py`
+
+#### 168. Bottom Panel — 2 New Widgets + Layout Rebalance ✅
+- Added **Strategy Pulse** (pipeline counts + last lifecycle event) and **Signal Stats** (last run time, accept rate, top rejection reason)
+- Added **Market Pulse** (4 asset class regimes with confidence dots) — fixed `current_regimes` key (was using wrong `per_asset_class_regimes`)
+- Rebalanced widths: Book Pulse + System Feed get `flex-[3]`, the 4 compact widgets get `flex-[2]` each
+- Collapse bar simplified to "Trading Console" label — removed redundant widget name list
+- Individual panel headers removed — widget name shown as tiny 9px label inside content area
+- **Files**: `frontend/src/components/BottomWidgetZone.tsx`, `frontend/src/components/widgets/StrategyPulseWidget.tsx`, `frontend/src/components/widgets/SignalStatsWidget.tsx`, `frontend/src/components/widgets/MarketPulseWidget.tsx`
+
+#### 169. MetricsBar — Signal Chip ✅
+- Added `Signal: 14m ago · 16 → 0 exec` chip to persistent top bar (visible at lg breakpoint)
+- Reads from `getRecentSignals` in background, non-blocking, green if any executed / red if all rejected
+- **Files**: `frontend/src/components/MetricsBar.tsx`
+
+#### 170. Overview Right Panel — ActivityPanel ✅
+Replaced thin "Recent Trades" + "Positions by Asset Class" with full tabbed `ActivityPanel`:
+- **Trades** — last 20 closed, sortable by date or P&L
+- **Opened** — last 20 opened positions by entry time
+- **Closed** — last 20 closed with entry→exit price + holding time
+- **Top P&L** — best 10 winners + worst 10 losers
+- **Strategies** — last 20 lifecycle events (ACTIVATED/BACKTESTED/RETIRED) with Sharpe + age
+- **Files**: `frontend/src/components/ActivityPanel.tsx`, `frontend/src/pages/OverviewNew.tsx`
+
+#### 171. Stale Failed Orders Cleanup ✅
+- 14 FAILED SELL orders for `ID_100005` etc. were sitting in orders table, polluting System Feed widget
+- Deleted from DB; System Feed now filters orders older than 6h to prevent recurrence
+- **Files**: `frontend/src/components/widgets/SystemFeedWidget.tsx`
+
+#### 172. Altcoin Position Close Fix ✅
+- `_resolve_instrument_id()` helper added to `account.py` — extracts numeric ID from `ID_100005` prefix directly instead of returning `None` from `SYMBOL_TO_INSTRUMENT_ID.get()`
+- Applied to all 4 close call sites in `account.py`
+- **Files**: `src/api/routers/account.py`
+
+---
+
+## Current System State (April 17, 2026 — Updated Session 17)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables, `promoted_to_demo` column added to `autonomous_cycle_runs`
+- **Account:** eToro DEMO, equity ~$475K, ~198 open positions (97.9% utilisation — at exposure limit)
+- **Signal generation**: Running — 19 signals per cycle, all rejected due to max exposure (95%)
+- **Cycle Intelligence**: Fully redesigned — correct 7-stage funnel, proper activated/promoted_to_demo tracking
+- **Bottom panel**: 6 widgets — Book Pulse, System Feed, Market Pulse, Strategy Pulse, Signal Stats, Risk Pulse
+- **PRICE_CHANGE_PCT**: DSL indicator now auto-detected from conditions
+
+## Open Items (Updated)
+
+### Infrastructure
+- ~~Node.js v20 EOL~~ ✅
+- ~~Python 3.11.0rc1~~ ✅
+- Old `venv/` still on disk — delete when ready: `rm -rf /home/ubuntu/alphacent/venv`
+- pandas 2→3 upgrade pending
+- lucide-react 0.5→1.x pending
+
+### Trading
+- Portfolio at 97.9% utilisation — signals blocked until positions close naturally
+- 7 orphaned altcoin positions (ID_100005 etc.) — `_resolve_instrument_id` fix deployed, retry close from Portfolio page
+- `promoted_to_demo` will show 0 until exposure limit clears and strategies get first orders
+
+### UI
+- ActivityPanel closed positions limit=20 — consider making configurable
+- Cycle Intelligence `Activated` row will show 0 until exposure limit clears
+
+---
+
+### Session Improvements (April 18, 2026 — Session 16: Trading Logic Audit & Position Cleanup)
+
+#### 157. Regime Detection Fixed in Strategy Decay (`_check_strategy_decay`) ✅ (CRITICAL)
+- **Bug**: `_check_strategy_decay` was instantiating `MarketAnalyzer()` with no arguments — silently failing, leaving `current_regime = 'unknown'` on every strategy. The entire regime mismatch penalty branch (`-2` for major shift, `-1` for drift) was dead code.
+- **Fix**: Now uses `MarketStatisticsAnalyzer(get_market_data_manager())` — same path as the rest of the system.
+- **Impact**: Regime mismatch penalties now fire correctly. Strategies created in `ranging_low_vol` that are still active in `trending_up_weak` will accumulate decay penalties.
+- **Files**: `src/core/monitoring_service.py`
+
+#### 158. Race Condition Dedup Fixed in Signal Generation ✅ (CRITICAL)
+- **Bug**: `orders_submitted_this_run` was keyed on `(symbol, direction)` — not `(strategy_id, symbol, direction)`. A single strategy generating N signals for the same symbol in one batch cycle could open N positions before any appeared in DB. This caused XLK×4, EWZ×5, HYG×3, ITA×2, OKTA×2, TSM×2, VTI×2, GOOGL×2, FXI×2 duplicate positions.
+- **Fix**: Key changed to `(strategy_id, symbol, direction)`. Different strategies can still trade the same symbol; the same strategy cannot double-enter in one run.
+- **Also fixed**: Coordination layer (`_coordinate_signals`) now adds same-template dedup — `RSI Dip Buy V24` and `RSI Dip Buy V120` are the same signal logic. Only the highest-confidence signal per template name passes per symbol per cycle.
+- **Files**: `src/core/trading_scheduler.py`
+
+#### 159. "Don't Kill a Winner" Override Tightened ✅
+- **Bug**: Decay check override was `live_pnl > 0` — a strategy at +$3 on $6K deployed got a full reprieve. Noise, not a winner.
+- **Fix**: Threshold raised to `live_pnl > total_invested * 0.02` (must be >2% return on deployed capital to qualify as a genuine winner worth keeping alive).
+- **Files**: `src/core/monitoring_service.py`
+
+#### 160. Probation Halved for Doubly-Broken Strategies ✅
+- When `decay_score = 0` AND `health_score ≤ 2`, probation period is halved (e.g., 4h strategies: 14 days → 7 days). No point protecting a strategy failing on both dimensions.
+- **Files**: `src/core/monitoring_service.py`
+
+#### 161. `check_symbol_concentration` Removed from `validate_signal` ✅
+- The check was redundant — coordination layer already handles symbol limits upstream. It also ran against a stale position snapshot (didn't include positions opened earlier in the same run). Removed to simplify the pipeline.
+- **Files**: `src/risk/risk_manager.py`
+
+#### 162. Regime-Change BACKTESTED Retirement ✅
+- **New method**: `_retire_regime_incompatible_backtested()` in MonitoringService.
+- On each run (every 30 min), detects current regime and compares to last known. On change, queries `StrategyTemplateLibrary` for templates valid in the new regime. Any BACKTESTED strategy whose `template_name` is not in the valid set is retired.
+- Alpha Edge strategies are skipped (they self-filter by regime).
+- **Immediate cleanup**: 29 BACKTESTED strategies retired for `trending_up_weak` regime (ranging-only templates: `SMA Trend Momentum`, `4H BB Squeeze Swing Long/Short`, `EMA Ribbon Expansion Long`, `Hourly RSI Oversold Bounce`, `VWAP Reversion Long Ranging`, etc.)
+- **Files**: `src/core/monitoring_service.py`
+
+#### 163. Position Sync Reopen Bug Fixed ✅
+- **Bug**: `sync_positions()` was unconditionally reopening any DB position with `closed_at IS NOT NULL` when the eToro position still existed. This fought our pending closure pipeline — positions we intentionally closed (race condition duplicates, SL hits, strategy retirements) were being reopened because the eToro close order hadn't propagated yet.
+- **Fix**: Only reopen if `closure_reason` is empty. A non-empty `closure_reason` means our system intentionally closed it — the eToro position is still open because the close order is in-flight.
+- Same fix applied to the `closed_dup` reopen path.
+- **Files**: `src/core/order_monitor.py`
+
+#### 164. UniqueViolation in Position Sync Fixed ✅
+- **Bug**: When a closed duplicate position held an `etoro_position_id`, the sync tried to update the open position's ID to the same value → UniqueViolation every 60 seconds.
+- **Fix**: Before updating `etoro_position_id`, check if any other row (open or closed) already holds that ID. If so, skip the update.
+- **Files**: `src/core/order_monitor.py`
+
+#### 165. `close_position` Endpoint Corrected ✅ (CRITICAL)
+- **Bug**: `close_position()` was using `/api/v1/trading/positions/{id}/close` (live endpoint) for DEMO mode. Should be `/api/v1/trading/execution/demo/market-close-orders/positions/{id}`.
+- **Also fixed**: Was sending `Amount` in the payload — eToro ignores it. Per official API docs: full close = omit `UnitsToDeduct` entirely. Partial close = send `UnitsToDeduct`. `partial_close_position` updated to use `UnitsToDeduct` not `Amount`.
+- **Files**: `src/api/etoro_client.py`
+
+#### 166. Market-Hours Bypass for Intentional Closures ✅
+- **Bug**: `_process_pending_closures` was skipping all positions when market is closed. Intentional system closures (race condition duplicates, strategy retirements, etc.) were never submitted to eToro on weekends.
+- **Fix**: Market-hours check is bypassed when `closure_reason` is set. These close orders are submitted immediately so eToro queues them in "Received" status and executes at next market open.
+- **Files**: `src/core/monitoring_service.py`
+
+#### 167. 14 Race-Condition Duplicate Positions Cleaned Up ✅
+- Identified 14 positions opened by the same strategy for the same symbol in one batch cycle (race condition before Fix 158).
+- All 14 flagged with `pending_closure = true` and `closure_reason = 'Race condition duplicate...'`.
+- Close orders submitted to eToro via corrected `close_position` endpoint.
+- All 14 now in eToro `ordersForClose` with `statusID=11` (Received — pending market open Monday 9:30 ET).
+- **Symbols**: EWZ×3, XLK×3, HYG×2, GOOGL×1, ITA×1, OKTA×1, TSM×1, VTI×1, FXI×1
+
+---
+
+## Current System State (April 18, 2026 — Updated Session 16)
+
+- **Database:** PostgreSQL 16 on EC2, 33 tables, 780K+ rows
+- **Account:** eToro DEMO, equity ~$470K
+- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Active strategies:** ~118 DEMO
+- **Open positions:** 197 in DB (183 legitimate + 14 pending closure), 198 on eToro
+- **Market regime:** Equity: trending_up_weak, Crypto: trending_up
+- **Regime change**: ranging_low_vol → trending_up_weak. 29 BACKTESTED strategies retired (ranging-only templates). Regime mismatch decay penalties now firing correctly.
+- **Pending closures**: 14 duplicate positions queued for closure on eToro (statusID=11, Received). Will execute Monday 9:30 ET market open.
+- **Race condition**: Fixed — same strategy can no longer open multiple positions for same symbol in one batch cycle.
+- **Same-template dedup**: Fixed — RSI Dip Buy V24 and V120 no longer both enter the same symbol in the same cycle.
+
+---
+
+## Open Items (Updated Session 16)
+
+### Pending
+- 14 duplicate positions close at Monday market open (9:30 ET) — monitor execution
+- Regime decay penalties now active — watch for strategies being retired over next few days
+- BACKTESTED pool: 87 strategies remain, all valid for `trending_up_weak`
+
+### Trading Performance
+- Monitor win rate after all quant improvements (target: >50%)
+- Monitor pairs trading two-leg execution
+- Monitor VIX filter and yield curve gate frequency
+
+### Infrastructure
+- Consider t3.small downgrade — waiting on CloudWatch memory data
+- FMP Starter plan: insider trading plan-gated (404)
+- News sentiment: ~192 symbols still unpopulated (filling at 100 req/day)
