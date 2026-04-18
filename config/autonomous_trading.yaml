@@ -598,6 +598,23 @@ position_management:
     max_sector_exposure_pct: 0.4
     max_directional_exposure_pct: 0.65
     min_strategy_types: 1
+  portfolio_var:
+    enabled: true
+    confidence: 0.95
+    max_var_pct: 0.02        # Reject if 1-day 95% VaR > 2% of equity
+    lookback_days: 252       # 1 year of daily returns
+    min_history_days: 30     # Skip check if fewer than 30 equity snapshots
+  drawdown_sizing:
+    enabled: true
+    threshold_5pct: 0.50     # 50% size reduction when drawdown > 5%
+    threshold_10pct: 0.25    # 75% size reduction when drawdown > 10%
+    lookback_days: 30        # Rolling peak over last 30 days
+  vol_scaling:
+    min_scale: 0.10          # Was 0.25 — properly shrink high-vol (crypto) positions
+    max_scale: 1.50          # Was 2.50 — cap forex over-sizing
+    confidence_min: 0.30     # Reject signals with confidence < 0.30 (safety net)
+    max_symbol_pct: 0.05     # Hard cap: no symbol > 5% of equity
+    sector_soft_cap_pct: 0.30  # Halve size if sector already > 30% of equity
   directional_quotas:
     enabled: true
     adjacent_regime_reserve_pct: 0.2

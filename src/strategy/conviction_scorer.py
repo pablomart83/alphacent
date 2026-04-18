@@ -114,6 +114,13 @@ class ConvictionScorer:
         factor_adj = self._score_factor_exposure(signal, strategy)
         total_score += factor_adj
 
+        # Normalize total score to 0-100 scale (3.4).
+        # Theoretical max = 40+25+20+15+15+5+5+8+6 = 139.
+        # Without normalization, the 60 threshold means ~43% of max — semantically misleading.
+        # After normalization, 60 means "60% of maximum possible evidence".
+        THEORETICAL_MAX = 139.0
+        total_score = min(100.0, total_score * (100.0 / THEORETICAL_MAX))
+
         breakdown = {
             'walkforward_edge': {
                 'score': wf_score,

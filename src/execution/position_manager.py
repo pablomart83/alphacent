@@ -61,7 +61,7 @@ class PositionManager:
     # Trail distance = max(distance_pct * price, ATR_TRAIL_MULTIPLIER * daily_ATR)
     # This prevents penny-stop whipsaws on high-priced instruments where a fixed
     # percentage produces a stop that's within normal intraday noise.
-    ATR_TRAIL_MULTIPLIER = 1.5
+    ATR_TRAIL_MULTIPLIER = 2.0  # Raised from 1.5 — 1.5x was within normal intraday noise for ranging markets
 
     def _get_asset_class(self, symbol: str) -> str:
         """Classify symbol for trailing stop parameter selection."""

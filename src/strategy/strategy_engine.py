@@ -7696,16 +7696,23 @@ class StrategyEngine:
             logger.debug(f"Pairs Trading {symbol}/{partner}: correlation {correlation:.2f} < {min_corr} — skip")
             return None
 
-        # OLS regression spread: spread = sym - β*partner - α
-        # More robust than price ratio — handles different price scales and drift
+        # Rolling 60-day OLS hedge ratio (3.6) — matches backtest simulation.
+        # Static full-window OLS goes stale over months; rolling keeps β current.
+        rolling_window = pt_config.get('rolling_window', 60)
         y = combined['sym'].values
         x = combined['partner'].values
-        x_mean, y_mean = x.mean(), y.mean()
-        var_x = ((x - x_mean) ** 2).mean()
-        if var_x < 1e-10:
+
+        # Compute rolling beta using the last `rolling_window` observations
+        y_roll = y[-rolling_window:]
+        x_roll = x[-rolling_window:]
+        x_mean_r, y_mean_r = x_roll.mean(), y_roll.mean()
+        var_x_r = ((x_roll - x_mean_r) ** 2).mean()
+        if var_x_r < 1e-10:
             return None
-        beta = ((x - x_mean) * (y - y_mean)).mean() / var_x
-        alpha_ols = y_mean - beta * x_mean
+        beta = ((x_roll - x_mean_r) * (y_roll - y_mean_r)).mean() / var_x_r
+        alpha_ols = y_mean_r - beta * x_mean_r
+
+        # Spread uses full history for z-score stability, but with rolling β
         spread = combined['sym'] - beta * combined['partner'] - alpha_ols
         spread_mean = spread.rolling(window=rolling_window).mean().iloc[-1]
         spread_std = spread.rolling(window=rolling_window).std().iloc[-1]
@@ -7760,7 +7767,8 @@ class StrategyEngine:
                 confidence=confidence, reasoning=reasoning, generated_at=datetime.now(),
                 indicators={"price": current_price, "z_score": current_z, "correlation": correlation, "partner": partner},
                 metadata={"signal_engine": "alpha_edge_fundamental", "template_type": "pairs_trading",
-                          "pair_partner": partner, "strategy_name": strategy.name}
+                          "pair_partner": partner, "strategy_name": strategy.name,
+                          "hedge_ratio": float(beta)}
             )
         elif current_z < -z_entry:
             # Symbol underpriced vs partner → LONG symbol
@@ -7773,7 +7781,8 @@ class StrategyEngine:
                 confidence=confidence, reasoning=reasoning, generated_at=datetime.now(),
                 indicators={"price": current_price, "z_score": current_z, "correlation": correlation, "partner": partner},
                 metadata={"signal_engine": "alpha_edge_fundamental", "template_type": "pairs_trading",
-                          "pair_partner": partner, "strategy_name": strategy.name}
+                          "pair_partner": partner, "strategy_name": strategy.name,
+                          "hedge_ratio": float(beta)}
             )
 
         return None

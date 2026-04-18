@@ -316,6 +316,123 @@ class RiskManager:
             and (not active_strategy_ids or pos.strategy_id in active_strategy_ids)
         ]
 
+    def check_portfolio_var(
+        self,
+        signal: TradingSignal,
+        account: AccountInfo,
+        positions: List[Position],
+    ) -> tuple[bool, str]:
+        """
+        Pre-trade portfolio VaR check (3.1).
+
+        Computes 1-day 95% historical simulation VaR for the portfolio including
+        the proposed position. Rejects if VaR > max_var_pct of equity.
+
+        Fail-open: returns (True, "skipped") when insufficient history.
+
+        Returns:
+            (passes, reason) — passes=True means signal is allowed.
+        """
+        try:
+            import yaml as _yaml
+            from pathlib import Path as _Path
+            _cfg_path = _Path("config/autonomous_trading.yaml")
+            if not _cfg_path.exists():
+                return True, "config unavailable"
+            with open(_cfg_path) as _f:
+                _cfg = _yaml.safe_load(_f) or {}
+            var_cfg = (_cfg.get("position_management") or {}).get("portfolio_var") or {}
+            if not var_cfg.get("enabled", True):
+                return True, "VaR check disabled"
+
+            confidence = float(var_cfg.get("confidence", 0.95))
+            max_var_pct = float(var_cfg.get("max_var_pct", 0.02))
+            lookback_days = int(var_cfg.get("lookback_days", 252))
+            min_history_days = int(var_cfg.get("min_history_days", 30))
+
+            from src.models.database import get_database
+            from src.models.orm import EquitySnapshotORM
+            db = get_database()
+            session = db.get_session()
+            try:
+                rows = (
+                    session.query(EquitySnapshotORM.equity)
+                    .filter(EquitySnapshotORM.snapshot_type == "daily")
+                    .order_by(EquitySnapshotORM.date.desc())
+                    .limit(lookback_days + 1)
+                    .all()
+                )
+            finally:
+                session.close()
+
+            equities = [r.equity for r in rows if r.equity and r.equity > 0]
+            if len(equities) < min_history_days:
+                return True, f"insufficient history ({len(equities)} days < {min_history_days})"
+
+            # Daily returns (oldest first)
+            equities = list(reversed(equities))
+            port_returns = [
+                (equities[i] - equities[i - 1]) / equities[i - 1]
+                for i in range(1, len(equities))
+            ]
+
+            # Estimate new position's contribution using symbol price history
+            symbol_returns: list[float] = []
+            try:
+                from src.data.market_data_manager import MarketDataManager
+                from datetime import timedelta as _td
+                _mdm = MarketDataManager(_cfg)
+                _end = datetime.now()
+                _start = _end - _td(days=lookback_days + 10)
+                _bars = _mdm.get_historical_data(signal.symbol, _start, _end, interval="1d")
+                if _bars and len(_bars) >= min_history_days:
+                    closes = [getattr(b, 'close', None) for b in _bars if getattr(b, 'close', None)]
+                    symbol_returns = [
+                        (closes[i] - closes[i - 1]) / closes[i - 1]
+                        for i in range(1, len(closes))
+                    ]
+            except Exception:
+                pass
+
+            portfolio_value = getattr(account, 'equity', None) or account.balance
+            if portfolio_value <= 0:
+                return True, "invalid equity"
+
+            # Estimate position weight (use $2K minimum as proxy if size unknown)
+            position_weight = 2000.0 / portfolio_value
+
+            # Combine portfolio returns with new position contribution
+            if symbol_returns:
+                n = min(len(port_returns), len(symbol_returns))
+                combined = [
+                    port_returns[-n + i] + position_weight * symbol_returns[-n + i]
+                    for i in range(n)
+                ]
+            else:
+                combined = port_returns
+
+            # Historical simulation VaR at confidence level
+            combined_sorted = sorted(combined)
+            var_idx = int((1.0 - confidence) * len(combined_sorted))
+            var_idx = max(0, min(var_idx, len(combined_sorted) - 1))
+            var_1d = abs(combined_sorted[var_idx])  # positive number = loss
+
+            if var_1d > max_var_pct:
+                return False, (
+                    f"Portfolio VaR {var_1d:.2%} exceeds limit {max_var_pct:.2%} "
+                    f"(1-day {confidence:.0%} historical simulation)"
+                )
+
+            logger.debug(
+                f"VaR check passed for {signal.symbol}: "
+                f"1-day {confidence:.0%} VaR = {var_1d:.2%} (limit {max_var_pct:.2%})"
+            )
+            return True, f"VaR {var_1d:.2%} within limit"
+
+        except Exception as e:
+            logger.debug(f"VaR check failed with exception — fail open: {e}")
+            return True, f"VaR check error (fail open): {e}"
+
     def validate_signal(
         self, 
         signal: TradingSignal, 
@@ -443,6 +560,15 @@ class RiskManager:
                     is_valid=False,
                     position_size=0.0,
                     reason=f"Position would exceed max position size limit of {self.config.max_position_size_pct:.1%}"
+                )
+
+            # Pre-trade portfolio VaR check (3.1)
+            var_passes, var_reason = self.check_portfolio_var(signal, account, positions)
+            if not var_passes:
+                return ValidationResult(
+                    is_valid=False,
+                    position_size=0.0,
+                    reason=f"Portfolio VaR check failed: {var_reason}"
                 )
 
             # Check exposure limits
@@ -593,8 +719,8 @@ class RiskManager:
         # This is how institutional momentum funds (AQR, Barroso & Santa-Clara 2015)
         # ensure high-vol assets don't dominate portfolio risk.
         TARGET_VOL = 0.16  # 16% annualized — equity-like baseline
-        VOL_SCALE_MIN = 0.25  # Never scale below 25% of base size
-        VOL_SCALE_MAX = 2.5   # Never scale above 250% of base size
+        VOL_SCALE_MIN = 0.10  # Lowered from 0.25 — properly shrink high-vol (crypto) positions
+        VOL_SCALE_MAX = 1.50  # Lowered from 2.50 — cap forex over-sizing
         
         volatility_adjustment = 1.0
         if signal.metadata and 'price_history' in signal.metadata:
@@ -619,15 +745,23 @@ class RiskManager:
                 volatility_adjustment = max(VOL_SCALE_MIN, min(VOL_SCALE_MAX, raw_scale))
                 logger.debug(f"Vol-scaling (legacy): vol={volatility:.4f} -> {volatility_adjustment:.2f}x")
         
-        # Calculate position size as percentage of STRATEGY'S allocated capital
-        # Scale from 20% (low confidence) to 100% (high confidence) of strategy allocation
-        min_position_pct = 0.20  # 20% of strategy allocation minimum
-        max_position_pct = 1.00  # 100% of strategy allocation maximum
-        position_pct = min_position_pct + (max_position_pct - min_position_pct) * confidence_factor
-        
+        # Confidence scaling (3.5): reject outright if confidence < 0.30 (safety net).
+        # The conviction scorer already filtered weak signals; this is a hard floor.
+        CONFIDENCE_FLOOR = 0.30
+        if confidence_factor < CONFIDENCE_FLOOR:
+            logger.warning(
+                f"Signal confidence {confidence_factor:.2f} below floor {CONFIDENCE_FLOOR} "
+                f"for {getattr(signal, 'symbol', '?')} — rejecting"
+            )
+            return 0.0
+
+        # Scale linearly from 0% at CONFIDENCE_FLOOR to 100% at 1.0
+        max_position_pct = 1.00
+        position_pct = (confidence_factor - CONFIDENCE_FLOOR) / (1.0 - CONFIDENCE_FLOOR) * max_position_pct
+
         # Apply volatility adjustment to position percentage
         position_pct *= volatility_adjustment
-        
+
         # Calculate dollar amount based on strategy's allocated capital
         position_size = strategy_allocated_capital * position_pct
 
@@ -639,6 +773,96 @@ class RiskManager:
 
         # Cap at available capital
         position_size = min(position_size, available_capital)
+
+        # ── 3.2 Drawdown-based position sizing ──────────────────────────────
+        # If portfolio is in drawdown from its 30-day peak, reduce new position sizes.
+        try:
+            import yaml as _yaml
+            from pathlib import Path as _Path
+            _cfg_path = _Path("config/autonomous_trading.yaml")
+            if _cfg_path.exists():
+                with open(_cfg_path) as _f:
+                    _cfg = _yaml.safe_load(_f) or {}
+                dd_cfg = (_cfg.get("position_management") or {}).get("drawdown_sizing") or {}
+                if dd_cfg.get("enabled", True):
+                    dd_lookback = int(dd_cfg.get("lookback_days", 30))
+                    dd_thresh5 = float(dd_cfg.get("threshold_5pct", 0.50))
+                    dd_thresh10 = float(dd_cfg.get("threshold_10pct", 0.25))
+                    from src.models.database import get_database
+                    from src.models.orm import EquitySnapshotORM
+                    _db = get_database()
+                    _sess = _db.get_session()
+                    try:
+                        _rows = (
+                            _sess.query(EquitySnapshotORM.equity)
+                            .filter(EquitySnapshotORM.snapshot_type == "daily")
+                            .order_by(EquitySnapshotORM.date.desc())
+                            .limit(dd_lookback)
+                            .all()
+                        )
+                    finally:
+                        _sess.close()
+                    _equities = [r.equity for r in _rows if r.equity and r.equity > 0]
+                    if len(_equities) >= 5:
+                        _peak = max(_equities)
+                        _current_eq = portfolio_value
+                        _drawdown = (_peak - _current_eq) / _peak if _peak > 0 else 0.0
+                        if _drawdown > 0.10:
+                            position_size *= dd_thresh10
+                            logger.info(
+                                f"Drawdown sizing: {_drawdown:.1%} drawdown from 30d peak "
+                                f"— reducing position size by 75% (multiplier {dd_thresh10})"
+                            )
+                        elif _drawdown > 0.05:
+                            position_size *= dd_thresh5
+                            logger.info(
+                                f"Drawdown sizing: {_drawdown:.1%} drawdown from 30d peak "
+                                f"— reducing position size by 50% (multiplier {dd_thresh5})"
+                            )
+        except Exception as _dd_err:
+            logger.debug(f"Drawdown sizing check failed — skipping: {_dd_err}")
+
+        # ── 3.5 Per-symbol concentration cap ────────────────────────────────
+        # Hard cap: no single symbol can exceed 5% of equity regardless of sizing.
+        symbol_cap = portfolio_value * 0.05
+        existing_symbol_exposure = sum(
+            self._get_position_value(pos)
+            for pos in positions
+            if pos.closed_at is None
+            and not getattr(pos, 'pending_closure', False)
+            and pos.symbol == getattr(signal, 'symbol', None)
+        )
+        if existing_symbol_exposure + position_size > symbol_cap:
+            allowed = max(0.0, symbol_cap - existing_symbol_exposure)
+            if allowed < position_size:
+                logger.info(
+                    f"Symbol concentration cap: {getattr(signal, 'symbol', '?')} "
+                    f"existing={existing_symbol_exposure:.0f}, cap={symbol_cap:.0f} "
+                    f"— clamping size {position_size:.0f} → {allowed:.0f}"
+                )
+                position_size = allowed
+
+        # ── 3.5 Sector soft cap at sizing time ──────────────────────────────
+        # If sector already > 30% of equity, halve the position size (proactive penalty).
+        try:
+            symbol_sector = get_symbol_sector(getattr(signal, 'symbol', ''))
+            if symbol_sector and symbol_sector not in ('Unknown', 'Crypto', 'Forex', 'Index', 'Commodity'):
+                sector_exposure = sum(
+                    self._get_position_value(pos)
+                    for pos in positions
+                    if pos.closed_at is None
+                    and not getattr(pos, 'pending_closure', False)
+                    and get_symbol_sector(pos.symbol) == symbol_sector
+                )
+                sector_pct = sector_exposure / portfolio_value if portfolio_value > 0 else 0.0
+                if sector_pct > 0.30:
+                    logger.info(
+                        f"Sector soft cap: {symbol_sector} at {sector_pct:.1%} of equity "
+                        f"— halving position size {position_size:.0f} → {position_size/2:.0f}"
+                    )
+                    position_size *= 0.5
+        except Exception:
+            pass
 
         # Ensure minimum order size: $2000 across all asset classes
         MINIMUM_ORDER_SIZE = 2000.0
