@@ -99,6 +99,24 @@ def _finalize_position_close(position_orm) -> None:
         logger.debug(f"Could not log exit to trade journal for {getattr(position_orm, 'symbol', '?')}: {e}")
 
 
+def _resolve_instrument_id(symbol: str):
+    """Resolve eToro instrument ID from symbol.
+
+    Handles two cases:
+    - Normal symbol (e.g. 'AAPL') → looks up SYMBOL_TO_INSTRUMENT_ID
+    - ID_ prefixed symbol (e.g. 'ID_100005') → extracts numeric ID directly
+      This happens when position sync stores the raw instrument ID because the
+      symbol wasn't in our mapping at the time the position was opened.
+    """
+    from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
+    if symbol and symbol.startswith("ID_"):
+        try:
+            return int(symbol[3:])
+        except ValueError:
+            return None
+    return SYMBOL_TO_INSTRUMENT_ID.get(symbol)
+
+
 class AccountInfoResponse(BaseModel):
     """Account information response model."""
     account_id: str
@@ -687,8 +705,7 @@ async def approve_position_closure(
     
     try:
         # Close position via eToro API
-        from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
-        instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(position_orm.symbol)
+        instrument_id = _resolve_instrument_id(position_orm.symbol)
         etoro_client.close_position(position_orm.etoro_position_id, instrument_id=instrument_id)
         
         # Update position in database
@@ -777,8 +794,7 @@ async def approve_bulk_closures(
             
             # Try to close via eToro API
             try:
-                from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
-                instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(position_orm.symbol)
+                instrument_id = _resolve_instrument_id(position_orm.symbol)
                 etoro_client.close_position(position_orm.etoro_position_id, instrument_id=instrument_id)
                 _finalize_position_close(position_orm)
                 success_count += 1
@@ -1077,8 +1093,7 @@ async def close_positions(
                     logger.warning(f"Failed to cancel order {order.id}: {cancel_err}")
             
             # Close position via eToro API
-            from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
-            instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(position_orm.symbol)
+            instrument_id = _resolve_instrument_id(position_orm.symbol)
             etoro_client.close_position(position_orm.etoro_position_id, instrument_id=instrument_id)
             
             # Update position in database
@@ -1183,8 +1198,7 @@ async def close_all_positions(
     
     for position_orm in open_positions:
         try:
-            from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
-            instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(position_orm.symbol)
+            instrument_id = _resolve_instrument_id(position_orm.symbol)
             etoro_client.close_position(position_orm.etoro_position_id, instrument_id=instrument_id)
             _finalize_position_close(position_orm)
             success_count += 1
@@ -2028,6 +2042,15 @@ async def get_position_detail(
             # (gives enough context for the chart)
 
         price_rows = price_query.order_by(HistoricalPriceCacheORM.date.asc()).all()
+
+        # If no rows found with the date filter (e.g. position opened today before
+        # the daily bar was written), fall back to the last 60 bars for context.
+        if not price_rows:
+            price_rows = db.query(HistoricalPriceCacheORM).filter(
+                HistoricalPriceCacheORM.symbol == symbol,
+                HistoricalPriceCacheORM.interval == interval,
+            ).order_by(HistoricalPriceCacheORM.date.desc()).limit(60).all()
+            price_rows = list(reversed(price_rows))  # oldest first
 
         for row in price_rows:
             price_history.append(OHLCVPoint(
