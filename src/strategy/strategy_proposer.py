@@ -1342,7 +1342,17 @@ class StrategyProposer:
                     train_trades = wf_results['train_results'].total_trades if wf_results.get('train_results') else 0
                     
                     # Load min_trades thresholds from config — asset-class and timeframe aware
-                    _at_cfg = self.config.get('activation_thresholds', {})
+                    try:
+                        import yaml as _yaml
+                        from pathlib import Path as _Path
+                        _cfg_path = _Path("config/autonomous_trading.yaml")
+                        _at_cfg = {}
+                        if _cfg_path.exists():
+                            with open(_cfg_path) as _f:
+                                _full_cfg = _yaml.safe_load(_f) or {}
+                            _at_cfg = _full_cfg.get('activation_thresholds', {})
+                    except Exception:
+                        _at_cfg = {}
                     _interval = (strategy.metadata or {}).get('interval', '1d')
                     _is_crypto = False
                     _is_commodity = False
