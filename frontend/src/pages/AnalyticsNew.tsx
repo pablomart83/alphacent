@@ -349,7 +349,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       // Tab switches should NOT re-fetch these heavy endpoints
       const now = new Date();
       const dataIsFresh = lastFetchedAt && (now.getTime() - lastFetchedAt.getTime()) < 60000
-        && performanceMetrics && cioDashboard;
+        && performanceMetrics && cioDashboard
+        && (lastFetchedAt as any)._period === period
+        && (lastFetchedAt as any)._interval === equityInterval;
       
       if (!dataIsFresh) {
         const [perfAnalytics, perfStatsData, cioDashboardData, regimeDataPhase1] = await Promise.all([
@@ -405,7 +407,10 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           });
         }
         
-        setLastFetchedAt(new Date());
+        const ts = new Date();
+        (ts as any)._period = period;
+        (ts as any)._interval = equityInterval;
+        setLastFetchedAt(ts);
       }
       
       // Page is now visible with core metrics
@@ -634,7 +639,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
     if (!tradingModeLoading && tradingMode) {
       fetchAnalyticsData();
     }
-  }, [period]);
+  }, [period, equityInterval]);
 
   const handleTabChange = useCallback((tab: string) => {
     setActiveTab(tab);
