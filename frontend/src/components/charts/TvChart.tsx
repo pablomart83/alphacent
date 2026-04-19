@@ -83,6 +83,8 @@ export interface TvChartProps {
 function toChartTime(t: string | number): Time {
   if (typeof t === 'number') return t as Time;
   const s = String(t);
+  // Unix timestamp string (all digits, 9-11 chars) → number
+  if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
   if (s.length === 10) return s as Time;
   return s.slice(0, 10) as Time;
 }
@@ -298,6 +300,7 @@ const TvChartInner: FC<TvChartProps> = ({
 
         // Sort by time ascending (required by lightweight-charts)
         chartData.sort((a, b) => {
+          if (typeof a.time === 'number' && typeof b.time === 'number') return a.time - b.time;
           const ta = typeof a.time === 'string' ? a.time : String(a.time);
           const tb = typeof b.time === 'string' ? b.time : String(b.time);
           return ta.localeCompare(tb);

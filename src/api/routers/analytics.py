@@ -775,8 +775,22 @@ async def get_performance_analytics(
             eq = row.equity
             peak_equity = max(peak_equity, eq)
             drawdown = ((peak_equity - eq) / peak_equity * 100) if peak_equity > 0 else 0.0
+
+            # For intraday intervals, convert "YYYY-MM-DD HH:MM" to Unix timestamp
+            # TradingView lightweight-charts requires Unix int for sub-daily data
+            raw_date = row.date if isinstance(row.date, str) else row.date.strftime('%Y-%m-%d %H:%M')
+            if interval in ('1h', '4h') and len(raw_date) > 10:
+                try:
+                    from datetime import timezone
+                    dt = datetime.strptime(raw_date, '%Y-%m-%d %H:%M').replace(tzinfo=timezone.utc)
+                    ts_value: Any = int(dt.timestamp())
+                except Exception:
+                    ts_value = raw_date[:10]
+            else:
+                ts_value = raw_date[:10]
+
             equity_curve.append(EquityCurvePoint(
-                timestamp=row.date if isinstance(row.date, str) else row.date.strftime('%Y-%m-%d'),
+                timestamp=str(ts_value),
                 equity=round(eq, 2),
                 drawdown=round(drawdown, 2)
             ))
@@ -785,7 +799,7 @@ async def get_performance_analytics(
                 if prev_eq > 0:
                     daily_ret = (eq - prev_eq) / prev_eq
                     daily_returns.append(daily_ret)
-                    month_key = (row.date if isinstance(row.date, str) else row.date.strftime('%Y-%m-%d'))[:7]
+                    month_key = raw_date[:7]
                     monthly_returns[month_key] = monthly_returns.get(month_key, 0.0) + daily_ret * 100
 
         # Metrics from snapshots
