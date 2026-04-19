@@ -45,6 +45,7 @@ interface PerformanceMetrics {
   avg_win: number;
   avg_loss: number;
   profit_factor: number;
+  daily_returns_count?: number;
   equity_curve: Array<{ date: string; value: number; benchmark?: number }>;
   drawdown_curve: Array<{ date: string; drawdown: number }>;
   returns_distribution: Array<{ range: string; count: number }>;
@@ -372,6 +373,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
             avg_win: 0,
             avg_loss: 0,
             profit_factor: perfAnalytics.profit_factor || 0,
+            daily_returns_count: perfAnalytics.daily_returns_count || 0,
             equity_curve: (perfAnalytics.equity_curve || []).map((point: { timestamp: string; equity: number }) => ({
               date: point.timestamp,
               value: point.equity,

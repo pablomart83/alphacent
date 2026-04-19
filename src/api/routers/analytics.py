@@ -117,6 +117,7 @@ class PerformanceAnalyticsResponse(BaseModel):
     equity_curve: List[EquityCurvePoint]
     monthly_returns: Dict[str, float]
     returns_distribution: Dict[str, int]
+    daily_returns_count: int = 0  # number of data points used for Sharpe/Sortino
 
 
 class CorrelationCell(BaseModel):
@@ -137,11 +138,11 @@ class CorrelationMatrixResponse(BaseModel):
 def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.02) -> float:
     """Calculate annualized Sharpe ratio from daily returns.
     
-    Minimum 10 data points for a preliminary estimate.
-    Below 30 points, the result is directionally useful but not statistically robust.
+    Minimum 30 data points for a statistically meaningful estimate.
+    Below 30 points, returns 0.0 — not enough data.
     Capped to [-5, 5] — no fund in history has sustained Sharpe > 4.
     """
-    if not returns or len(returns) < 10:
+    if not returns or len(returns) < 30:
         return 0.0
     
     daily_rf = risk_free_rate / 252
@@ -153,8 +154,8 @@ def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.02) -
     
     sharpe = float(np.mean(excess_returns) / std * np.sqrt(252))
     
-    # Cap to sane range — values above 10 indicate data quality issues (too few trades)
-    return max(-10.0, min(10.0, round(sharpe, 2)))
+    # Cap to sane range — values above 5 indicate data quality issues
+    return max(-5.0, min(5.0, round(sharpe, 2)))
 
 
 def calculate_sortino_ratio(returns: List[float], risk_free_rate: float = 0.02) -> float:
@@ -883,7 +884,8 @@ async def get_performance_analytics(
         total_trades=total_trades,
         equity_curve=equity_curve,
         monthly_returns=monthly_returns,
-        returns_distribution=returns_distribution
+        returns_distribution=returns_distribution,
+        daily_returns_count=len(daily_returns),
     )
 
 

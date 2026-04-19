@@ -49,7 +49,13 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
   const kpiRow1 = [
     { label: 'Total Return', value: pm ? `${(pm.total_return ?? 0) >= 0 ? '+' : ''}${(pm.total_return ?? 0).toFixed(2)}%` : '—', color: (pm?.total_return ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red', border: (pm?.total_return ?? 0) >= 0 ? 'border-accent-green' : 'border-accent-red' },
     { label: 'CAGR', value: cio ? `${cio.cagr >= 0 ? '+' : ''}${cio.cagr.toFixed(1)}%` : '—', color: (cio?.cagr ?? 0) >= 0 ? 'text-accent-green' : 'text-accent-red', border: (cio?.cagr ?? 0) >= 0 ? 'border-accent-green' : 'border-accent-red' },
-    { label: 'Sharpe Ratio', value: pm ? (pm.sharpe_ratio ?? 0).toFixed(2) : '—', sub: (pm?.sharpe_ratio ?? 0) >= 2 ? 'Excellent' : (pm?.sharpe_ratio ?? 0) >= 1 ? 'Good' : (pm?.sharpe_ratio ?? 0) >= 0.5 ? 'Acceptable' : 'Weak', color: (pm?.sharpe_ratio ?? 0) >= 1 ? 'text-accent-green' : (pm?.sharpe_ratio ?? 0) >= 0.5 ? 'text-yellow-400' : 'text-accent-red', border: 'border-blue-500' },
+    {
+      label: 'Sharpe Ratio',
+      value: pm ? (pm.daily_returns_count ?? 0) < 30 ? `${(pm.sharpe_ratio ?? 0).toFixed(2)}*` : (pm.sharpe_ratio ?? 0).toFixed(2) : '—',
+      sub: (pm?.daily_returns_count ?? 0) < 30 ? `*${pm?.daily_returns_count ?? 0}d data — needs 30+` : (pm?.sharpe_ratio ?? 0) >= 2 ? 'Excellent' : (pm?.sharpe_ratio ?? 0) >= 1 ? 'Good' : (pm?.sharpe_ratio ?? 0) >= 0.5 ? 'Acceptable' : 'Weak',
+      color: (pm?.daily_returns_count ?? 0) < 30 ? 'text-yellow-400' : (pm?.sharpe_ratio ?? 0) >= 1 ? 'text-accent-green' : (pm?.sharpe_ratio ?? 0) >= 0.5 ? 'text-yellow-400' : 'text-accent-red',
+      border: 'border-blue-500',
+    },
     { label: 'Calmar', value: cio ? cio.calmar_ratio.toFixed(2) : '—', sub: 'Return / Max DD', color: (cio?.calmar_ratio ?? 0) >= 1 ? 'text-accent-green' : (cio?.calmar_ratio ?? 0) >= 0.5 ? 'text-yellow-400' : 'text-accent-red', border: 'border-blue-500' },
     { label: 'Info Ratio', value: cio ? cio.information_ratio.toFixed(2) : '—', sub: 'vs benchmark', color: (cio?.information_ratio ?? 0) >= 0.5 ? 'text-accent-green' : (cio?.information_ratio ?? 0) >= 0 ? 'text-yellow-400' : 'text-accent-red', border: 'border-purple-500' },
     { label: 'Max Drawdown', value: pm ? `${(pm.max_drawdown ?? 0).toFixed(2)}%` : '—', sub: cio ? `${cio.drawdown_duration_days}d duration` : undefined, color: 'text-accent-red', border: 'border-accent-red' },
