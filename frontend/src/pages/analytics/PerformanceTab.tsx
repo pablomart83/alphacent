@@ -71,12 +71,22 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
             </div>
           )}
         </div>
-        <EquityCurveChart
-          equityData={(perfStats?.equity_curve || pm?.equity_curve || []).map((d: any) => ({ date: typeof d.date === 'string' ? d.date.slice(0, 10) : '', equity: d.portfolio ?? d.value ?? 0 }))}
-          period={period} onPeriodChange={(p) => setPeriod(p as any)}
-          interval={equityInterval} onIntervalChange={(iv: string) => setEquityInterval(iv as any)}
-          height={280}
-        />
+        {(() => {
+          const curve = perfStats?.equity_curve || pm?.equity_curve || [];
+          const equityData = curve.map((d: any) => ({ date: typeof d.date === 'string' ? d.date.slice(0, 10) : '', equity: d.portfolio ?? d.value ?? 0 }));
+          const spyData = curve.some((d: any) => d.benchmark != null)
+            ? curve.map((d: any) => ({ date: typeof d.date === 'string' ? d.date.slice(0, 10) : '', close: d.benchmark ?? 0 })).filter((d: any) => d.close > 0)
+            : undefined;
+          return (
+            <EquityCurveChart
+              equityData={equityData}
+              spyData={spyData}
+              period={period} onPeriodChange={(p) => setPeriod(p as any)}
+              interval={equityInterval} onIntervalChange={(iv: string) => setEquityInterval(iv as any)}
+              height={280}
+            />
+          );
+        })()}
       </div>
 
       {/* ROW 3: 3-column detail panels */}
