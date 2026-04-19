@@ -338,9 +338,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
     closure_reasons: Record<string, number>;
   } | null>(null);
 
-  const fetchAnalyticsData = useCallback(async (tabOverride?: string, forceRefresh?: boolean) => {
+  const fetchAnalyticsData = useCallback(async (tabOverride?: string, forceRefresh?: boolean, intervalOverride?: string, periodOverride?: string) => {
     if (!tradingMode) return;
     const currentTab = tabOverride || activeTab;
+    const effectiveInterval = (intervalOverride ?? equityInterval) as '1d' | '4h' | '1h';
+    const effectivePeriod = (periodOverride ?? period) as '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
     
     try {
       if (!performanceMetrics) setLoading(true);  // Only show skeleton on first load
@@ -354,9 +356,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       
       if (!dataIsFresh) {
         const [perfAnalytics, perfStatsData, cioDashboardData, regimeDataPhase1] = await Promise.all([
-          apiClient.getPerformanceAnalytics(tradingMode, period, equityInterval),
-          apiClient.getPerformanceStats(tradingMode, period).catch(() => null),
-          apiClient.getCIODashboard(tradingMode, period).catch(() => null),
+          apiClient.getPerformanceAnalytics(tradingMode, effectivePeriod, effectiveInterval),
+          apiClient.getPerformanceStats(tradingMode, effectivePeriod).catch(() => null),
+          apiClient.getCIODashboard(tradingMode, effectivePeriod).catch(() => null),
           apiClient.getComprehensiveRegimeAnalysis().catch(() => null),
         ]);
         
@@ -634,10 +636,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
   useEffect(() => {
     if (!tradingModeLoading && tradingMode) {
-      fetchAnalyticsData(undefined, true);  // force re-fetch on period/interval change
+      fetchAnalyticsData(undefined, true, equityInterval, period);
     }
   }, [period, equityInterval]);
-
   const handleTabChange = useCallback((tab: string) => {
     setActiveTab(tab);
     fetchAnalyticsData(tab);
@@ -964,9 +965,9 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
               perfStats={perfStats}
               regimeAnalysis={regimeAnalysis}
               period={period}
-              setPeriod={setPeriod}
+              setPeriod={(p: any) => { setPeriod(p); fetchAnalyticsData(undefined, true, equityInterval, p); }}
               equityInterval={equityInterval}
-              setEquityInterval={setEquityInterval}
+              setEquityInterval={(iv: any) => { setEquityInterval(iv); fetchAnalyticsData(undefined, true, iv, period); }}
             />
           </TabsContent>
 
