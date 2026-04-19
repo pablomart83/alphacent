@@ -1188,12 +1188,20 @@ def _compute_sentiment_coverage() -> dict:
             row = session.execute(text(
                 "SELECT COUNT(*) as total, "
                 "SUM(CASE WHEN fetched_at > NOW() - INTERVAL '24 hours' THEN 1 ELSE 0 END) as fresh_24h, "
-                "SUM(CASE WHEN fetched_at > NOW() - INTERVAL '7 days' THEN 1 ELSE 0 END) as fresh_7d "
+                "SUM(CASE WHEN fetched_at > NOW() - INTERVAL '7 days' THEN 1 ELSE 0 END) as fresh_7d, "
+                "SUM(CASE WHEN sentiment_score > 0.15 THEN 1 ELSE 0 END) as bullish_count, "
+                "SUM(CASE WHEN sentiment_score < -0.15 THEN 1 ELSE 0 END) as bearish_count, "
+                "SUM(CASE WHEN sentiment_score BETWEEN -0.15 AND 0.15 THEN 1 ELSE 0 END) as neutral_count, "
+                "ROUND(AVG(sentiment_score)::numeric, 3) as avg_score "
                 "FROM symbol_news_sentiment"
             )).fetchone()
             total_cached = row[0] if row else 0
             fresh_24h = row[1] if row else 0
             fresh_7d = row[2] if row else 0
+            bullish_count = int(row[3] or 0)
+            bearish_count = int(row[4] or 0)
+            neutral_count = int(row[5] or 0)
+            avg_score = float(row[6]) if row[6] is not None else 0.0
         finally:
             session.close()
 
@@ -1219,12 +1227,19 @@ def _compute_sentiment_coverage() -> dict:
             "coverage_pct": round(total_cached / total_applicable * 100, 1) if total_applicable > 0 else 0.0,
             "requests_today": requests_today,
             "requests_remaining": requests_remaining,
+            "score_distribution": {
+                "bullish": bullish_count,
+                "neutral": neutral_count,
+                "bearish": bearish_count,
+                "avg_score": avg_score,
+            },
         }
     except Exception as e:
         logger.warning(f"Could not compute sentiment coverage: {e}")
         return {"total_cached": 0, "fresh_24h": 0, "fresh_7d": 0,
                 "total_applicable": 0, "coverage_pct": 0.0,
-                "requests_today": 0, "requests_remaining": 95}
+                "requests_today": 0, "requests_remaining": 95,
+                "score_distribution": {"bullish": 0, "neutral": 0, "bearish": 0, "avg_score": 0.0}}
 
 
 @router.get("/news-sentiment/status")

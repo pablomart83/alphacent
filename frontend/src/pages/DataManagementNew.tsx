@@ -794,6 +794,36 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
               </div>
             )}
 
+            {/* Score distribution — bullish / neutral / bearish breakdown */}
+            {newsSentimentStatus?.score_distribution && !newsSentimentSyncing && (
+              <div className="mb-2">
+                <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  Score distribution
+                  {newsSentimentStatus.score_distribution.avg_score != null && (
+                    <span className="ml-1 font-mono" style={{
+                      color: newsSentimentStatus.score_distribution.avg_score > 0.05 ? '#22c55e'
+                           : newsSentimentStatus.score_distribution.avg_score < -0.05 ? '#ef4444'
+                           : 'var(--color-text-secondary)'
+                    }}>
+                      (avg {newsSentimentStatus.score_distribution.avg_score > 0 ? '+' : ''}{newsSentimentStatus.score_distribution.avg_score.toFixed(3)})
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-3 gap-1">
+                  {[
+                    { label: '▲ Bullish', value: newsSentimentStatus.score_distribution.bullish ?? 0, color: '#22c55e' },
+                    { label: '— Neutral', value: newsSentimentStatus.score_distribution.neutral ?? 0, color: '#6b7280' },
+                    { label: '▼ Bearish', value: newsSentimentStatus.score_distribution.bearish ?? 0, color: '#ef4444' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="rounded p-1 text-center" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                      <div className="text-xs font-mono font-semibold" style={{ color }}>{value}</div>
+                      <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Progress during sync */}
             {newsSentimentSyncing && newsSentimentStatus && (
               <div className="grid grid-cols-2 gap-1 mb-2">

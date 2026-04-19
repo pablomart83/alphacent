@@ -153,6 +153,8 @@ class PositionResponse(BaseModel):
     closure_reason: Optional[str] = None
     invested_amount: Optional[float] = None
     pending_closure: Optional[bool] = False
+    sector: Optional[str] = None
+    asset_class: Optional[str] = None
 
 
 class PositionsResponse(BaseModel):
@@ -373,17 +375,16 @@ async def get_positions(
         d['strategy_name'] = strategy_name_map.get(pos.strategy_id)
         # Enrich with sector and asset_class from symbol registry
         try:
-            from src.risk.risk_manager import get_symbol_sector, SYMBOL_SECTOR_MAP
-            from src.core.symbol_registry import SymbolRegistry
-            sector = get_symbol_sector(pos.symbol)
-            d['sector'] = sector if sector != 'Unknown' else 'Other'
-            # Derive asset_class from sector
-            sector_to_ac = {
-                'Crypto': 'Crypto', 'Forex': 'Forex', 'Indices': 'Indices',
-                'Commodities': 'Commodities', 'Commodities ETF': 'Commodities',
-                'ETF': 'ETF',
+            from src.core.symbol_registry import get_registry
+            registry = get_registry()
+            sector = registry.get_sector(pos.symbol)
+            ac_raw = registry.get_asset_class(pos.symbol)
+            _AC_DISPLAY = {
+                "stocks": "Stocks", "etfs": "ETFs", "forex": "Forex",
+                "indices": "Indices", "commodities": "Commodities", "crypto": "Crypto",
             }
-            d['asset_class'] = sector_to_ac.get(sector, 'Stocks')
+            d['sector'] = sector if sector != 'Unknown' else 'Other'
+            d['asset_class'] = _AC_DISPLAY.get(ac_raw.lower(), ac_raw.capitalize()) if ac_raw != 'unknown' else 'Stocks'
         except Exception:
             d.setdefault('sector', 'Other')
             d.setdefault('asset_class', 'Stocks')

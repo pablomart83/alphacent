@@ -818,16 +818,33 @@ class AdvancedRiskResponse(BaseModel):
 
 
 def _get_asset_class(symbol: str) -> str:
-    """Classify a symbol into its asset class."""
+    """Classify a symbol into its asset class using the SymbolRegistry."""
+    try:
+        from src.core.symbol_registry import get_registry
+        ac = get_registry().get_asset_class(symbol.upper())
+        if ac:
+            # Normalize to display names
+            _AC_DISPLAY = {
+                "stocks": "Stocks",
+                "etfs": "ETFs",
+                "forex": "Forex",
+                "indices": "Indices",
+                "commodities": "Commodities",
+                "crypto": "Crypto",
+            }
+            return _AC_DISPLAY.get(ac.lower(), ac.capitalize())
+    except Exception:
+        pass
+    # Fallback: infer from sector map
     from src.risk.risk_manager import SYMBOL_SECTOR_MAP
-    sector = SYMBOL_SECTOR_MAP.get(symbol.upper(), "Unknown")
-    if sector in ("Forex",):
+    sector = SYMBOL_SECTOR_MAP.get(symbol.upper(), "")
+    if sector == "Forex":
         return "Forex"
-    if sector in ("Crypto",):
+    if sector == "Crypto":
         return "Crypto"
     if sector in ("Commodities", "Commodities ETF"):
         return "Commodities"
-    if sector in ("Indices",):
+    if sector == "Indices":
         return "Indices"
     if "ETF" in sector:
         return "ETFs"

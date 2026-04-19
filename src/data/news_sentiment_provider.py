@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Marketaux API
 _MARKETAUX_BASE = "https://api.marketaux.com/v1/news/all"
-_ARTICLES_PER_REQUEST = 5   # enough to get a reliable average
+_ARTICLES_PER_REQUEST = 10  # more articles = more reliable average
 _REQUEST_TIMEOUT = 10
 
 # TTL rules (hours)
@@ -199,6 +199,7 @@ class NewsSentimentProvider:
             "filter_entities": "true",
             "language": "en",
             "limit": _ARTICLES_PER_REQUEST,
+            "sort": "published_at",  # most recent first
             "api_token": self.api_key,
         }
         resp = requests.get(_MARKETAUX_BASE, params=params, timeout=_REQUEST_TIMEOUT)
@@ -320,8 +321,8 @@ class NewsSentimentProvider:
             return _TTL_WEEKEND
         if article_count == 0:
             return _TTL_QUIET
-        if article_count >= 4:
-            # High news volume — could be earnings week, refresh more often
+        if article_count >= 8:
+            # Very high news volume — likely earnings week, refresh more often
             return _TTL_EARNINGS_WEEK
         return _TTL_NORMAL
 
