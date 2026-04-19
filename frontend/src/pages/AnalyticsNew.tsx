@@ -338,7 +338,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
     closure_reasons: Record<string, number>;
   } | null>(null);
 
-  const fetchAnalyticsData = useCallback(async (tabOverride?: string) => {
+  const fetchAnalyticsData = useCallback(async (tabOverride?: string, forceRefresh?: boolean) => {
     if (!tradingMode) return;
     const currentTab = tabOverride || activeTab;
     
@@ -349,10 +349,8 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       // Phase 1: Core metrics — skip if data was fetched recently (within 60s)
       // Tab switches should NOT re-fetch these heavy endpoints
       const now = new Date();
-      const dataIsFresh = lastFetchedAt && (now.getTime() - lastFetchedAt.getTime()) < 60000
-        && performanceMetrics && cioDashboard
-        && (lastFetchedAt as any)._period === period
-        && (lastFetchedAt as any)._interval === equityInterval;
+      const dataIsFresh = !forceRefresh && lastFetchedAt && (now.getTime() - lastFetchedAt.getTime()) < 60000
+        && performanceMetrics && cioDashboard;
       
       if (!dataIsFresh) {
         const [perfAnalytics, perfStatsData, cioDashboardData, regimeDataPhase1] = await Promise.all([
@@ -409,10 +407,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
           });
         }
         
-        const ts = new Date();
-        (ts as any)._period = period;
-        (ts as any)._interval = equityInterval;
-        setLastFetchedAt(ts);
+        setLastFetchedAt(new Date());
       }
       
       // Page is now visible with core metrics
@@ -639,7 +634,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
 
   useEffect(() => {
     if (!tradingModeLoading && tradingMode) {
-      fetchAnalyticsData();
+      fetchAnalyticsData(undefined, true);  // force re-fetch on period/interval change
     }
   }, [period, equityInterval]);
 
