@@ -362,7 +362,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
             <span className="text-[10px] text-gray-500 tracking-widest uppercase font-semibold">Cycle Log</span>
             <span className="text-[10px] text-gray-600 font-mono">{cycleRunning ? '● live' : 'last run'}</span>
           </div>
-          <div className="max-h-[200px] overflow-y-auto bg-[var(--color-dark-bg)] p-2 space-y-0.5 font-mono text-[11px]">
+          <div className="max-h-[220px] overflow-y-auto bg-[var(--color-dark-bg)] p-2 space-y-0.5 font-mono text-[11px]">
             {cycleLog.map((entry, i) => (
               <div key={i} className="flex gap-2 leading-relaxed">
                 <span className="text-gray-600 shrink-0">[{entry.time}]</span>

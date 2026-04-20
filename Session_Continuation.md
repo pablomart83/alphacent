@@ -283,7 +283,19 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 ### Sprint 4 (remaining)
 - **4.2 Cull Low-Activation Templates** — run `scripts/utilities/cull_low_activation_templates.py --apply` manually when ready (needs `config/.proposal_tracker.json` populated with enough data)
 
-### Sprint 8+ (Next Sessions)
+### Sprint 9 — Autonomous Cycle Deep Dive (Next Session)
+**Priority focus:** Audit and improve the autonomous cycle end-to-end.
+- How are proposals being generated? Are templates being scored correctly?
+- Walk-forward validation pass rate — is 25% healthy or are good strategies being filtered?
+- MC bootstrap threshold (p5=0.2) — is it too conservative?
+- Conviction scoring calibration — are the component weights right?
+- Strategy lifespan analysis — why are strategies retiring so fast (avg 3d)?
+- Template diversity — are we over-proposing the same templates?
+- Proposal-to-activation funnel — where are strategies dropping out?
+- Consider: longer test windows for low-frequency strategies
+- Consider: regime-specific proposal filters (only propose trend strategies in trending_up)
+
+### Sprint 8+ (Backlog)
 - **R-Multiple Distribution** — histogram in Tear Sheet tab (backend done, needs frontend wiring)
 - **Historical Stress Tests** — backend done, frontend tab added
 - **Benchmark-Relative Performance Per Strategy** — alpha_vs_spy column added
@@ -292,7 +304,6 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 - **Portfolio-level VaR check** — implemented but needs monitoring to tune the 2% threshold
 - **Template weight decay over time** — addressed with dynamic weighting but could be improved
 - **Transcript sentiment** — module built but not integrated into conviction scorer
-- **Historical stress tests** — SPY data available, beta=0.70 assumption, could use actual portfolio beta
 
 ### Cycle Quality Issues to Watch
 - **`trades=low` still dominant rejection** — even with Sharpe exception, many strategies have 0-2 trades in test window. Consider whether the test window (120-180 days) is appropriate for low-frequency strategies.
@@ -301,7 +312,48 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 
 ---
 
-## Files Changed This Session (April 18, 2026)
+## Files Changed This Session (April 20, 2026)
+
+### Backend
+- `src/strategy/strategy_engine.py` — exit signals bypass conviction/ML filters (critical fix); improved rejection log
+- `src/strategy/conviction_scorer.py` — news sentiment impact reduced to ±1pt (was ±8, 90% negative bias on free tier)
+- `src/data/news_sentiment_provider.py` — articles 5→10, sort=published_at, get_article_count() method
+- `src/core/monitoring_service.py` — zombie exit rule (_check_zombie_exits, 6h interval); _last_zombie_check init
+- `src/core/trading_scheduler.py` — cross-cycle same-template dedup (blocks EMA Ribbon V7+V106+V117 all opening QQQ)
+- `src/api/routers/analytics.py` — template win rate double-division fix (was /100 twice → 0.9% instead of 90%)
+- `src/api/routers/strategies.py` — template rankings win_rate ×100 fix; template-rankings endpoint
+- `src/api/routers/account.py` — PositionResponse: add sector/asset_class fields; use SymbolRegistry directly
+- `src/api/routers/risk.py` — _get_asset_class uses SymbolRegistry instead of sector-map hack
+- `src/api/routers/data_management.py` — score_distribution (bullish/neutral/bearish/avg) in sentiment coverage
+- `src/data/news_sentiment_provider.py` — TTL threshold 4→8 articles for earnings-week
+
+### Frontend
+- `frontend/src/pages/analytics/PerformanceTab.tsx` — full Performance tab redesign (new component)
+- `frontend/src/pages/AnalyticsNew.tsx` — interval/period buttons now trigger refetch (stale closure fix); forceRefresh param
+- `frontend/src/components/charts/EquityCurveChart.tsx` — SPY benchmark fetch via dedicated API call
+- `frontend/src/components/charts/TvChart.tsx` — toChartTime handles Unix timestamp strings for intraday
+- `frontend/src/components/trading/TradingCyclePipeline.tsx` — live cycle log panel with autoscroll
+- `frontend/src/pages/DataManagementNew.tsx` — score distribution display (bullish/neutral/bearish)
+
+### Key Fixes This Session
+1. **Exit signals were being filtered by conviction scorer** — DSL exits never fired, positions only closed via SL/TP
+2. **Asset class/sector showing Unknown** — PositionResponse missing fields, Pydantic was dropping them
+3. **News sentiment ±8pts on 3 articles** — 90% negative bias on Marketaux free tier, reduced to ±1pt
+4. **Template win rate 0.9%** — double /100 division bug in two separate endpoints
+5. **Same-template cross-cycle duplicates** — EMA Ribbon V7/V106/V117/V179 all opened QQQ independently
+6. **1H/4H interval buttons did nothing** — stale closure captured old equityInterval value
+7. **Sharpe ratio 7.82** — only 15 daily snapshots, inflated by tiny std dev; added daily_returns_count field
+
+### System State (April 20, 2026)
+- **Equity:** ~$474K (+3.7% since Mar 31)
+- **Open positions:** ~185 (down from 188 after exit signal fix)
+- **Today's realized P&L:** +$1,047 (13 DSL exits: +$1,893, 3 stale underwater: -$530, 1 SL: -$316)
+- **Exit signal fix impact:** 12 positions closed in first cycle after fix (ADI, GLD, HYG, TLT, OKTA, XBI, AMGN, SPY, SPX500, NSDQ100, DJ30, XBI)
+- **vs SPY today:** -0.08% vs SPY -0.30% ✓ outperformed
+- **Zombie exit rule:** 23 flat positions flagged (±1% for 14+ days), ~$58K capital to redeploy
+- **Orphaned positions flagged:** COPPER/FXI/ZINC/LCID (~$15K freed)
+
+## Files Changed Previous Session (April 18, 2026)
 
 ### Backend
 - `src/risk/risk_manager.py` — VaR check, drawdown sizing, vol scaling, symbol/sector caps
@@ -318,8 +370,6 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 - `config/autonomous_trading.yaml` — all Sprint 3 risk params, relaxed min_trades thresholds
 - `requirements.txt` — added slowapi==0.1.9
 - `migrations/add_performance_indexes.py` — 6 DB indexes
-- `scripts/utilities/cull_low_activation_templates.py` — manual cull tool
-- `scripts/utilities/retire_failing_strategies.sql` — retirement SQL
 
 ### Frontend
 - `frontend/src/pages/StrategiesNew.tsx` — Alpha column, allocation viz
