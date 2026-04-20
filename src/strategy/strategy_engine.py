@@ -4735,9 +4735,12 @@ class StrategyEngine:
                     logger.info(
                         f"Signal rejected for {signal.symbol}: "
                         f"conviction {conviction.total_score:.1f} < {min_conviction} "
-                        f"(signal: {conviction.signal_strength_score:.1f}, "
-                        f"fundamental: {conviction.fundamental_score:.1f}, "
-                        f"regime: {conviction.regime_alignment_score:.1f})"
+                        f"(wf_edge: {conviction.breakdown.get('walkforward_edge', {}).get('score', 0):.1f}, "
+                        f"signal: {conviction.signal_strength_score:.1f}, "
+                        f"asset: {conviction.fundamental_score:.1f}, "
+                        f"regime: {conviction.regime_alignment_score:.1f}, "
+                        f"fundamental_adj: {conviction.breakdown.get('fundamental_quality_direction', {}).get('score', 0):.1f}, "
+                        f"news: {conviction.breakdown.get('news_sentiment', {}).get('score', 0):.1f})"
                     )
                     continue
                 
