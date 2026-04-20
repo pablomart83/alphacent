@@ -4652,6 +4652,14 @@ class StrategyEngine:
             )
             
             for signal in signals:
+                # EXIT signals bypass ALL filters — they are risk management, not entry decisions.
+                # Filtering an exit signal means a position stays open past its edge expiry.
+                from src.models.enums import SignalAction as _SA
+                if signal.action in (_SA.EXIT_LONG, _SA.EXIT_SHORT):
+                    filtered_signals.append(signal)
+                    logger.info(f"Exit signal for {signal.symbol} passed through (bypasses conviction/ML filters)")
+                    continue
+
                 # Check frequency limits first (cheapest check)
                 freq_check = frequency_limiter.check_signal_allowed(signal, strategy)
                 if not freq_check.allowed:
