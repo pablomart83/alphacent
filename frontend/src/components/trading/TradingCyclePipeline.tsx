@@ -1,4 +1,4 @@
-import React, { type FC, useEffect, useState, useCallback } from 'react';
+import React, { type FC, useEffect, useState, useRef, useCallback } from 'react';
 import {
   CheckCircle2, XCircle, Loader2, Clock, Trash2, BarChart3,
   Lightbulb, Database, TrendingUp, Zap, Send, HardDrive,
@@ -65,6 +65,8 @@ const statusConfig = {
 };
 
 export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunning }) => {
+  const [cycleLog, setCycleLog] = useState<Array<{ time: string; message: string; type: 'info' | 'success' | 'error' }>>([]);
+  const logEndRef = useRef<HTMLDivElement>(null);
   const [stages, setStages] = useState<Record<string, StageState>>(() => {
     // On mount, restore live cycle stages if a cycle was running when we navigated away
     try {
@@ -118,6 +120,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
     if (cycleRunning) {
       setStages({});
       setCycleComplete(false);
+      setCycleLog([]);
       localStorage.removeItem(LIVE_STAGES_KEY);
     }
   }, [cycleRunning]);
@@ -127,6 +130,37 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
     const unsubscribe = wsManager.onCycleProgress((data: any) => {
       const progress = data?.data || data;
       if (!progress?.stage) return;
+
+      // Accumulate log entries from phase messages
+      const phase = progress.metrics?.phase;
+      const now = new Date();
+      const timeStr = now.toTimeString().slice(0, 8);
+      if (phase) {
+        setCycleLog(prev => [...prev, {
+          time: timeStr,
+          message: phase,
+          type: progress.status === 'error' ? 'error' : progress.status === 'complete' ? 'success' : 'info',
+        }]);
+      } else if (progress.status === 'running' && !phase) {
+        // Stage started — log it
+        const label = STAGES.find(s => s.key === progress.stage)?.label || progress.stage;
+        setCycleLog(prev => [...prev, { time: timeStr, message: `▶ ${label}...`, type: 'info' }]);
+      } else if (progress.status === 'complete') {
+        const label = STAGES.find(s => s.key === progress.stage)?.label || progress.stage;
+        const metrics = progress.metrics || {};
+        const detail = Object.entries(metrics)
+          .filter(([k]) => k !== 'phase' && k !== 'skipped' && k !== 'reason')
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(', ');
+        setCycleLog(prev => [...prev, {
+          time: timeStr,
+          message: `✓ ${label}${detail ? ` — ${detail}` : ''}`,
+          type: 'success',
+        }]);
+      } else if (progress.status === 'error') {
+        const label = STAGES.find(s => s.key === progress.stage)?.label || progress.stage;
+        setCycleLog(prev => [...prev, { time: timeStr, message: `✗ ${label}: ${progress.error || 'error'}`, type: 'error' }]);
+      }
 
       setStages(prev => {
         const next = {
@@ -188,6 +222,11 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
   useEffect(() => {
     fetchHistory();
   }, [fetchHistory]);
+
+  // Auto-scroll log to bottom
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [cycleLog]);
 
   const hasAnyStageData = Object.keys(stages).length > 0;
   const displayStages = hasAnyStageData ? stages : (persistedStages || {});
@@ -312,6 +351,29 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
           ) : null;
         })()}
       </div>
+
+      {/* Cycle Log — shown during and after a cycle run */}
+      {cycleLog.length > 0 && (
+        <div className="border border-[var(--color-dark-border)] rounded overflow-hidden">
+          <div className="px-3 py-1.5 border-b border-[var(--color-dark-border)] flex items-center justify-between">
+            <span className="text-[10px] text-gray-500 tracking-widest uppercase font-semibold">Cycle Log</span>
+            <span className="text-[10px] text-gray-600 font-mono">{cycleRunning ? '● live' : 'last run'}</span>
+          </div>
+          <div className="max-h-[200px] overflow-y-auto bg-[var(--color-dark-bg)] p-2 space-y-0.5 font-mono text-[11px]">
+            {cycleLog.map((entry, i) => (
+              <div key={i} className="flex gap-2 leading-relaxed">
+                <span className="text-gray-600 shrink-0">[{entry.time}]</span>
+                <span className={
+                  entry.type === 'error' ? 'text-accent-red' :
+                  entry.type === 'success' ? 'text-accent-green' :
+                  'text-gray-400'
+                }>{entry.message}</span>
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
 
       {/* Cycle Summary */}
       {cycleComplete && hasAnyStageData && (
