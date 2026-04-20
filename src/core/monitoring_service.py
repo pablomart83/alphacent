@@ -98,6 +98,9 @@ class MonitoringService:
         
         # Time-based exit check (daily — alongside fundamental exits)
         self._last_time_based_exit_check: float = 0
+
+        # Zombie exit check (every 6 hours)
+        self._last_zombie_check: float = 0
         
         # Daily sync job (data cleanup, performance feedback, daily summary)
         self._last_daily_sync: float = 0
@@ -448,6 +451,18 @@ class MonitoringService:
                 self._last_time_based_exit_check = now
             except Exception as e:
                 logger.error(f"Error checking time-based exits: {e}")
+
+        # Zombie exit check (every 6 hours) — flag flat positions for human review
+        _zombie_interval = 6 * 3600
+        if not _cycle_active and now - self._last_zombie_check >= _zombie_interval:
+            try:
+                zombie_results = self._check_zombie_exits()
+                flagged = zombie_results.get("flagged", 0)
+                if flagged > 0:
+                    logger.info(f"[ZombieExit] {flagged} flat positions flagged for closure review")
+                self._last_zombie_check = now
+            except Exception as e:
+                logger.error(f"Error checking zombie exits: {e}")
         
             # Demote idle DEMO strategies back to BACKTESTED
             try:
@@ -2620,7 +2635,104 @@ class MonitoringService:
         finally:
             session.close()
 
-    def _check_strategy_health(self) -> Dict:
+    def _check_zombie_exits(self) -> Dict:
+        """
+        Flag 'zombie' positions for human review — capital tied up with no momentum.
+
+        Two categories:
+        1. RETIREMENT BLOCKERS: positions in pending_retirement strategies that are
+           flat (±2%) for 5+ days. These block strategy retirement and redeploy nothing.
+           Threshold is looser (±2%) because we want to catch genuinely stuck positions,
+           not normal intraday noise.
+
+        2. LONG-TERM FLAT: positions open 14+ days (above p90 for 1D strategies) that
+           are flat (±1%). These are genuinely stagnant regardless of strategy type.
+           4H strategies get a tighter threshold: 7+ days flat (above p90 for 4H).
+
+        Does NOT auto-close — sets pending_closure=True with a descriptive reason so
+        the operator can review and approve via the UI.
+
+        Skips:
+        - Positions already pending closure
+        - Forex positions (spread noise makes ±1% meaningless for short holds)
+        - Alpha Edge strategies (they have their own hold logic, longer time horizons)
+        """
+        session = self.db.get_session()
+        checked = 0
+        flagged = 0
+
+        try:
+            from src.models.orm import PositionORM, StrategyORM
+            from src.core.tradeable_instruments import DEMO_ALLOWED_FOREX
+
+            forex_symbols = set(s.upper() for s in DEMO_ALLOWED_FOREX)
+            now = datetime.utcnow()
+
+            open_positions = session.query(PositionORM).filter(
+                PositionORM.closed_at.is_(None),
+                PositionORM.pending_closure == False,
+                PositionORM.invested_amount > 0,
+            ).all()
+
+            for pos in open_positions:
+                if not pos.opened_at or not pos.invested_amount:
+                    continue
+                if pos.symbol and pos.symbol.upper() in forex_symbols:
+                    continue
+
+                age_days = (now - pos.opened_at).total_seconds() / 86400
+                pnl_pct = pos.unrealized_pnl / pos.invested_amount * 100 if pos.invested_amount else 0
+
+                strategy = session.query(StrategyORM).filter(
+                    StrategyORM.id == pos.strategy_id
+                ).first() if pos.strategy_id else None
+
+                # Skip Alpha Edge — longer time horizons by design
+                if strategy:
+                    meta = strategy.strategy_metadata or {}
+                    if meta.get('strategy_category') == 'alpha_edge':
+                        continue
+                    is_4h = meta.get('interval') == '4h'
+                    is_pending_retirement = meta.get('pending_retirement', False)
+                else:
+                    is_4h = False
+                    is_pending_retirement = False
+
+                checked += 1
+                reason = None
+
+                # Category 1: retirement blocker — flat ±2% for 5+ days
+                if is_pending_retirement and age_days >= 5 and abs(pnl_pct) <= 2.0:
+                    reason = (
+                        f"Retirement blocker: strategy pending retirement, position flat "
+                        f"({pnl_pct:+.1f}%) for {age_days:.0f} days — blocking strategy demotion"
+                    )
+
+                # Category 2: long-term flat — above p90 hold time for the strategy type
+                elif not reason:
+                    flat_days_threshold = 7 if is_4h else 14
+                    flat_pct_threshold = 1.0
+                    if age_days >= flat_days_threshold and abs(pnl_pct) <= flat_pct_threshold:
+                        reason = (
+                            f"Long-term flat: {'4H' if is_4h else '1D'} position flat "
+                            f"({pnl_pct:+.1f}%) for {age_days:.0f} days — capital redeployment candidate"
+                        )
+
+                if reason:
+                    pos.pending_closure = True
+                    pos.closure_reason = reason
+                    flagged += 1
+                    logger.info(f"[ZombieExit] {pos.symbol}: {reason}")
+
+            session.commit()
+            return {"checked": checked, "flagged": flagged}
+
+        except Exception as e:
+            logger.error(f"Error in zombie exit check: {e}", exc_info=True)
+            session.rollback()
+            return {"checked": checked, "flagged": flagged, "error": str(e)}
+        finally:
+            session.close()
         """
         Compute a health score (0-5) for each active strategy based on its CURRENT
         positions and realized trade history. Retire when score reaches 0.
