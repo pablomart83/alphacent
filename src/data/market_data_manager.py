@@ -357,6 +357,14 @@ class MarketDataManager:
         normalized_symbol = normalize_symbol(symbol)
         logger.debug(f"Symbol normalized: {symbol} -> {normalized_symbol}")
 
+        # LME metals (ZINC, ALUMINUM, NICKEL) only have daily data on Yahoo Finance.
+        # Return empty immediately for any intraday request — no point going through
+        # DB → Yahoo → FMP chain only to get nothing and crash in the strategy engine.
+        is_lme_metal = normalized_symbol.upper() in ("NICKEL", "ALUMINUM", "ZINC", "RUBBER")
+        if is_lme_metal and interval != '1d':
+            logger.warning(f"LME metal {normalized_symbol} only has daily data (requested {interval}). Skipping.")
+            return []
+
         # Cacheable intervals that get persisted to DB
         _cacheable = interval in ("1d", "1h", "4h")
         
@@ -452,12 +460,6 @@ class MarketDataManager:
 
         # Forex: try FMP first (Yahoo has known issues with forex data)
         is_forex = self._is_forex_symbol(normalized_symbol)
-        # LME metals: FMP only has daily data. Yahoo doesn't carry these at all.
-        # For intraday requests, return empty immediately — no point trying Yahoo.
-        is_lme_metal = normalized_symbol.upper() in ("NICKEL", "ALUMINUM", "ZINC", "RUBBER")
-        if is_lme_metal and interval != '1d':
-            logger.warning(f"LME metal {normalized_symbol} only has daily data (requested {interval}). Skipping.")
-            return []
         if (is_forex or is_lme_metal) and self._fmp_api_key and interval == '1d':
             try:
                 logger.info(f"Fetching historical data for {normalized_symbol} from FMP (forex primary)")

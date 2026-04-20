@@ -985,12 +985,28 @@ class PortfolioManager:
             min_trades_required = max(2, min_trades_required - 1)
         
         if backtest_results.total_trades < min_trades_required:
-            reason = (
-                f"Trades {backtest_results.total_trades} < {min_trades_required} "
-                f"({'commodity' if is_commodity else '4H' if interval == '4h' else 'AE' if is_alpha_edge else 'DSL'})"
-            )
-            logger.info(f"Strategy {strategy.name} failed activation: {reason}")
-            return False, reason
+            # Sharpe exception: high-conviction strategies (test Sharpe ≥ 2.0) with ≥ 3 trades
+            # pass even if below the min_trades threshold. Mirrors the WF Sharpe exception so
+            # strategies that passed WF on this basis don't get blocked again here.
+            wf_test_sharpe = 0.0
+            # strategy is a dataclass with .metadata dict (set by proposer after WF)
+            if hasattr(strategy, 'metadata') and strategy.metadata:
+                wf_test_sharpe = float(strategy.metadata.get('wf_test_sharpe', 0) or 0)
+            if not wf_test_sharpe and hasattr(strategy, 'strategy_metadata') and strategy.strategy_metadata:
+                wf_test_sharpe = float(strategy.strategy_metadata.get('wf_test_sharpe', 0) or 0)
+            if backtest_results.total_trades >= 3 and wf_test_sharpe >= 2.0:
+                logger.info(
+                    f"Sharpe exception at activation: {strategy.name} — "
+                    f"wf_sharpe={wf_test_sharpe:.2f} ≥ 2.0 with {backtest_results.total_trades} trades "
+                    f"(below {min_trades_required} threshold but high conviction)"
+                )
+            else:
+                reason = (
+                    f"Trades {backtest_results.total_trades} < {min_trades_required} "
+                    f"({'commodity' if is_commodity else '4H' if interval == '4h' else 'AE' if is_alpha_edge else 'DSL'})"
+                )
+                logger.info(f"Strategy {strategy.name} failed activation: {reason}")
+                return False, reason
 
         # Net-of-costs profitability check using per-asset-class cost model.
         # eToro charges zero commission on stocks/ETFs — the real cost is spread + slippage.

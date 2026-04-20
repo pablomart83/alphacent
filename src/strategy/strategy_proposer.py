@@ -1476,7 +1476,7 @@ class StrategyProposer:
             # Strategies with < 5 test trades are skipped (not enough data to bootstrap).
             mc_passed_ids = set()
             MC_ITERATIONS = 1000
-            MC_MIN_P5_SHARPE = 0.2
+            MC_MIN_P5_SHARPE = 0.0  # Break-even bar: reject only if edge is negative at p5
             MC_MIN_TRADES_FOR_BOOTSTRAP = 15  # Raised from 5 — too few trades makes bootstrap meaningless
             for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
                 if not (tv and tev and het and not ov):
@@ -1518,30 +1518,40 @@ class StrategyProposer:
                         mc_passed_ids.add(s.id)
                         continue
                     arr = _np_mc.array(trade_returns)
-                    # Bootstrap: resample with replacement, compute Sharpe each iteration
+                    # Bootstrap: resample with replacement, compute Sharpe each iteration.
+                    # Annualization: trade-level returns need sqrt(trades_per_year) scaling.
+                    # Estimate trades_per_year from test window (180 days default).
+                    # This is more accurate than sqrt(n_trades) which conflates sample size
+                    # with annualization and produces artificially wide distributions.
+                    test_window_days = 180  # matches walk_forward.test_days config
+                    trades_per_year = (n_trades / test_window_days) * 252
+                    annualization_factor = _np_mc.sqrt(max(trades_per_year, 1.0))
                     bootstrap_sharpes = []
                     for _ in range(MC_ITERATIONS):
                         sample = _np_mc.random.choice(arr, size=len(arr), replace=True)
                         std = sample.std()
                         if std > 0:
-                            # Annualise: assume ~252/holding_days trades per year
-                            # Use a conservative 252 scaling (daily returns equivalent)
-                            sharpe = (sample.mean() / std) * _np_mc.sqrt(len(arr))
+                            sharpe = (sample.mean() / std) * annualization_factor
                             bootstrap_sharpes.append(sharpe)
                     if not bootstrap_sharpes:
                         mc_passed_ids.add(s.id)
                         continue
                     p5_sharpe = float(_np_mc.percentile(bootstrap_sharpes, 5))
-                    if p5_sharpe >= MC_MIN_P5_SHARPE:
+                    # Threshold: p5 >= 0.0 (break-even in worst 5% of resampled worlds).
+                    # A strategy that already passed WF only needs to show its edge is
+                    # non-negative under resampling — not that it's strongly positive.
+                    # Reject only if the downside tail is genuinely negative (noise).
+                    mc_pass = p5_sharpe >= MC_MIN_P5_SHARPE
+                    if mc_pass:
                         mc_passed_ids.add(s.id)
                         logger.info(
-                            f"MC bootstrap PASS: {s.name} — p5_sharpe={p5_sharpe:.2f} "
-                            f"(n={n_trades} trades, {MC_ITERATIONS} iterations)"
+                            f"MC bootstrap PASS: {s.name} — p5={p5_sharpe:.2f} "
+                            f"(n={n_trades} trades, ann={annualization_factor:.1f}x, {MC_ITERATIONS} iters)"
                         )
                     else:
                         logger.info(
-                            f"MC bootstrap FAIL: {s.name} — p5_sharpe={p5_sharpe:.2f} < {MC_MIN_P5_SHARPE} "
-                            f"(n={n_trades} trades) — likely noise, rejected"
+                            f"MC bootstrap FAIL: {s.name} — p5={p5_sharpe:.2f} < {MC_MIN_P5_SHARPE} "
+                            f"(n={n_trades} trades) — edge likely noise, rejected"
                         )
                 except Exception as _mc_err:
                     logger.debug(f"Monte Carlo bootstrap failed for {s.name}: {_mc_err}")
@@ -5965,6 +5975,32 @@ Make this strategy distinct and innovative while following all threshold and pai
             excluded = before - len(dsl_templates)
             if excluded:
                 logger.info(f"VIX risk-off ({vix:.1f}): excluded {excluded} momentum/breakout templates")
+
+        # Regime-directional filter: in trending_up regimes, suppress SHORT-direction
+        # templates (except market-neutral and alpha_edge which self-manage direction).
+        # Short strategies generate 0 trades in uptrends, waste proposal slots, and
+        # accumulate in the zero-trade blacklist. Standard quant practice: only propose
+        # strategies whose direction aligns with the prevailing regime.
+        trending_up_regimes = {
+            'trending_up', 'trending_up_weak', 'trending_up_strong'
+        }
+        regime_str = market_regime.value if hasattr(market_regime, 'value') else str(market_regime)
+        if regime_str in trending_up_regimes:
+            before = len(dsl_templates)
+            dsl_templates = [
+                t for t in dsl_templates
+                if not (
+                    (t.metadata or {}).get('direction', '').lower() == 'short'
+                    and not (t.metadata or {}).get('market_neutral', False)
+                    and (t.metadata or {}).get('strategy_category', '') != 'alpha_edge'
+                )
+            ]
+            excluded = before - len(dsl_templates)
+            if excluded:
+                logger.info(
+                    f"Regime filter ({regime_str}): suppressed {excluded} SHORT-direction templates "
+                    f"(non-neutral, non-AE) — direction misaligned with uptrend"
+                )
         
         filtered = dsl_templates + alpha_edge_templates
         
