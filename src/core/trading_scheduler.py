@@ -1892,12 +1892,24 @@ class TradingScheduler:
                 # Same-template dedup within incoming signals (not yet in existing positions).
                 # Prevents RSI Dip Buy V24 and RSI Dip Buy V120 both entering the same symbol
                 # in the same cycle — they're the same logic, not independent alpha.
+                # Also blocks new signals if an existing open position already uses the same template.
                 # Keep only the highest-confidence signal per template name.
                 seen_template_names: dict = {}  # template_name -> (strategy_id, signal, strategy_name)
                 template_deduped = []
                 for strategy_id, signal, strategy_name in tf_signals:
                     strat, _ = strategy_map.get(strategy_id, (None, None))
                     tmpl = (strat.metadata or {}).get('template_name') if strat and strat.metadata else None
+
+                    # Block if an existing open position already uses this template on this symbol
+                    if tmpl and existing_template_names and tmpl in existing_template_names:
+                        self._log_coordination_rejection(
+                            signal=signal,
+                            strategy_name=strategy_name,
+                            rejection_reason=f"Same-template duplicate: {tmpl} already has open position in {normalized_symbol}",
+                        )
+                        position_duplicate_count += 1
+                        continue
+
                     if tmpl and tmpl in seen_template_names:
                         # Keep the higher-confidence one
                         existing_entry = seen_template_names[tmpl]

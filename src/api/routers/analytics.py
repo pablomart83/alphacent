@@ -1818,7 +1818,7 @@ async def get_strategy_template_performance(
                 total_return = strategy.performance.get('total_return', 0.0)
                 
                 template_data[template]['trades'] += trades
-                template_data[template]['wins'] += int(trades * win_rate / 100)
+                template_data[template]['wins'] += int(trades * win_rate)  # win_rate is already 0-1 decimal
                 template_data[template]['returns'].append(total_return)
                 template_data[template]['hold_times'].append(48.0)  # Mock hold time
         
