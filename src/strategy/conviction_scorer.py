@@ -926,9 +926,27 @@ class ConvictionScorer:
             # Direction-aware: flip for shorts
             direction_score = raw_score if is_long else -raw_score
 
-            # Scale to ±8 points
-            adjusted = direction_score * 8.0
-            adjusted = max(-8.0, min(8.0, adjusted))
+            # Scale to ±8 points — but dampen for small article counts.
+            # Marketaux free tier returns max 3 articles. With 3 articles,
+            # a single bad-news day gives -1.0 for a fundamentally strong company.
+            # Dampen the impact proportionally to sample size:
+            # 1-3 articles → max ±3 pts (unreliable sample)
+            # 4-6 articles → max ±5 pts (moderate confidence)
+            # 7+ articles  → max ±8 pts (full weight)
+            try:
+                article_count = provider.get_article_count(sym)
+            except Exception:
+                article_count = 3  # assume small sample if unknown
+
+            if article_count <= 3:
+                max_impact = 3.0
+            elif article_count <= 6:
+                max_impact = 5.0
+            else:
+                max_impact = 8.0
+
+            adjusted = direction_score * max_impact
+            adjusted = max(-max_impact, min(max_impact, adjusted))
 
             if abs(adjusted) >= 1.0:
                 label = "bullish" if raw_score > 0 else "bearish"

@@ -166,6 +166,24 @@ class NewsSentimentProvider:
         """Check if a symbol needs a fresh fetch (public wrapper)."""
         return self._needs_refresh(symbol.upper().split(':')[0])
 
+    def get_article_count(self, symbol: str) -> int:
+        """Return the cached article count for a symbol (0 if unknown)."""
+        sym = symbol.upper().split(':')[0]
+        try:
+            from src.models.database import get_database
+            from sqlalchemy import text
+            db = get_database()
+            session = db.get_session()
+            try:
+                row = session.execute(text(
+                    "SELECT article_count FROM symbol_news_sentiment WHERE symbol = :sym"
+                ), {"sym": sym}).fetchone()
+                return int(row[0]) if row and row[0] is not None else 0
+            finally:
+                session.close()
+        except Exception:
+            return 0
+
     def get_coverage_stats(self) -> Dict:
         """Return coverage statistics for the Data Management page."""
         try:
