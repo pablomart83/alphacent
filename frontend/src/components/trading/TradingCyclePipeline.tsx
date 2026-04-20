@@ -223,9 +223,12 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
     fetchHistory();
   }, [fetchHistory]);
 
-  // Auto-scroll log to bottom
+  // Auto-scroll log container (not the page) to bottom
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (logEndRef.current) {
+      const container = logEndRef.current.parentElement;
+      if (container) container.scrollTop = container.scrollHeight;
+    }
   }, [cycleLog]);
 
   const hasAnyStageData = Object.keys(stages).length > 0;
