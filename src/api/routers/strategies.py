@@ -1314,7 +1314,7 @@ async def get_template_rankings(
             sharpes = td["sharpes"]
             rankings.append(TemplateRankingResponse(
                 name=tname,
-                win_rate=round(sum(win_rates) / len(win_rates), 4) if win_rates else None,
+                win_rate=round(sum(win_rates) / len(win_rates) * 100, 1) if win_rates else None,
                 avg_sharpe=round(sum(sharpes) / len(sharpes), 2) if sharpes else None,
                 total_trades=td["total_trades"],
                 active_count=td["active_count"],
