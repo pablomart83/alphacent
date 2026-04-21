@@ -741,6 +741,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       id: 'holding',
       header: 'Hold',
       enableSorting: true,
+      sortDescFirst: false,
       accessorFn: (row) => new Date(row.opened_at).getTime(),
       sortingFn: (rowA, rowB) =>
         new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime(),
@@ -755,6 +756,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       id: 'opened_at',
       header: 'Opened',
       enableSorting: true,
+      sortDescFirst: true,
       accessorFn: (row) => new Date(row.opened_at).getTime(),
       sortingFn: (rowA, rowB) =>
         new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime(),
