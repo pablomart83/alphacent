@@ -688,6 +688,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       id: 'status',
       header: 'Status',
       enableSorting: true,
+      accessorFn: (row) => getPositionStatus(row),
       sortingFn: (rowA, rowB) => {
         return getPositionStatus(rowA.original).localeCompare(getPositionStatus(rowB.original));
       },
@@ -705,6 +706,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       id: 'invested',
       header: () => <div className="text-right">Invested</div>,
       enableSorting: true,
+      accessorFn: (row) => getInvested(row),
       sortingFn: (rowA, rowB) => getInvested(rowA.original) - getInvested(rowB.original),
       cell: ({ row }) => {
         const invested = getInvested(row.original);
@@ -739,6 +741,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       id: 'holding',
       header: 'Hold',
       enableSorting: true,
+      accessorFn: (row) => new Date(row.opened_at).getTime(),
       sortingFn: (rowA, rowB) =>
         new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime(),
       cell: ({ row }) => {
@@ -752,6 +755,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       id: 'opened_at',
       header: 'Opened',
       enableSorting: true,
+      accessorFn: (row) => new Date(row.opened_at).getTime(),
       sortingFn: (rowA, rowB) =>
         new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime(),
       cell: ({ row }) => {
@@ -770,6 +774,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       id: 'portfolioPct',
       header: () => <div className="text-right">%Port</div>,
       enableSorting: true,
+      accessorFn: (row) => getInvested(row),
       sortingFn: (rowA, rowB) => getInvested(rowA.original) - getInvested(rowB.original),
       cell: ({ row }) => {
         const totalValue = positions.reduce((sum, p) => sum + Math.abs(getInvested(p)), 0);
