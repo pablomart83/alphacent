@@ -367,10 +367,41 @@ class CycleLogger:
     # --- Hourly signal cycle ---
 
     def log_signal_cycle(self, duration_seconds: float, strategies: int,
-                         signals: int, orders: int, mode: str = "1h"):
-        self._write(f"[SIGNAL-{mode.upper()}] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-                     f"{duration_seconds:.0f}s | {strategies} strategies | "
-                     f"{signals} signals | {orders} orders")
+                         signals: int, orders: int, mode: str = "1h",
+                         signal_details: list = None,
+                         rejection_details: list = None,
+                         order_details: list = None):
+        """Log a scheduler signal cycle with optional per-signal breakdown.
+
+        signal_details: list of dicts with keys: symbol, strategy, side, confidence
+        rejection_details: list of dicts with keys: symbol, strategy, reason
+        order_details: list of dicts with keys: symbol, side, size, strategy
+        """
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self._write(
+            f"[SIGNAL-{mode.upper()}] {ts} | {duration_seconds:.0f}s | "
+            f"{strategies} strategies | {signals} signals | {orders} orders"
+        )
+        if signal_details:
+            for s in signal_details:
+                sym = s.get('symbol', '?')
+                strat = s.get('strategy', '?')[:35]
+                side = s.get('side', '?')
+                conf = s.get('confidence', 0)
+                self._write(f"  -> {side:10s} {sym:8s} conf={conf:.2f}  [{strat}]")
+        if rejection_details:
+            for r in rejection_details[:20]:
+                sym = r.get('symbol', '?')
+                strat = r.get('strategy', '?')[:35]
+                reason = r.get('reason', '?')[:80]
+                self._write(f"  x  {sym:8s} [{strat}] -- {reason}")
+        if order_details:
+            for o in order_details:
+                sym = o.get('symbol', '?')
+                side = o.get('side', '?')
+                size = o.get('size', 0)
+                strat = o.get('strategy', '?')[:35]
+                self._write(f"  ✓  {side:10s} {sym:8s} ${size:,.0f}  [{strat}]")
 
 
 def get_cycle_logger() -> CycleLogger:

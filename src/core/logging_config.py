@@ -6,6 +6,12 @@ This module provides centralized logging configuration with:
 - Rolling log files with automatic rotation
 - Structured logging format with context
 - Support for different log levels per component
+
+Log files:
+  logs/alphacent.log   — full INFO+ audit trail (rotates at 10MB, 5 backups)
+  logs/errors.log      — ERROR and CRITICAL only (near-empty on healthy days)
+  logs/warnings.log    — WARNING only (position sizing bumps, stale data, etc.)
+  logs/<component>.log — per-component INFO+ (api, strategy, risk, execution, data, ...)
 """
 
 import logging
@@ -40,13 +46,42 @@ class LogSeverity(Enum):
     CRITICAL = logging.CRITICAL
 
 
+# Map source module prefixes to LogComponent for automatic routing
+_MODULE_TO_COMPONENT = {
+    'src.api':        LogComponent.API,
+    'src.strategy':   LogComponent.STRATEGY,
+    'src.risk':       LogComponent.RISK,
+    'src.execution':  LogComponent.EXECUTION,
+    'src.data':       LogComponent.DATA,
+    'src.models':     LogComponent.DATABASE,
+    'src.core':       LogComponent.SYSTEM,
+    'src.analytics':  LogComponent.STRATEGY,
+    'src.ml':         LogComponent.STRATEGY,
+}
+
+
+class ComponentRoutingFilter(logging.Filter):
+    """Routes log records to the correct component file handler based on module name."""
+
+    def __init__(self, component: LogComponent):
+        super().__init__()
+        self.component = component
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Accept records whose module name starts with the component's prefix(es)
+        for prefix, comp in _MODULE_TO_COMPONENT.items():
+            if record.name.startswith(prefix) and comp == self.component:
+                return True
+        return False
+
+
 class ContextLogger:
     """Logger with component and context support."""
-    
+
     def __init__(self, component: LogComponent, logger: logging.Logger):
         self.component = component
         self.logger = logger
-    
+
     def _format_message(self, message: str, context: Optional[Dict[str, Any]] = None) -> str:
         """Format message with component and context."""
         formatted = f"[{self.component.value.upper()}] {message}"
@@ -54,34 +89,29 @@ class ContextLogger:
             context_str = " | ".join(f"{k}={v}" for k, v in context.items())
             formatted = f"{formatted} | {context_str}"
         return formatted
-    
+
     def debug(self, message: str, context: Optional[Dict[str, Any]] = None):
-        """Log debug message."""
         self.logger.debug(self._format_message(message, context))
-    
+
     def info(self, message: str, context: Optional[Dict[str, Any]] = None):
-        """Log info message."""
         self.logger.info(self._format_message(message, context))
-    
+
     def warning(self, message: str, context: Optional[Dict[str, Any]] = None):
-        """Log warning message."""
         self.logger.warning(self._format_message(message, context))
-    
+
     def error(self, message: str, context: Optional[Dict[str, Any]] = None, exc_info: bool = False):
-        """Log error message."""
         self.logger.error(self._format_message(message, context), exc_info=exc_info)
-    
+
     def critical(self, message: str, context: Optional[Dict[str, Any]] = None, exc_info: bool = False):
-        """Log critical message."""
         self.logger.critical(self._format_message(message, context), exc_info=exc_info)
 
 
 class LoggingConfig:
     """Centralized logging configuration."""
-    
+
     _initialized = False
     _loggers: Dict[LogComponent, ContextLogger] = {}
-    
+
     @classmethod
     def initialize(
         cls,
@@ -93,136 +123,119 @@ class LoggingConfig:
     ):
         """
         Initialize logging system with rolling file handlers.
-        
-        Args:
-            log_dir: Directory for log files
-            log_level: Default log level
-            max_bytes: Maximum size of each log file before rotation
-            backup_count: Number of backup files to keep
-            console_output: Whether to output logs to console
+
+        Creates:
+          alphacent.log  — full INFO+ audit trail
+          errors.log     — ERROR and CRITICAL only
+          warnings.log   — WARNING only
+          <component>.log — per-component INFO+ for api/strategy/risk/execution/data/...
         """
         if cls._initialized:
             return
-        
-        # Create log directory
+
         log_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create formatter
+
         formatter = logging.Formatter(
             fmt='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        
-        # Configure root logger
+
         root_logger = logging.getLogger()
         root_logger.setLevel(log_level.value)
-        
-        # Remove existing handlers
         root_logger.handlers.clear()
-        
-        # Add console handler if requested
+
+        # ── Console handler ──────────────────────────────────────────────────
         if console_output:
             console_handler = logging.StreamHandler(sys.stdout)
             console_handler.setLevel(log_level.value)
             console_handler.setFormatter(formatter)
             root_logger.addHandler(console_handler)
-        
-        # Add main rotating file handler
-        # Use single log file that rotates when it reaches max_bytes
-        # This prevents creating a new file on every restart
-        main_log_file = log_dir / "alphacent.log"
-        file_handler = logging.handlers.RotatingFileHandler(
-            main_log_file,
+
+        # ── Main log: full INFO+ audit trail ─────────────────────────────────
+        main_handler = logging.handlers.RotatingFileHandler(
+            log_dir / "alphacent.log",
             maxBytes=max_bytes,
             backupCount=backup_count
         )
-        file_handler.setLevel(log_level.value)
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
-        
-        # Create component-specific loggers
+        main_handler.setLevel(log_level.value)
+        main_handler.setFormatter(formatter)
+        root_logger.addHandler(main_handler)
+
+        # ── errors.log: ERROR and CRITICAL only ──────────────────────────────
+        # Near-empty on a healthy day. Any entry here needs attention.
+        error_handler = logging.handlers.RotatingFileHandler(
+            log_dir / "errors.log",
+            maxBytes=max_bytes,
+            backupCount=backup_count
+        )
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(formatter)
+        root_logger.addHandler(error_handler)
+
+        # ── warnings.log: WARNING only ───────────────────────────────────────
+        # Position sizing bumps, stale data, minor issues. Review periodically.
+        class WarningOnlyFilter(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
+                return record.levelno == logging.WARNING
+
+        warning_handler = logging.handlers.RotatingFileHandler(
+            log_dir / "warnings.log",
+            maxBytes=max_bytes,
+            backupCount=backup_count
+        )
+        warning_handler.setLevel(logging.WARNING)
+        warning_handler.addFilter(WarningOnlyFilter())
+        warning_handler.setFormatter(formatter)
+        root_logger.addHandler(warning_handler)
+
+        # ── Component-specific logs: routed by module name prefix ────────────
+        # Each component file captures INFO+ from its own source modules.
+        # e.g. strategy.log gets everything from src.strategy.*, src.analytics.*, src.ml.*
+        component_handlers: Dict[LogComponent, logging.Handler] = {}
         for component in LogComponent:
-            component_logger = logging.getLogger(f"alphacent.{component.value}")
-            component_logger.setLevel(log_level.value)
-            
-            # Add component-specific file handler
-            component_log_file = log_dir / f"{component.value}.log"
-            component_handler = logging.handlers.RotatingFileHandler(
-                component_log_file,
+            handler = logging.handlers.RotatingFileHandler(
+                log_dir / f"{component.value}.log",
                 maxBytes=max_bytes,
                 backupCount=backup_count
             )
-            component_handler.setLevel(log_level.value)
-            component_handler.setFormatter(formatter)
-            component_logger.addHandler(component_handler)
-            
-            # Create context logger
+            handler.setLevel(log_level.value)
+            handler.setFormatter(formatter)
+            handler.addFilter(ComponentRoutingFilter(component))
+            root_logger.addHandler(handler)
+            component_handlers[component] = handler
+
+            component_logger = logging.getLogger(f"alphacent.{component.value}")
+            component_logger.setLevel(log_level.value)
             cls._loggers[component] = ContextLogger(component, component_logger)
-        
+
         cls._initialized = True
-    
+
     @classmethod
     def get_logger(cls, component: LogComponent) -> ContextLogger:
-        """
-        Get logger for specific component.
-        
-        Args:
-            component: Component to get logger for
-            
-        Returns:
-            ContextLogger for the component
-        """
         if not cls._initialized:
             cls.initialize()
-        
         return cls._loggers[component]
-    
+
     @classmethod
     def set_level(cls, component: LogComponent, level: LogSeverity):
-        """
-        Set log level for specific component.
-        
-        Args:
-            component: Component to set level for
-            level: New log level
-        """
         if not cls._initialized:
             cls.initialize()
-        
         logger = cls._loggers[component].logger
         logger.setLevel(level.value)
         for handler in logger.handlers:
             handler.setLevel(level.value)
-    
+
     @classmethod
     def set_global_level(cls, level: LogSeverity):
-        """
-        Set log level for all components.
-        
-        Args:
-            level: New log level
-        """
         if not cls._initialized:
             cls.initialize()
-        
         root_logger = logging.getLogger()
         root_logger.setLevel(level.value)
         for handler in root_logger.handlers:
             handler.setLevel(level.value)
-        
         for component in LogComponent:
             cls.set_level(component, level)
 
 
-# Convenience function for getting loggers
 def get_logger(component: LogComponent) -> ContextLogger:
-    """
-    Get logger for specific component.
-    
-    Args:
-        component: Component to get logger for
-        
-    Returns:
-        ContextLogger for the component
-    """
     return LoggingConfig.get_logger(component)

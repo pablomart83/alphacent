@@ -1397,11 +1397,37 @@ class TradingScheduler:
                 from src.core.cycle_logger import get_cycle_logger
                 import time as _t2
                 duration = _t2.time() - batch_start if 'batch_start' in dir() else 0
+
+                # Build per-signal detail for cycle log
+                _signal_details = []
+                _order_details = []
+                for _sid, _sigs in coordinated_results.items():
+                    _strat = strategy_map.get(_sid, (None, None))[0]
+                    _sname = _strat.name if _strat else _sid[:20]
+                    for _sig in _sigs:
+                        _signal_details.append({
+                            'symbol': _sig.symbol,
+                            'strategy': _sname,
+                            'side': _sig.action.value if hasattr(_sig.action, 'value') else str(_sig.action),
+                            'confidence': _sig.confidence,
+                        })
+
+                # Collect rejection reasons from result
+                _rejection_details = []
+                for _rej in result.get('coordination_rejections', []):
+                    _rejection_details.append({
+                        'symbol': _rej.get('symbol', '?'),
+                        'strategy': _rej.get('strategy', '?'),
+                        'reason': _rej.get('reason', '?'),
+                    })
+
                 get_cycle_logger().log_signal_cycle(
                     duration_seconds=duration,
                     strategies=result["active_strategies"],
                     signals=result["signals_coordinated"],
                     orders=orders_executed,
+                    signal_details=_signal_details if _signal_details else None,
+                    rejection_details=_rejection_details if _rejection_details else None,
                 )
             except Exception:
                 pass
