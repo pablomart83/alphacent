@@ -177,8 +177,8 @@ backtest:
         slippage_percent: 0.00005
         overnight_financing_pct_per_day: 0.0001  # Forex swap rates vary; 0.01% conservative
       crypto:
-        commission_percent: 0.01
-        spread_percent: 0.0
+        commission_percent: 0.0
+        spread_percent: 0.0038  # eToro crypto spread ~0.375% per side = 0.75% round-trip
         slippage_percent: 0.001
         overnight_financing_pct_per_day: 0.0  # Crypto: no overnight fee on eToro
       index:
