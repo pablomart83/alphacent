@@ -639,6 +639,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
   const positionColumns: ColumnDef<Position>[] = [
     {
       id: 'select',
+      enableSorting: false,
       header: () => (
         <div className="flex items-center justify-center">
           <input type="checkbox" checked={filteredPositions.length > 0 && selectedPositions.size === filteredPositions.length}
@@ -666,6 +667,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'strategy_name',
       header: 'Strategy',
+      sortingFn: 'alphanumeric',
       cell: ({ row }) => (
         <div className="font-mono text-xs text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || row.original.strategy_id?.slice(0, 8) || '—'}
@@ -685,6 +687,10 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       id: 'status',
       header: 'Status',
+      enableSorting: true,
+      sortingFn: (rowA, rowB) => {
+        return getPositionStatus(rowA.original).localeCompare(getPositionStatus(rowB.original));
+      },
       cell: ({ row }) => {
         const status = getPositionStatus(row.original);
         return (
@@ -696,8 +702,10 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       },
     },
     {
-      accessorKey: 'quantity',
+      id: 'invested',
       header: () => <div className="text-right">Invested</div>,
+      enableSorting: true,
+      sortingFn: (rowA, rowB) => getInvested(rowA.original) - getInvested(rowB.original),
       cell: ({ row }) => {
         const invested = getInvested(row.original);
         return <div className="text-right font-mono text-[13px]">{formatCurrency(invested)}</div>;
@@ -730,19 +738,22 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       id: 'holding',
       header: 'Hold',
+      enableSorting: true,
+      sortingFn: (rowA, rowB) =>
+        new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime(),
       cell: ({ row }) => {
         const days = Math.floor((Date.now() - new Date(row.original.opened_at).getTime()) / (1000 * 60 * 60 * 24));
         const color = days < 7 ? 'text-[#22c55e]' : days <= 30 ? 'text-amber-400' : 'text-[#ef4444]';
         const bg = days < 7 ? 'bg-[#22c55e]/10' : days <= 30 ? 'bg-amber-400/10' : 'bg-[#ef4444]/10';
         return <span className={cn('px-1.5 py-0.5 rounded text-xs font-mono font-semibold', color, bg)}>{days}d</span>;
       },
-      sortingFn: (rowA, rowB) => {
-        return new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime();
-      },
     },
     {
       id: 'opened_at',
       header: 'Opened',
+      enableSorting: true,
+      sortingFn: (rowA, rowB) =>
+        new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime(),
       cell: ({ row }) => {
         const d = new Date(row.original.opened_at);
         const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
@@ -754,13 +765,12 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
           </div>
         );
       },
-      sortingFn: (rowA, rowB) => {
-        return new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime();
-      },
     },
     {
       id: 'portfolioPct',
       header: () => <div className="text-right">%Port</div>,
+      enableSorting: true,
+      sortingFn: (rowA, rowB) => getInvested(rowA.original) - getInvested(rowB.original),
       cell: ({ row }) => {
         const totalValue = positions.reduce((sum, p) => sum + Math.abs(getInvested(p)), 0);
         const posValue = Math.abs(getInvested(row.original));
@@ -771,6 +781,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       id: 'stopTp',
       header: 'SL/TP',
+      enableSorting: false,
       cell: ({ row }) => {
         const { entry_price, current_price, stop_loss, take_profit } = row.original;
         if (!stop_loss && !take_profit) return <span className="text-xs text-muted-foreground">—</span>;
@@ -791,6 +802,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     },
     {
       id: 'actions',
+      enableSorting: false,
       header: '',
       cell: ({ row }) => (
         <div className="flex justify-end">
@@ -817,6 +829,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
   const closedPositionColumns: ColumnDef<ClosedPosition>[] = [
     {
       id: 'select',
+      enableSorting: false,
       header: () => (
         <div className="flex items-center justify-center">
           <input type="checkbox" checked={filteredClosedPositions.length > 0 && selectedClosedPositions.size === filteredClosedPositions.length}
@@ -849,6 +862,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'strategy_name',
       header: 'Strategy',
+      sortingFn: 'alphanumeric',
       cell: ({ row }) => (
         <div className="font-mono text-xs text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || '—'}
@@ -883,11 +897,14 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'exit_reason',
       header: 'Exit',
+      sortingFn: 'alphanumeric',
       cell: ({ row }) => <div className="text-xs text-muted-foreground">{row.original.exit_reason || 'N/A'}</div>,
     },
     {
       accessorKey: 'closed_at',
       header: () => <div className="text-right">Closed</div>,
+      sortingFn: (rowA, rowB) =>
+        new Date(rowA.original.closed_at).getTime() - new Date(rowB.original.closed_at).getTime(),
       cell: ({ row }) => <div className="text-right text-xs text-muted-foreground whitespace-nowrap font-mono">{formatTimestamp(row.original.closed_at)}</div>,
     },
   ];
