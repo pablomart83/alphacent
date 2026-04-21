@@ -1880,12 +1880,47 @@ class TradingScheduler:
                     new_signals = []
                     for strategy_id, signal, strategy_name in tf_signals:
                         if strategy_id in existing_strategy_ids:
-                            self._log_coordination_rejection(
-                                signal=signal,
-                                strategy_name=strategy_name,
-                                rejection_reason=f"Same-strategy duplicate: already has {direction} position in {normalized_symbol}",
-                            )
-                            position_duplicate_count += 1
+                            # Allow re-entry by the same strategy if the existing position
+                            # is still within its SL range (loss < SL%). The signal fired
+                            # again — the thesis is intact and we can scale in.
+                            # Block only if the position is already at/near the SL boundary.
+                            allow_reentry = False
+                            for pos in existing_positions_for_key:
+                                if not (hasattr(pos, 'strategy_id') and pos.strategy_id == strategy_id):
+                                    continue
+                                if not pos.entry_price or pos.entry_price <= 0:
+                                    continue
+                                if not pos.current_price or pos.current_price <= 0:
+                                    continue
+                                # Price-based loss (same as health check)
+                                pos_side = str(getattr(pos, 'side', 'LONG')).upper()
+                                if 'LONG' in pos_side or 'BUY' in pos_side:
+                                    pos_loss = (pos.entry_price - pos.current_price) / pos.entry_price
+                                else:
+                                    pos_loss = (pos.current_price - pos.entry_price) / pos.entry_price
+                                # Get SL% for this position's strategy
+                                pos_sl_pct = 0.05
+                                strat_tuple = strategy_map.get(strategy_id, (None, None))
+                                if strat_tuple[0] and hasattr(strat_tuple[0], 'risk_params') and strat_tuple[0].risk_params:
+                                    pos_sl_pct = strat_tuple[0].risk_params.get('stop_loss_pct', 0.05)
+                                # Allow re-entry if loss is less than 80% of SL (safe margin)
+                                if pos_loss < pos_sl_pct * 0.8:
+                                    allow_reentry = True
+                                break
+
+                            if allow_reentry:
+                                new_signals.append((strategy_id, signal, strategy_name))
+                                logger.debug(
+                                    f"Re-entry allowed: {strategy_name} on {normalized_symbol} "
+                                    f"(existing position within SL range)"
+                                )
+                            else:
+                                self._log_coordination_rejection(
+                                    signal=signal,
+                                    strategy_name=strategy_name,
+                                    rejection_reason=f"Same-strategy duplicate: already has {direction} position in {normalized_symbol}",
+                                )
+                                position_duplicate_count += 1
                         else:
                             new_signals.append((strategy_id, signal, strategy_name))
                     

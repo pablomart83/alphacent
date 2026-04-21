@@ -4717,8 +4717,13 @@ Generate a CORRECTED strategy that addresses all errors:"""
             template_map[template.name] = template
 
             for symbol in symbols:
-                # Skip combos already active in the pipeline
-                if (template.name, symbol) in active_pairs:
+                # Skip combos already active in the pipeline.
+                # Exception: crypto_optimized templates only have BTC/ETH as valid symbols.
+                # With only 2 symbols, blocking both because another version is already
+                # running would permanently starve all crypto templates. Allow them through
+                # — the per-timeframe cap (MAX_PER_SYMBOL_PER_TIMEFRAME) handles concentration.
+                is_crypto_template = bool(template.metadata and template.metadata.get('crypto_optimized'))
+                if not is_crypto_template and (template.name, symbol) in active_pairs:
                     continue
 
                 base_score = self._score_symbol_for_template(
@@ -5968,23 +5973,31 @@ Make this strategy distinct and innovative while following all threshold and pai
         # Get equity-regime templates (for stocks, ETFs, forex, indices, commodities)
         equity_templates = _get_templates_for_regime_with_parent(market_regime)
 
-        # Get crypto-regime templates (for crypto symbols)
+        # Get crypto-regime templates (for crypto symbols).
+        # Always add crypto templates regardless of whether crypto regime matches equity —
+        # crypto_optimized templates are hard-blocked from non-crypto symbols in scoring,
+        # so they can only ever run on BTC/ETH. Without this, when equity and crypto happen
+        # to share the same regime string, crypto templates fall through the equity filter
+        # and score 0 on all 295 non-crypto symbols, getting zero proposal slots.
+        crypto_templates = _get_templates_for_regime_with_parent(crypto_regime)
+        crypto_only = [t for t in crypto_templates
+                      if t.metadata and t.metadata.get('crypto_optimized')]
+        equity_names = {t.name for t in equity_templates}
+        added_crypto = 0
+        for ct in crypto_only:
+            if ct.name not in equity_names:
+                equity_templates.append(ct)
+                equity_names.add(ct.name)
+                added_crypto += 1
         if crypto_regime.value != market_regime.value:
-            crypto_templates = _get_templates_for_regime_with_parent(crypto_regime)
-            # Only keep crypto-specific templates from the crypto regime set
-            crypto_only = [t for t in crypto_templates
-                          if t.metadata and t.metadata.get('crypto_optimized')]
-            # Merge: equity templates + crypto-regime-matched crypto templates
-            equity_names = {t.name for t in equity_templates}
-            for ct in crypto_only:
-                if ct.name not in equity_names:
-                    equity_templates.append(ct)
             logger.info(
-                f"Multi-regime gate: equity={market_regime.value} ({len(equity_templates) - len(crypto_only)} templates), "
-                f"crypto={crypto_regime.value} ({len(crypto_only)} crypto templates added)"
+                f"Multi-regime gate: equity={market_regime.value} ({len(equity_templates) - added_crypto} templates), "
+                f"crypto={crypto_regime.value} ({added_crypto} crypto templates added)"
             )
         else:
-            logger.info(f"Regime gate: {market_regime.value} (crypto regime matches equity)")
+            logger.info(
+                f"Regime gate: {market_regime.value} (crypto matches equity, {added_crypto} crypto templates added)"
+            )
 
         templates = equity_templates
         vix = market_context.get('vix', 20.0)

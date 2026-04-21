@@ -1518,24 +1518,25 @@ class MonitoringService:
                 if not pos.current_price or pos.current_price <= 0:
                     continue
                 
-                # Use invested_amount for P&L % calculation.
-                # Fallback to quantity * entry_price (actual cost basis).
-                # Never use raw quantity alone — that produces nonsensical percentages.
+                # Use price-based P&L % — avoids stale unrealized_pnl from eToro sync.
+                # unrealized_pnl in DB can be hours old and wildly wrong (e.g. HWM -89.5%,
+                # VOO -53% were stale values that triggered false health check closures).
+                # (current_price - entry_price) / entry_price is always computable and correct.
+                side_str = str(pos.side).upper() if pos.side else 'LONG'
+                is_long = 'LONG' in side_str
+                if is_long:
+                    pnl_pct = (pos.current_price - pos.entry_price) / pos.entry_price
+                else:
+                    pnl_pct = (pos.entry_price - pos.current_price) / pos.entry_price
+
+                # invested_amount still needed for dollar display in closure_reason
                 if pos.invested_amount and pos.invested_amount > 0:
                     invested = pos.invested_amount
                 elif pos.quantity and pos.entry_price and pos.quantity > 0 and pos.entry_price > 0:
                     invested = abs(pos.quantity) * pos.entry_price
                 else:
-                    continue
-                if invested <= 0:
-                    continue
-                
-                # Current P&L as percentage of invested
-                pnl = pos.unrealized_pnl or 0
-                pnl_pct = pnl / invested
-                
-                side_str = str(pos.side).upper() if pos.side else 'LONG'
-                is_long = 'LONG' in side_str
+                    invested = 0
+                pnl = pnl_pct * invested
                 
                 # Get strategy's configured SL% (if available)
                 sl_pct = 0.05  # Default 5%
@@ -1572,9 +1573,10 @@ class MonitoringService:
                 if not closure_reason and pnl_pct < -0.05 and pos.opened_at:
                     age_days = (datetime.now() - pos.opened_at).days
                     if age_days >= 7:
+                        pnl_display = f"${pnl:.2f}" if invested > 0 else f"{pnl_pct:.1%}"
                         closure_reason = (
                             f"Stale underwater: {pnl_pct:.1%} loss for {age_days} days "
-                            f"(${pnl:.2f} on ${invested:.0f} invested)"
+                            f"({pnl_display} on ${invested:.0f} invested)"
                         )
                 
                 if closure_reason:
