@@ -1331,6 +1331,18 @@ class StrategyEngine:
         logger.info(f"Fetching data with {warmup_days} day warmup period (from {fetch_start.date()} to {end.date()})")
         logger.info(f"Expected data points: ~{expected_trading_days} trading days ({calendar_days} calendar days, {asset_class})")
         
+        # For intraday intervals, convert expected trading days to expected bars.
+        # Daily bars: 1 bar/day. 1h bars: ~6.5 bars/day (stocks) or 24 (crypto).
+        # Without this, coverage% is nonsensical (2200 bars / 193 days = 1139%).
+        if interval == '1h':
+            bars_per_trading_day = 24 if asset_class == 'crypto' else 7  # ~6.5h rounded up
+            expected_bars = expected_trading_days * bars_per_trading_day
+        elif interval == '4h':
+            bars_per_trading_day = 6 if asset_class == 'crypto' else 2
+            expected_bars = expected_trading_days * bars_per_trading_day
+        else:
+            expected_bars = expected_trading_days
+        
         # Fetch historical data for all symbols (with warmup period)
         all_data = {}
         data_quality_warnings = []
@@ -1367,7 +1379,7 @@ class StrategyEngine:
                 
                 # Data quality check — relative to the period being backtested
                 actual_days = len(df)
-                data_coverage = (actual_days / expected_trading_days) * 100 if expected_trading_days > 0 else 0
+                data_coverage = (actual_days / expected_bars) * 100 if expected_bars > 0 else 0
                 
                 logger.info(f"Fetched {actual_days} data points for {symbol} (coverage: {data_coverage:.1f}%)")
                 
@@ -1376,13 +1388,13 @@ class StrategyEngine:
                 # not a data quality issue. Only flag real problems.
                 if data_coverage < 50:
                     # Severely limited — less than half the expected data
-                    warning_msg = f"Symbol {symbol} has only {actual_days} days of data (expected ~{expected_trading_days}, coverage: {data_coverage:.0f}%)"
+                    warning_msg = f"Symbol {symbol} has only {actual_days} bars of data (expected ~{expected_bars}, coverage: {data_coverage:.0f}%)"
                     logger.warning(warning_msg)
                     logger.warning(f"  ⚠ Very limited data for {symbol}. Consider using shorter backtest period.")
                     data_quality_warnings.append(warning_msg)
                 elif data_coverage < 70:
                     # Limited but usable
-                    warning_msg = f"Symbol {symbol} has {actual_days} days (expected ~{expected_trading_days}, coverage: {data_coverage:.0f}%)"
+                    warning_msg = f"Symbol {symbol} has {actual_days} bars (expected ~{expected_bars}, coverage: {data_coverage:.0f}%)"
                     logger.warning(warning_msg)
                     data_quality_warnings.append(warning_msg)
             
@@ -6436,6 +6448,17 @@ class StrategyEngine:
                                     should_enter = True
                         except (ValueError, TypeError):
                             pass
+                    else:
+                        # FMP insider endpoint unavailable on current plan (403/404).
+                        # Fall back to momentum + volume proxy: 5-day return > 2% with
+                        # above-average volume is a reasonable proxy for insider confidence.
+                        if entry_idx is not None and entry_idx >= 10 and entry_idx < len(df):
+                            ret_5d = (close.iloc[entry_idx] - close.iloc[entry_idx - 5]) / close.iloc[entry_idx - 5]
+                            vol_avg = df['volume'].iloc[entry_idx - 10:entry_idx].mean()
+                            vol_current = df['volume'].iloc[entry_idx]
+                            vol_ratio = vol_current / vol_avg if vol_avg > 0 else 1.0
+                            if ret_5d > 0.02 and vol_ratio > 1.3:
+                                should_enter = True
 
             elif template_type == 'sector_rotation':
                 # Use real FMP sector performance data for sector rotation

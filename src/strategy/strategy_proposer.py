@@ -15,6 +15,7 @@ from src.models.enums import StrategyStatus
 from src.strategy.market_analyzer import MarketStatisticsAnalyzer
 from src.strategy.performance_tracker import StrategyPerformanceTracker
 from src.strategy.strategy_templates import StrategyTemplateLibrary, StrategyTemplate, MarketRegime, StrategyType
+from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS as _DAILY_ONLY_SYMBOLS
 
 logger = logging.getLogger(__name__)
 
@@ -1312,6 +1313,23 @@ class StrategyProposer:
                     template_name = strategy.metadata.get('template_name', '') if strategy.metadata else ''
                     primary_symbol = strategy.symbols[0] if strategy.symbols else ''
                     wf_cache_key = (template_name, primary_symbol)
+
+                    # Pre-WF fundamental filter: skip dividend_aristocrat strategies on
+                    # symbols with no meaningful dividend yield — they will always produce
+                    # 0 trades in backtest (entry condition requires yield > 2%).
+                    if 'dividend' in template_name.lower() or 'aristocrat' in template_name.lower():
+                        try:
+                            quarters = self._get_cached_quarterly_data(primary_symbol)
+                            if quarters:
+                                div_yields = [q.get('dividend_yield') for q in quarters if q.get('dividend_yield') is not None]
+                                latest_yield = div_yields[0] if div_yields else 0.0
+                            else:
+                                latest_yield = 0.0
+                            if latest_yield < 0.015:
+                                logger.debug(f"Pre-WF skip: {template_name} on {primary_symbol} — dividend yield {latest_yield:.2%} < 1.5%")
+                                continue
+                        except Exception:
+                            pass  # If we can't check, let WF decide
                     
                     import time as _wf_time
                     cached_wf = self._wf_results_cache.get(wf_cache_key)
@@ -3280,7 +3298,19 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 skipped_dupes += 1
                 continue
             seen_template_symbols.add(pair_key)
-            
+
+            # Skip LME metals (ZINC, ALUMINUM, PLATINUM, NICKEL) on intraday templates.
+            # These symbols only have daily data — intraday WF will always crash with
+            # "No historical data available", flooding errors.log and wasting proposal slots.
+            _is_intraday = bool(template.metadata and template.metadata.get('intraday', False))
+            _is_4h = bool(template.metadata and template.metadata.get('interval_4h', False))
+            _primary_sym = (template.metadata.get('fixed_symbols', [assigned_symbol]) if template.metadata else [assigned_symbol])
+            _primary_sym = _primary_sym[0] if isinstance(_primary_sym, list) else _primary_sym
+            if _primary_sym.upper() in _DAILY_ONLY_SYMBOLS and (_is_intraday or _is_4h):
+                logger.debug(f"Skipping {template_name} on {_primary_sym} — LME metal has no intraday data")
+                skipped_dupes += 1
+                continue
+
             # Build watchlist: primary symbol is the assigned one, rest from template's watchlist
             if template.metadata and 'fixed_symbols' in template.metadata:
                 strategy_symbol = template.metadata['fixed_symbols']

@@ -88,6 +88,7 @@ DAILY_ONLY_SYMBOLS = {
     "ZINC",       # ZNC=F — CME zinc futures, no reliable 1h data on Yahoo
     "ALUMINUM",   # ALI=F — CME aluminum futures, thin 1h data
     "PLATINUM",   # PL=F — CME platinum futures, thin 1h data
+    "NICKEL",     # LME nickel — no intraday data on Yahoo Finance
 }
 
 

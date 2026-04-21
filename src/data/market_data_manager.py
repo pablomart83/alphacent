@@ -707,11 +707,15 @@ class MarketDataManager:
                 logger.warning(f"Market data for {data.symbol} has high < low")
                 return False
 
-            if data.high < data.open or data.high < data.close:
+            # Use a small epsilon for float comparison — open=high or close=high
+            # are valid bars (e.g., a down-day where open was the high).
+            # Strict < avoids false positives from floating-point rounding.
+            _eps = 1e-8
+            if data.high < data.open - _eps or data.high < data.close - _eps:
                 logger.warning(f"Market data for {data.symbol} has high < open or close")
                 return False
 
-            if data.low > data.open or data.low > data.close:
+            if data.low > data.open + _eps or data.low > data.close + _eps:
                 logger.warning(f"Market data for {data.symbol} has low > open or close")
                 return False
 
