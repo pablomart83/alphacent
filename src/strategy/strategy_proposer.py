@@ -5970,15 +5970,20 @@ Make this strategy distinct and innovative while following all threshold and pai
                             templates.append(pt)
             return templates
 
-        # Get equity-regime templates (for stocks, ETFs, forex, indices, commodities)
-        equity_templates = _get_templates_for_regime_with_parent(market_regime)
+        # Get equity-regime templates (for stocks, ETFs, forex, indices, commodities).
+        # Strip crypto_optimized templates from the equity pool — they score 0 on all
+        # non-crypto symbols anyway (hard-blocked in _score_symbol_for_template), so
+        # keeping them in the equity pool just wastes slots and causes the dedup below
+        # to block them from being re-added from the crypto-regime pool.
+        equity_templates_raw = _get_templates_for_regime_with_parent(market_regime)
+        equity_templates = [t for t in equity_templates_raw
+                           if not (t.metadata and t.metadata.get('crypto_optimized'))]
 
         # Get crypto-regime templates (for crypto symbols).
         # Always add crypto templates regardless of whether crypto regime matches equity —
         # crypto_optimized templates are hard-blocked from non-crypto symbols in scoring,
-        # so they can only ever run on BTC/ETH. Without this, when equity and crypto happen
-        # to share the same regime string, crypto templates fall through the equity filter
-        # and score 0 on all 295 non-crypto symbols, getting zero proposal slots.
+        # so they can only ever run on BTC/ETH. Without stripping them from the equity
+        # pool above, the dedup below would block all of them when regimes match.
         crypto_templates = _get_templates_for_regime_with_parent(crypto_regime)
         crypto_only = [t for t in crypto_templates
                       if t.metadata and t.metadata.get('crypto_optimized')]

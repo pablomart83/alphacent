@@ -536,19 +536,18 @@ class RiskManager:
             MINIMUM_ORDER_SIZE_POST = 2000.0
 
             if 0 < position_size < MINIMUM_ORDER_SIZE_POST:
-                MAX_BUMP_RATIO_POST = 3.0
-                if position_size > 0 and MINIMUM_ORDER_SIZE_POST / position_size > MAX_BUMP_RATIO_POST:
+                max_bump_dollar_post = portfolio_value * 0.01  # 1% of equity
+                if position_size > 0 and MINIMUM_ORDER_SIZE_POST > max_bump_dollar_post:
                     logger.warning(
                         f"Post-adjustment size ${position_size:.2f} below eToro minimum "
-                        f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bump would be "
-                        f"{MINIMUM_ORDER_SIZE_POST/position_size:.1f}x (>{MAX_BUMP_RATIO_POST:.0f}x max). "
-                        f"Rejecting to avoid over-sizing."
+                        f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bump would exceed "
+                        f"1% equity cap (${max_bump_dollar_post:.0f}). Rejecting."
                     )
                     return ValidationResult(
                         is_valid=False,
                         position_size=0.0,
                         reason=f"Post-adjustment size ${position_size:.2f} too far below minimum "
-                               f"${MINIMUM_ORDER_SIZE_POST:.0f} (would require {MINIMUM_ORDER_SIZE_POST/position_size:.1f}x bump)"
+                               f"${MINIMUM_ORDER_SIZE_POST:.0f} (exceeds 1% equity cap)"
                     )
                 logger.info(
                     f"Post-adjustment size ${position_size:.2f} below eToro minimum "
@@ -868,18 +867,20 @@ class RiskManager:
         MINIMUM_ORDER_SIZE = 2000.0
 
         if position_size < MINIMUM_ORDER_SIZE:
-            # Bump to minimum only if the calculated size is at least $667 (3x guard).
-            # A strategy that calculates $700+ gets bumped to $2K — acceptable.
-            # A strategy that calculates $200 would need a 10x bump — that means the
-            # volatility-scaled sizing decided this position should be tiny. Respect that.
-            MAX_BUMP_RATIO = 3.0
+            # Bump to minimum if we have capital available.
+            # Guard: don't bump if the position would exceed 1% of portfolio equity
+            # (that would mean the vol-scaler decided this is a genuinely tiny position
+            # relative to the portfolio — respect that signal).
+            # But if it's just the $2K floor being hit on a normal-sized strategy,
+            # bump it up — eToro won't accept less than $2K anyway.
+            max_bump_dollar = portfolio_value * 0.01  # 1% of equity = ~$4,750 at current size
             if available_capital >= MINIMUM_ORDER_SIZE and remaining_exposure >= MINIMUM_ORDER_SIZE:
-                if position_size > 0 and MINIMUM_ORDER_SIZE / position_size > MAX_BUMP_RATIO:
+                if position_size > 0 and MINIMUM_ORDER_SIZE > max_bump_dollar:
+                    # Position is genuinely tiny relative to portfolio — vol-scaler said so
                     logger.warning(
                         f"Position size ${position_size:.2f} below eToro minimum ${MINIMUM_ORDER_SIZE:.0f} "
-                        f"for {getattr(signal, 'symbol', '?')} — bump would be {MINIMUM_ORDER_SIZE/position_size:.1f}x "
-                        f"(>{MAX_BUMP_RATIO:.0f}x max). Rejecting — vol-scaling says position should be small. "
-                        f"Strategy allocation too small for this asset class."
+                        f"for {getattr(signal, 'symbol', '?')} — bump would exceed 1% equity cap "
+                        f"(${max_bump_dollar:.0f}). Rejecting."
                     )
                     return 0.0
                 logger.info(
