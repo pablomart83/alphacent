@@ -536,19 +536,10 @@ class RiskManager:
             MINIMUM_ORDER_SIZE_POST = 2000.0
 
             if 0 < position_size < MINIMUM_ORDER_SIZE_POST:
-                max_bump_dollar_post = portfolio_value * 0.01  # 1% of equity
-                if position_size > 0 and MINIMUM_ORDER_SIZE_POST > max_bump_dollar_post:
-                    logger.warning(
-                        f"Post-adjustment size ${position_size:.2f} below eToro minimum "
-                        f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bump would exceed "
-                        f"1% equity cap (${max_bump_dollar_post:.0f}). Rejecting."
-                    )
-                    return ValidationResult(
-                        is_valid=False,
-                        position_size=0.0,
-                        reason=f"Post-adjustment size ${position_size:.2f} too far below minimum "
-                               f"${MINIMUM_ORDER_SIZE_POST:.0f} (exceeds 1% equity cap)"
-                    )
+                logger.info(
+                    f"Post-adjustment size ${position_size:.2f} below eToro minimum "
+                    f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bumping to minimum"
+                )
                 logger.info(
                     f"Post-adjustment size ${position_size:.2f} below eToro minimum "
                     f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bumping to minimum"
@@ -867,22 +858,11 @@ class RiskManager:
         MINIMUM_ORDER_SIZE = 2000.0
 
         if position_size < MINIMUM_ORDER_SIZE:
-            # Bump to minimum if we have capital available.
-            # Guard: don't bump if the position would exceed 1% of portfolio equity
-            # (that would mean the vol-scaler decided this is a genuinely tiny position
-            # relative to the portfolio — respect that signal).
-            # But if it's just the $2K floor being hit on a normal-sized strategy,
-            # bump it up — eToro won't accept less than $2K anyway.
-            max_bump_dollar = portfolio_value * 0.01  # 1% of equity = ~$4,750 at current size
+            # Always bump to $2K minimum if we have the capital.
+            # The vol-scaler sizes for equal risk contribution, but eToro won't accept
+            # less than $2K regardless. At $475K equity, $2K = 0.42% — always acceptable.
+            # The only legitimate rejection is insufficient available capital.
             if available_capital >= MINIMUM_ORDER_SIZE and remaining_exposure >= MINIMUM_ORDER_SIZE:
-                if position_size > 0 and MINIMUM_ORDER_SIZE > max_bump_dollar:
-                    # Position is genuinely tiny relative to portfolio — vol-scaler said so
-                    logger.warning(
-                        f"Position size ${position_size:.2f} below eToro minimum ${MINIMUM_ORDER_SIZE:.0f} "
-                        f"for {getattr(signal, 'symbol', '?')} — bump would exceed 1% equity cap "
-                        f"(${max_bump_dollar:.0f}). Rejecting."
-                    )
-                    return 0.0
                 logger.info(
                     f"Position size ${position_size:.2f} below eToro minimum ${MINIMUM_ORDER_SIZE:.0f} "
                     f"for {getattr(signal, 'symbol', '?')} — bumping to minimum"
@@ -891,7 +871,7 @@ class RiskManager:
             else:
                 logger.warning(
                     f"Calculated position size ${position_size:.2f} is below minimum ${MINIMUM_ORDER_SIZE:.0f}. "
-                    f"Strategy allocation too low ({strategy_allocation_pct:.1f}% = ${strategy_allocated_capital:.2f})"
+                    f"Insufficient capital (available=${available_capital:.0f}, remaining_exposure=${remaining_exposure:.0f})"
                 )
                 return 0.0
 
