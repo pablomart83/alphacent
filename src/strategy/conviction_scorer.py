@@ -301,7 +301,28 @@ class ConvictionScorer:
                     pass
 
             adjusted = min(1.0, confidence * regime_multiplier)
-            score += adjusted * 12.0
+
+            # DSL strategies produce confidence 0.3-0.5 by design — it's a parser
+            # artifact reflecting how many conditions fired, not signal quality.
+            # WF Sharpe already captures signal quality for DSL.
+            # Use a baseline of 8/12 for any DSL signal that clears the confidence
+            # floor (0.3), scaling to 12 at confidence=1.0.
+            # Alpha Edge signals use the full linear scale (their confidence is
+            # a genuine quality measure from the fundamental scoring pipeline).
+            is_alpha_edge = (
+                hasattr(strategy, 'metadata') and
+                isinstance(strategy.metadata, dict) and
+                strategy.metadata.get('strategy_category') == 'alpha_edge'
+            )
+            if is_alpha_edge:
+                score += adjusted * 12.0
+            else:
+                # DSL: baseline 8 pts at confidence floor, scales to 12 at 1.0
+                CONFIDENCE_FLOOR = 0.3
+                if adjusted >= CONFIDENCE_FLOOR:
+                    score += 8.0 + (adjusted - CONFIDENCE_FLOOR) / (1.0 - CONFIDENCE_FLOOR) * 4.0
+                else:
+                    score += adjusted * 12.0  # Below floor: linear (will be rejected anyway)
 
         # --- Risk management (max 8) ---
         has_sl = strategy.risk_params and strategy.risk_params.stop_loss_pct

@@ -414,9 +414,13 @@ class TradingScheduler:
 
             total_signals = sum(len(s) for s in batch_results.values())
             result["signals_generated"] = total_signals
+            # Raw signals before conviction/frequency filtering (for accurate reporting)
+            raw_signals = getattr(self._strategy_engine, '_last_batch_raw_signals', total_signals)
+            result["signals_raw"] = raw_signals
             logger.info(
                 f"Batch signal generation: {total_signals} signals from "
                 f"{len(strategy_list)} strategies in {batch_time:.1f}s"
+                + (f" ({raw_signals - total_signals} rejected by conviction/frequency filters)" if raw_signals > total_signals else "")
             )
 
             # Coordinate signals to avoid redundancy and check existing positions

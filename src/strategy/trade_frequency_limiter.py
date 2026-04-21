@@ -75,48 +75,54 @@ class TradeFrequencyLimiter:
     ) -> TradeFrequencyCheck:
         """
         Check if a signal is allowed based on frequency limits.
-        
-        Args:
-            signal: Trading signal to check
-            strategy: Strategy that generated the signal
-            
-        Returns:
-            TradeFrequencyCheck with result and details
+
+        Monthly trade cap and minimum holding period only apply to Alpha Edge
+        strategies — they are fundamental plays with specific entry windows where
+        churning in and out is genuinely harmful.
+
+        DSL strategies (EMA crossover, RSI dip buy, etc.) should trade whenever
+        the signal fires. Applying a monthly cap to a systematic DSL strategy
+        defeats the purpose of running it.
         """
-        # Check monthly trade limit
+        is_alpha_edge = (
+            hasattr(strategy, 'metadata') and
+            isinstance(strategy.metadata, dict) and
+            strategy.metadata.get('strategy_category') == 'alpha_edge'
+        )
+
         trades_this_month = self._get_trades_this_month(strategy.id)
-        
-        if trades_this_month >= self.max_trades_per_strategy_per_month:
-            return TradeFrequencyCheck(
-                allowed=False,
-                reason=f"Monthly trade limit reached ({trades_this_month}/{self.max_trades_per_strategy_per_month})",
-                trades_this_month=trades_this_month,
-                max_trades_per_month=self.max_trades_per_strategy_per_month,
-                days_since_last_trade=None,
-                min_holding_period_days=self.min_holding_period_days
-            )
-        
-        # Check minimum holding period
-        last_trade_date = self._get_last_trade_date(strategy.id)
-        
-        if last_trade_date:
-            days_since_last = (datetime.now() - last_trade_date).total_seconds() / 86400
-            
-            if days_since_last < self.min_holding_period_days:
+
+        if is_alpha_edge:
+            # Alpha Edge: enforce monthly cap and minimum holding period
+            if trades_this_month >= self.max_trades_per_strategy_per_month:
                 return TradeFrequencyCheck(
                     allowed=False,
-                    reason=f"Minimum holding period not met ({days_since_last:.1f}/{self.min_holding_period_days} days)",
+                    reason=f"Monthly trade limit reached ({trades_this_month}/{self.max_trades_per_strategy_per_month})",
                     trades_this_month=trades_this_month,
                     max_trades_per_month=self.max_trades_per_strategy_per_month,
-                    days_since_last_trade=days_since_last,
+                    days_since_last_trade=None,
                     min_holding_period_days=self.min_holding_period_days
                 )
-            
-            days_since_last_trade = days_since_last
+
+            last_trade_date = self._get_last_trade_date(strategy.id)
+            if last_trade_date:
+                days_since_last = (datetime.now() - last_trade_date).total_seconds() / 86400
+                if days_since_last < self.min_holding_period_days:
+                    return TradeFrequencyCheck(
+                        allowed=False,
+                        reason=f"Minimum holding period not met ({days_since_last:.1f}/{self.min_holding_period_days} days)",
+                        trades_this_month=trades_this_month,
+                        max_trades_per_month=self.max_trades_per_strategy_per_month,
+                        days_since_last_trade=days_since_last,
+                        min_holding_period_days=self.min_holding_period_days
+                    )
+                days_since_last_trade = days_since_last
+            else:
+                days_since_last_trade = None
         else:
+            # DSL strategies: no frequency constraints — trade on every valid signal
             days_since_last_trade = None
-        
-        # Signal is allowed
+
         return TradeFrequencyCheck(
             allowed=True,
             reason="Signal allowed",

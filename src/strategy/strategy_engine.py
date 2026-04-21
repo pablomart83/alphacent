@@ -4650,6 +4650,8 @@ class StrategyEngine:
                 f"Applying conviction scoring (min: {min_conviction}), frequency limiting, "
                 f"and ML filtering to {len(signals)} signals"
             )
+            # Accumulate raw signal count for batch reporting
+            self._last_batch_raw_signals = getattr(self, '_last_batch_raw_signals', 0) + len(signals)
             
             for signal in signals:
                 # EXIT signals bypass ALL filters — they are risk management, not entry decisions.
@@ -4821,6 +4823,7 @@ class StrategyEngine:
         
         batch_start = _time.time()
         self._batch_signal_running = True
+        self._last_batch_raw_signals = 0  # Reset raw signal counter for this batch
         results: Dict[str, List[TradingSignal]] = {}
         
         # Load signal generation config
@@ -5037,6 +5040,8 @@ class StrategyEngine:
         total_time = _time.time() - batch_start
         total_signals = sum(len(s) for s in results.values())
         self._batch_signal_running = False
+        # Track raw signals (pre-conviction) for reporting — accumulated by generate_signals
+        self._last_batch_raw_signals = getattr(self, '_last_batch_raw_signals', 0)
         logger.info(
             f"Batch signal generation complete: {total_signals} signals from "
             f"{len(strategies)} strategies in {total_time:.2f}s"

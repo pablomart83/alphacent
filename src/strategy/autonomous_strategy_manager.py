@@ -586,6 +586,7 @@ class AutonomousStrategyManager:
                     signals_rejected = sig_result.get("signals_rejected", 0)
                     orders_submitted = sig_result.get("orders_submitted", 0)
                     promoted_to_demo = sig_result.get("promoted_to_demo", 0)
+                    signals_raw = sig_result.get("signals_raw", signals_generated)
 
                     scheduler._last_signal_check = _time.time()
 
@@ -727,6 +728,12 @@ class AutonomousStrategyManager:
             logger.info(f"Strategies approved (BACKTESTED): {newly_approved}, Activated to DEMO: {promoted_to_demo}, Retired: {stats['strategies_retired']}")
             logger.info(f"Total active (DEMO+LIVE): {total_active}")
             logger.info(f"Signals generated: {signals_generated}, Orders submitted: {orders_submitted}, Rejected: {signals_rejected}")
+            if signals_generated == 0 and newly_approved > 0:
+                raw = locals().get('signals_raw', 0)
+                if raw > 0:
+                    logger.info(f"  ({raw} raw signals generated, all rejected by conviction/frequency filters — entry conditions not met or scores below threshold)")
+                else:
+                    logger.info("  (0 signals passed conviction/frequency filters — entry conditions not met or scores below threshold)")
             if promoted_to_demo > 0:
                 logger.info(f"Strategies promoted to DEMO: {promoted_to_demo} (signal fired + order placed)")
             if stats["errors"]:
@@ -881,9 +888,9 @@ class AutonomousStrategyManager:
                 )
 
                 cl.log_signals(
-                    generated=signals_generated,
-                    coordinated=signals_generated - signals_rejected,
-                    rejected=signals_rejected,
+                    generated=locals().get('signals_raw', signals_generated),
+                    coordinated=signals_generated,
+                    rejected=locals().get('signals_raw', signals_generated) - signals_generated,
                     orders_submitted=orders_submitted,
                 )
 
