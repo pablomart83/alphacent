@@ -1864,9 +1864,9 @@ class TradingScheduler:
                 # Same-strategy dedup within this timeframe bucket.
                 # Also dedup same-template-name: RSI Dip Buy V24 and RSI Dip Buy V120
                 # are the same signal logic — only one should enter per symbol per cycle.
+                existing_strategy_ids = set()
+                existing_template_names = set()
                 if existing_count > 0:
-                    existing_strategy_ids = set()
-                    existing_template_names = set()
                     for pos in existing_positions_for_key:
                         if hasattr(pos, 'strategy_id') and pos.strategy_id:
                             existing_strategy_ids.add(pos.strategy_id)

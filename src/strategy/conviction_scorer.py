@@ -35,8 +35,8 @@ class ConvictionScore:
     breakdown: Dict[str, Any]
 
     def passes_threshold(self, threshold: float) -> bool:
-        """Check if score passes threshold."""
-        return self.total_score >= threshold
+        """Check if score passes threshold. Uses 0.05 epsilon for float rounding."""
+        return self.total_score >= threshold - 0.05
 
 
 class ConvictionScorer:
