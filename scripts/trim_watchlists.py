@@ -11,6 +11,7 @@ import sys, os, json
 sys.path.insert(0, "/home/ubuntu/alphacent")
 os.chdir("/home/ubuntu/alphacent")
 
+from collections import defaultdict
 from sqlalchemy import create_engine, text
 import subprocess
 
@@ -55,6 +56,15 @@ def wl_thresholds(primary_class, sym_class):
 WL_MAX = 3  # total including primary
 
 with engine.connect() as conn:
+    # Pre-load open positions per strategy to protect them from trimming
+    pos_rows = conn.execute(text(
+        "SELECT strategy_id::text, symbol FROM positions WHERE closed_at IS NULL"
+    )).fetchall()
+    open_position_symbols = defaultdict(set)
+    for pr in pos_rows:
+        if pr[0]:
+            open_position_symbols[pr[0]].add(pr[1])
+
     rows = conn.execute(text(
         "SELECT id, name, symbols, strategy_metadata->>'template_name' as template "
         "FROM strategies WHERE status IN ('DEMO','BACKTESTED') "
@@ -84,6 +94,11 @@ with engine.connect() as conn:
         for sym in symbols[1:]:
             if len(new_symbols) >= WL_MAX:
                 break  # cap at 3
+
+            # Never remove a symbol that has an open position — exit signals must fire
+            if sym in open_position_symbols.get(str(sid), set()):
+                new_symbols.append(sym)
+                continue
 
             sym_class = get_asset_class(sym)
             min_sharpe, min_trades = wl_thresholds(primary_class, sym_class)
