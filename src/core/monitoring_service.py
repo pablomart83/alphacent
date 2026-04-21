@@ -474,7 +474,7 @@ class MonitoringService:
             
             # Check live strategy health — retire consistent losers
             try:
-                health_results = self._check_strategy_health()
+                health_results = self._check_strategy_decay()
                 if health_results.get("retired", 0) > 0:
                     logger.info(
                         f"Strategy health: retired {health_results['retired']} "

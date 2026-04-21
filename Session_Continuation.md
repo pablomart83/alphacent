@@ -4,6 +4,55 @@ Read `#File:.kiro/steering/trading-system-context.md` for full system context, t
 
 ---
 
+## Observability & Log Access
+
+### Log files on EC2 (`/home/ubuntu/alphacent/logs/`)
+
+| File | What's in it | When to read it |
+|---|---|---|
+| `errors.log` | ERROR + CRITICAL only | **First thing every session** — near-empty on healthy days |
+| `warnings.log` | WARNING only | Position sizing bumps, stale data, API failures |
+| `alphacent.log` | Full INFO+ audit trail (rotates 10MB × 5) | Deep dive into any issue |
+| `strategy.log` | All `src.strategy.*`, `src.analytics.*`, `src.ml.*` | Signal gen, WF, conviction scoring |
+| `risk.log` | All `src.risk.*` | Position sizing, risk validation |
+| `data.log` | All `src.data.*` | Price fetches, data quality, cache hits |
+| `api.log` | All `src.api.*` | HTTP requests, eToro API calls |
+| `system.log` | All `src.core.*` | Monitoring service, scheduler, order monitor |
+| `execution.log` | All `src.execution.*` | Order execution, trailing stops |
+| `cycles/cycle_history.log` | Structured autonomous cycle + signal cycle summaries | **Best for cycle diagnostics** |
+
+### How to read logs for troubleshooting
+
+```bash
+# 1. Always start here — any errors since last restart?
+ssh ... 'cat /home/ubuntu/alphacent/logs/errors.log'
+
+# 2. Check recent signal cycles (what fired, what was rejected, what orders placed)
+ssh ... 'tail -100 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
+
+# 3. Why did a specific signal get rejected?
+ssh ... 'grep "HIMS\|APP\|IONQ" /home/ubuntu/alphacent/logs/strategy.log | tail -30'
+
+# 4. Position sizing issues
+ssh ... 'grep "below.*minimum\|bump\|Rejecting" /home/ubuntu/alphacent/logs/risk.log | tail -20'
+
+# 5. Full recent activity (last 200 lines of main log)
+ssh ... 'tail -200 /home/ubuntu/alphacent/logs/alphacent.log'
+
+# 6. journalctl (persisted, survives restarts, last 3 days, capped at 200MB)
+ssh ... 'sudo journalctl -u alphacent --no-pager -n 500 2>/dev/null | grep "ERROR\|WARNING"'
+ssh ... 'sudo journalctl -u alphacent --no-pager --since "2026-04-21 18:00" 2>/dev/null | head -100'
+```
+
+### Storage budget
+- `logs/` total: ~400MB typical, ~800MB worst case (14GB free on EC2 — fine)
+- `alphacent.log`: 10MB × 6 = 60MB max (full audit trail, 5 backups)
+- `errors.log` / `warnings.log`: 10MB × 6 = 60MB each (low volume)
+- Component logs (`strategy`, `data`, etc.): 10MB × 4 = 40MB each (3 backups)
+- `journald`: capped at 200MB, 3-day retention, auto-vacuums
+
+---
+
 ## Philosophy
 
 AlphaCent is not a side project. It is the technology backbone of a systematic trading operation built to institutional standards. Every line of code, every architectural decision, every deployment choice is made as if managing a $100B book. We don't ship code that "works" — we ship code that is correct, resilient, and auditable.
@@ -283,7 +332,49 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 ### Sprint 4 (remaining)
 - **4.2 Cull Low-Activation Templates** — run `scripts/utilities/cull_low_activation_templates.py --apply` manually when ready (needs `config/.proposal_tracker.json` populated with enough data)
 
-### Sprint 9 — Autonomous Cycle Deep Dive (Next Session)
+### Sprint 9 — Autonomous Cycle Deep Dive ✅ (April 20, 2026)
+
+**Audit findings from last cycle (500 proposals, 17:36 UTC):**
+- 495 DSL + 5 Alpha Edge proposed
+- 730 zero-trade blacklist entries, 135 rejection blacklist entries, 449 WF validated combos loaded
+- WF pass rate: 34/473 = **7.2%** (expected ~25%) — MC bootstrap was the bottleneck
+- MC bootstrap filtered 47 strategies — p5 values of -0.57 to -6.33 (annualization bug + threshold too high)
+- 22 strategies reached activation; 14/22 failed on trade count (3-7 trades vs 8 threshold)
+- Only 4 activated: Pairs Trading Market Neutral NEM, 4H VWAP TGT, Gold Momentum GOLD, Insider Buying CHTR
+- ZINC/ALUMINUM crashing WF every cycle ("No historical data available") — LME guard was firing too late
+- SHORT templates (MACD Divergence Short, EMA Rejection Short, BB Squeeze Reversal Short) wasting slots in trending_up regime
+
+**Fixes shipped:**
+1. **MC bootstrap annualization** — `sqrt(n_trades)` → `sqrt(trades_per_year)` using 180-day test window
+2. **MC bootstrap threshold** — 0.2 → 0.0 (break-even bar; standard quant practice for post-WF filter)
+3. **Activation Sharpe exception** — mirrors WF gate: Sharpe ≥ 2.0 + ≥ 3 trades bypasses min_trades at activation (not just at WF). Reads from `strategy.metadata['wf_test_sharpe']`
+4. **Regime-directional filter** — in `trending_up*` regimes, SHORT-direction templates (non-neutral, non-AE) are suppressed before proposal. Recovers wasted proposal slots.
+5. **LME metals guard** — moved ZINC/ALUMINUM/NICKEL intraday block to top of `get_historical_data()` before DB/Yahoo/FMP chain. Eliminates WF crash. Daily data path (FMP) preserved.
+
+**Files changed:**
+- `src/strategy/strategy_proposer.py` — MC bootstrap fix + regime short filter
+- `src/strategy/portfolio_manager.py` — activation Sharpe exception
+- `src/data/market_data_manager.py` — LME guard moved to top of function
+
+**Remaining Sprint 9 items:**
+- Monitor next cycle: expect WF pass rate to recover toward 20-25%, MC bootstrap to pass more strategies
+- Strategy lifespan analysis (avg 5.4 days DEMO) — investigate why strategies retire fast
+- Template diversity: Insider Buying 16/66 BACKTESTED (24%) — watch for over-concentration
+- Consider longer test windows for low-frequency strategies (forex, commodities)
+- Triple EMA Alignment DSL bug (`EMA(10) > EMA(10)` always false) — still open
+
+**Signal generation audit (April 20):**
+- 0 signals during autonomous cycle = expected — entry conditions not met at that moment
+- 39 strategies excluded from signal gen = correct — `pending_retirement: true` (Sprint 8 retirements)
+- 4 signals passed conviction in regular scheduler cycle → 2 orders filled (CAT, GE)
+- IONQ rejected: vol-scaled size $458 < $2000 minimum, bump would be 4.4x (>3x guard)
+
+**Position sizing review — deferred to Sprint 10:**
+- Current design: `position_size = allocated_capital × confidence × vol_adjustment`
+- Problem: 3x bump guard too conservative — rejects valid trades on high-vol symbols
+- Correct approach: percentage-of-equity check instead of fixed multiplier
+- Must account for: available balance, open exposure, margin, concentration limits
+- Full design pass needed — not a quick fix
 **Priority focus:** Audit and improve the autonomous cycle end-to-end.
 - How are proposals being generated? Are templates being scored correctly?
 - Walk-forward validation pass rate — is 25% healthy or are good strategies being filtered?
@@ -312,7 +403,99 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 
 ---
 
-## Files Changed This Session (April 20, 2026)
+## Files Changed This Session (April 21, 2026)
+
+### Backend
+- `src/strategy/strategy_proposer.py` — fixed_symbols dedup race condition (Gold Momentum GOLD was being proposed 10x — dedup checked assigned_symbol but fixed_symbols templates override that; now also checks actual fixed_symbols list against active_symbol_template_pairs)
+- `src/core/monitoring_service.py` — proper multi-slot autonomous scheduler: slot-based dedup (fire_key per day+time), 3-min window, 30s check interval (was 60s ±1min — too tight, missed cycles); auto-migrates legacy config
+- `src/api/routers/control.py` — new GET/POST /control/autonomous/schedules endpoints; ScheduleSlot model (id/enabled/days[]/hour/minute); legacy /schedule endpoints preserved
+- `src/strategy/trade_frequency_limiter.py` — monthly trade cap + minimum holding period now Alpha Edge only; DSL strategies trade on every valid signal (was blocking GS, XLE, SILVER, URA etc at 4/month)
+- `src/strategy/conviction_scorer.py` — DSL signal confidence baseline: 8/12 pts at confidence floor (0.3), scales to 12 at 1.0 (was linear 0-12, penalising DSL for parser behaviour); float epsilon fix in passes_threshold (60.0 was being rejected as < 60)
+- `src/strategy/autonomous_strategy_manager.py` — cycle report now tracks raw signals (pre-conviction) vs signals that passed; "0 Signals" no longer misleading
+- `src/strategy/strategy_engine.py` — _last_batch_raw_signals counter for accurate reporting; _last_batch_raw_signals reset at start of each batch
+- `src/core/trading_scheduler.py` — **critical bug fix**: `existing_template_names` was only initialized inside `if existing_count > 0` block but referenced unconditionally at line 1908 in `_coordinate_signals`; caused UnboundLocalError on every signal for symbols with no existing positions — silently dropped ALL signals from new strategies; raw signal count surfaced in result dict
+
+### Frontend
+- `frontend/src/pages/AutonomousNew.tsx` — SchedulerPanel component: add/remove slots, multi-day toggle (Mon-Sun), hour/minute picker, per-slot enable toggle, next run display; replaces old single frequency/day/time picker
+- `frontend/src/services/api.ts` — getScheduleSlots() + updateScheduleSlots() + ScheduleSlot type
+
+### Key Fixes This Session
+1. **`existing_template_names` UnboundLocalError** — every signal for a new symbol (no existing positions) crashed _coordinate_signals, silently dropping all orders. This was killing signal execution for all newly activated BACKTESTED strategies. Fixed by initializing the variable before the conditional block.
+2. **Monthly trade cap blocking DSL** — 4/month cap was Alpha Edge config applied to all strategies. GS, XLE, SILVER, URA etc were blocked. Fixed: DSL strategies bypass frequency limiter entirely.
+3. **DSL conviction scores clustering 55-59** — signal confidence component was penalising DSL strategies for parser behaviour (0.3-0.5 confidence = 3.6-6/12 pts). Fixed: baseline 8/12 pts for any DSL signal clearing the confidence floor.
+4. **Conviction float precision** — 60.0 was being rejected as < 60 due to floating point arithmetic. Fixed with 0.05 epsilon.
+5. **Autonomous scheduler missing cycles** — ±1 min window + 60s check interval was too tight. Fixed: 3-min window, 30s check, slot-based dedup.
+6. **Multi-slot scheduler** — replaced single frequency/day/time with proper multi-slot system. Default: weekdays 8:00+13:00 UTC, weekends 10:00 UTC.
+7. **Gold Momentum GOLD 10x duplicates** — race condition in fixed_symbols dedup. Fixed.
+
+### System State (April 21, 2026)
+- **Equity:** ~$475,588 (+0.10% today, outperforming SPY -0.3% for 2nd consecutive day)
+- **Open positions:** ~149
+- **Active DEMO strategies:** ~101 (39 pending_retirement)
+- **BACKTESTED:** ~96 (95 activation_approved)
+- **Signal gen:** 28 signals passing conviction per cycle (post-fix), orders now being submitted
+- **Orphaned positions cleared:** LCID, FXI, COPPER, ZINC (~$620 loss, ~$15K freed)
+
+---
+
+## Sprint 9 — Autonomous Cycle Deep Dive ✅ (April 20-21, 2026)
+
+**Audit findings from last cycle (500 proposals, 17:36 UTC):**
+- 495 DSL + 5 Alpha Edge proposed
+- 730 zero-trade blacklist entries, 135 rejection blacklist entries, 449 WF validated combos loaded
+- WF pass rate: 34/473 = **7.2%** (expected ~25%) — MC bootstrap was the bottleneck
+- MC bootstrap filtered 47 strategies — p5 values of -0.57 to -6.33 (annualization bug + threshold too high)
+- 22 strategies reached activation; 14/22 failed on trade count (3-7 trades vs 8 threshold)
+- Only 4 activated: Pairs Trading Market Neutral NEM, 4H VWAP TGT, Gold Momentum GOLD, Insider Buying CHTR
+- ZINC/ALUMINUM crashing WF every cycle ("No historical data available") — LME guard was firing too late
+- SHORT templates (MACD Divergence Short, EMA Rejection Short, BB Squeeze Reversal Short) wasting slots in trending_up regime
+
+**Fixes shipped:**
+1. **MC bootstrap annualization** — `sqrt(n_trades)` → `sqrt(trades_per_year)` using 180-day test window
+2. **MC bootstrap threshold** — 0.2 → 0.0 (break-even bar; standard quant practice for post-WF filter)
+3. **Activation Sharpe exception** — mirrors WF gate: Sharpe ≥ 2.0 + ≥ 3 trades bypasses min_trades at activation (not just at WF). Reads from `strategy.metadata['wf_test_sharpe']`
+4. **Regime-directional filter** — in `trending_up*` regimes, SHORT-direction templates (non-neutral, non-AE) are suppressed before proposal. Recovers wasted proposal slots.
+5. **LME metals guard** — moved ZINC/ALUMINUM/NICKEL intraday block to top of `get_historical_data()` before DB/Yahoo/FMP chain. Eliminates WF crash. Daily data path (FMP) preserved.
+
+**Signal generation audit (April 21):**
+- 0 signals during autonomous cycle = was caused by _coordinate_signals crash (now fixed)
+- 39 strategies excluded from signal gen = correct — `pending_retirement: true` (Sprint 8 retirements)
+- Post-fix: 28 signals passing conviction per cycle, orders being submitted
+
+**Position sizing review — deferred to Sprint 10:**
+- Current design: `position_size = allocated_capital × confidence × vol_adjustment`
+- Problem: 3x bump guard too conservative — rejects valid trades on high-vol symbols
+- Correct approach: percentage-of-equity check instead of fixed multiplier
+- Must account for: available balance, open exposure, margin, concentration limits
+- Full design pass needed — not a quick fix
+
+---
+
+## Open Items for Next Session
+
+### Signal Generation Quality
+- **Conviction scores still clustering 55-59 for some strategies** — wf_edge 24-28/40 is the bottleneck (WF Sharpe 0.5-0.8). These are genuinely modest-conviction strategies. Monitor whether post-fix order flow is healthy before further tuning.
+- **HIMS 57.7 rejected** — regime: 12.0 (weak match, mean_reversion in trending_up). This is correct behaviour — regime fit is a legitimate signal. Watch whether these strategies improve as regime shifts.
+- **PYPL 59.5, AMD 58.5** — just under threshold. News sentiment penalty (-0.4, -0.8) is the marginal factor. Consider whether Marketaux free tier news is reliable enough to be a marginal gate factor.
+
+### Position Sizing (Sprint 10)
+- Full redesign of minimum order size logic
+- Account for available balance, open exposure, margin
+- Percentage-of-equity check instead of fixed 3x bump guard
+
+### Strategy Lifespan
+- Avg 5.7 days — investigate whether this is healthy or strategies are retiring too fast
+- 39 pending_retirement strategies: ~45 open positions, -$513 unrealized, clearing over next 3-7 days
+
+### Template Diversity
+- Insider Buying: 16/66 BACKTESTED (24%) — watch for over-concentration
+- Gold Momentum GOLD: 10 duplicates in BACKTESTED — harmless but should clean up (delete 9 duplicates from DB)
+- Triple EMA Alignment DSL bug (`EMA(10) > EMA(10)` always false) — still open
+
+### WF Pass Rate
+- Currently ~8% — target 15-20%
+- MC bootstrap (p5 threshold 0.0) is working correctly — genuinely noisy strategies being filtered
+- Consider longer test windows for low-frequency strategies (forex, commodities currently 180d test)
 
 ### Backend
 - `src/strategy/strategy_engine.py` — exit signals bypass conviction/ML filters (critical fix); improved rejection log

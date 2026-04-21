@@ -191,18 +191,19 @@ class LoggingConfig:
         # ── Component-specific logs: routed by module name prefix ────────────
         # Each component file captures INFO+ from its own source modules.
         # e.g. strategy.log gets everything from src.strategy.*, src.analytics.*, src.ml.*
-        component_handlers: Dict[LogComponent, logging.Handler] = {}
+        # Fewer backups than main log — component logs are for targeted debugging,
+        # not long-term audit. 3 backups = ~3 days of history at typical volume.
+        component_backup_count = 3
         for component in LogComponent:
             handler = logging.handlers.RotatingFileHandler(
                 log_dir / f"{component.value}.log",
                 maxBytes=max_bytes,
-                backupCount=backup_count
+                backupCount=component_backup_count
             )
             handler.setLevel(log_level.value)
             handler.setFormatter(formatter)
             handler.addFilter(ComponentRoutingFilter(component))
             root_logger.addHandler(handler)
-            component_handlers[component] = handler
 
             component_logger = logging.getLogger(f"alphacent.{component.value}")
             component_logger.setLevel(log_level.value)
