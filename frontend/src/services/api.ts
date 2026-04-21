@@ -21,6 +21,14 @@ import type {
 // Period type used across analytics endpoints
 type AnalyticsPeriod = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
 
+export interface ScheduleSlot {
+  id: string;
+  enabled: boolean;
+  days: string[];  // monday-sunday
+  hour: number;    // 0-23 UTC
+  minute: number;  // 0, 15, 30, 45
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 /**
@@ -885,6 +893,29 @@ class ApiClient {
     message: string;
   }> {
     const response = await this.client.post<ApiResponse<any>>('/control/autonomous/schedule', schedule);
+    return this.handleResponse(response);
+  }
+
+  // Multi-schedule endpoints
+  async getScheduleSlots(): Promise<{
+    success: boolean;
+    schedules: ScheduleSlot[];
+    next_runs: (string | null)[];
+    last_run: string | null;
+    message: string;
+  }> {
+    const response = await this.client.get<ApiResponse<any>>('/control/autonomous/schedules');
+    return this.handleResponse(response);
+  }
+
+  async updateScheduleSlots(schedules: ScheduleSlot[]): Promise<{
+    success: boolean;
+    schedules: ScheduleSlot[];
+    next_runs: (string | null)[];
+    last_run: string | null;
+    message: string;
+  }> {
+    const response = await this.client.post<ApiResponse<any>>('/control/autonomous/schedules', { schedules });
     return this.handleResponse(response);
   }
 

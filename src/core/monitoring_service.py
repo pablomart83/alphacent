@@ -111,11 +111,13 @@ class MonitoringService:
         self._trailing_stop_last_etoro_update: Dict[str, float] = {}  # position_id -> timestamp
         self._trailing_stop_rate_limit_seconds: int = 300  # Max 1 update per position per 5 minutes
         
-        # Scheduled autonomous cycle
+        # Scheduled autonomous cycle — supports multiple schedule slots
         self._last_scheduled_cycle_check: float = 0
-        self._scheduled_cycle_check_interval = 60  # Check every 60s if it's time to run
+        self._scheduled_cycle_check_interval = 30  # Check every 30s (was 60s — tighter window)
         self._last_scheduled_cycle_time: Optional[datetime] = None
         self._schedule_config = self._load_schedule_config()
+        # Track which schedule slots have already fired this period (key: "slot_id:YYYY-MM-DD:HH:MM")
+        self._fired_schedule_slots: set = set()
 
         # Regime-change tracking — retire BACKTESTED strategies that are incompatible
         # with the new regime so they don't fire signals into the wrong market.
@@ -3925,70 +3927,131 @@ class MonitoringService:
             return {}
 
     def _load_schedule_config(self) -> Dict:
-        """Load autonomous schedule config from YAML."""
+        """Load autonomous schedule config from YAML.
+        
+        Supports both legacy single-schedule format and new multi-schedule format:
+        
+        Legacy (auto-migrated):
+          autonomous_schedule:
+            enabled: true
+            frequency: daily
+            hour: 15
+            minute: 15
+        
+        New multi-schedule format:
+          autonomous_schedules:
+            - id: slot_1
+              enabled: true
+              days: [monday, tuesday, wednesday, thursday, friday]
+              hour: 8
+              minute: 0
+            - id: slot_2
+              enabled: true
+              days: [monday, tuesday, wednesday, thursday, friday]
+              hour: 13
+              minute: 0
+        """
         try:
             with open("config/autonomous_trading.yaml", "r") as f:
                 config = yaml.safe_load(f)
-            return config.get("autonomous_schedule", {
-                "enabled": True,
-                "frequency": "weekly",
-                "day_of_week": "sunday",
-                "hour": 2,
-                "minute": 0,
-            })
+            
+            # New format: autonomous_schedules list
+            if "autonomous_schedules" in config:
+                return {"schedules": config["autonomous_schedules"]}
+            
+            # Legacy format: autonomous_schedule single entry — migrate on the fly
+            legacy = config.get("autonomous_schedule", {})
+            if not legacy:
+                return {"schedules": []}
+            
+            frequency = legacy.get("frequency", "weekly")
+            hour = legacy.get("hour", 2)
+            minute = legacy.get("minute", 0)
+            enabled = legacy.get("enabled", True)
+            
+            if frequency == "daily":
+                days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+            else:
+                day = legacy.get("day_of_week", "sunday")
+                days = [day]
+            
+            return {"schedules": [{
+                "id": "slot_legacy",
+                "enabled": enabled,
+                "days": days,
+                "hour": hour,
+                "minute": minute,
+            }]}
         except Exception as e:
             logger.warning(f"Could not load schedule config: {e}")
-            return {"enabled": False}
+            return {"schedules": []}
 
     def _reload_schedule_config(self):
         """Reload schedule config from YAML (called when config is updated via API)."""
         self._schedule_config = self._load_schedule_config()
-        logger.info(f"Schedule config reloaded: {self._schedule_config}")
+        self._fired_schedule_slots = set()  # Reset fired slots on config change
+        logger.info(f"Schedule config reloaded: {len(self._schedule_config.get('schedules', []))} slots")
 
     def _check_scheduled_cycle(self):
-        """Check if it's time to run a scheduled autonomous cycle."""
-        config = self._schedule_config
-        if not config.get("enabled", False):
+        """Check if any schedule slot should fire right now.
+        
+        Uses slot-based dedup: each slot fires at most once per (day, hour, minute) window.
+        Checks every 30s with a 3-minute firing window — robust against timing jitter.
+        """
+        schedules = self._schedule_config.get("schedules", [])
+        if not schedules:
             return
 
         now = datetime.utcnow()
-        target_hour = config.get("hour", 2)
-        target_minute = config.get("minute", 0)
-        frequency = config.get("frequency", "weekly")
+        day_map = {
+            "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+            "friday": 4, "saturday": 5, "sunday": 6,
+        }
+        today_name = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][now.weekday()]
+        today_str = now.strftime("%Y-%m-%d")
 
-        # Check if we're within the target time window (within 2 minutes)
-        if now.hour != target_hour or abs(now.minute - target_minute) > 1:
-            return
+        for slot in schedules:
+            if not slot.get("enabled", True):
+                continue
 
-        # For weekly schedule, check day of week
-        if frequency == "weekly":
-            day_map = {
-                "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-                "friday": 4, "saturday": 5, "sunday": 6,
-            }
-            target_day = day_map.get(config.get("day_of_week", "sunday").lower(), 6)
-            if now.weekday() != target_day:
-                return
+            slot_id = slot.get("id", "slot_unknown")
+            slot_days = [d.lower() for d in slot.get("days", [])]
+            slot_hour = slot.get("hour", 0)
+            slot_minute = slot.get("minute", 0)
 
-        # Prevent running more than once per window — check if we already ran today
-        if self._last_scheduled_cycle_time:
-            elapsed = (now - self._last_scheduled_cycle_time).total_seconds()
-            if elapsed < 3600:  # Don't re-trigger within 1 hour
-                return
+            # Check day match
+            if today_name not in slot_days:
+                continue
 
-        # Time to run!
-        logger.info(f"[ScheduledCycle] Triggering scheduled autonomous cycle "
-                     f"(frequency={frequency}, day={config.get('day_of_week')}, "
-                     f"hour={target_hour}:{target_minute:02d})")
-        self._last_scheduled_cycle_time = now
+            # Check time window: within 3 minutes of target (robust against 30s check jitter)
+            minutes_since_target = (now.hour * 60 + now.minute) - (slot_hour * 60 + slot_minute)
+            if not (0 <= minutes_since_target <= 3):
+                continue
 
-        try:
-            from src.strategy.autonomous_strategy_manager import AutonomousStrategyManager
-            manager = AutonomousStrategyManager()
-            result = manager.run_full_cycle()
-            logger.info(f"[ScheduledCycle] Completed: {result}")
-        except Exception as e:
-            logger.error(f"[ScheduledCycle] Failed: {e}", exc_info=True)
+            # Dedup: has this slot already fired in this time window today?
+            fire_key = f"{slot_id}:{today_str}:{slot_hour:02d}:{slot_minute:02d}"
+            if fire_key in self._fired_schedule_slots:
+                continue
+
+            # Fire!
+            self._fired_schedule_slots.add(fire_key)
+            # Prune old keys (keep only today's)
+            self._fired_schedule_slots = {k for k in self._fired_schedule_slots if today_str in k}
+
+            self._last_scheduled_cycle_time = now
+            logger.info(
+                f"[ScheduledCycle] Firing slot '{slot_id}' "
+                f"(day={today_name}, time={slot_hour:02d}:{slot_minute:02d} UTC, "
+                f"window={minutes_since_target}min past target)"
+            )
+
+            try:
+                from src.strategy.autonomous_strategy_manager import AutonomousStrategyManager
+                manager = AutonomousStrategyManager()
+                result = manager.run_full_cycle()
+                logger.info(f"[ScheduledCycle] Slot '{slot_id}' completed: {result}")
+            except Exception as e:
+                logger.error(f"[ScheduledCycle] Slot '{slot_id}' failed: {e}", exc_info=True)
 
     def _evaluate_alerts(self) -> Dict:
         """

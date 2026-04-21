@@ -6,8 +6,8 @@ Validates: Requirements 11.5, 11.11, 11.12, 16.12
 """
 
 import logging
-from typing import Optional
-from datetime import datetime
+from typing import Optional, List
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -945,18 +945,67 @@ async def stop_service(
 # Autonomous Schedule Management
 # ============================================================================
 
+DAY_NAMES = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
+
+class ScheduleSlot(BaseModel):
+    """A single schedule slot — fires on specified days at specified time."""
+    id: str = Field(..., description="Unique slot identifier")
+    enabled: bool = Field(True, description="Whether this slot is active")
+    days: List[str] = Field(..., description="Days to fire: monday-sunday")
+    hour: int = Field(..., ge=0, le=23, description="UTC hour (0-23)")
+    minute: int = Field(0, ge=0, le=59, description="Minute (0, 15, 30, 45)")
+
+    @property
+    def next_run_utc(self) -> Optional[datetime]:
+        """Calculate next UTC run time for this slot."""
+        if not self.enabled or not self.days:
+            return None
+        day_map = {d: i for i, d in enumerate(DAY_NAMES)}
+        now = datetime.utcnow()
+        now_minutes = now.weekday() * 1440 + now.hour * 60 + now.minute
+        best = None
+        for day in self.days:
+            d_idx = day_map.get(day.lower())
+            if d_idx is None:
+                continue
+            slot_minutes = d_idx * 1440 + self.hour * 60 + self.minute
+            diff = slot_minutes - now_minutes
+            if diff <= 0:
+                diff += 7 * 1440  # wrap to next week
+            if best is None or diff < best:
+                best = diff
+        if best is None:
+            return None
+        return now + timedelta(minutes=best)
+
+
+class ScheduleSlotsRequest(BaseModel):
+    """Request to update all schedule slots."""
+    schedules: List[ScheduleSlot]
+
+
+class ScheduleSlotsResponse(BaseModel):
+    """Response for schedule endpoints."""
+    success: bool
+    schedules: List[ScheduleSlot]
+    next_runs: List[Optional[str]] = []
+    last_run: Optional[str] = None
+    message: str = ""
+
+
+# Keep legacy model for backward compat
 class AutonomousScheduleConfig(BaseModel):
-    """Autonomous cycle schedule configuration."""
-    enabled: bool = Field(True, description="Whether scheduled autonomous cycles are enabled")
-    frequency: str = Field("weekly", description="Schedule frequency: weekly or daily")
-    day_of_week: str = Field("sunday", description="Day of week for weekly schedule")
-    hour: int = Field(2, ge=0, le=23, description="Hour of day to run (0-23)")
-    minute: int = Field(0, ge=0, le=59, description="Minute of hour to run (0-59)")
+    """Autonomous cycle schedule configuration (legacy single-slot)."""
+    enabled: bool = Field(True)
+    frequency: str = Field("weekly")
+    day_of_week: str = Field("sunday")
+    hour: int = Field(2, ge=0, le=23)
+    minute: int = Field(0, ge=0, le=59)
 
 
 class AutonomousScheduleResponse(BaseModel):
-    """Response for autonomous schedule endpoints."""
+    """Response for autonomous schedule endpoints (legacy)."""
     success: bool
     schedule: AutonomousScheduleConfig
     next_run: Optional[str] = None
@@ -964,87 +1013,105 @@ class AutonomousScheduleResponse(BaseModel):
     message: str = ""
 
 
-@router.get("/autonomous/schedule", response_model=AutonomousScheduleResponse)
-async def get_autonomous_schedule(
-    username: str = Depends(get_current_user)
-):
-    """
-    Get the current autonomous cycle schedule configuration and next run time.
-    """
+def _slot_next_run_str(slot: ScheduleSlot) -> Optional[str]:
+    nxt = slot.next_run_utc
+    return nxt.isoformat() + "Z" if nxt else None
+
+
+def _get_last_run() -> Optional[str]:
+    try:
+        from src.core.monitoring_service import get_monitoring_service
+        ms = get_monitoring_service()
+        if ms and hasattr(ms, '_last_scheduled_cycle_time') and ms._last_scheduled_cycle_time:
+            return ms._last_scheduled_cycle_time.isoformat()
+    except Exception:
+        pass
+    return None
+
+
+def _load_schedules_from_yaml() -> List[ScheduleSlot]:
+    """Load schedule slots from YAML, migrating legacy format if needed."""
     import yaml
     from pathlib import Path
+    config_path = Path("config/autonomous_trading.yaml")
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
 
+    # New format
+    if "autonomous_schedules" in config:
+        slots = []
+        for s in config["autonomous_schedules"]:
+            try:
+                slots.append(ScheduleSlot(**s))
+            except Exception:
+                pass
+        return slots
+
+    # Legacy format — migrate
+    legacy = config.get("autonomous_schedule", {})
+    if not legacy:
+        return []
+    frequency = legacy.get("frequency", "weekly")
+    if frequency == "daily":
+        days = DAY_NAMES
+    else:
+        days = [legacy.get("day_of_week", "sunday")]
+    return [ScheduleSlot(
+        id="slot_1",
+        enabled=legacy.get("enabled", True),
+        days=days,
+        hour=legacy.get("hour", 2),
+        minute=legacy.get("minute", 0),
+    )]
+
+
+def _save_schedules_to_yaml(slots: List[ScheduleSlot]):
+    """Persist schedule slots to YAML."""
+    import yaml
+    from pathlib import Path
+    config_path = Path("config/autonomous_trading.yaml")
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    config["autonomous_schedules"] = [s.dict() for s in slots]
+    # Remove legacy key to avoid confusion
+    config.pop("autonomous_schedule", None)
+    with open(config_path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+
+@router.get("/autonomous/schedules", response_model=ScheduleSlotsResponse)
+async def get_autonomous_schedules(username: str = Depends(get_current_user)):
+    """Get all autonomous cycle schedule slots."""
     try:
-        config_path = Path("config/autonomous_trading.yaml")
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-
-        schedule_config = config.get("autonomous_schedule", {})
-        schedule = AutonomousScheduleConfig(
-            enabled=schedule_config.get("enabled", True),
-            frequency=schedule_config.get("frequency", "weekly"),
-            day_of_week=schedule_config.get("day_of_week", "sunday"),
-            hour=schedule_config.get("hour", 2),
-            minute=schedule_config.get("minute", 0),
-        )
-
-        # Calculate next run time
-        next_run = _calculate_next_run(schedule)
-        
-        # Get last run time from monitoring service
-        last_run = None
-        try:
-            from src.core.monitoring_service import get_monitoring_service
-            ms = get_monitoring_service()
-            if ms and hasattr(ms, '_last_scheduled_cycle_time') and ms._last_scheduled_cycle_time:
-                last_run = ms._last_scheduled_cycle_time.isoformat()
-        except Exception:
-            pass
-
-        return AutonomousScheduleResponse(
+        slots = _load_schedules_from_yaml()
+        return ScheduleSlotsResponse(
             success=True,
-            schedule=schedule,
-            next_run=next_run,
-            last_run=last_run,
-            message="Schedule retrieved successfully",
+            schedules=slots,
+            next_runs=[_slot_next_run_str(s) for s in slots],
+            last_run=_get_last_run(),
+            message="Schedules retrieved",
         )
     except Exception as e:
-        logger.error(f"Error getting autonomous schedule: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error getting schedule: {str(e)}",
-        )
+        logger.error(f"Error getting schedules: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/autonomous/schedule", response_model=AutonomousScheduleResponse)
-async def update_autonomous_schedule(
-    request: AutonomousScheduleConfig,
+@router.post("/autonomous/schedules", response_model=ScheduleSlotsResponse)
+async def update_autonomous_schedules(
+    request: ScheduleSlotsRequest,
     username: str = Depends(get_current_user)
 ):
-    """
-    Update the autonomous cycle schedule configuration.
-    """
-    import yaml
-    from pathlib import Path
-
+    """Replace all autonomous cycle schedule slots."""
     try:
-        config_path = Path("config/autonomous_trading.yaml")
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
+        # Validate day names
+        for slot in request.schedules:
+            for day in slot.days:
+                if day.lower() not in DAY_NAMES:
+                    raise HTTPException(status_code=400, detail=f"Invalid day: {day}")
 
-        # Update the schedule section
-        config["autonomous_schedule"] = {
-            "enabled": request.enabled,
-            "frequency": request.frequency,
-            "day_of_week": request.day_of_week,
-            "hour": request.hour,
-            "minute": request.minute,
-        }
+        _save_schedules_to_yaml(request.schedules)
 
-        with open(config_path, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
-        # Notify monitoring service of config change
+        # Reload in monitoring service
         try:
             from src.core.monitoring_service import get_monitoring_service
             ms = get_monitoring_service()
@@ -1053,63 +1120,70 @@ async def update_autonomous_schedule(
         except Exception:
             pass
 
-        next_run = _calculate_next_run(request)
-
-        logger.info(f"Autonomous schedule updated by {username}: enabled={request.enabled}, "
-                     f"frequency={request.frequency}, day={request.day_of_week}, hour={request.hour}")
-
-        return AutonomousScheduleResponse(
+        logger.info(f"Schedules updated by {username}: {len(request.schedules)} slots")
+        return ScheduleSlotsResponse(
             success=True,
-            schedule=request,
-            next_run=next_run,
-            message="Schedule updated successfully",
+            schedules=request.schedules,
+            next_runs=[_slot_next_run_str(s) for s in request.schedules],
+            last_run=_get_last_run(),
+            message=f"{len(request.schedules)} schedule slots saved",
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error updating autonomous schedule: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error updating schedule: {str(e)}",
+        logger.error(f"Error updating schedules: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Legacy single-schedule endpoints (backward compat)
+@router.get("/autonomous/schedule", response_model=AutonomousScheduleResponse)
+async def get_autonomous_schedule(username: str = Depends(get_current_user)):
+    """Get autonomous schedule (legacy single-slot endpoint)."""
+    try:
+        slots = _load_schedules_from_yaml()
+        slot = slots[0] if slots else ScheduleSlot(id="slot_1", enabled=False, days=["sunday"], hour=2, minute=0)
+        frequency = "daily" if len(slot.days) == 7 else "weekly"
+        schedule = AutonomousScheduleConfig(
+            enabled=slot.enabled,
+            frequency=frequency,
+            day_of_week=slot.days[0] if slot.days else "sunday",
+            hour=slot.hour,
+            minute=slot.minute,
         )
+        next_run = _slot_next_run_str(slot)
+        return AutonomousScheduleResponse(success=True, schedule=schedule, next_run=next_run,
+                                          last_run=_get_last_run(), message="OK")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def _calculate_next_run(schedule: AutonomousScheduleConfig) -> Optional[str]:
-    """Calculate the next scheduled run time based on config."""
-    if not schedule.enabled:
-        return None
-
-    from datetime import timedelta
-
-    now = datetime.utcnow()
-    day_map = {
-        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-        "friday": 4, "saturday": 5, "sunday": 6,
-    }
-
-    if schedule.frequency == "weekly":
-        target_day = day_map.get(schedule.day_of_week.lower(), 6)
-        days_ahead = target_day - now.weekday()
-        if days_ahead < 0:
-            days_ahead += 7
-
-        next_run = now.replace(
-            hour=schedule.hour, minute=schedule.minute, second=0, microsecond=0
-        ) + timedelta(days=days_ahead)
-
-        # If the calculated time is in the past (same day but earlier), move to next week
-        if next_run <= now:
-            next_run += timedelta(weeks=1)
-
-        return next_run.isoformat() + "Z"
-
-    elif schedule.frequency == "daily":
-        next_run = now.replace(
-            hour=schedule.hour, minute=schedule.minute, second=0, microsecond=0
-        )
-        if next_run <= now:
-            next_run += timedelta(days=1)
-        return next_run.isoformat() + "Z"
-
-    return None
+@router.post("/autonomous/schedule", response_model=AutonomousScheduleResponse)
+async def update_autonomous_schedule(
+    request: AutonomousScheduleConfig,
+    username: str = Depends(get_current_user)
+):
+    """Update autonomous schedule (legacy single-slot endpoint)."""
+    try:
+        if request.frequency == "daily":
+            days = DAY_NAMES
+        else:
+            days = [request.day_of_week]
+        slot = ScheduleSlot(id="slot_1", enabled=request.enabled, days=days,
+                            hour=request.hour, minute=request.minute)
+        _save_schedules_to_yaml([slot])
+        try:
+            from src.core.monitoring_service import get_monitoring_service
+            ms = get_monitoring_service()
+            if ms and hasattr(ms, '_reload_schedule_config'):
+                ms._reload_schedule_config()
+        except Exception:
+            pass
+        next_run = _slot_next_run_str(slot)
+        logger.info(f"Schedule updated by {username} (legacy): {request}")
+        return AutonomousScheduleResponse(success=True, schedule=request, next_run=next_run,
+                                          last_run=_get_last_run(), message="Schedule updated")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # Sync Status

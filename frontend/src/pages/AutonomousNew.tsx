@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
   PlayCircle, PauseCircle, Settings, RefreshCw, Search,
-  AlertCircle, Clock, Trash2,
+  AlertCircle, Clock, Trash2, Plus, X,
 } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { PageTemplate } from '../components/PageTemplate';
@@ -22,6 +22,7 @@ import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { useTradingMode } from '../contexts/TradingModeContext';
 import { usePolling } from '../hooks/usePolling';
 import { apiClient } from '../services/api';
+import type { ScheduleSlot } from '../services/api';
 import { wsManager } from '../services/websocket';
 import { cn, formatCurrency, formatPercentage, formatTimestamp } from '../lib/utils';
 import { utcToLocal } from '../lib/date-utils';
@@ -33,6 +34,160 @@ import type {
 } from '../types';
 import { ColumnDef } from '@tanstack/react-table';
 import { toast } from 'sonner';
+
+// ─── Scheduler Panel ──────────────────────────────────────────────────────────
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MINUTES = [0, 15, 30, 45];
+
+function newSlot(id: string): ScheduleSlot {
+  return { id, enabled: true, days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'], hour: 8, minute: 0 };
+}
+
+interface SchedulerPanelProps {
+  slots: ScheduleSlot[];
+  nextRuns: (string | null)[];
+  lastRun: string | null;
+  saving: boolean;
+  onSave: (slots: ScheduleSlot[]) => void;
+}
+
+const SchedulerPanel: FC<SchedulerPanelProps> = ({ slots, nextRuns, lastRun, saving, onSave }) => {
+  const [local, setLocal] = useState<ScheduleSlot[]>(slots);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => { setLocal(slots); setDirty(false); }, [slots]);
+
+  const update = (idx: number, patch: Partial<ScheduleSlot>) => {
+    setLocal(prev => prev.map((s, i) => i === idx ? { ...s, ...patch } : s));
+    setDirty(true);
+  };
+
+  const toggleDay = (idx: number, day: string) => {
+    const slot = local[idx];
+    const days = slot.days.includes(day) ? slot.days.filter(d => d !== day) : [...slot.days, day];
+    update(idx, { days });
+  };
+
+  const addSlot = () => {
+    const id = `slot_${Date.now()}`;
+    setLocal(prev => [...prev, newSlot(id)]);
+    setDirty(true);
+  };
+
+  const removeSlot = (idx: number) => {
+    setLocal(prev => prev.filter((_, i) => i !== idx));
+    setDirty(true);
+  };
+
+  const nextRunFor = (idx: number) => {
+    const nr = nextRuns[idx];
+    if (!nr) return null;
+    return new Date(nr).toLocaleString('en-GB', {
+      weekday: 'short', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Scheduled Execution</div>
+        <button onClick={addSlot}
+          className="flex items-center gap-1 px-2 py-0.5 text-xs rounded-md border border-blue-500/40 text-blue-400 hover:bg-blue-500/10 transition-colors">
+          <Plus className="h-3 w-3" /> Add slot
+        </button>
+      </div>
+
+      {local.length === 0 && (
+        <div className="text-xs text-muted-foreground py-2">No schedules configured. Add a slot to run cycles automatically.</div>
+      )}
+
+      {local.map((slot, idx) => (
+        <div key={slot.id} className={cn(
+          'rounded-lg border p-3 space-y-2.5 transition-colors',
+          slot.enabled ? 'border-border bg-muted/20' : 'border-border/40 bg-muted/5 opacity-60'
+        )}>
+          {/* Header row: enable toggle + remove */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <button onClick={() => update(idx, { enabled: !slot.enabled })}
+                className={cn('relative inline-flex h-4 w-7 items-center rounded-full transition-colors',
+                  slot.enabled ? 'bg-accent-green' : 'bg-gray-600')}>
+                <span className={cn('inline-block h-3 w-3 transform rounded-full bg-white transition-transform',
+                  slot.enabled ? 'translate-x-3.5' : 'translate-x-0.5')} />
+              </button>
+              <span className="text-xs text-muted-foreground">Slot {idx + 1}</span>
+            </div>
+            <button onClick={() => removeSlot(idx)} className="text-gray-600 hover:text-red-400 transition-colors">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {/* Days multi-select */}
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Days (UTC)</label>
+            <div className="flex gap-1 flex-wrap">
+              {DAYS.map((day, di) => (
+                <button key={day} onClick={() => toggleDay(idx, day)}
+                  className={cn('px-1.5 py-0.5 text-xs rounded border transition-colors',
+                    slot.days.includes(day)
+                      ? 'bg-blue-500/20 border-blue-500/60 text-blue-300'
+                      : 'border-border/40 text-gray-600 hover:border-blue-500/30 hover:text-gray-400')}>
+                  {DAY_SHORT[di]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Time picker */}
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">Time (UTC)</label>
+            <div className="flex gap-1.5 items-center">
+              <select value={slot.hour} onChange={e => update(idx, { hour: parseInt(e.target.value) })}
+                className="bg-background border border-border rounded px-1.5 py-0.5 text-xs w-14">
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>{i.toString().padStart(2, '0')}</option>
+                ))}
+              </select>
+              <span className="text-muted-foreground text-xs">:</span>
+              <select value={slot.minute} onChange={e => update(idx, { minute: parseInt(e.target.value) })}
+                className="bg-background border border-border rounded px-1.5 py-0.5 text-xs w-14">
+                {MINUTES.map(m => (
+                  <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
+                ))}
+              </select>
+              <span className="text-xs text-muted-foreground">UTC</span>
+            </div>
+          </div>
+
+          {/* Next run */}
+          {slot.enabled && nextRunFor(idx) && (
+            <div className="flex items-center gap-1.5 text-xs text-blue-400/80">
+              <Clock className="h-3 w-3 flex-shrink-0" />
+              <span>Next: {nextRunFor(idx)}</span>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Save + last run */}
+      <div className="space-y-1.5">
+        {dirty && (
+          <button onClick={() => onSave(local)} disabled={saving}
+            className="w-full px-2 py-1.5 text-xs rounded-md bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50 font-medium">
+            {saving ? 'Saving...' : 'Save Schedule'}
+          </button>
+        )}
+        {lastRun && (
+          <div className="text-xs text-muted-foreground">
+            Last run: {formatTimestamp(lastRun)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 interface AutonomousNewProps {
   onLogout: () => void;
@@ -125,17 +280,12 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   } | null>(null);
   const [signalFilter, setSignalFilter] = useState<string>('all');
 
-  // Schedule state
-  const [scheduleConfig, setScheduleConfig] = useState<{
-    enabled: boolean;
-    frequency: string;
-    day_of_week: string;
-    hour: number;
-    minute: number;
-  } | null>(null);
-  const [nextScheduledRun, setNextScheduledRun] = useState<string | null>(null);
+  // Schedule state — multi-slot
+  const [scheduleSlots, setScheduleSlots] = useState<import('../services/api').ScheduleSlot[]>([]);
+  const [scheduleNextRuns, setScheduleNextRuns] = useState<(string | null)[]>([]);
   const [lastScheduledRun, setLastScheduledRun] = useState<string | null>(null);
   const [scheduleUpdating, setScheduleUpdating] = useState(false);
+  // Legacy compat vars removed — SchedulerPanel handles everything
   const [signalRefreshing, setSignalRefreshing] = useState(false);
 
   // Walk-Forward Analytics state (Task 9.4)
@@ -146,11 +296,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   // Active tab state for main panel
   const [autoTab, setAutoTab] = useState<string>('control');
 
-  // Schedule editing state
-  const [editFrequency, setEditFrequency] = useState<string>('weekly');
-  const [editDay, setEditDay] = useState<string>('saturday');
-  const [editHour, setEditHour] = useState<number>(2);
-  const [editMinute, setEditMinute] = useState<number>(0);
+  // Schedule editing state — no longer needed (handled inline in SchedulerPanel)
 
   // Fetch all data
   const fetchData = useCallback(async () => {
@@ -165,7 +311,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
         apiClient.getStrategies(tradingMode, false),
         apiClient.getOrders(tradingMode),
         apiClient.getRecentSignals(tradingMode, 100).catch(() => null),
-        apiClient.getAutonomousSchedule().catch(() => null),
+        apiClient.getScheduleSlots().catch(() => null),
         apiClient.getAutonomousCycles(10).catch(() => null),
         apiClient.getAutonomousConfig().catch(() => null),
       ]);
@@ -188,8 +334,8 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
       // Apply schedule config
       if (scheduleResult) {
-        setScheduleConfig(scheduleResult.schedule);
-        setNextScheduledRun(scheduleResult.next_run);
+        setScheduleSlots(scheduleResult.schedules ?? []);
+        setScheduleNextRuns(scheduleResult.next_runs ?? []);
         setLastScheduledRun(scheduleResult.last_run);
       }
 
@@ -469,54 +615,23 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
     }
   };
 
-  const handleToggleSchedule = async () => {
-    if (!scheduleConfig) return;
+  const handleSaveSlots = async (slots: import('../services/api').ScheduleSlot[]) => {
     setScheduleUpdating(true);
     try {
-      const newEnabled = !scheduleConfig.enabled;
-      const result = await apiClient.updateAutonomousSchedule({
-        ...scheduleConfig,
-        enabled: newEnabled,
-      });
-      setScheduleConfig(result.schedule);
-      setNextScheduledRun(result.next_run);
-      toast.success(newEnabled ? 'Scheduled runs enabled' : 'Scheduled runs disabled');
+      const result = await apiClient.updateScheduleSlots(slots);
+      setScheduleSlots(result.schedules);
+      setScheduleNextRuns(result.next_runs);
+      toast.success('Schedule saved');
     } catch (err: any) {
-      toast.error(`Failed to update schedule: ${err.message}`);
+      toast.error(`Failed to save schedule: ${err.message}`);
     } finally {
       setScheduleUpdating(false);
     }
   };
 
-  const handleSaveSchedule = async () => {
-    setScheduleUpdating(true);
-    try {
-      const result = await apiClient.updateAutonomousSchedule({
-        enabled: scheduleConfig?.enabled ?? true,
-        frequency: editFrequency,
-        day_of_week: editDay,
-        hour: editHour,
-        minute: editMinute,
-      });
-      setScheduleConfig(result.schedule);
-      setNextScheduledRun(result.next_run);
-      toast.success('Schedule updated');
-    } catch (err: any) {
-      toast.error(`Failed to update schedule: ${err.message}`);
-    } finally {
-      setScheduleUpdating(false);
-    }
-  };
+  // Legacy toggle removed — SchedulerPanel handles inline
 
-  // Sync edit state when scheduleConfig loads
-  useEffect(() => {
-    if (scheduleConfig) {
-      setEditFrequency(scheduleConfig.frequency);
-      setEditDay(scheduleConfig.day_of_week);
-      setEditHour(scheduleConfig.hour);
-      setEditMinute(scheduleConfig.minute);
-    }
-  }, [scheduleConfig]);
+  // Remove legacy handleSaveSchedule / useEffect for editFrequency etc.
 
   const handleRefreshSignals = async () => {
     if (!tradingMode) return;
@@ -1031,119 +1146,13 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
 
                 {/* Right Column - Schedule */}
                 <div className="space-y-3">
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Scheduled Execution</div>
-                    {scheduleConfig ? (
-                      <>
-                        {/* Enable/Disable toggle */}
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground">
-                            {scheduleConfig.enabled ? 'Enabled' : 'Disabled'}
-                          </span>
-                          <button
-                            onClick={handleToggleSchedule}
-                            disabled={scheduleUpdating}
-                            className={cn(
-                              'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none',
-                              scheduleConfig.enabled ? 'bg-accent-green' : 'bg-gray-600'
-                            )}
-                          >
-                            <span className={cn(
-                              'inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform',
-                              scheduleConfig.enabled ? 'translate-x-5' : 'translate-x-0.5'
-                            )} />
-                          </button>
-                        </div>
-
-                        {/* Frequency */}
-                        <div className="space-y-1">
-                          <label className="text-xs text-muted-foreground">Frequency</label>
-                          <div className="flex gap-1">
-                            {['daily', 'weekly'].map((freq) => (
-                              <button key={freq} onClick={() => {
-                                setEditFrequency(freq);
-                                if (freq === 'daily' && editHour === 2) setEditHour(22);
-                                if (freq === 'weekly' && editHour === 22) setEditHour(2);
-                              }} className={cn(
-                                'px-2 py-0.5 text-xs rounded-md border transition-colors',
-                                editFrequency === freq
-                                  ? 'bg-blue-500/20 border-blue-500 text-blue-400'
-                                  : 'border-border text-muted-foreground hover:border-blue-500/50'
-                              )}>
-                                {freq.charAt(0).toUpperCase() + freq.slice(1)}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Day of week (weekly only) */}
-                        {editFrequency === 'weekly' && (
-                          <div className="space-y-1">
-                            <label className="text-xs text-muted-foreground">Day</label>
-                            <select value={editDay} onChange={(e) => setEditDay(e.target.value)}
-                              className="w-full bg-background border border-border rounded-md px-2 py-1 text-xs">
-                              {['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map((day) => (
-                                <option key={day} value={day}>{day.charAt(0).toUpperCase() + day.slice(1)}</option>
-                              ))}
-                            </select>
-                          </div>
-                        )}
-
-                        {/* Time picker */}
-                        <div className="space-y-1">
-                          <label className="text-xs text-muted-foreground">Time (UTC)</label>
-                          <div className="flex gap-1 items-center">
-                            <select value={editHour} onChange={(e) => setEditHour(parseInt(e.target.value))}
-                              className="bg-background border border-border rounded-md px-1.5 py-0.5 text-xs w-14">
-                              {Array.from({ length: 24 }, (_, i) => (
-                                <option key={i} value={i}>{i.toString().padStart(2, '0')}</option>
-                              ))}
-                            </select>
-                            <span className="text-muted-foreground text-xs">:</span>
-                            <select value={editMinute} onChange={(e) => setEditMinute(parseInt(e.target.value))}
-                              className="bg-background border border-border rounded-md px-1.5 py-0.5 text-xs w-14">
-                              {[0, 15, 30, 45].map((m) => (
-                                <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
-                              ))}
-                            </select>
-                            <span className="text-xs text-muted-foreground">UTC</span>
-                          </div>
-                        </div>
-
-                        {/* Save button */}
-                        {(editFrequency !== scheduleConfig.frequency ||
-                          editDay !== scheduleConfig.day_of_week ||
-                          editHour !== scheduleConfig.hour ||
-                          editMinute !== scheduleConfig.minute) && (
-                          <button onClick={handleSaveSchedule} disabled={scheduleUpdating}
-                            className="w-full px-2 py-1 text-xs rounded-md bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50">
-                            {scheduleUpdating ? 'Saving...' : 'Save Schedule'}
-                          </button>
-                        )}
-
-                        {/* Next run */}
-                        {nextScheduledRun && scheduleConfig.enabled && (
-                          <div className="bg-muted/50 rounded-lg p-2 flex items-center gap-2">
-                            <Clock className="h-3 w-3 text-blue-400 flex-shrink-0" />
-                            <div>
-                              <div className="text-xs text-muted-foreground">Next Run</div>
-                              <div className="text-xs font-mono text-blue-400">
-                                {new Date(nextScheduledRun).toLocaleString('en-US', {
-                                  weekday: 'short', month: 'short', day: 'numeric',
-                                  hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        {lastScheduledRun && (
-                          <div className="text-xs text-muted-foreground">
-                            Last run: {formatTimestamp(lastScheduledRun)}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="text-xs text-muted-foreground">Loading schedule...</div>
-                    )}
+                  <SchedulerPanel
+                    slots={scheduleSlots}
+                    nextRuns={scheduleNextRuns}
+                    lastRun={lastScheduledRun}
+                    saving={scheduleUpdating}
+                    onSave={handleSaveSlots}
+                  />
                 </div>
               </div>
 
