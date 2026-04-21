@@ -39,9 +39,9 @@ ssh ... 'grep "below.*minimum\|bump\|Rejecting" /home/ubuntu/alphacent/logs/risk
 # 5. Full recent activity (last 200 lines of main log)
 ssh ... 'tail -200 /home/ubuntu/alphacent/logs/alphacent.log'
 
-# 6. journalctl (persisted, survives restarts, last 3 days, capped at 200MB)
-ssh ... 'sudo journalctl -u alphacent --no-pager -n 500 2>/dev/null | grep "ERROR\|WARNING"'
-ssh ... 'sudo journalctl -u alphacent --no-pager --since "2026-04-21 18:00" 2>/dev/null | head -100'
+# 6. journalctl (volatile/in-memory only — use for live tailing, not history)
+ssh ... 'sudo journalctl -u alphacent -f'   # live tail
+ssh ... 'sudo journalctl -u alphacent --no-pager -n 200 2>/dev/null'  # last 200 lines since restart
 ```
 
 ### Storage budget
@@ -49,7 +49,7 @@ ssh ... 'sudo journalctl -u alphacent --no-pager --since "2026-04-21 18:00" 2>/d
 - `alphacent.log`: 10MB × 6 = 60MB max (full audit trail, 5 backups)
 - `errors.log` / `warnings.log`: 10MB × 6 = 60MB each (low volume)
 - Component logs (`strategy`, `data`, etc.): 10MB × 4 = 40MB each (3 backups)
-- `journald`: capped at 200MB, 3-day retention, auto-vacuums
+- `journald`: volatile (in-memory only, cleared on restart) — same data as alphacent.log, no disk cost
 
 ---
 
