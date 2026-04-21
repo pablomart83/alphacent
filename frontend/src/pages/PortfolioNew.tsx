@@ -741,6 +741,24 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       },
     },
     {
+      id: 'opened_at',
+      header: 'Opened',
+      cell: ({ row }) => {
+        const d = new Date(row.original.opened_at);
+        const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+        const timeStr = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        return (
+          <div className="font-mono text-xs text-muted-foreground whitespace-nowrap" title={d.toLocaleString()}>
+            <div>{dateStr}</div>
+            <div className="text-[10px] opacity-70">{timeStr}</div>
+          </div>
+        );
+      },
+      sortingFn: (rowA, rowB) => {
+        return new Date(rowA.original.opened_at).getTime() - new Date(rowB.original.opened_at).getTime();
+      },
+    },
+    {
       id: 'portfolioPct',
       header: () => <div className="text-right">%Port</div>,
       cell: ({ row }) => {

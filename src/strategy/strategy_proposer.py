@@ -4756,6 +4756,39 @@ Generate a CORRECTED strategy that addresses all errors:"""
         for score, tmpl, sym in all_pairs[:10]:
             logger.info(f"  {tmpl.name} × {sym} = {score:.1f}")
 
+        # Log templates with zero viable pairs (all combos blocked by blacklists/active_pairs)
+        templates_with_pairs = set(tmpl.name for _, tmpl, _ in all_pairs)
+        templates_no_pairs = [t for t in active_templates if t.name not in templates_with_pairs]
+        if templates_no_pairs:
+            # Group by reason for better diagnostics
+            blocked_by_active = []
+            blocked_by_blacklist = []
+            blocked_by_regime = []
+            for t in templates_no_pairs:
+                all_combos_active = all(
+                    (t.name, sym) in active_pairs for sym in symbols
+                )
+                all_combos_blacklisted = all(
+                    (t.name, sym) in self._zero_trade_blacklist or
+                    self.is_rejection_blacklisted(t.name, sym)
+                    for sym in symbols[:10]  # Sample first 10 to avoid O(n²)
+                )
+                if all_combos_active:
+                    blocked_by_active.append(t.name)
+                elif all_combos_blacklisted:
+                    blocked_by_blacklist.append(t.name)
+                else:
+                    blocked_by_regime.append(t.name)
+            if blocked_by_active:
+                logger.info(f"Templates with all combos already active ({len(blocked_by_active)}): "
+                           f"{', '.join(blocked_by_active[:10])}")
+            if blocked_by_blacklist:
+                logger.info(f"Templates with all combos blacklisted ({len(blocked_by_blacklist)}): "
+                           f"{', '.join(blocked_by_blacklist[:10])}")
+            if blocked_by_regime:
+                logger.info(f"Templates with no viable pairs (low score/regime mismatch) ({len(blocked_by_regime)}): "
+                           f"{', '.join(blocked_by_regime[:10])}")
+
         # --- PHASE 2: Round-robin template-first selection ---
         # Every template gets a seat at the table. Score only decides which
         # symbol is best for each template — templates don't compete.

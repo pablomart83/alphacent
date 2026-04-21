@@ -1518,7 +1518,15 @@ class MonitoringService:
                 if not pos.current_price or pos.current_price <= 0:
                     continue
                 
-                invested = pos.invested_amount if pos.invested_amount and pos.invested_amount > 0 else abs(pos.quantity)
+                # Use invested_amount for P&L % calculation.
+                # Fallback to quantity * entry_price (actual cost basis).
+                # Never use raw quantity alone — that produces nonsensical percentages.
+                if pos.invested_amount and pos.invested_amount > 0:
+                    invested = pos.invested_amount
+                elif pos.quantity and pos.entry_price and pos.quantity > 0 and pos.entry_price > 0:
+                    invested = abs(pos.quantity) * pos.entry_price
+                else:
+                    continue
                 if invested <= 0:
                     continue
                 
