@@ -1706,6 +1706,40 @@ class StrategyProposer:
             # Walk-forward each watchlist symbol for every validated DSL strategy.
             # Only symbols that pass WF stay in the watchlist. This ensures every
             # symbol a strategy can trade has been proven to work with that template.
+            #
+            # Tiered thresholds by asset class relationship to primary symbol:
+            #   Same class (stock→stock, forex→forex):  S > 0.2, t >= 3
+            #   Adjacent   (stock→ETF/index):            S > 0.3, t >= 4
+            #   Cross-asset (stock→forex/commodity/crypto): S > 0.5, t >= 6
+            #
+            # Max watchlist size: 3 total (primary + 2). No floor guarantee —
+            # a single-symbol strategy is better than one with a weak second symbol.
+            _WL_MAX = 2  # max extra symbols beyond primary
+
+            def _wl_thresholds(primary_class: str, sym_class: str):
+                """Return (min_sharpe, min_trades) for a watchlist symbol."""
+                if primary_class == sym_class:
+                    return 0.2, 3   # same class — relaxed
+                # Adjacent: equity ↔ ETF/index
+                _equity = {"stock", "etf", "index"}
+                if primary_class in _equity and sym_class in _equity:
+                    return 0.3, 4   # adjacent
+                # Cross-asset: anything else
+                return 0.5, 6
+
+            # Detect current regime once — reused for all watchlist regime checks
+            _wl_regime = "unknown"
+            try:
+                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                from src.data.market_data_manager import get_market_data_manager
+                _wl_mdm = get_market_data_manager()
+                if _wl_mdm:
+                    _wl_analyzer = MarketStatisticsAnalyzer(_wl_mdm)
+                    _wl_sub, _, _, _ = _wl_analyzer.detect_sub_regime()
+                    _wl_regime = _wl_sub.value
+            except Exception:
+                pass
+
             import time as _wl_time
             wl_validated_total = 0
             wl_pruned_total = 0
@@ -1718,17 +1752,46 @@ class StrategyProposer:
                 template_name = strategy.metadata.get('template_name', '') if strategy.metadata else ''
                 if not template_name:
                     continue
-                
+
                 primary = strategy.symbols[0]
+                primary_class = self._get_asset_class(primary)
                 validated_symbols = [primary]  # Primary already passed WF
-                
+
+                # Detect template direction for regime compatibility check
+                template_direction = 'long'
+                if strategy.metadata:
+                    template_direction = strategy.metadata.get('direction', 'long').lower()
+
                 for sym in strategy.symbols[1:]:
+                    # Hard cap: primary + 2 max
+                    if len(validated_symbols) >= _WL_MAX + 1:
+                        wl_pruned_total += 1
+                        continue
+
+                    sym_class = self._get_asset_class(sym)
+                    min_sharpe, min_trades = _wl_thresholds(primary_class, sym_class)
+
+                    # Regime compatibility: skip if symbol's regime is incompatible
+                    # with the template direction (reuse already-computed regime)
+                    if _wl_regime != "unknown":
+                        _is_short = template_direction == 'short'
+                        _trending_up = 'trending_up' in _wl_regime
+                        _trending_down = 'trending_down' in _wl_regime
+                        # Short templates in strong uptrend — skip
+                        if _is_short and _trending_up and 'strong' in _wl_regime:
+                            wl_pruned_total += 1
+                            continue
+                        # Long templates in strong downtrend — skip
+                        if not _is_short and _trending_down and 'strong' in _wl_regime:
+                            wl_pruned_total += 1
+                            continue
+
                     # Check blacklist first (cheap)
                     bl_key = (template_name, sym)
                     if bl_key in self._zero_trade_blacklist and self._zero_trade_blacklist[bl_key] >= self._zero_trade_blacklist_threshold:
                         wl_pruned_total += 1
                         continue
-                    
+
                     # Check WF cache (already validated in a previous cycle?)
                     wf_key = (template_name, sym)
                     cached = self._wf_results_cache.get(wf_key)
@@ -1738,26 +1801,24 @@ class StrategyProposer:
                             test_sharpe = cached_result[1]
                             has_trades = cached_result[2]
                             is_overfitted = cached_result[3]
-                            if test_sharpe > 0.15 and has_trades and not is_overfitted:
+                            if test_sharpe > min_sharpe and has_trades and not is_overfitted:
                                 validated_symbols.append(sym)
                                 wl_validated_total += 1
-                                continue
                             else:
                                 wl_pruned_total += 1
-                                continue
-                    
+                            continue
+
                     # No cache — run WF on this symbol
                     try:
-                        # Create a temporary strategy with this symbol as primary
                         import copy
                         temp_strategy = copy.deepcopy(strategy)
                         temp_strategy.symbols = [sym]
-                        
+
                         if hasattr(strategy_engine, 'indicator_library'):
                             strategy_engine.indicator_library.clear_cache()
                         if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
                             strategy_engine.market_data._historical_memory_cache.clear()
-                        
+
                         wf_result = strategy_engine.walk_forward_validate(
                             strategy=temp_strategy,
                             start=start_date,
@@ -1765,24 +1826,23 @@ class StrategyProposer:
                             train_days=train_days,
                             test_days=test_days
                         )
-                        
+
                         ts = wf_result['train_sharpe']
                         tes = wf_result['test_sharpe']
                         ov = wf_result['is_overfitted']
                         test_trades = wf_result['test_results'].total_trades if wf_result.get('test_results') else 0
                         train_trades = wf_result['train_results'].total_trades if wf_result.get('train_results') else 0
-                        het = test_trades >= 2 and train_trades >= 2
+                        het = test_trades >= min_trades and train_trades >= min_trades
                         tv = not (math.isinf(ts) or math.isnan(ts))
                         tev = not (math.isinf(tes) or math.isnan(tes))
-                        
+
                         # Cache the result
                         self._wf_results_cache[wf_key] = (
                             (ts, tes, het, ov, tv, tev, wf_result),
                             _wl_time.time()
                         )
-                        
-                        # Record in validated combos if passed
-                        if tev and tes > 0.15 and het and not ov:
+
+                        if tev and tes > min_sharpe and het and not ov:
                             validated_symbols.append(sym)
                             wl_validated_total += 1
                             self._wf_validated[wf_key] = {
@@ -1791,27 +1851,32 @@ class StrategyProposer:
                                 'timestamp': datetime.now().isoformat(),
                             }
                             self._save_wf_validated_to_disk()
-                            logger.info(f"  Watchlist WF PASS: {template_name} on {sym} (S={tes:.2f}, t={test_trades})")
+                            logger.info(
+                                f"  Watchlist WF PASS: {template_name} on {sym} "
+                                f"(S={tes:.2f}, t={test_trades}, threshold=S>{min_sharpe}/t>={min_trades}, "
+                                f"class={primary_class}→{sym_class})"
+                            )
                         else:
                             wl_pruned_total += 1
-                            # Persist failure to disk
                             self._save_wf_failed_to_disk()
-                            # Update blacklist if 0 trades
                             if test_trades == 0 or train_trades == 0:
                                 self._zero_trade_blacklist[bl_key] = self._zero_trade_blacklist.get(bl_key, 0) + 1
                                 self._zero_trade_blacklist_timestamps[bl_key] = datetime.now().isoformat()
                                 self._save_blacklist_to_disk()
-                            logger.info(f"  Watchlist WF FAIL: {template_name} on {sym} (S={tes:.2f}, t={test_trades}, ov={ov})")
+                            logger.info(
+                                f"  Watchlist WF FAIL: {template_name} on {sym} "
+                                f"(S={tes:.2f}, t={test_trades}, need S>{min_sharpe}/t>={min_trades})"
+                            )
                     except Exception as wl_err:
                         logger.debug(f"  Watchlist WF error for {template_name} on {sym}: {wl_err}")
                         wl_pruned_total += 1
-                
+
                 strategy.symbols = validated_symbols
-            
+
             if wl_validated_total > 0 or wl_pruned_total > 0:
                 logger.info(
                     f"Watchlist validation: {wl_validated_total} symbols passed WF, "
-                    f"{wl_pruned_total} pruned (blacklisted/failed/error)"
+                    f"{wl_pruned_total} pruned (threshold/regime/blacklist/cap)"
                 )
 
             # Enforce max 1 strategy per (symbol, direction, type, interval) to prevent concentration

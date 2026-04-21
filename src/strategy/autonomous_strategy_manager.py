@@ -1373,6 +1373,30 @@ class AutonomousStrategyManager:
                         factor_result = self.strategy_engine.validate_alpha_edge_factor(strategy)
                         
                         if factor_result['passed']:
+                            # Gate3 hard check: primary symbol must be in the right quintile.
+                            # A wide factor spread is necessary but not sufficient — the
+                            # specific symbol we're trading must actually qualify for the factor.
+                            # CHTR with momentum_rank=5.9 (bottom quintile) should not pass
+                            # even if the universe spread looks great.
+                            details = factor_result.get('details', {})
+                            gate3 = details.get('gate3', {})
+                            in_right_quintile = gate3.get('in_right_quintile', True)  # default True for backward compat
+                            if in_right_quintile is False:
+                                primary_rank = gate3.get('primary_rank', 'N/A')
+                                factor_name = gate3.get('factor', 'unknown')
+                                logger.warning(
+                                    f"      Factor validation gate3 FAILED: {strategy.name} — "
+                                    f"primary symbol not in right quintile "
+                                    f"(factor={factor_name}, rank={primary_rank})"
+                                )
+                                strategy.status = StrategyStatus.INVALID
+                                stats["errors"].append({
+                                    "step": "factor_validation",
+                                    "strategy": strategy.name,
+                                    "message": f"gate3 failed: primary symbol rank={primary_rank} not in right quintile for {factor_name}"
+                                })
+                                continue
+
                             # Use the factor validation's synthetic results instead
                             backtest_results = factor_result['backtest_results']
                             strategy.backtest_results = backtest_results
