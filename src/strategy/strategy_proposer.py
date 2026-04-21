@@ -3263,6 +3263,17 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 skipped_dupes += 1
                 continue
             
+            # For fixed_symbols templates (single-symbol like Gold Momentum Long GOLD),
+            # also check the actual fixed symbol — not just the assigned_symbol from scoring.
+            # This catches the race condition where multiple rapid cycles each see an empty
+            # pipeline and all propose the same fixed-symbol strategy before any is committed.
+            if template.metadata and 'fixed_symbols' in template.metadata:
+                fixed_syms = template.metadata['fixed_symbols']
+                if isinstance(fixed_syms, list):
+                    if any((template_name, fs) in active_symbol_template_pairs for fs in fixed_syms):
+                        skipped_dupes += 1
+                        continue
+            
             # Skip duplicate (template, symbol) pairs within this cycle
             pair_key = (template_name, assigned_symbol)
             if pair_key in seen_template_symbols:
