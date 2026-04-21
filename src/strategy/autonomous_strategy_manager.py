@@ -1282,6 +1282,27 @@ class AutonomousStrategyManager:
                 })
                 
                 if is_alpha_edge:
+                    # Pre-filter: skip AE strategies that will always produce 0 trades
+                    # before spending time on validation + FMP backtest.
+                    template_name_ae = strategy.metadata.get('template_name', strategy.name) if strategy.metadata else strategy.name
+                    primary_symbol_ae = strategy.symbols[0] if strategy.symbols else ''
+
+                    # Dividend Aristocrat: skip non-dividend-paying symbols (yield < 1.5%)
+                    if 'dividend' in template_name_ae.lower() or 'aristocrat' in template_name_ae.lower():
+                        try:
+                            quarters = self.strategy_proposer._get_cached_quarterly_data(primary_symbol_ae) if hasattr(self, 'strategy_proposer') and self.strategy_proposer else []
+                            if quarters:
+                                div_yields = [q.get('dividend_yield') for q in quarters if q.get('dividend_yield') is not None]
+                                latest_yield = div_yields[0] if div_yields else 0.0
+                            else:
+                                latest_yield = 0.0
+                            if latest_yield < 0.015:
+                                logger.info(f"  [{i}/{len(proposals)}] Pre-filter skip: {template_name_ae} on {primary_symbol_ae} — dividend yield {latest_yield:.2%} < 1.5%")
+                                stats["errors"].append({"step": "pre_filter", "strategy": strategy.name, "message": f"Dividend yield {latest_yield:.2%} < 1.5% threshold"})
+                                continue
+                        except Exception:
+                            pass  # Can't check — let validation decide
+
                     # Alpha Edge: fundamental validation + FMP-based backtest
                     logger.info(f"  [{i}/{len(proposals)}] Alpha Edge fundamental validation: {strategy.name}...")
                     
