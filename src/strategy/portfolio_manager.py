@@ -955,7 +955,7 @@ class PortfolioManager:
                     return False, reason
                 logger.info(f"Risk/reward ratio: {risk_reward_ratio:.2f} (meets {min_rr:.2f}:1 minimum for {backtest_results.win_rate:.0%} WR)")
             else:
-                logger.warning(f"Cannot calculate risk/reward ratio (avg_loss=0)")
+                logger.debug(f"Cannot calculate risk/reward ratio (avg_loss=0) — strategy has no losing trades in backtest")
         
 
         # Check minimum number of trades — interval-aware and asset-class-aware thresholds

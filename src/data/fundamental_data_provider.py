@@ -985,6 +985,11 @@ class FundamentalDataProvider:
         if symbol.upper() in NON_FUNDAMENTAL_SYMBOLS:
             return None
 
+        # Non-US symbols (e.g. RHM.DE, RR.L) are not covered by our FMP plan tier
+        # — the /earnings endpoint returns 402 Payment Required for these.
+        if '.' in symbol:
+            return None
+
         # Check memory cache first (7-day TTL)
         if symbol in self.earnings_calendar_cache:
             cached_time = self.earnings_calendar_timestamps.get(symbol)

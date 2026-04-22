@@ -5162,12 +5162,18 @@ Generate a CORRECTED strategy that addresses all errors:"""
             seen = {primary_symbol}
             
             # Phase 1: Add WF-validated symbols for this template (proven to work)
+            _template_is_intraday = bool(template.metadata and (
+                template.metadata.get('intraday', False) or
+                template.metadata.get('interval_4h', False)
+            ))
             validated_for_template = [
                 (v['sharpe'], sym)
                 for (t, sym), v in self._wf_validated.items()
                 if t == tname and sym not in seen
                 and self._get_asset_class(sym) in allowed_classes
                 and (tname, sym) not in _active_pairs  # skip symbols already in active pipeline
+                # Don't add daily-only LME metals to intraday/4h template watchlists
+                and not (_template_is_intraday and sym.upper() in _DAILY_ONLY_SYMBOLS)
             ]
             # Sort by Sharpe descending — best performers first
             validated_for_template.sort(reverse=True)
@@ -5195,6 +5201,9 @@ Generate a CORRECTED strategy that addresses all errors:"""
                     continue
                 sym_class = self._get_asset_class(symbol)
                 if sym_class not in allowed_classes:
+                    continue
+                # Don't add daily-only LME metals to intraday/4h template watchlists
+                if _template_is_intraday and symbol.upper() in _DAILY_ONLY_SYMBOLS:
                     continue
                 # Skip blacklisted combos
                 bl_key = (tname, symbol)
