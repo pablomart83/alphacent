@@ -497,7 +497,56 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 - MC bootstrap (p5 threshold 0.0) is working correctly — genuinely noisy strategies being filtered
 - Consider longer test windows for low-frequency strategies (forex, commodities currently 180d test)
 
-### Backend
+---
+
+## Sprint 10 — Log Audit & Watchlist Quality (April 22, 2026)
+
+### Fixes Shipped
+
+**Backend**
+- `src/strategy/strategy_proposer.py` — DAILY_ONLY_SYMBOLS guard: skip ZINC/ALUMINUM/PLATINUM/NICKEL on 1h/4h templates before WF (eliminates 50+ errors/cycle); dividend_aristocrat pre-WF filter (yield < 1.5% skipped); watchlist overhaul: tiered WF thresholds by asset class (same: S>0.2/t≥3, adjacent: S>0.3/t≥4, cross-asset: S>0.5/t≥6), cap at 3 symbols, regime compatibility check, no floor guarantee
+- `src/strategy/strategy_engine.py` — insider_buying fallback to momentum+volume proxy when FMP returns [] (403/404); intraday expected bar count fix (multiply by bars/day for 1h/4h, eliminates false 53% coverage warnings)
+- `src/strategy/autonomous_strategy_manager.py` — AE dividend pre-filter before FMP backtest; gate3 `in_right_quintile` hard enforcement (was approving strategies where primary symbol not in right factor quintile)
+- `src/data/market_data_manager.py` — OHLC epsilon fix in validate_data (strict < with 1e-8, eliminates false EURUSD warnings on valid open=high bars)
+- `src/utils/symbol_mapper.py` — NICKEL added to DAILY_ONLY_SYMBOLS
+- `src/core/monitoring_service.py` — duplicate `_check_strategy_decay()` call confirmed already removed
+
+**Scripts (one-time ops)**
+- `scripts/backfill_gap.py` — backfilled Apr 22–Sep 1 2025 data gap for 152 symbols (~91 trading days each); gap was causing WF test period to return 102 bars instead of 193, corrupting Sharpe/trade counts for all affected strategies
+- `scripts/retire_null_sharpe.py` — retired 21 BACKTESTED strategies approved via factor_validation fallback with null wf_test_sharpe (FMP insider endpoint 403/404 + gate3 not enforced)
+- `scripts/trim_watchlists.py` — trimmed 167 strategies to new watchlist rules; 54 single-symbol, 14 two-symbol, 158 three-symbol after cleanup
+- `scripts/restore_active_position_symbols.py` — restored 58 orphaned positions (symbols removed by trim but with open positions); 45 strategies updated
+- `scripts/flag_weak_watchlist_losers.py` — flagged 33 losing weak-watchlist positions for pending_closure (-$1,080 P&L, ~$85K capital freed)
+
+### Key Findings from Log Audit
+
+1. **ALUMINUM/ZINC errors** — LME guard was working but strategy_engine raised ValueError on empty return; fixed at proposal stage (DAILY_ONLY guard before WF)
+2. **152-symbol data gap (Apr–Sep 2025)** — WF test period fell entirely in this gap, producing corrupted Sharpe/trade counts for months; backfilled
+3. **21 null-Sharpe AE strategies** — approved via factor_validation fallback because FMP insider endpoint unavailable (403/404); gate3 `in_right_quintile=false` not enforced; all retired
+4. **Watchlist was too permissive** — S>0.15/t≥2 allowed cross-asset noise (stock strategies trading forex, commodity strategies trading stocks); 34% of open positions were on weak-evidence watchlist symbols; 33 losing ones flagged for closure
+5. **EURUSD OHLC false warnings** — valid down-day bars (open=high) were being rejected; epsilon fix
+6. **Coverage warnings were false positives** — intraday expected bar count was using daily bar formula; fixed
+
+### System State (April 22, 2026)
+- **Equity:** ~$475K
+- **Open positions:** ~170 (33 pending_closure from weak watchlist audit)
+- **Active DEMO strategies:** ~99
+- **BACKTESTED:** ~106 (21 null-Sharpe retired, watchlists cleaned)
+- **Watchlist distribution:** 54 single / 14 two-symbol / 158 three-symbol (was mostly 4-5)
+- **Capital being freed:** ~$85K from 33 weak-watchlist closures
+- **Data gap:** filled for all 152 affected symbols
+
+### Open Items for Next Session
+- **Triple EMA Alignment DSL bug** (`EMA(10) > EMA(10)` always false) — still open
+- **Position sizing Sprint 10** — 3x bump guard too conservative; percentage-of-equity redesign needed
+- **Strategy lifespan** — avg 5.7 days; investigate whether healthy or retiring too fast
+- **Gold Momentum GOLD duplicates** — 10 copies in BACKTESTED; delete 9
+- **FMP insider endpoint** — currently 403/404 on current plan; insider_buying now uses momentum proxy fallback; consider plan upgrade to restore real insider data
+- **gate3 in_right_quintile** — fix shipped; monitor next AE cycle to confirm no false approvals
+- **WF pass rate** — data gap now filled; expect improvement in next cycle (was ~8%, target 15-20%)
+- **Group 1 high-Sharpe BACKTESTED strategies** — validated on single-regime test period (Sep-Oct 2025 rally only due to data gap); monitor live performance; decay scorer will retire underperformers naturally
+
+### Backend (Previous Session — April 21, 2026)
 - `src/strategy/strategy_engine.py` — exit signals bypass conviction/ML filters (critical fix); improved rejection log
 - `src/strategy/conviction_scorer.py` — news sentiment impact reduced to ±1pt (was ±8, 90% negative bias on free tier)
 - `src/data/news_sentiment_provider.py` — articles 5→10, sort=published_at, get_article_count() method
@@ -510,7 +559,7 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 - `src/api/routers/data_management.py` — score_distribution (bullish/neutral/bearish/avg) in sentiment coverage
 - `src/data/news_sentiment_provider.py` — TTL threshold 4→8 articles for earnings-week
 
-### Frontend
+### Frontend (Previous Session — April 21, 2026)
 - `frontend/src/pages/analytics/PerformanceTab.tsx` — full Performance tab redesign (new component)
 - `frontend/src/pages/AnalyticsNew.tsx` — interval/period buttons now trigger refetch (stale closure fix); forceRefresh param
 - `frontend/src/components/charts/EquityCurveChart.tsx` — SPY benchmark fetch via dedicated API call
@@ -518,7 +567,7 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 - `frontend/src/components/trading/TradingCyclePipeline.tsx` — live cycle log panel with autoscroll
 - `frontend/src/pages/DataManagementNew.tsx` — score distribution display (bullish/neutral/bearish)
 
-### Key Fixes This Session
+### Key Fixes (April 21, 2026)
 1. **Exit signals were being filtered by conviction scorer** — DSL exits never fired, positions only closed via SL/TP
 2. **Asset class/sector showing Unknown** — PositionResponse missing fields, Pydantic was dropping them
 3. **News sentiment ±8pts on 3 articles** — 90% negative bias on Marketaux free tier, reduced to ±1pt
