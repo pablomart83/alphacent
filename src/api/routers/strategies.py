@@ -47,6 +47,130 @@ import threading as _threading
 _db_cycle_lock = _threading.Lock()
 
 
+def _make_serializable(obj):
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {k: _make_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_make_serializable(v) for v in obj]
+    return obj
+
+
+def launch_autonomous_cycle_thread(cycle_id: str, filters: Optional[Dict] = None) -> threading.Thread:
+    """
+    Build deps, spin up the autonomous cycle in a background daemon thread, and return it.
+    Reused by both the manual API trigger and the scheduled cycle in MonitoringService.
+    Caller is responsible for checking _running_cycle_thread.is_alive() before calling.
+    """
+    global _running_cycle_thread, _running_cycle_id
+
+    config = get_config()
+    credentials = config.load_credentials(TradingMode.DEMO)
+    if not credentials or not credentials.get("public_key") or not credentials.get("user_key"):
+        raise RuntimeError("eToro credentials not configured")
+
+    etoro_client = EToroAPIClient(
+        public_key=credentials["public_key"],
+        user_key=credentials["user_key"],
+        mode=TradingMode.DEMO,
+    )
+    market_data = MarketDataManager(etoro_client)
+    ws_manager = get_websocket_manager()
+    strategy_engine = StrategyEngine(None, market_data, ws_manager)
+    autonomous_manager = AutonomousStrategyManager(
+        llm_service=None,
+        market_data=market_data,
+        strategy_engine=strategy_engine,
+        websocket_manager=ws_manager,
+    )
+
+    def run_cycle_in_thread():
+        global _running_cycle_thread, _running_cycle_id
+        with open('cycle_error.log', 'w') as f:
+            f.write(f"Thread started for {cycle_id} at {datetime.now().isoformat()}\n")
+        try:
+            logger.info(f"Cycle {cycle_id}: acquiring DB lock...")
+            acquired = _db_cycle_lock.acquire(timeout=30)
+            if not acquired:
+                raise RuntimeError("Could not acquire DB lock — scheduler may be stuck")
+            logger.info(f"Cycle {cycle_id}: DB lock acquired")
+            try:
+                logger.info(f"Background thread started for cycle {cycle_id}")
+
+                # Wait for any running signal generation batch to finish
+                try:
+                    from src.core.trading_scheduler import get_trading_scheduler
+                    ts = get_trading_scheduler()
+                    if ts and hasattr(ts, '_strategy_engine') and ts._strategy_engine:
+                        import time as _wait_time
+                        _wait_start = _wait_time.time()
+                        _max_wait = 300
+                        while _wait_time.time() - _wait_start < _max_wait:
+                            if not getattr(ts._strategy_engine, '_batch_signal_running', False):
+                                break
+                            elapsed = _wait_time.time() - _wait_start
+                            logger.info(f"Cycle {cycle_id}: waiting for signal generation to finish ({elapsed:.0f}s)")
+                            _wait_time.sleep(5)
+                        waited = _wait_time.time() - _wait_start
+                        if waited > 1:
+                            logger.info(f"Cycle {cycle_id}: signal generation finished after {waited:.0f}s wait")
+                except Exception as e:
+                    logger.debug(f"Could not check signal gen status: {e}")
+
+                logger.info(f"Cycle {cycle_id} filters: {filters if filters else 'none (all strategies)'}")
+                cycle_result = autonomous_manager.run_strategy_cycle(filters=filters)
+
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(ws_manager.broadcast({
+                        "type": "autonomous:cycle_completed",
+                        "cycle_id": cycle_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "result": _make_serializable(cycle_result),
+                    }))
+                finally:
+                    loop.close()
+
+                logger.info(f"Autonomous cycle {cycle_id} completed successfully")
+                with open('cycle_error.log', 'w') as f:
+                    f.write(f"Cycle {cycle_id} completed successfully at {datetime.now().isoformat()}\n")
+            finally:
+                _db_cycle_lock.release()
+                logger.info(f"Cycle {cycle_id}: DB lock released")
+        except Exception as e:
+            import traceback
+            with open('cycle_error.log', 'w') as f:
+                f.write(f"CYCLE ERROR for {cycle_id}:\n{str(e)}\n\n{traceback.format_exc()}")
+            logger.error(f"Background cycle {cycle_id} failed: {e}", exc_info=True)
+            try:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(ws_manager.broadcast({
+                        "type": "autonomous:cycle_error",
+                        "cycle_id": cycle_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "error": str(e),
+                    }))
+                finally:
+                    loop.close()
+            except Exception:
+                pass
+        finally:
+            _running_cycle_id = None
+
+    _running_cycle_id = cycle_id
+    _running_cycle_thread = threading.Thread(
+        target=run_cycle_in_thread,
+        name=f"autonomous-cycle-{cycle_id}",
+        daemon=True,
+    )
+    _running_cycle_thread.start()
+    return _running_cycle_thread
+
+
 def sanitize_float(value: float) -> float:
     """
     Sanitize float values for JSON serialization.
@@ -2603,61 +2727,40 @@ async def trigger_autonomous_cycle(
     username: str = Depends(get_current_user)
 ):
     """Manually trigger an autonomous trading cycle in a background thread."""
-    import sys
-    print(f"[TRIGGER] Received trigger request from {username}, force={request.force}", flush=True)
-    sys.stdout.flush()
     global _running_cycle_thread, _running_cycle_id
-    
+
     logger.info(f"Manual trigger of autonomous cycle by user {username}, force={request.force}")
-    
-    # Check if a cycle is already running
+
     if _running_cycle_thread and _running_cycle_thread.is_alive():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A cycle is already running (ID: {_running_cycle_id}). Please wait for it to complete."
         )
-    
+
     try:
+        # Check enabled/schedule gates (needs a temporary manager just for config)
         config = get_config()
         credentials = config.load_credentials(TradingMode.DEMO)
-        
         if not credentials or not credentials.get("public_key") or not credentials.get("user_key"):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="eToro credentials not configured."
             )
-        
-        etoro_client = EToroAPIClient(
-            public_key=credentials["public_key"],
-            user_key=credentials["user_key"],
-            mode=TradingMode.DEMO
-        )
-        market_data = MarketDataManager(etoro_client)
-        ws_manager = get_websocket_manager()
-        strategy_engine = StrategyEngine(None, market_data, ws_manager)
-        
-        autonomous_manager = AutonomousStrategyManager(
-            llm_service=None,
-            market_data=market_data,
-            strategy_engine=strategy_engine,
-            websocket_manager=ws_manager
-        )
-        
-        if not autonomous_manager.config["autonomous"]["enabled"] and not request.force:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Autonomous system is disabled. Use force=true to override."
-            )
-        
-        if not request.force and not autonomous_manager.should_run_cycle():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cycle not scheduled yet. Use force=true to override."
-            )
-        
+
+        if not request.force:
+            # Lightweight config check — no need to build full deps yet
+            from src.core.config_loader import load_config as _load_cfg
+            auto_cfg = _load_cfg()
+            if not auto_cfg.get("autonomous", {}).get("enabled", True):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Autonomous system is disabled. Use force=true to override."
+                )
+
         cycle_id = f"cycle_{uuid4().hex[:8]}"
-        
-        # Broadcast cycle start — show cache_warming as the first stage
+
+        # Broadcast cycle start
+        ws_manager = get_websocket_manager()
         await ws_manager.broadcast({
             "type": "cycle_progress",
             "data": {
@@ -2668,129 +2771,25 @@ async def trigger_autonomous_cycle(
                 "timestamp": datetime.now().isoformat(),
             }
         })
-        
+
+        cycle_filters = {}
+        if request.asset_classes:
+            cycle_filters['asset_classes'] = request.asset_classes
+        if request.intervals:
+            cycle_filters['intervals'] = request.intervals
+        if request.strategy_types:
+            cycle_filters['strategy_types'] = request.strategy_types
+
         logger.info(f"Starting autonomous cycle {cycle_id} in background thread")
-        
-        def _make_serializable(obj):
-            if isinstance(obj, datetime):
-                return obj.isoformat()
-            if isinstance(obj, dict):
-                return {k: _make_serializable(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [_make_serializable(v) for v in obj]
-            return obj
-        
-        def run_cycle_in_thread():
-            global _running_cycle_thread, _running_cycle_id
-            with open('cycle_error.log', 'w') as f:
-                f.write(f"Thread started for {cycle_id} at {datetime.now().isoformat()}\n")
-            try:
-                # Acquire DB lock — waits for scheduler signal gen to finish if running
-                logger.info(f"Cycle {cycle_id}: acquiring DB lock...")
-                acquired = _db_cycle_lock.acquire(timeout=30)
-                if not acquired:
-                    raise RuntimeError("Could not acquire DB lock — scheduler may be stuck")
-                logger.info(f"Cycle {cycle_id}: DB lock acquired")
-                try:
-                    print(f"[TRIGGER] Background thread STARTED for cycle {cycle_id}", flush=True)
-                    logger.info(f"Background thread started for cycle {cycle_id}")
-                    
-                    # Wait for any running signal generation batch to finish before starting
-                    # the heavy market analysis. Signal gen takes 150-250s and competes for
-                    # CPU/GIL, causing the autonomous cycle to crawl.
-                    try:
-                        from src.core.trading_scheduler import get_trading_scheduler
-                        ts = get_trading_scheduler()
-                        if ts and hasattr(ts, '_strategy_engine') and ts._strategy_engine:
-                            import time as _wait_time
-                            _wait_start = _wait_time.time()
-                            _max_wait = 300  # 5 min max
-                            while _wait_time.time() - _wait_start < _max_wait:
-                                if not getattr(ts._strategy_engine, '_batch_signal_running', False):
-                                    break
-                                elapsed = _wait_time.time() - _wait_start
-                                logger.info(f"Cycle {cycle_id}: waiting for signal generation to finish ({elapsed:.0f}s)")
-                                _wait_time.sleep(5)
-                            waited = _wait_time.time() - _wait_start
-                            if waited > 1:
-                                logger.info(f"Cycle {cycle_id}: signal generation finished after {waited:.0f}s wait")
-                    except Exception as e:
-                        logger.debug(f"Could not check signal gen status: {e}")
-                    
-                    cycle_filters = {}
-                    if request.asset_classes:
-                        cycle_filters['asset_classes'] = request.asset_classes
-                    if request.intervals:
-                        cycle_filters['intervals'] = request.intervals
-                    if request.strategy_types:
-                        cycle_filters['strategy_types'] = request.strategy_types
-                    logger.info(f"Cycle {cycle_id} filters: {cycle_filters if cycle_filters else 'none (all strategies)'}")
-                    cycle_result = autonomous_manager.run_strategy_cycle(filters=cycle_filters if cycle_filters else None)
-                    
-                    # Broadcast completion via new event loop
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    try:
-                        loop.run_until_complete(ws_manager.broadcast({
-                            "type": "autonomous:cycle_completed",
-                            "cycle_id": cycle_id,
-                            "timestamp": datetime.now().isoformat(),
-                            "result": _make_serializable(cycle_result)
-                        }))
-                    finally:
-                        loop.close()
-                    
-                    logger.info(f"Autonomous cycle {cycle_id} completed successfully")
-                    logger.info("Cycle complete — signal generation ran as part of the cycle")
-                    
-                    with open('cycle_error.log', 'w') as f:
-                        f.write(f"Cycle {cycle_id} completed successfully at {datetime.now().isoformat()}\n")
-                finally:
-                    _db_cycle_lock.release()
-                    logger.info(f"Cycle {cycle_id}: DB lock released")
-            except Exception as e:
-                import traceback
-                with open('cycle_error.log', 'w') as f:
-                    f.write(f"CYCLE ERROR for {cycle_id}:\n")
-                    f.write(f"{str(e)}\n\n")
-                    f.write(traceback.format_exc())
-                print(f"[TRIGGER] Background thread FAILED for cycle {cycle_id}: {e}", flush=True)
-                logger.error(f"Background cycle {cycle_id} failed: {e}", exc_info=True)
-                try:
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    try:
-                        loop.run_until_complete(ws_manager.broadcast({
-                            "type": "autonomous:cycle_error",
-                            "cycle_id": cycle_id,
-                            "timestamp": datetime.now().isoformat(),
-                            "error": str(e)
-                        }))
-                    finally:
-                        loop.close()
-                except:
-                    pass
-            finally:
-                _running_cycle_id = None
-        
-        # Start in a daemon thread
-        _running_cycle_id = cycle_id
-        _running_cycle_thread = threading.Thread(
-            target=run_cycle_in_thread,
-            name=f"autonomous-cycle-{cycle_id}",
-            daemon=True
-        )
-        print(f"[TRIGGER] Starting background thread for cycle {cycle_id}", flush=True)
-        sys.stdout.flush()
-        _running_cycle_thread.start()
-        
+        launch_autonomous_cycle_thread(cycle_id, filters=cycle_filters if cycle_filters else None)
+
         return TriggerCycleResponse(
             success=True,
             message=f"Autonomous cycle {cycle_id} started in background",
             cycle_id=cycle_id,
             estimated_duration=300
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:

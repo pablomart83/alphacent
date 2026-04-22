@@ -472,24 +472,13 @@ class MonitoringService:
             except Exception as e:
                 logger.error(f"Error demoting idle strategies: {e}")
             
-            # Check live strategy health — retire consistent losers
-            try:
-                health_results = self._check_strategy_decay()
-                if health_results.get("retired", 0) > 0:
-                    logger.info(
-                        f"Strategy health: retired {health_results['retired']} "
-                        f"underperforming strategies"
-                    )
-            except Exception as e:
-                logger.error(f"Error checking strategy health: {e}")
-            
-            # Check strategy edge decay — retire expired edges
+            # Check strategy edge decay — retire consistent losers and expired edges
             try:
                 decay_results = self._check_strategy_decay()
                 if decay_results.get("retired", 0) > 0:
                     logger.info(
                         f"Strategy decay: retired {decay_results['retired']} "
-                        f"expired-edge strategies"
+                        f"underperforming/expired-edge strategies"
                     )
             except Exception as e:
                 logger.error(f"Error checking strategy decay: {e}")
@@ -4056,10 +4045,13 @@ class MonitoringService:
             )
 
             try:
-                from src.strategy.autonomous_strategy_manager import AutonomousStrategyManager
-                manager = AutonomousStrategyManager()
-                result = manager.run_full_cycle()
-                logger.info(f"[ScheduledCycle] Slot '{slot_id}' completed: {result}")
+                from src.api.routers.strategies import launch_autonomous_cycle_thread, _running_cycle_thread, _running_cycle_id
+                if _running_cycle_thread and _running_cycle_thread.is_alive():
+                    logger.info(f"[ScheduledCycle] Slot '{slot_id}' skipped — cycle '{_running_cycle_id}' already running")
+                    continue
+                cycle_id = f"scheduled_{slot_id}_{now.strftime('%H%M')}"
+                launch_autonomous_cycle_thread(cycle_id)
+                logger.info(f"[ScheduledCycle] Slot '{slot_id}' launched cycle '{cycle_id}' in background thread")
             except Exception as e:
                 logger.error(f"[ScheduledCycle] Slot '{slot_id}' failed: {e}", exc_info=True)
 
