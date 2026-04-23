@@ -65,7 +65,11 @@ export interface TvMultiPaneProps {
 function toChartTime(t: string | number): Time {
   if (typeof t === 'number') return t as Time;
   const s = String(t);
-  return (s.length === 10 ? s : s.slice(0, 10)) as Time;
+  // Unix timestamp string (all digits) → parse as number
+  if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
+  // Date string "YYYY-MM-DD HH:MM" or longer → slice to 10
+  if (s.length >= 10) return s.slice(0, 10) as Time;
+  return s as Time;
 }
 
 function getSeriesDef(type: TvSeriesConfig['type']) {

@@ -12,7 +12,7 @@ import { CompactMetricRow } from '../components/trading/CompactMetricRow';
 import type { CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
-import { EquityCurveChart } from '../components/charts/EquityCurveChart';import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
+import { PortfolioEquityChart } from '../components/charts/PortfolioEquityChart';import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
 import { TvChart } from '../components/charts/TvChart';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 import { ActivityPanel } from '../components/ActivityPanel';
@@ -403,22 +403,14 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
         <div className="p-2 flex flex-col gap-3">
           {d && d.equity_curve?.length ? (
-            <EquityCurveChart
+            <PortfolioEquityChart
               equityData={d.equity_curve}
               spyData={showBenchmark ? spyData : undefined}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
               interval={equityInterval}
-              onIntervalChange={(iv: string) => setEquityInterval(iv as '1d' | '4h' | '1h')}
+              onIntervalChange={(iv) => setEquityInterval(iv)}
               height={380}
-              totalReturnPct={(() => {
-                const curve = d.equity_curve;
-                if (!curve?.length) return null;
-                const first = curve[0].equity;
-                const last = curve[curve.length - 1].equity;
-                return first > 0 ? ((last - first) / first) * 100 : null;
-              })()}
-              maxDrawdownPct={maxDrawdown}
             />
           ) : (
             <ChartSkeleton height={380} />
