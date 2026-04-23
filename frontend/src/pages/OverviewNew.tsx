@@ -13,8 +13,9 @@ import type { CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
 import { PortfolioEquityChart } from '../components/charts/PortfolioEquityChart';
-import { DailyPnLChart } from '../components/charts/DailyPnLChart';import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
-import { TvChart } from '../components/charts/TvChart';
+import { DailyPnLChart } from '../components/charts/DailyPnLChart';
+import { InteractiveChart } from '../components/charts/InteractiveChart';
+import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 import { ActivityPanel } from '../components/ActivityPanel';
 import { useTradingMode } from '../contexts/TradingModeContext';
@@ -428,25 +429,11 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
           {rollingSharpe30.length > 1 && (
             <div>
               <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">Rolling Sharpe (30d)</div>
-              <TvChart
-                series={[{
-                  id: 'rolling_sharpe',
-                  type: 'baseline',
-                  data: rollingSharpe30,
-                  baseValue: 1,
-                  topFillColor1: 'rgba(34,197,94,0.18)',
-                  topFillColor2: 'rgba(34,197,94,0.02)',
-                  bottomFillColor1: 'rgba(239,68,68,0.02)',
-                  bottomFillColor2: 'rgba(239,68,68,0.18)',
-                  topLineColor: '#22c55e',
-                  bottomLineColor: '#ef4444',
-                  lineWidth: 1,
-                  lastValueVisible: false,
-                  priceLineVisible: false,
-                }]}
+              <InteractiveChart
+                data={rollingSharpe30.map(d => ({ date: d.time, sharpe: d.value }))}
+                dataKeys={[{ key: 'sharpe', color: '#3b82f6', type: 'line' }]}
+                xAxisKey="date"
                 height={90}
-                showTimeScale={false}
-                autoResize
               />
             </div>
           )}
