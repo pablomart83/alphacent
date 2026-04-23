@@ -1,9 +1,8 @@
-import { type FC, useState, useEffect, useMemo } from 'react';
+import { type FC, useState, useEffect } from 'react';
 import { apiClient } from '../../services/api';
 import { cn, formatCurrency } from '../../lib/utils';
 import { SVGBarChart } from '../../components/charts/SVGBarChart';
 import { EquityCurveChart } from '../../components/charts/EquityCurveChart';
-import { buildEquityCurveSeries } from '../../lib/chart-utils';
 import { UnderwaterPlot } from '../../components/charts/UnderwaterPlot';
 
 interface PerformanceTabProps {
@@ -45,17 +44,6 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
       setSpyData(spy && spy.length > 0 ? spy : undefined);
     }).catch(() => setSpyData(undefined));
   }, [period]);
-
-  // Pre-build equity curve series — pure data transform, no rendering
-  const equityCurveSeries = useMemo(() => {
-    const rawCurve = pm?.equity_curve || perfStats?.equity_curve || [];
-    if (!rawCurve.length) return null;
-    const equityData = rawCurve.map((d: any) => ({
-      date: typeof d.date === 'string' ? d.date : (d.timestamp ?? ''),
-      equity: d.portfolio ?? d.value ?? 0,
-    }));
-    return buildEquityCurveSeries(equityData, spyData, period);
-  }, [pm?.equity_curve, perfStats?.equity_curve, spyData, period, equityInterval]);
   const cio = cioDashboard;
 
   const kpiRow1 = [
@@ -98,13 +86,16 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
           )}
         </div>
         <EquityCurveChart
-          mainSeries={equityCurveSeries?.mainSeries ?? []}
-          drawdownSeries={equityCurveSeries?.drawdownSeries ?? []}
-          hasSpy={equityCurveSeries?.hasSpy ?? false}
-          hasRealized={equityCurveSeries?.hasRealized ?? false}
+          equityData={(pm?.equity_curve || perfStats?.equity_curve || []).map((d: any) => ({
+            date: typeof d.date === 'string' ? d.date : (d.timestamp ?? ''),
+            equity: d.portfolio ?? d.value ?? 0,
+          }))}
+          spyData={spyData}
           period={period} onPeriodChange={(p) => { setPeriod(p as any); }}
           interval={equityInterval} onIntervalChange={(iv: string) => setEquityInterval(iv as any)}
           height={280}
+          totalReturnPct={pm?.total_return ?? null}
+          maxDrawdownPct={pm?.max_drawdown ?? null}
         />
       </div>
 

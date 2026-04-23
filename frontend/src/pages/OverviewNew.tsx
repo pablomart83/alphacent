@@ -12,9 +12,7 @@ import { CompactMetricRow } from '../components/trading/CompactMetricRow';
 import type { CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
-import { EquityCurveChart } from '../components/charts/EquityCurveChart';
-import { buildEquityCurveSeries } from '../lib/chart-utils';
-import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
+import { EquityCurveChart } from '../components/charts/EquityCurveChart';import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
 import { TvChart } from '../components/charts/TvChart';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 import { ActivityPanel } from '../components/ActivityPanel';
@@ -121,7 +119,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   // State
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [spyData, setSpyData] = useState<Array<{ date: string; close: number }> | undefined>(undefined);
-  const [recentTrades, setRecentTrades] = useState<Position[]>([]);
+  const [_recentTrades, setRecentTrades] = useState<Position[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
   const [_error, setError] = useState<string | null>(null);
@@ -299,19 +297,6 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     ];
   }, [dashboard, dailyPnl, maxDrawdown]);
 
-  // Pre-build equity curve series — must be before any early returns (Rules of Hooks)
-  const equityCurveSeries = useMemo(() => {
-    const curve = dashboard?.equity_curve;
-    if (!curve?.length) return null;
-    const realizedData = curve
-      .filter((p: any) => p.realized != null)
-      .map((p: any) => ({ date: p.date, realized: p.realized as number }));
-    const trades = recentTrades
-      .map(t => ({ date: (t.closed_at || '').slice(0, 10), pnl: t.realized_pnl ?? 0, symbol: t.symbol }))
-      .filter(t => t.date);
-    const spyForSeries = showBenchmark ? spyData : undefined;
-    return buildEquityCurveSeries(curve, spyForSeries, equityPeriod, realizedData, trades);
-  }, [dashboard?.equity_curve, showBenchmark, spyData, equityPeriod, recentTrades]);
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
@@ -417,17 +402,23 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     <div className="flex flex-col h-full overflow-auto">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
         <div className="p-2 flex flex-col gap-3">
-          {d && equityCurveSeries ? (
+          {d && d.equity_curve?.length ? (
             <EquityCurveChart
-              mainSeries={equityCurveSeries.mainSeries}
-              drawdownSeries={equityCurveSeries.drawdownSeries}
-              hasSpy={equityCurveSeries.hasSpy}
-              hasRealized={equityCurveSeries.hasRealized}
+              equityData={d.equity_curve}
+              spyData={showBenchmark ? spyData : undefined}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
               interval={equityInterval}
               onIntervalChange={(iv: string) => setEquityInterval(iv as '1d' | '4h' | '1h')}
               height={380}
+              totalReturnPct={(() => {
+                const curve = d.equity_curve;
+                if (!curve?.length) return null;
+                const first = curve[0].equity;
+                const last = curve[curve.length - 1].equity;
+                return first > 0 ? ((last - first) / first) * 100 : null;
+              })()}
+              maxDrawdownPct={maxDrawdown}
             />
           ) : (
             <ChartSkeleton height={380} />

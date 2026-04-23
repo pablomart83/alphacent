@@ -4,7 +4,7 @@ export { SVGBarChart } from './SVGBarChart';
 export { SVGStackedBarChart } from './SVGStackedBarChart';
 export { SVGPieChart } from './SVGPieChart';
 export { PeriodSelector } from './PeriodSelector';
-export { EquityCurveChart, normalizeToBase100, computeDrawdown } from './EquityCurveChart';
+export { EquityCurveChart } from './EquityCurveChart';
 export type { EquityCurveChartProps } from './EquityCurveChart';
 export { MultiTimeframeView } from './MultiTimeframeView';
 export type { MultiTimeframeViewProps } from './MultiTimeframeView';
