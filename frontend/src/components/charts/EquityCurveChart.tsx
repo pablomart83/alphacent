@@ -116,6 +116,8 @@ function buildSeries(
       bottomLineColor: 'transparent',
       lineWidth: 0,
       priceScaleId: 'alpha',
+      lastValueVisible: false,
+      priceLineVisible: false,
     });
 
     // SPY benchmark — gray dashed line
@@ -128,6 +130,8 @@ function buildSeries(
       color: chartTheme.series.benchmark,
       lineWidth: 1,
       dashed: true,
+      lastValueVisible: false,
+      priceLineVisible: false,
     });
   }
 
@@ -164,6 +168,8 @@ function buildSeries(
         color: '#22c55e',
         lineWidth: 1,
         dashed: true,
+        lastValueVisible: false,
+        priceLineVisible: false,
       });
     }
   }

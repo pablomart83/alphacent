@@ -57,6 +57,8 @@ export interface TvSeriesConfig {
   bottomLineColor?: string;
   priceScaleId?: string;
   dashed?: boolean;
+  lastValueVisible?: boolean;
+  priceLineVisible?: boolean;
 }
 
 export interface TvDataPoint {
@@ -102,6 +104,8 @@ function getSeriesDefinition(type: TvChartType) {
 function buildSeriesOptions(cfg: TvSeriesConfig): Record<string, unknown> {
   const base: Record<string, unknown> = {};
   if (cfg.priceScaleId) base.priceScaleId = cfg.priceScaleId;
+  if (cfg.lastValueVisible === false) base.lastValueVisible = false;
+  if (cfg.priceLineVisible === false) base.priceLineVisible = false;
 
   switch (cfg.type) {
     case 'area':
