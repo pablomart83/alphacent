@@ -34,7 +34,7 @@ interface OverviewNewProps {
 
 interface DashboardData {
   pnl_periods: Array<{ label: string; pnl_absolute: number; pnl_percent: number }>;
-  equity_curve: Array<{ date: string; equity: number; benchmark?: number }>;
+  equity_curve: Array<{ date: string; equity: number; realized?: number; benchmark?: number }>;
   drawdown_data: Array<{ date: string; drawdown_pct: number }>;
   sector_exposure: Array<{ sector: string; allocation_pct: number; pnl: number; pnl_pct: number; position_count: number }>;
   market_regime: { current_regime: string; regime_color: string; regime_description: string };
@@ -409,6 +409,9 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
           {d ? (
             <EquityCurveChart
               equityData={d.equity_curve}
+              realizedData={d.equity_curve
+                .filter(p => p.realized != null)
+                .map(p => ({ date: p.date, realized: p.realized! }))}
               spyData={effectiveSpyData}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}

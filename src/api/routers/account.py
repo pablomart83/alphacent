@@ -1451,6 +1451,7 @@ class EquityPoint(BaseModel):
     """Single point on the equity curve."""
     date: str
     equity: float
+    realized: Optional[float] = None
     benchmark: Optional[float] = None
 
 class DrawdownPoint(BaseModel):
@@ -1694,6 +1695,7 @@ async def get_dashboard_summary(
                 equity_curve.append(EquityPoint(
                     date=snap.date,
                     equity=round(snap.equity, 2),
+                    realized=round(snap.realized_pnl_cumulative, 2) if snap.realized_pnl_cumulative is not None else None,
                     benchmark=None
                 ))
             # Add today's live equity if not already the last snapshot
@@ -1702,6 +1704,7 @@ async def get_dashboard_summary(
                 equity_curve.append(EquityPoint(
                     date=today_str,
                     equity=round(equity, 2),
+                    realized=round(all_time_realized, 2),
                     benchmark=None
                 ))
         else:

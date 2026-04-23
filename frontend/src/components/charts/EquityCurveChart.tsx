@@ -10,6 +10,8 @@ import { chartTheme } from '../../lib/design-tokens';
 
 interface EquityCurveChartProps {
   equityData: Array<{ date: string; equity: number }>;
+  /** Realized-only equity curve (same dates, realized P&L cumulative) */
+  realizedData?: Array<{ date: string; realized: number }>;
   spyData?: Array<{ date: string; close: number }>;
   period: string;
   onPeriodChange: (period: string) => void;
@@ -57,6 +59,7 @@ function buildSeries(
   spyData: Array<{ date: string; close: number }> | undefined,
   period: string,
   trades?: Array<{ date: string; pnl: number; symbol?: string }>,
+  realizedData?: Array<{ date: string; realized: number }>,
 ) {
   // Filter equity data by period
   const filteredEquity = filterDataByPeriod(
@@ -139,6 +142,26 @@ function buildSeries(
     lineWidth: 2,
   });
 
+  // Realized-only line — dashed green, normalized to same base as portfolio
+  if (realizedData && realizedData.length > 0) {
+    const filteredRealized = filterDataByPeriod(
+      realizedData.map(d => ({ date: d.date, value: d.realized })),
+      'date',
+      period,
+    );
+    const normRealized = normalizeToBase100(filteredRealized);
+    if (normRealized.length > 0) {
+      mainSeries.push({
+        id: 'realized',
+        type: 'line',
+        data: normRealized.map(d => ({ time: d.date, value: d.value })),
+        color: '#22c55e',
+        lineWidth: 1,
+        dashed: true,
+      });
+    }
+  }
+
   // Trade markers — green dots for wins, red dots for losses, sized by |P&L|
   // Rendered as a scatter-style line series with zero width (just markers)
   const tradeMarkers: Array<{ time: string; value: number; color: string; size: number }> = [];
@@ -205,7 +228,7 @@ function buildSeries(
     },
   ];
 
-  return { mainSeries, drawdownSeries, hasSpy };
+  return { mainSeries, drawdownSeries, hasSpy, hasRealized: !!(realizedData && realizedData.length > 0) };
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -214,6 +237,7 @@ const PERIODS = ['1W', '1M', '3M', '6M', '1Y', 'ALL'];
 
 export const EquityCurveChart: FC<EquityCurveChartProps> = ({
   equityData,
+  realizedData,
   spyData,
   period,
   onPeriodChange,
@@ -222,9 +246,9 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
   height = 400,
   trades,
 }) => {
-  const { mainSeries, drawdownSeries } = useMemo(
-    () => buildSeries(equityData, spyData, period, trades),
-    [equityData, spyData, period, trades],
+  const { mainSeries, drawdownSeries, hasRealized } = useMemo(
+    () => buildSeries(equityData, spyData, period, trades, realizedData),
+    [equityData, realizedData, spyData, period, trades],
   );
 
   const numericHeight = typeof height === 'number' ? height : 400;
@@ -268,8 +292,14 @@ export const EquityCurveChart: FC<EquityCurveChartProps> = ({
           <div className="flex items-center gap-3 text-xs font-mono">
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-0.5 bg-[#3b82f6] rounded" />
-              <span className="text-gray-400">Portfolio</span>
+              <span className="text-gray-400">Total (R+U)</span>
             </span>
+            {hasRealized && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 rounded" style={{ borderTop: '1px dashed #22c55e' }} />
+                <span className="text-gray-400">Realised</span>
+              </span>
+            )}
             {!benchmarkUnavailable && (
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-0.5 bg-gray-500 rounded" style={{ borderTop: '1px dashed #6b7280' }} />
