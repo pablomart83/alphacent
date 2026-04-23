@@ -116,25 +116,8 @@ export function buildEquityCurveSeries(
 
   const mainSeries: TvSeriesConfig[] = [];
 
+  // SPY benchmark — gray dashed line (no separate scale, same axis as portfolio)
   if (hasSpy) {
-    mainSeries.push({
-      id: 'alpha',
-      type: 'baseline',
-      data: normPortfolio
-        .filter((d) => normSpyMap.has(d.date))
-        .map((d) => ({ time: d.date, value: d.value - (normSpyMap.get(d.date) ?? 0) })),
-      baseValue: 0,
-      topFillColor1: 'rgba(34,197,94,0.18)',
-      topFillColor2: 'rgba(34,197,94,0.02)',
-      bottomFillColor1: 'rgba(239,68,68,0.02)',
-      bottomFillColor2: 'rgba(239,68,68,0.18)',
-      topLineColor: 'transparent',
-      bottomLineColor: 'transparent',
-      lineWidth: 0,
-      priceScaleId: 'alpha',
-      lastValueVisible: false,
-      priceLineVisible: false,
-    });
     mainSeries.push({
       id: 'spy',
       type: 'line',
@@ -149,18 +132,20 @@ export function buildEquityCurveSeries(
     });
   }
 
+  // Portfolio — blue area series
   mainSeries.push({
     id: 'portfolio',
     type: 'area',
     data: normPortfolio.map((d) => ({ time: d.date, value: d.value })),
     lineColor: chartTheme.series.portfolio,
-    topColor: 'rgba(59,130,246,0.18)',
+    topColor: 'rgba(59,130,246,0.15)',
     bottomColor: 'transparent',
     lineWidth: 2,
     lastValueVisible: false,
     priceLineVisible: false,
   });
 
+  // Realized-only line — dashed green, normalized to same base
   let hasRealized = false;
   if (realizedData && realizedData.length > 0 && filteredEquity.length > 0) {
     const filteredRealized = filterDataByPeriod(
@@ -187,6 +172,7 @@ export function buildEquityCurveSeries(
     }
   }
 
+  // Trade markers
   if (trades && trades.length > 0 && normPortfolio.length > 0) {
     const equityMap = new Map(normPortfolio.map((d) => [d.date, d.value]));
     const filteredTrades = filterDataByPeriod(trades.map((t) => ({ ...t })), 'date', period);
@@ -211,6 +197,8 @@ export function buildEquityCurveSeries(
         data: markers.map((m) => ({ time: m.time, value: m.value, color: m.color })),
         color: 'transparent',
         lineWidth: 0,
+        lastValueVisible: false,
+        priceLineVisible: false,
       };
       (markerSeries as any).__tradeMarkers = markers.map((m) => ({
         time: m.time,
@@ -231,9 +219,9 @@ export function buildEquityCurveSeries(
     id: 'drawdown',
     type: 'area',
     data: drawdownRaw.map((d) => ({ time: d.date, value: d.drawdown })),
-    lineColor: chartTheme.series.drawdown,
-    topColor: 'rgba(239,68,68,0.4)',
-    bottomColor: 'rgba(239,68,68,0.05)',
+    lineColor: 'rgba(239,68,68,0.8)',
+    topColor: 'rgba(239,68,68,0.35)',
+    bottomColor: 'rgba(239,68,68,0.02)',
     lineWidth: 1,
     lastValueVisible: false,
     priceLineVisible: false,

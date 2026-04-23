@@ -312,7 +312,6 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     const spyForSeries = showBenchmark ? spyData : undefined;
     return buildEquityCurveSeries(curve, spyForSeries, equityPeriod, realizedData, trades);
   }, [dashboard?.equity_curve, showBenchmark, spyData, equityPeriod, recentTrades]);
-
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>

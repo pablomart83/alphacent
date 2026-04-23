@@ -55,7 +55,7 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
       equity: d.portfolio ?? d.value ?? 0,
     }));
     return buildEquityCurveSeries(equityData, spyData, period);
-  }, [pm?.equity_curve, perfStats?.equity_curve, spyData, period]);
+  }, [pm?.equity_curve, perfStats?.equity_curve, spyData, period, equityInterval]);
   const cio = cioDashboard;
 
   const kpiRow1 = [
