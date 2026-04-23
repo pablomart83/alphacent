@@ -161,7 +161,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
       setError(classified.message);
       setLoading(false);
     }
-  }, [tradingMode, equityPeriod]);
+  }, [tradingMode, equityPeriod, equityInterval]);
 
   const { refresh, isRefreshing } = usePolling({
     fetchFn: fetchAll,
