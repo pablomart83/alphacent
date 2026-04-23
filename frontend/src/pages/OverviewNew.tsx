@@ -299,6 +299,20 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     ];
   }, [dashboard, dailyPnl, maxDrawdown]);
 
+  // Pre-build equity curve series — must be before any early returns (Rules of Hooks)
+  const equityCurveSeries = useMemo(() => {
+    const curve = dashboard?.equity_curve;
+    if (!curve?.length) return null;
+    const realizedData = curve
+      .filter((p: any) => p.realized != null)
+      .map((p: any) => ({ date: p.date, realized: p.realized as number }));
+    const trades = recentTrades
+      .map(t => ({ date: (t.closed_at || '').slice(0, 10), pnl: t.realized_pnl ?? 0, symbol: t.symbol }))
+      .filter(t => t.date);
+    const spyForSeries = showBenchmark ? spyData : undefined;
+    return buildEquityCurveSeries(curve, spyForSeries, equityPeriod, realizedData, trades);
+  }, [dashboard?.equity_curve, showBenchmark, spyData, equityPeriod, recentTrades]);
+
   if (tradingModeLoading || loading) {
     return (
       <DashboardLayout onLogout={onLogout}>
@@ -308,21 +322,6 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   }
 
   const d = dashboard;
-
-  // Effective SPY data — hide if benchmark toggle is off
-  const effectiveSpyData = showBenchmark ? spyData : undefined;
-
-  // Pre-build equity curve series in useMemo — pure data transform, no rendering
-  const equityCurveSeries = useMemo(() => {
-    if (!d?.equity_curve?.length) return null;
-    const realizedData = d.equity_curve
-      .filter((p: any) => p.realized != null)
-      .map((p: any) => ({ date: p.date, realized: p.realized as number }));
-    const trades = recentTrades
-      .map(t => ({ date: (t.closed_at || '').slice(0, 10), pnl: t.realized_pnl ?? 0, symbol: t.symbol }))
-      .filter(t => t.date);
-    return buildEquityCurveSeries(d.equity_curve, effectiveSpyData, equityPeriod, realizedData, trades);
-  }, [d?.equity_curve, effectiveSpyData, equityPeriod, recentTrades]);
 
   // ── Header actions ─────────────────────────────────────────────────────
   const headerActions = (
