@@ -142,22 +142,28 @@ function buildSeries(
     lineWidth: 2,
   });
 
-  // Realized-only line — dashed green, absolute P&L on right price scale
-  if (realizedData && realizedData.length > 0) {
+  // Realized-only line — dashed green, normalized using the same equity base as portfolio
+  // Formula: (starting_equity + realized_pnl) / starting_equity * 100
+  // This puts both lines on the same scale — gap = unrealized P&L as % of starting equity
+  if (realizedData && realizedData.length > 0 && filteredEquity.length > 0) {
     const filteredRealized = filterDataByPeriod(
       realizedData.map(d => ({ date: d.date, value: d.realized })),
       'date',
       period,
     );
-    if (filteredRealized.length > 0) {
+    // Use the first equity value as the base (same as normalizeToBase100 uses for portfolio)
+    const equityBase = filteredEquity[0]?.equity;
+    if (filteredRealized.length > 0 && equityBase && equityBase > 0) {
       mainSeries.push({
         id: 'realized',
         type: 'line',
-        data: filteredRealized.map(d => ({ time: d.date, value: d.value })),
+        data: filteredRealized.map(d => ({
+          time: d.date,
+          value: ((equityBase + d.value) / equityBase) * 100,
+        })),
         color: '#22c55e',
         lineWidth: 1,
         dashed: true,
-        priceScaleId: 'realized',
       });
     }
   }
