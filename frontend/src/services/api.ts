@@ -949,9 +949,11 @@ class ApiClient {
   // Dashboard Summary Endpoint
   // ============================================================================
 
-  async getDashboardSummary(mode: TradingMode): Promise<any> {
+  async getDashboardSummary(mode: TradingMode, interval?: '1d' | '4h' | '1h'): Promise<any> {
+    const params = new URLSearchParams({ mode });
+    if (interval && interval !== '1d') params.set('interval', interval);
     const response = await this.client.get<ApiResponse<any>>(
-      `/account/dashboard/summary?mode=${mode}`
+      `/account/dashboard/summary?${params.toString()}`
     );
     return this.handleResponse(response);
   }

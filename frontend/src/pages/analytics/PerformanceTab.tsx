@@ -86,7 +86,7 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
           )}
         </div>
         <EquityCurveChart
-          equityData={(perfStats?.equity_curve || pm?.equity_curve || []).map((d: any) => ({ date: typeof d.date === 'string' ? d.date : '', equity: d.portfolio ?? d.value ?? 0 }))}
+          equityData={(pm?.equity_curve || perfStats?.equity_curve || []).map((d: any) => ({ date: typeof d.date === 'string' ? d.date : '', equity: d.portfolio ?? d.value ?? 0 }))}
           spyData={spyData}
           period={period} onPeriodChange={(p) => { setPeriod(p as any); }}
           interval={equityInterval} onIntervalChange={(iv: string) => setEquityInterval(iv as any)}

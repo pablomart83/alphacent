@@ -1509,6 +1509,7 @@ class DashboardSummaryResponse(BaseModel):
 @router.get("/dashboard/summary", response_model=DashboardSummaryResponse)
 async def get_dashboard_summary(
     mode: TradingMode,
+    interval: str = "1d",
     username: str = Depends(get_current_user),
     db: Session = Depends(get_db_session),
     config: Configuration = Depends(get_configuration),
@@ -1683,38 +1684,66 @@ async def get_dashboard_summary(
     try:
         ninety_days_ago = now - timedelta(days=90)
         ninety_days_str = ninety_days_ago.strftime("%Y-%m-%d")
-        
-        # Try equity snapshots first (most accurate — includes unrealized)
-        snapshots = db.query(EquitySnapshotORM).filter(
+
+        # Fetch snapshots based on interval
+        all_snaps = db.query(EquitySnapshotORM).filter(
             EquitySnapshotORM.date >= ninety_days_str
         ).order_by(EquitySnapshotORM.date.asc()).all()
-        
-        if snapshots and len(snapshots) > 1:
-            # Deduplicate to one point per calendar day (last snapshot = closing value).
-            # Hourly snapshots have date like "2026-04-22 07:00"; daily ones like "2026-04-22".
-            # We want the latest equity value for each calendar day.
+
+        if interval in ('1h', '4h'):
+            # Use all hourly rows; for 4h downsample to every 4th hour
+            snapshots = all_snaps
+            if interval == '4h':
+                filtered = []
+                for s in snapshots:
+                    date_str = str(s.date)
+                    if len(date_str) > 10:
+                        try:
+                            hour = int(date_str[11:13])
+                            if hour % 4 == 0:
+                                filtered.append(s)
+                        except Exception:
+                            filtered.append(s)
+                    else:
+                        filtered.append(s)
+                snapshots = filtered or snapshots
+        else:
+            # Daily: deduplicate to one point per calendar day (last snapshot = closing value)
             daily_latest: dict = {}
+            for snap in all_snaps:
+                day_key = str(snap.date)[:10]
+                daily_latest[day_key] = snap
+            snapshots = [daily_latest[k] for k in sorted(daily_latest.keys())]
+
+        if snapshots and len(snapshots) > 1:
             for snap in snapshots:
-                day_key = str(snap.date)[:10]  # "2026-04-22"
-                daily_latest[day_key] = snap  # later rows overwrite earlier ones
-            
-            for day_key in sorted(daily_latest.keys()):
-                snap = daily_latest[day_key]
+                date_str = str(snap.date)
+                # For intraday, convert to Unix timestamp for TvChart
+                if interval in ('1h', '4h') and len(date_str) > 10:
+                    try:
+                        from datetime import timezone as _tz
+                        dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M').replace(tzinfo=_tz.utc)
+                        point_date = str(int(dt.timestamp()))
+                    except Exception:
+                        point_date = date_str[:10]
+                else:
+                    point_date = date_str[:10]
                 equity_curve.append(EquityPoint(
-                    date=day_key,
+                    date=point_date,
                     equity=round(snap.equity, 2),
                     realized=round(snap.realized_pnl_cumulative, 2) if snap.realized_pnl_cumulative is not None else None,
                     benchmark=None
                 ))
-            # Add today's live equity if not already the last point
-            today_str = now.strftime("%Y-%m-%d")
-            if not equity_curve or equity_curve[-1].date != today_str:
-                equity_curve.append(EquityPoint(
-                    date=today_str,
-                    equity=round(equity, 2),
-                    realized=round(all_time_realized, 2),
-                    benchmark=None
-                ))
+            # Add today's live equity if not already the last point (daily only)
+            if interval == '1d':
+                today_str = now.strftime("%Y-%m-%d")
+                if not equity_curve or equity_curve[-1].date != today_str:
+                    equity_curve.append(EquityPoint(
+                        date=today_str,
+                        equity=round(equity, 2),
+                        realized=round(all_time_realized, 2),
+                        benchmark=None
+                    ))
         else:
             # Fallback: build from closed positions (less accurate — realized only)
             closed_positions = db.query(PositionORM).filter(

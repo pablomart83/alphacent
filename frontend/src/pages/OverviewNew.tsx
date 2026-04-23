@@ -136,7 +136,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     try {
       setError(null);
       const [dashData, closedPos, strats] = await Promise.all([
-        apiClient.getDashboardSummary(tradingMode),
+        apiClient.getDashboardSummary(tradingMode, equityInterval),
         apiClient.getClosedPositions(tradingMode, 10),
         apiClient.getStrategies(tradingMode, true),
       ]);
