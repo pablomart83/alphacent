@@ -124,6 +124,8 @@ function buildSeriesOptions(cfg: TvSeriesConfig): Record<string, unknown> {
         color: cfg.color || THEME.line,
         lineWidth: cfg.lineWidth || 2,
         lineStyle: cfg.dashed ? LineStyle.Dashed : LineStyle.Solid,
+        lastValueVisible: cfg.lastValueVisible ?? false,
+        priceLineVisible: cfg.priceLineVisible ?? false,
       };
     case 'candlestick':
       return {
@@ -141,6 +143,8 @@ function buildSeriesOptions(cfg: TvSeriesConfig): Record<string, unknown> {
         color: cfg.color || THEME.volume,
         priceFormat: { type: 'volume' as const },
         priceScaleId: cfg.priceScaleId || 'volume',
+        lastValueVisible: cfg.lastValueVisible ?? false,
+        priceLineVisible: cfg.priceLineVisible ?? false,
       };
     case 'baseline':
       return {
@@ -153,6 +157,8 @@ function buildSeriesOptions(cfg: TvSeriesConfig): Record<string, unknown> {
         topLineColor: cfg.topLineColor || THEME.up,
         bottomLineColor: cfg.bottomLineColor || THEME.down,
         lineWidth: cfg.lineWidth || 2,
+        lastValueVisible: cfg.lastValueVisible ?? false,
+        priceLineVisible: cfg.priceLineVisible ?? false,
       };
     default:
       return base;

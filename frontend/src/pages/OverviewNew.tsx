@@ -438,9 +438,11 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                   type: 'histogram',
                   data: dailyPnlBars,
                   priceScaleId: 'pnl_scale',
+                  lastValueVisible: false,
+                  priceLineVisible: false,
                 }]}
                 height={90}
-                showTimeScale={false}
+                showTimeScale
                 autoResize
               />
             </div>
@@ -463,9 +465,11 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
                   topLineColor: '#22c55e',
                   bottomLineColor: '#ef4444',
                   lineWidth: 1,
+                  lastValueVisible: false,
+                  priceLineVisible: false,
                 }]}
                 height={90}
-                showTimeScale
+                showTimeScale={false}
                 autoResize
               />
             </div>
