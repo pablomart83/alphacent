@@ -115,6 +115,8 @@ function buildSeriesOptions(cfg: TvSeriesConfig): Record<string, unknown> {
         topColor: cfg.topColor || (cfg.color ? `${cfg.color}33` : THEME.area),
         bottomColor: cfg.bottomColor || 'transparent',
         lineWidth: cfg.lineWidth || 2,
+        lastValueVisible: cfg.lastValueVisible ?? false,
+        priceLineVisible: cfg.priceLineVisible ?? false,
       };
     case 'line':
       return {

@@ -144,6 +144,8 @@ function buildSeries(
     topColor: 'rgba(59, 130, 246, 0.18)',
     bottomColor: 'transparent',
     lineWidth: 2,
+    lastValueVisible: false,
+    priceLineVisible: false,
   });
 
   // Realized-only line — dashed green, normalized using the same equity base as portfolio
@@ -237,6 +239,8 @@ function buildSeries(
       topColor: 'rgba(239, 68, 68, 0.4)',
       bottomColor: 'rgba(239, 68, 68, 0.05)',
       lineWidth: 1,
+      lastValueVisible: false,
+      priceLineVisible: false,
     },
   ];
 
