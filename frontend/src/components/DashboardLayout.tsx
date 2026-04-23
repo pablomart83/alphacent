@@ -2,6 +2,7 @@ import { type FC, type ReactNode, useEffect, useState, useCallback, useRef } fro
 import { TopNavBar } from './TopNavBar';
 import { MetricsBar } from './MetricsBar';
 import { PositionTickerStrip } from './PositionTickerStrip';
+import { BottomWidgetZone } from './BottomWidgetZone';
 import { KeyboardShortcutsHelp } from './KeyboardShortcutsHelp';
 import { useTradingMode } from '../contexts/TradingModeContext';
 import { useLastSynced } from '../hooks/useLastSynced';
@@ -116,9 +117,11 @@ export const DashboardLayout: FC<DashboardLayoutProps> = ({ children, onLogout }
       <MetricsBar />
       <PositionTickerStrip />
 
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto min-h-0">
         {children}
       </main>
+
+      <BottomWidgetZone />
 
       {/* Keyboard shortcuts help overlay */}
       <KeyboardShortcutsHelp open={showHelp} onClose={() => setShowHelp(false)} />

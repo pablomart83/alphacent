@@ -1,5 +1,4 @@
 import { type FC, type ReactNode } from 'react';
-import { BottomWidgetZone } from './BottomWidgetZone';
 import { cn } from '../lib/utils';
 
 interface PageTemplateProps {
@@ -11,7 +10,7 @@ interface PageTemplateProps {
   actions?: ReactNode;
   /** Main page content */
   children: ReactNode;
-  /** Whether to show the bottom widget zone (default: true) */
+  /** Whether to show the bottom widget zone (default: true) — kept for API compat, console is now persistent in DashboardLayout */
   showWidgets?: boolean;
   /** Compact mode: hides title, reduces header to 36px with just actions, or 0px if no actions */
   compact?: boolean;
@@ -23,7 +22,7 @@ export const PageTemplate: FC<PageTemplateProps> = ({
   description,
   actions: _actions,
   children,
-  showWidgets = true,
+  showWidgets: _showWidgets,
   compact = false,
   className,
 }) => {
@@ -47,9 +46,6 @@ export const PageTemplate: FC<PageTemplateProps> = ({
       <div className="flex-1 overflow-auto min-h-0">
         {children}
       </div>
-
-      {/* Bottom widget zone */}
-      {showWidgets && <BottomWidgetZone />}
     </div>
   );
 };
