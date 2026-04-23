@@ -93,8 +93,8 @@ export const DailyPnLChart: FC<DailyPnLChartProps> = ({ data, height = 90 }) => 
       timeScale: {
         borderColor:  THEME.grid,
         timeVisible:  false,
-        rightOffset:  4,
-        barSpacing:   6,
+        rightOffset:  8,
+        barSpacing:   8,
         fixLeftEdge:  true,
         fixRightEdge: true,
       },
@@ -129,8 +129,7 @@ export const DailyPnLChart: FC<DailyPnLChartProps> = ({ data, height = 90 }) => 
       lastValueVisible: false,
       priceLineVisible: false,
       priceFormat:      { type: 'custom', formatter: fmtDollar, minMove: 1 },
-    });
-    hist.setData(
+    });    hist.setData(
       dailyData.map(d => ({
         time:  d.date as Time,
         value: d.pnl,

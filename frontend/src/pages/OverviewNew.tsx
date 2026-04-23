@@ -204,9 +204,10 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     setEquityPeriod(periodMap[period] || '3M');
   }, []);
 
-  // ── Rolling Sharpe series (30-day rolling) ─────────────────────────────
+  // ── Rolling Sharpe series (30-day rolling) — always daily ─────────────
   const rollingSharpe30 = useMemo(() => {
-    const curve = dashboard?.equity_curve ?? [];
+    // Always use daily points only (date length == 10)
+    const curve = (dashboard?.equity_curve ?? []).filter((d: any) => String(d.date).length === 10);
     if (curve.length < 32) return [];
     const returns: number[] = [];
     for (let i = 1; i < curve.length; i++) {
@@ -216,7 +217,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     }
     const result: Array<{ time: string; value: number }> = [];
     for (let i = 29; i < returns.length; i++) {
-      const dateIdx = i + 1; // returns[i] corresponds to curve[i+1]
+      const dateIdx = i + 1;
       if (dateIdx >= curve.length) break;
       const window = returns.slice(i - 29, i + 1);
       const mean = window.reduce((s, v) => s + v, 0) / 30;
