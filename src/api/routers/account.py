@@ -1690,17 +1690,25 @@ async def get_dashboard_summary(
         ).order_by(EquitySnapshotORM.date.asc()).all()
         
         if snapshots and len(snapshots) > 1:
-            # Use snapshot-based equity curve
+            # Deduplicate to one point per calendar day (last snapshot = closing value).
+            # Hourly snapshots have date like "2026-04-22 07:00"; daily ones like "2026-04-22".
+            # We want the latest equity value for each calendar day.
+            daily_latest: dict = {}
             for snap in snapshots:
+                day_key = str(snap.date)[:10]  # "2026-04-22"
+                daily_latest[day_key] = snap  # later rows overwrite earlier ones
+            
+            for day_key in sorted(daily_latest.keys()):
+                snap = daily_latest[day_key]
                 equity_curve.append(EquityPoint(
-                    date=snap.date,
+                    date=day_key,
                     equity=round(snap.equity, 2),
                     realized=round(snap.realized_pnl_cumulative, 2) if snap.realized_pnl_cumulative is not None else None,
                     benchmark=None
                 ))
-            # Add today's live equity if not already the last snapshot
+            # Add today's live equity if not already the last point
             today_str = now.strftime("%Y-%m-%d")
-            if not snapshots or snapshots[-1].date != today_str:
+            if not equity_curve or equity_curve[-1].date != today_str:
                 equity_curve.append(EquityPoint(
                     date=today_str,
                     equity=round(equity, 2),
