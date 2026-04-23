@@ -142,22 +142,22 @@ function buildSeries(
     lineWidth: 2,
   });
 
-  // Realized-only line — dashed green, normalized to same base as portfolio
+  // Realized-only line — dashed green, absolute P&L on right price scale
   if (realizedData && realizedData.length > 0) {
     const filteredRealized = filterDataByPeriod(
       realizedData.map(d => ({ date: d.date, value: d.realized })),
       'date',
       period,
     );
-    const normRealized = normalizeToBase100(filteredRealized);
-    if (normRealized.length > 0) {
+    if (filteredRealized.length > 0) {
       mainSeries.push({
         id: 'realized',
         type: 'line',
-        data: normRealized.map(d => ({ time: d.date, value: d.value })),
+        data: filteredRealized.map(d => ({ time: d.date, value: d.value })),
         color: '#22c55e',
         lineWidth: 1,
         dashed: true,
+        priceScaleId: 'realized',
       });
     }
   }
