@@ -1040,7 +1040,21 @@ class OrderMonitor:
                                         positions_created += 1
                                         logger.info(f"Created position {new_pos.id} for order {order.id} with strategy_id '{order.strategy_id}'")
                         else:
-                            logger.warning(f"Could not find eToro position for filled order {order.id} (symbol: {order.symbol})")
+                            # Before warning, check if sync_positions already created/matched
+                            # a position for this strategy+symbol — if so, this is a false alarm.
+                            existing_for_strategy = session.query(PositionORM).filter(
+                                PositionORM.strategy_id == order.strategy_id,
+                                PositionORM.symbol == order.symbol,
+                                PositionORM.closed_at.is_(None),
+                            ).first()
+                            if existing_for_strategy:
+                                logger.info(
+                                    f"Order {order.id} ({order.symbol}): eToro position not found in "
+                                    f"live list but DB position {existing_for_strategy.id} already exists "
+                                    f"(etoro_id: {existing_for_strategy.etoro_position_id}) — sync_positions handled it"
+                                )
+                            else:
+                                logger.warning(f"Could not find eToro position for filled order {order.id} (symbol: {order.symbol})")
                         
                         # Log to trade journal for analytics tracking
                         try:

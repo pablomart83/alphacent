@@ -1165,9 +1165,15 @@ class TradingScheduler:
                             if order.etoro_order_id:
                                 try:
                                     import time as _t
-                                    _t.sleep(1)  # Brief pause for eToro to process
+                                    _t.sleep(3)  # eToro status endpoint has ~2-3s propagation delay after placement
 
-                                    status_data = self._etoro_client.get_order_status(order.etoro_order_id)
+                                    try:
+                                        status_data = self._etoro_client.get_order_status(order.etoro_order_id)
+                                    except Exception as _status_err:
+                                        # 404 immediately after placement = propagation delay, not a real error
+                                        # order_monitor will pick it up on next cycle
+                                        logger.debug(f"Order {order.etoro_order_id} status not yet available (propagation delay): {_status_err}")
+                                        status_data = None
                                     etoro_status = status_data.get("statusID") if status_data else None
 
                                     if etoro_status in [2, 3, 7]:
