@@ -78,7 +78,14 @@ const THEME = {
 function toTime(s: string): Time {
   // Unix timestamp (all digits, 9-11 chars)
   if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
-  // "YYYY-MM-DD HH:MM" or longer → take date part only for daily
+  // Sub-daily: "YYYY-MM-DD HH:MM" → convert to Unix timestamp for proper intraday rendering
+  if (s.length > 10 && s[10] === ' ') {
+    try {
+      const dt = new Date(s.replace(' ', 'T') + ':00Z');
+      if (!isNaN(dt.getTime())) return Math.floor(dt.getTime() / 1000) as Time;
+    } catch { /* fall through */ }
+  }
+  // Daily: "YYYY-MM-DD"
   return s.slice(0, 10) as Time;
 }
 
@@ -213,7 +220,7 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
       },
       timeScale: {
         borderColor:  THEME.grid,
-        timeVisible:  false,
+        timeVisible:  interval !== '1d', // show HH:MM for intraday
         rightOffset:  8,
         barSpacing:   8,
         fixLeftEdge:  true,

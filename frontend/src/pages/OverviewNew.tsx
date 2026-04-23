@@ -238,8 +238,9 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
         color: r.daily_pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)',
       }));
     }
-    const curve = dashboard?.equity_curve ?? [];
-    return curve.slice(1).map((d, i) => {
+    // Use only daily points (date length == 10, e.g. "2026-04-22")
+    const curve = (dashboard?.equity_curve ?? []).filter((d: any) => String(d.date).length === 10);
+    return curve.slice(1).map((d: any, i: number) => {
       const pnl = d.equity - curve[i].equity;
       return { time: d.date, value: pnl, color: pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)' };
     });
