@@ -13,6 +13,7 @@ import type { CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
 import { EquityCurveChart } from '../components/charts/EquityCurveChart';
+import { buildEquityCurveSeries } from '../lib/chart-utils';
 import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
 import { TvChart } from '../components/charts/TvChart';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
@@ -311,6 +312,18 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   // Effective SPY data — hide if benchmark toggle is off
   const effectiveSpyData = showBenchmark ? spyData : undefined;
 
+  // Pre-build equity curve series in useMemo — pure data transform, no rendering
+  const equityCurveSeries = useMemo(() => {
+    if (!d?.equity_curve?.length) return null;
+    const realizedData = d.equity_curve
+      .filter((p: any) => p.realized != null)
+      .map((p: any) => ({ date: p.date, realized: p.realized as number }));
+    const trades = recentTrades
+      .map(t => ({ date: (t.closed_at || '').slice(0, 10), pnl: t.realized_pnl ?? 0, symbol: t.symbol }))
+      .filter(t => t.date);
+    return buildEquityCurveSeries(d.equity_curve, effectiveSpyData, equityPeriod, realizedData, trades);
+  }, [d?.equity_curve, effectiveSpyData, equityPeriod, recentTrades]);
+
   // ── Header actions ─────────────────────────────────────────────────────
   const headerActions = (
     <div className="flex items-center gap-1.5">
@@ -406,23 +419,17 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     <div className="flex flex-col h-full overflow-auto">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
         <div className="p-2 flex flex-col gap-3">
-          {d ? (
+          {d && equityCurveSeries ? (
             <EquityCurveChart
-              equityData={d.equity_curve}
-              realizedData={d.equity_curve
-                .filter(p => p.realized != null)
-                .map(p => ({ date: p.date, realized: p.realized! }))}
-              spyData={effectiveSpyData}
+              mainSeries={equityCurveSeries.mainSeries}
+              drawdownSeries={equityCurveSeries.drawdownSeries}
+              hasSpy={equityCurveSeries.hasSpy}
+              hasRealized={equityCurveSeries.hasRealized}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
               interval={equityInterval}
               onIntervalChange={(iv: string) => setEquityInterval(iv as '1d' | '4h' | '1h')}
               height={380}
-              trades={recentTrades.map(t => ({
-                date: (t.closed_at || '').slice(0, 10),
-                pnl: t.realized_pnl ?? 0,
-                symbol: t.symbol,
-              })).filter(t => t.date)}
             />
           ) : (
             <ChartSkeleton height={380} />
