@@ -155,10 +155,17 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
         ?? [...spyMap.entries()].find(([d]) => d >= startDate)?.[1];
       if (startSpy && startSpy > 0) {
         const scale = startEquity / startSpy;
+        // For intraday data, deduplicate SPY to one point per day (avoid duplicate times)
+        const seenDates = new Set<string>();
         spy = filtered
           .map(d => {
-            const v = spyMap.get(d.date.slice(0, 10));
-            return v != null ? { time: toTime(d.date), value: v * scale } : null;
+            const dayKey = d.date.slice(0, 10);
+            const v = spyMap.get(dayKey);
+            if (v == null) return null;
+            // For daily data keep all; for intraday only emit once per day
+            if (seenDates.has(dayKey)) return null;
+            seenDates.add(dayKey);
+            return { time: toTime(dayKey), value: v * scale };
           })
           .filter(Boolean) as Array<{ time: Time; value: number }>;
         if (spy.length < 2) spy = null;

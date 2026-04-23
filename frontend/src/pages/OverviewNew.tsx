@@ -12,7 +12,8 @@ import { CompactMetricRow } from '../components/trading/CompactMetricRow';
 import type { CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
-import { PortfolioEquityChart } from '../components/charts/PortfolioEquityChart';import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
+import { PortfolioEquityChart } from '../components/charts/PortfolioEquityChart';
+import { DailyPnLChart } from '../components/charts/DailyPnLChart';import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
 import { TvChart } from '../components/charts/TvChart';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 import { ActivityPanel } from '../components/ActivityPanel';
@@ -130,12 +131,13 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Fetch all data
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (intervalOverride?: '1d' | '4h' | '1h') => {
     if (!tradingMode) return;
+    const iv = intervalOverride ?? equityInterval;
     try {
       setError(null);
       const [dashData, closedPos, strats] = await Promise.all([
-        apiClient.getDashboardSummary(tradingMode, equityInterval),
+        apiClient.getDashboardSummary(tradingMode, iv),
         apiClient.getClosedPositions(tradingMode, 10),
         apiClient.getStrategies(tradingMode, true),
       ]);
@@ -146,7 +148,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
       setLastFetchedAt(new Date());
       setLoading(false);
 
-      // Fetch SPY benchmark (non-blocking — endpoint may not exist yet)
+      // Fetch SPY benchmark (non-blocking)
       try {
         const spy = await apiClient.getSpyBenchmark(equityPeriod);
         setSpyData(spy && spy.length > 0 ? spy : undefined);
@@ -232,18 +234,14 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
   const dailyPnlBars = useMemo(() => {
     const table = (dashboard as any)?.daily_pnl_table as Array<{ date: string; daily_pnl: number }> | undefined;
     if (table && table.length > 0) {
-      return table.map(r => ({
-        time: r.date,
-        value: r.daily_pnl,
-        color: r.daily_pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)',
-      }));
+      return table.map(r => ({ date: r.date.slice(0, 10), pnl: r.daily_pnl }));
     }
     // Use only daily points (date length == 10, e.g. "2026-04-22")
     const curve = (dashboard?.equity_curve ?? []).filter((d: any) => String(d.date).length === 10);
-    return curve.slice(1).map((d: any, i: number) => {
-      const pnl = d.equity - curve[i].equity;
-      return { time: d.date, value: pnl, color: pnl >= 0 ? 'rgba(34,197,94,0.7)' : 'rgba(239,68,68,0.7)' };
-    });
+    return curve.slice(1).map((d: any, i: number) => ({
+      date: d.date,
+      pnl: d.equity - curve[i].equity,
+    }));
   }, [dashboard]);
 
   // Build compact metrics for left panel
@@ -410,7 +408,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
               interval={equityInterval}
-              onIntervalChange={(iv) => setEquityInterval(iv)}
+              onIntervalChange={(iv) => { setEquityInterval(iv); fetchAll(iv); }}
               height={380}
             />
           ) : (
@@ -421,19 +419,7 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
           {dailyPnlBars.length > 1 && (
             <div>
               <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">Daily P&L</div>
-              <TvChart
-                series={[{
-                  id: 'daily_pnl',
-                  type: 'histogram',
-                  data: dailyPnlBars,
-                  priceScaleId: 'pnl_scale',
-                  lastValueVisible: false,
-                  priceLineVisible: false,
-                }]}
-                height={90}
-                showTimeScale
-                autoResize
-              />
+              <DailyPnLChart data={dailyPnlBars} height={90} />
             </div>
           )}
 

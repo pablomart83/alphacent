@@ -39,7 +39,7 @@ export function filterDataByPeriod<T extends Record<string, unknown>>(
 ): T[] {
   if (period === 'ALL' || data.length === 0) return data;
 
-  const lastDateStr = String(data[data.length - 1][xAxisKey]);
+  const lastDateStr = String(data[data.length - 1][xAxisKey]).slice(0, 10);
   const anchor = parseISO(lastDateStr);
   if (isNaN(anchor.getTime())) return data;
 
@@ -47,7 +47,9 @@ export function filterDataByPeriod<T extends Record<string, unknown>>(
   if (!start) return data;
 
   return data.filter((d) => {
-    const dateStr = String(d[xAxisKey]);
+    const raw = String(d[xAxisKey]);
+    // Normalise: take first 10 chars for date comparison (handles "YYYY-MM-DD HH:MM")
+    const dateStr = raw.slice(0, 10);
     const date = parseISO(dateStr);
     return !isNaN(date.getTime()) && isAfter(date, start);
   });
