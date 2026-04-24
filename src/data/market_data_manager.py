@@ -47,6 +47,53 @@ from src.utils.symbol_mapper import normalize_symbol, to_yahoo_ticker
 
 logger = logging.getLogger(__name__)
 
+# ── Module-level singleton ────────────────────────────────────────────────────
+# MarketDataManager is expensive to construct (reads config, creates HTTP session,
+# initialises DataQualityValidator). Instantiating it per-symbol inside loops
+# (trailing stops, risk checks, order executor) creates hundreds of objects per
+# minute and floods the log with "Initialized MarketDataManager" lines.
+#
+# get_market_data_manager() returns a shared instance, creating it on first call.
+# Callers that need a fresh instance (e.g. after config reload) can pass
+# force_new=True.
+_shared_mdm: "Optional[MarketDataManager]" = None
+_shared_mdm_lock = _yf_threading.Lock()
+
+def get_market_data_manager(config: dict = None, force_new: bool = False) -> "Optional[MarketDataManager]":
+    """Return the shared MarketDataManager singleton, creating it if needed.
+    
+    Returns None if not yet initialized and config is not available.
+    The monitoring_service registers the authoritative instance via
+    set_market_data_manager() once it has the etoro_client available.
+    """
+    global _shared_mdm
+    if _shared_mdm is not None and not force_new:
+        return _shared_mdm
+    with _shared_mdm_lock:
+        if _shared_mdm is not None and not force_new:
+            return _shared_mdm
+        if config is None:
+            try:
+                import yaml
+                from pathlib import Path
+                _p = Path("config/autonomous_trading.yaml")
+                config = yaml.safe_load(_p.read_text()) if _p.exists() else {}
+            except Exception:
+                config = {}
+        _shared_mdm = MarketDataManager(config)
+        return _shared_mdm
+
+
+def set_market_data_manager(instance: "MarketDataManager") -> None:
+    """Register an externally-created MarketDataManager as the shared singleton.
+    
+    Called by MonitoringService after it creates an instance with etoro_client.
+    This ensures the singleton has live price access, not just DB/Yahoo.
+    """
+    global _shared_mdm
+    with _shared_mdm_lock:
+        _shared_mdm = instance
+
 
 class MarketDataCache:
     """Simple in-memory cache with TTL for market data."""

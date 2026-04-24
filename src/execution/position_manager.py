@@ -155,17 +155,9 @@ class PositionManager:
                 # percentage produces a stop within normal intraday noise.
                 effective_distance = distance_pct
                 try:
-                    from src.data.market_data_manager import MarketDataManager
-                    import yaml as _yaml
-                    from pathlib import Path as _Path
-                    from datetime import timedelta as _td
-                    _cfg_path = _Path("config/autonomous_trading.yaml")
-                    _cfg = {}
-                    if _cfg_path.exists():
-                        with open(_cfg_path) as _f:
-                            _cfg = _yaml.safe_load(_f) or {}
-                    _mdm = MarketDataManager(_cfg)
-                    from datetime import datetime as _dt
+                    from src.data.market_data_manager import get_market_data_manager
+                    from datetime import timedelta as _td, datetime as _dt
+                    _mdm = get_market_data_manager()
                     _end = _dt.now()
                     _start = _end - _td(days=20)
                     _bars = _mdm.get_historical_data(position.symbol, _start, _end, interval="1d")

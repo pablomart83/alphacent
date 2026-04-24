@@ -379,9 +379,9 @@ class RiskManager:
             # Estimate new position's contribution using symbol price history
             symbol_returns: list[float] = []
             try:
-                from src.data.market_data_manager import MarketDataManager
+                from src.data.market_data_manager import get_market_data_manager
                 from datetime import timedelta as _td
-                _mdm = MarketDataManager(_cfg)
+                _mdm = get_market_data_manager()
                 _end = datetime.now()
                 _start = _end - _td(days=lookback_days + 10)
                 _bars = _mdm.get_historical_data(signal.symbol, _start, _end, interval="1d")
@@ -480,28 +480,22 @@ class RiskManager:
                 signal.metadata = {}
             if 'price_history' not in signal.metadata and hasattr(signal, 'symbol'):
                 try:
-                    from src.data.market_data_manager import MarketDataManager
-                    import yaml
-                    from pathlib import Path
-                    config_path = Path("config/autonomous_trading.yaml")
-                    if config_path.exists():
-                        with open(config_path, 'r') as f:
-                            cfg = yaml.safe_load(f) or {}
-                        mdm = MarketDataManager(cfg)
-                        from datetime import timedelta
-                        end = datetime.now()
-                        start = end - timedelta(days=90)
-                        bars = mdm.get_historical_data(signal.symbol, start, end, interval="1d")
-                        if bars and len(bars) >= 10:
-                            signal.metadata['price_history'] = [
-                                {
-                                    'open': getattr(b, 'open', None),
-                                    'high': getattr(b, 'high', None),
-                                    'low': getattr(b, 'low', None),
-                                    'close': getattr(b, 'close', None),
-                                }
-                                for b in bars[-63:]  # ~3 months of daily bars
-                            ]
+                    from src.data.market_data_manager import get_market_data_manager
+                    from datetime import timedelta
+                    mdm = get_market_data_manager()
+                    end = datetime.now()
+                    start = end - timedelta(days=90)
+                    bars = mdm.get_historical_data(signal.symbol, start, end, interval="1d")
+                    if bars and len(bars) >= 10:
+                        signal.metadata['price_history'] = [
+                            {
+                                'open': getattr(b, 'open', None),
+                                'high': getattr(b, 'high', None),
+                                'low': getattr(b, 'low', None),
+                                'close': getattr(b, 'close', None),
+                            }
+                            for b in bars[-63:]  # ~3 months of daily bars
+                        ]
                 except Exception as e:
                     logger.debug(f"Could not fetch price history for vol-scaling: {e}")
 

@@ -2147,15 +2147,8 @@ class MonitoringService:
         current_regime = 'unknown'
         try:
             from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-            from src.data.market_data_manager import MarketDataManager
-            import yaml as _yaml
-            from pathlib import Path as _Path
-            _cfg_path = _Path("config/autonomous_trading.yaml")
-            _cfg = {}
-            if _cfg_path.exists():
-                with open(_cfg_path) as _f:
-                    _cfg = _yaml.safe_load(_f) or {}
-            _mdm = MarketDataManager(_cfg)
+            from src.data.market_data_manager import get_market_data_manager
+            _mdm = get_market_data_manager()
             _analyzer = MarketStatisticsAnalyzer(_mdm)
             _sub_regime, _, _, _ = _analyzer.detect_sub_regime()
             current_regime = _sub_regime.value.lower() if _sub_regime else 'unknown'
@@ -3845,7 +3838,8 @@ class MonitoringService:
             from src.data.market_data_manager import MarketDataManager
             from src.strategy.market_analyzer import MarketStatisticsAnalyzer
 
-            mdm = MarketDataManager(etoro_client=self.etoro_client)
+            from src.data.market_data_manager import get_market_data_manager
+            mdm = get_market_data_manager()
             analyzer = MarketStatisticsAnalyzer(mdm)
             regime_enum, _confidence, _quality, _metrics = analyzer.detect_sub_regime(symbols=["SPY"])
             regime_str = str(regime_enum).lower().replace("marketregime.", "")

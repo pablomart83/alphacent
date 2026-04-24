@@ -198,16 +198,9 @@ class OrderExecutor:
 
                             _mdm = get_market_data_manager()
                             if _mdm is None:
-                                # Fallback: create a lightweight instance just for ATR
-                                from src.data.market_data_manager import MarketDataManager
-                                import yaml as _yaml
-                                from pathlib import Path as _Path
-                                _cfg_path = _Path("config/autonomous_trading.yaml")
-                                _cfg = {}
-                                if _cfg_path.exists():
-                                    with open(_cfg_path) as _f:
-                                        _cfg = _yaml.safe_load(_f) or {}
-                                _mdm = MarketDataManager(_cfg)
+                                # Fallback: use shared singleton
+                                from src.data.market_data_manager import get_market_data_manager
+                                _mdm = get_market_data_manager()
 
                             _end = datetime.now()
                             _start = _end - _td(days=30)
