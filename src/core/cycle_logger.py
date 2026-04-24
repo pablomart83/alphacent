@@ -239,7 +239,11 @@ class CycleLogger:
                              f"test: S={tes:.2f} ret={te_r:.1%} wr={te_wr:.0%} dd={te_dd:.1%} t={te_t}")
         zero = [r for r in failed if r.get('test_trades', 0) == 0 and r.get('train_trades', 0) == 0]
         overfit = [r for r in failed if r.get('overfitted') and r.get('train_trades', 0) > 0]
-        low = [r for r in failed if not r.get('overfitted') and r.get('train_trades', 0) > 0 and r.get('test_trades', 0) > 0]
+        # Split the "failed but has trades" bucket into meaningful sub-categories
+        has_trades = [r for r in failed if not r.get('overfitted') and r.get('train_trades', 0) > 0 and r.get('test_trades', 0) > 0]
+        low_trades = [r for r in has_trades if r.get('test_trades', 0) < 8 and r.get('test_sharpe', 0) >= 0.3]
+        low_winrate = [r for r in has_trades if r.get('test_trades', 0) >= 8 and r.get('test_win_rate', 0) < 0.35 and r.get('test_sharpe', 0) >= 0.3]
+        low = [r for r in has_trades if r not in low_trades and r not in low_winrate]
         crashed = [r for r in failed if r.get('error')]
         if zero:
             self._write(f"\n  [WF 0-TRADE] {len(zero)} strategies produced 0 trades:")
@@ -249,8 +253,16 @@ class CycleLogger:
             self._write(f"\n  [WF OVERFITTED] {len(overfit)} strategies:")
             for r in overfit[:10]:
                 self._write(f"    x {r.get('name', '?')[:42]} train={r.get('train_sharpe', 0):.2f} test={r.get('test_sharpe', 0):.2f}")
+        if low_trades:
+            self._write(f"\n  [WF LOW TRADES] {len(low_trades)} below min_trades threshold:")
+            for r in low_trades[:10]:
+                self._write(f"    x {r.get('name', '?')[:42]} test_S={r.get('test_sharpe', 0):.2f} wr={r.get('test_win_rate', 0):.0%} t={r.get('test_trades', 0)}")
+        if low_winrate:
+            self._write(f"\n  [WF LOW WINRATE] {len(low_winrate)} below win rate threshold:")
+            for r in low_winrate[:10]:
+                self._write(f"    x {r.get('name', '?')[:42]} test_S={r.get('test_sharpe', 0):.2f} wr={r.get('test_win_rate', 0):.0%} t={r.get('test_trades', 0)}")
         if low:
-            self._write(f"\n  [WF LOW SHARPE] {len(low)} below threshold:")
+            self._write(f"\n  [WF LOW SHARPE] {len(low)} below Sharpe/return threshold:")
             for r in low[:10]:
                 self._write(f"    x {r.get('name', '?')[:42]} test_S={r.get('test_sharpe', 0):.2f} wr={r.get('test_win_rate', 0):.0%}")
         if crashed:

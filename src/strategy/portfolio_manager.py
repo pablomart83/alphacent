@@ -1073,8 +1073,22 @@ class PortfolioManager:
             # Minimum return-per-trade check: filters out strategies that churn
             # with tiny edge. A strategy with 10 trades and 0.5% total return
             # has 0.05% per trade — that's noise, not edge.
+            # Interval-aware: 1h/4h strategies have shorter holds and smaller per-trade
+            # returns by design — use interval-specific thresholds when available.
             min_rpt_config = config_thresholds.get('min_return_per_trade', {})
-            min_return_per_trade = min_rpt_config.get(asset_class, 0.002) if isinstance(min_rpt_config, dict) else 0.002
+            if isinstance(min_rpt_config, dict):
+                _strat_interval = ''
+                if hasattr(strategy, 'metadata') and strategy.metadata:
+                    _strat_interval = strategy.metadata.get('interval', '')
+                if not _strat_interval and hasattr(strategy, 'rules') and isinstance(strategy.rules, dict):
+                    _strat_interval = strategy.rules.get('interval', '')
+                interval_key = f"{asset_class}_{_strat_interval}" if _strat_interval in ('1h', '4h') else None
+                min_return_per_trade = (
+                    min_rpt_config.get(interval_key, min_rpt_config.get(asset_class, 0.002))
+                    if interval_key else min_rpt_config.get(asset_class, 0.002)
+                )
+            else:
+                min_return_per_trade = 0.002
             if backtest_results.total_trades > 0:
                 return_per_trade = backtest_results.total_return / backtest_results.total_trades
                 if return_per_trade < min_return_per_trade:

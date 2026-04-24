@@ -720,6 +720,29 @@ class StrategyProposer:
                     return 'SHORT'
         return direction
 
+    def _detect_strategy_type(self, strategy) -> str:
+        """Detect strategy type (trend_following, mean_reversion, breakout, momentum) from name/metadata."""
+        if hasattr(strategy, 'metadata') and strategy.metadata:
+            st = strategy.metadata.get('template_type') or strategy.metadata.get('strategy_type')
+            if st:
+                return st
+        name = (strategy.name or '').lower() if hasattr(strategy, 'name') else ''
+        if any(kw in name for kw in ['ema crossover', 'ema ribbon', 'atr dynamic', 'adx trend',
+                                      'dual ma', 'sma trend', 'trend follow', 'macd trend',
+                                      'momentum burst', 'vwap trend', 'fast ema']):
+            return 'trend_following'
+        if any(kw in name for kw in ['breakout', 'keltner', 'squeeze', 'volume spike',
+                                      'bb squeeze', 'momentum surge']):
+            return 'breakout'
+        if any(kw in name for kw in ['momentum', 'macd signal', 'stochastic momentum',
+                                      'macd momentum', 'crypto.*macd']):
+            return 'momentum'
+        if any(kw in name for kw in ['rsi dip', 'bb middle', 'mean reversion', 'pullback',
+                                      'reversion', 'dip buy', 'oversold', 'proximity',
+                                      'stochastic swing', 'weak uptrend']):
+            return 'mean_reversion'
+        return 'unknown'
+
 
     def _compute_adaptive_risk_config(
         self,
@@ -1599,6 +1622,14 @@ class StrategyProposer:
                 test_win_rate = wf['test_results'].win_rate if wf.get('test_results') else 0
                 test_trades = wf['test_results'].total_trades if wf.get('test_results') else 0
                 min_win_rate = thresholds['min_win_rate']
+
+                # Strategy-type-aware win rate: trend-following strategies (EMA crossover,
+                # ATR, ADX, MACD momentum) have inherently lower win rates with higher R:R.
+                # A 30% WR with Sharpe 1.5 is a valid trend profile — don't reject it with
+                # the mean-reversion 45% floor.
+                _stype = self._detect_strategy_type(s) if hasattr(self, '_detect_strategy_type') else 'unknown'
+                if _stype in ('trend_following', 'breakout', 'momentum'):
+                    min_win_rate = min(min_win_rate, 0.30)  # floor 30% for trend strategies
                 
                 # Primary path: both train and test above threshold
                 if ts > min_sharpe and tes > min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate:

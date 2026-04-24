@@ -397,7 +397,7 @@ class ConvictionScorer:
             alignment = {
                 'trending_up':          {'strong': ['trend_following', 'momentum', 'breakout'], 'neutral': ['mean_reversion']},
                 'trending_up_strong':   {'strong': ['trend_following', 'momentum', 'breakout'], 'neutral': []},
-                'trending_up_weak':     {'strong': ['trend_following', 'momentum'], 'neutral': ['breakout', 'mean_reversion']},
+                'trending_up_weak':     {'strong': ['trend_following', 'momentum', 'breakout'], 'neutral': ['mean_reversion']},
                 'trending_down':        {'strong': ['mean_reversion', 'momentum'], 'neutral': ['trend_following', 'volatility']},
                 'trending_down_strong': {'strong': ['mean_reversion', 'momentum'], 'neutral': ['volatility']},
                 'trending_down_weak':   {'strong': ['mean_reversion', 'momentum'], 'neutral': ['trend_following', 'volatility', 'breakout']},

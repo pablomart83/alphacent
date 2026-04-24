@@ -26,16 +26,23 @@ activation_thresholds:
   min_trades: 2
   min_trades_alpha_edge: 8      # Was 10 — alpha edge strategies are lower frequency by design
   min_trades_dsl: 8             # Was 15 — too strict; selective 1d strategies fire 6-10x/6mo
-  min_trades_dsl_1h: 20         # Keep — 1h crypto removed anyway; non-crypto 1h needs density
+  min_trades_dsl_1h: 15          # Was 20 — 1h strategies with 15+ trades in 180d test window is sufficient
   min_trades_dsl_4h: 8          # Was 12 — 4h strategies in 180-day test window: 8 is sufficient
   min_trades_commodity: 6       # Was 8 — commodities are inherently lower frequency
   min_return_per_trade:
-    stock: 0.0015
+    stock: 0.0015       # daily: ~7-30 day holds
+    stock_4h: 0.0008    # 4h: shorter holds, lower per-trade target
+    stock_1h: 0.0003    # 1h: high frequency, small per-trade is expected
     etf: 0.001
+    etf_4h: 0.0005
+    etf_1h: 0.0002
     forex: 0.0005
+    forex_1h: 0.0001
     crypto: 0.04
     index: 0.001
+    index_1h: 0.0002
     commodity: 0.0015
+    commodity_4h: 0.0008
 retirement_thresholds:
   max_sharpe: 0.0
   max_drawdown: 0.31
