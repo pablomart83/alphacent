@@ -1341,6 +1341,35 @@ class TradingScheduler:
                         s_orm.strategy_metadata = meta
                         continue
 
+                    # ── Watchlist-trapped detection ──────────────────────────────────────
+                    # If ALL of this strategy's signals this cycle were rejected as
+                    # same-template duplicate, it's trapped — it only fires on symbols
+                    # already occupied by the same template and can never trade.
+                    # Retire immediately after 3 consecutive trapped cycles rather than
+                    # waiting 48 cycles for the normal TTL.
+                    total_this_cycle = _strategy_total_signals.get(sid, 0)
+                    dup_this_cycle = _template_dup_rejected.get(sid, 0)
+                    if total_this_cycle > 0 and dup_this_cycle == total_this_cycle:
+                        # Every signal was a template-dup rejection
+                        trapped_cycles = meta.get('template_trapped_cycles', 0) + 1
+                        meta['template_trapped_cycles'] = trapped_cycles
+                        s_orm.strategy_metadata = meta
+                        if trapped_cycles >= 3:
+                            s_orm.status = StrategyStatus.RETIRED
+                            s_orm.retired_at = datetime.now()
+                            expired_count += 1
+                            logger.info(
+                                f"  🚫 Retired BACKTESTED strategy {s_orm.name}: "
+                                f"watchlist-trapped ({trapped_cycles} consecutive cycles "
+                                f"with all signals rejected as same-template duplicate)"
+                            )
+                        continue
+                    else:
+                        # Not trapped this cycle — reset trapped counter
+                        if meta.get('template_trapped_cycles', 0) > 0:
+                            meta['template_trapped_cycles'] = 0
+                            s_orm.strategy_metadata = meta
+
                     # No signal — increment counter
                     cycles = meta.get('signal_cycles_without_trade', 0) + 1
                     meta['signal_cycles_without_trade'] = cycles
@@ -1818,6 +1847,10 @@ class TradingScheduler:
         filtered_count = 0
         position_duplicate_count = 0
         pending_order_duplicate_count = 0
+        # Track strategies whose every signal was rejected as same-template duplicate.
+        # These are "watchlist-trapped" — they only fire on occupied symbols and can never trade.
+        _template_dup_rejected: dict = {}   # strategy_id -> count of template-dup rejections this cycle
+        _strategy_total_signals: dict = {}  # strategy_id -> total signals this cycle
         symbol_limit_count = 0
         correlation_filtered_count = 0
         
@@ -1979,6 +2012,8 @@ class TradingScheduler:
                             rejection_reason=f"Same-template duplicate: {tmpl} already has open position in {normalized_symbol}",
                         )
                         position_duplicate_count += 1
+                        _template_dup_rejected[strategy_id] = _template_dup_rejected.get(strategy_id, 0) + 1
+                        _strategy_total_signals[strategy_id] = _strategy_total_signals.get(strategy_id, 0) + 1
                         continue
 
                     if tmpl and tmpl in seen_template_names:
@@ -1990,6 +2025,8 @@ class TradingScheduler:
                                 strategy_name=existing_entry[2],
                                 rejection_reason=f"Same-template duplicate: {tmpl} already queued for {normalized_symbol} (lower confidence)",
                             )
+                            _template_dup_rejected[existing_entry[0]] = _template_dup_rejected.get(existing_entry[0], 0) + 1
+                            _strategy_total_signals[existing_entry[0]] = _strategy_total_signals.get(existing_entry[0], 0) + 1
                             seen_template_names[tmpl] = (strategy_id, signal, strategy_name)
                         else:
                             self._log_coordination_rejection(
@@ -1997,9 +2034,12 @@ class TradingScheduler:
                                 strategy_name=strategy_name,
                                 rejection_reason=f"Same-template duplicate: {tmpl} already queued for {normalized_symbol} (lower confidence)",
                             )
+                            _template_dup_rejected[strategy_id] = _template_dup_rejected.get(strategy_id, 0) + 1
+                            _strategy_total_signals[strategy_id] = _strategy_total_signals.get(strategy_id, 0) + 1
                     else:
                         if tmpl:
                             seen_template_names[tmpl] = (strategy_id, signal, strategy_name)
+                        _strategy_total_signals[strategy_id] = _strategy_total_signals.get(strategy_id, 0) + 1
                         template_deduped.append((strategy_id, signal, strategy_name))
 
                 # Rebuild from seen_template_names to ensure we have the winners
