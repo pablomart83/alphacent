@@ -6,6 +6,7 @@
 import { type FC, useState, useCallback, useEffect } from 'react';
 import { useTradingMode } from '../../contexts/TradingModeContext';
 import { usePolling } from '../../hooks/usePolling';
+import { usePositions } from '../../contexts/PositionsContext';
 import { apiClient } from '../../services/api';
 import { wsManager } from '../../services/websocket';
 import { cn } from '../../lib/utils';
@@ -29,14 +30,14 @@ function trafficLight(val: number, warn: number, danger: number): string {
 
 export const RiskPulseWidget: FC = () => {
   const { tradingMode } = useTradingMode();
+  const { positions } = usePositions();
   const [snap, setSnap] = useState<RiskSnapshot | null>(null);
 
   const fetch = useCallback(async () => {
     if (!tradingMode) return;
     try {
-      const [account, positions, riskLimits] = await Promise.all([
+      const [account, riskLimits] = await Promise.all([
         apiClient.getAccountInfo(tradingMode),
-        apiClient.getPositions(tradingMode),
         apiClient.getRiskLimits(tradingMode).catch(() => null),
       ]);
 
@@ -48,7 +49,6 @@ export const RiskPulseWidget: FC = () => {
       const openPositions = positions.filter(p => !p.closed_at);
       const positionCount = openPositions.length;
 
-      // Largest single position by value
       let largestSymbol = '—';
       let largestPct = 0;
       if (equity > 0 && openPositions.length > 0) {
@@ -62,13 +62,12 @@ export const RiskPulseWidget: FC = () => {
         largestPct = (largestVal / equity) * 100;
       }
 
-      // Daily P&L from account
       const dailyPnlUsd = (account as any).daily_pnl ?? (account as any).unrealized_pnl ?? 0;
       const dailyPnlPct = equity > 0 ? (dailyPnlUsd / equity) * 100 : 0;
 
       setSnap({ exposurePct, exposureLimit, dailyPnlUsd, dailyPnlPct, positionCount, equity, largestSymbol, largestPct });
     } catch { /* ignore */ }
-  }, [tradingMode]);
+  }, [tradingMode, positions]);
 
   usePolling({ fetchFn: fetch, intervalMs: 15000, enabled: !!tradingMode, skipWhenWsConnected: true });
   useEffect(() => {

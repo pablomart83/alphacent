@@ -5,6 +5,7 @@
 import { type FC, useState, useCallback, useEffect } from 'react';
 import { useTradingMode } from '../../contexts/TradingModeContext';
 import { usePolling } from '../../hooks/usePolling';
+import { useWidgetActive } from '../BottomWidgetZone';
 import { apiClient } from '../../services/api';
 import { wsManager } from '../../services/websocket';
 import { cn } from '../../lib/utils';
@@ -38,6 +39,7 @@ function minsAgo(ts: string): number {
 
 export const StrategyPulseWidget: FC = () => {
   const { tradingMode } = useTradingMode();
+  const active = useWidgetActive();
   const [snap, setSnap] = useState<PipelineSnap | null>(null);
 
   const fetch = useCallback(async () => {
@@ -79,7 +81,7 @@ export const StrategyPulseWidget: FC = () => {
     } catch { /* ignore */ }
   }, [tradingMode]);
 
-  usePolling({ fetchFn: fetch, intervalMs: 30000, enabled: !!tradingMode, skipWhenWsConnected: true });
+  usePolling({ fetchFn: fetch, intervalMs: 30000, enabled: !!tradingMode && active, skipWhenWsConnected: true });
   useEffect(() => {
     if (!tradingMode) return;
     return wsManager.onStrategyUpdate(() => fetch());

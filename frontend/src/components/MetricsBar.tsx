@@ -63,31 +63,29 @@ export const MetricsBar: FC = memo(() => {
   const fetchMetrics = useCallback(async () => {
     if (!tradingMode) return;
     try {
-      const [account, summary] = await Promise.all([
-        apiClient.getAccountInfo(tradingMode),
-        apiClient.getDashboardSummary(tradingMode),
+      // Use lightweight metrics-bar endpoint instead of full dashboard/summary
+      const [metricsBar, signals] = await Promise.all([
+        apiClient.get(`/account/metrics-bar?mode=${tradingMode}`),
+        apiClient.getRecentSignals(tradingMode, 20).catch(() => null),
       ]);
-      const base = account.equity || account.balance || 1;
       setData({
-        totalEquity: account.equity ?? 0,
-        dailyPnl: account.daily_pnl ?? 0,
-        dailyPnlPct: base !== 0 ? ((account.daily_pnl ?? 0) / base) * 100 : 0,
-        openPositions: summary?.quick_stats?.open_positions ?? 0,
-        activeStrategies: summary?.quick_stats?.active_strategies ?? 0,
-        marketRegime: summary?.market_regime?.current_regime ?? 'unknown',
-        healthScore: summary?.health_score?.score ?? 0,
+        totalEquity: metricsBar.equity ?? 0,
+        dailyPnl: metricsBar.daily_pnl ?? 0,
+        dailyPnlPct: metricsBar.daily_pnl_pct ?? 0,
+        openPositions: metricsBar.open_positions ?? 0,
+        activeStrategies: metricsBar.active_strategies ?? 0,
+        marketRegime: metricsBar.market_regime ?? 'unknown',
+        healthScore: metricsBar.health_score ?? 0,
       });
       touchLastSynced();
 
-      // Signal chip — fetch in background, non-blocking
-      apiClient.getRecentSignals(tradingMode, 20).then(sig => {
-        if (!sig?.signals?.length) return;
+      if (signals?.signals?.length) {
         setSignalChip({
-          ago: relAge(sig.signals[0]?.created_at || ''),
-          total: sig.summary.total,
-          executed: sig.summary.accepted,
+          ago: relAge(signals.signals[0]?.created_at || ''),
+          total: signals.summary.total,
+          executed: signals.summary.accepted,
         });
-      }).catch(() => {});
+      }
     } catch {
       // Non-critical — keep last known values
     }

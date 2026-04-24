@@ -67,9 +67,15 @@ function toChartTime(t: string | number): Time {
   const s = String(t);
   // Unix timestamp string (all digits) → parse as number
   if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
-  // Date string "YYYY-MM-DD HH:MM" or longer → slice to 10
-  if (s.length >= 10) return s.slice(0, 10) as Time;
-  return s as Time;
+  // Sub-daily "YYYY-MM-DD HH:MM" → UTC Unix timestamp (matches PortfolioEquityChart.toTime)
+  if (s.length > 10 && s[10] === ' ') {
+    try {
+      const dt = new Date(s.replace(' ', 'T') + ':00Z');
+      if (!isNaN(dt.getTime())) return Math.floor(dt.getTime() / 1000) as Time;
+    } catch {}
+  }
+  // Daily "YYYY-MM-DD" → BusinessDay string
+  return s.slice(0, 10) as Time;
 }
 
 function getSeriesDef(type: TvSeriesConfig['type']) {
@@ -110,9 +116,10 @@ function setSeriesData(s: ISeriesApi<SeriesType>, cfg: TvSeriesConfig) {
     return { time: t, value: d.value ?? d.close ?? 0 };
   });
   chartData.sort((a, b) => {
-    const ta = typeof a.time === 'string' ? a.time : String(a.time);
-    const tb = typeof b.time === 'string' ? b.time : String(b.time);
-    return ta.localeCompare(tb);
+    const ta = typeof a.time === 'number' ? a.time : String(a.time);
+    const tb = typeof b.time === 'number' ? b.time : String(b.time);
+    if (typeof ta === 'number' && typeof tb === 'number') return ta - tb;
+    return String(ta).localeCompare(String(tb));
   });
   s.setData(chartData as any);
 }

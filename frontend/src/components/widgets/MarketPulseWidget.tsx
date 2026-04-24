@@ -6,6 +6,7 @@
 import { type FC, useState, useCallback } from 'react';
 import { useTradingMode } from '../../contexts/TradingModeContext';
 import { usePolling } from '../../hooks/usePolling';
+import { useWidgetActive } from '../BottomWidgetZone';
 import { apiClient } from '../../services/api';
 import { cn } from '../../lib/utils';
 
@@ -34,6 +35,7 @@ function fmt(regime: string) {
 
 export const MarketPulseWidget: FC = () => {
   const { tradingMode } = useTradingMode();
+  const active = useWidgetActive();
   const [rows, setRows] = useState<RegimeRow[]>([]);
 
   const fetch = useCallback(async () => {
@@ -67,7 +69,7 @@ export const MarketPulseWidget: FC = () => {
     } catch { /* ignore */ }
   }, [tradingMode]);
 
-  usePolling({ fetchFn: fetch, intervalMs: 60000, enabled: !!tradingMode });
+  usePolling({ fetchFn: fetch, intervalMs: 60000, enabled: !!tradingMode && active });
 
   if (rows.length === 0) {
     return <div className="text-xs text-gray-600 font-mono py-1">Loading...</div>;

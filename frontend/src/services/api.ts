@@ -31,6 +31,23 @@ export interface ScheduleSlot {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+// ── Request deduplication ─────────────────────────────────────────────────────
+// If two components call the same GET endpoint simultaneously, only one HTTP
+// request fires. Both callers await the same promise. TTL: 800ms (enough to
+// collapse burst on page load, short enough not to serve stale data).
+const _inflight = new Map<string, Promise<any>>();
+const _inflightTTL = 800; // ms
+
+function dedupedGet<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = _inflight.get(key);
+  if (existing) return existing as Promise<T>;
+  const p = fn().finally(() => {
+    setTimeout(() => _inflight.delete(key), _inflightTTL);
+  });
+  _inflight.set(key, p);
+  return p;
+}
+
 /**
  * API Client for backend communication
  * Handles REST API calls with authentication token management
@@ -164,21 +181,21 @@ class ApiClient {
   // ============================================================================
 
   async getAccountInfo(mode: TradingMode): Promise<AccountInfo> {
-    return this.withRetry(async () => {
+    return dedupedGet(`account:${mode}`, () => this.withRetry(async () => {
       const response = await this.client.get<ApiResponse<AccountInfo>>(
         `/account?mode=${mode}`
       );
       return this.handleResponse(response);
-    });
+    }));
   }
 
   async getPositions(mode: TradingMode): Promise<Position[]> {
-    return this.withRetry(async () => {
+    return dedupedGet(`positions:${mode}`, () => this.withRetry(async () => {
       const response = await this.client.get<ApiResponse<Position[]>>(
         `/account/positions?mode=${mode}`
       );
       return this.extractArrayFromResponse<Position>(response, 'positions');
-    });
+    }));
   }
 
   async getClosedPositions(mode: TradingMode, limit: number = 100): Promise<Position[]> {
@@ -952,10 +969,13 @@ class ApiClient {
   async getDashboardSummary(mode: TradingMode, interval?: '1d' | '4h' | '1h'): Promise<any> {
     const params = new URLSearchParams({ mode });
     if (interval && interval !== '1d') params.set('interval', interval);
-    const response = await this.client.get<ApiResponse<any>>(
-      `/account/dashboard/summary?${params.toString()}`
-    );
-    return this.handleResponse(response);
+    const key = `dashboard:${params.toString()}`;
+    return dedupedGet(key, async () => {
+      const response = await this.client.get<ApiResponse<any>>(
+        `/account/dashboard/summary?${params.toString()}`
+      );
+      return this.handleResponse(response);
+    });
   }
 
   // ============================================================================

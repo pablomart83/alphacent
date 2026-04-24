@@ -89,6 +89,7 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
           equityData={(pm?.equity_curve || perfStats?.equity_curve || []).map((d: any) => ({
             date: typeof d.date === 'string' ? d.date : (d.timestamp ?? ''),
             equity: d.portfolio ?? d.value ?? 0,
+            realized: d.realized ?? undefined,
           }))}
           spyData={spyData}
           period={period}

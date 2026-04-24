@@ -147,6 +147,8 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
     });
 
     // SPY scaled to same starting equity
+    // For intraday intervals, SPY is daily-only data — use the portfolio bar's own timestamp
+    // so all series on the chart share the same time format (Unix vs BusinessDay).
     let spy: Array<{ time: Time; value: number }> | null = null;
     if (spyData?.length) {
       const spyMap = new Map(spyData.map(s => [s.date.slice(0, 10), s.close]));
@@ -155,17 +157,17 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
         ?? [...spyMap.entries()].find(([d]) => d >= startDate)?.[1];
       if (startSpy && startSpy > 0) {
         const scale = startEquity / startSpy;
-        // For intraday data, deduplicate SPY to one point per day (avoid duplicate times)
         const seenDates = new Set<string>();
         spy = filtered
           .map(d => {
             const dayKey = d.date.slice(0, 10);
             const v = spyMap.get(dayKey);
             if (v == null) return null;
-            // For daily data keep all; for intraday only emit once per day
+            // For intraday: emit once per day using the portfolio bar's own timestamp
+            // so SPY time format matches portfolio (Unix timestamp, not BusinessDay string)
             if (seenDates.has(dayKey)) return null;
             seenDates.add(dayKey);
-            return { time: toTime(dayKey), value: v * scale };
+            return { time: toTime(d.date), value: v * scale };
           })
           .filter(Boolean) as Array<{ time: Time; value: number }>;
         if (spy.length < 2) spy = null;
@@ -195,11 +197,40 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
   }, [filtered, spyData]);
 
   // ── Create / destroy chart ─────────────────────────────────────────────
+  // Only recreate the chart when height changes or when the time format changes
+  // (switching between daily BusinessDay strings and intraday Unix timestamps).
+  // For period changes (client-side filter), just update series data in place.
+  const prevIntervalRef = useRef<string>(interval ?? '1d');
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    // Destroy previous
+    const intervalChanged = prevIntervalRef.current !== (interval ?? '1d');
+    prevIntervalRef.current = interval ?? '1d';
+
+    // If chart already exists and only data changed (not interval/height), update in place
+    if (chartRef.current && !intervalChanged && seriesRef.current['portfolio']) {
+      if (!chartData) return;
+      try {
+        if (chartData.spy && seriesRef.current['spy']) {
+          seriesRef.current['spy'].setData(chartData.spy as any);
+        } else if (!chartData.spy && seriesRef.current['spy']) {
+          // spy disappeared — need full rebuild
+        }
+        if (chartData.realized && seriesRef.current['realized']) {
+          seriesRef.current['realized'].setData(chartData.realized as any);
+        }
+        seriesRef.current['portfolio'].setData(chartData.portfolio as any);
+        seriesRef.current['drawdown'].setData(chartData.drawdown as any);
+        chartRef.current.timeScale().fitContent();
+        return; // skip full rebuild
+      } catch {
+        // fall through to full rebuild on any error
+      }
+    }
+
+    // Full rebuild (first mount, interval change, or height change)
     roRef.current?.disconnect();
     chartRef.current?.remove();
     seriesRef.current = {};

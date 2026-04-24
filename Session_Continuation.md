@@ -612,3 +612,66 @@ idx_historical_price_cache_symbol_date ON historical_price_cache(symbol, date DE
 ### Infrastructure
 - `/etc/systemd/system/alphacent.service` — added ExecStartPre for api key patching
 - DB: 6 performance indexes applied, 57 BACKTESTED strategies retired, 34 DEMO set to pending_retirement
+
+---
+
+## Session April 23-24, 2026 — Frontend Charts & Scheduler Fixes
+
+### Fixes Shipped
+
+**Backend**
+- `src/core/monitoring_service.py` — scheduled autonomous cycle was calling `AutonomousStrategyManager()` with no args (TypeError). Fixed: imports and calls `launch_autonomous_cycle_thread()` from `strategies.py`
+- `src/api/routers/strategies.py` — extracted `launch_autonomous_cycle_thread(cycle_id, filters)` as shared module-level function; `trigger_autonomous_cycle` endpoint now delegates to it; eliminates code duplication
+- `src/core/order_monitor.py` — "Could not find eToro position for filled order" false alarm suppressed: checks if DB position already exists before warning (sync_positions handles it)
+- `src/core/trading_scheduler.py` — eToro 404 race condition on immediate post-order status check: increased sleep 1s→3s, catches 404 as propagation delay (debug log only)
+- `src/api/routers/account.py` — dashboard summary now accepts `interval` param (1d/4h/1h); equity curve deduplicates to one point per calendar day for 1d; returns hourly snapshots for 4h/1h; `realized` field added to `EquityPoint` from `realized_pnl_cumulative`
+
+**Frontend**
+- `frontend/src/components/charts/PortfolioEquityChart.tsx` — **ground-up rewrite** of equity curve chart: single `createChart` instance, absolute dollar values on left axis, drawdown histogram on right axis (bottom 28%), SPY scaled to same starting equity, correct timestamp handling for both daily ("YYYY-MM-DD") and intraday ("YYYY-MM-DD HH:MM" → UTC timestamp), period selector filters client-side, interval selector triggers parent re-fetch
+- `frontend/src/components/charts/DailyPnLChart.tsx` — **ground-up rewrite** of daily P&L histogram: single `createChart`, green/red bars, zero baseline, dollar scale ($K), always uses daily-only data regardless of interval
+- `frontend/src/components/charts/EquityCurveChart.tsx` — **deleted** (was using TvMultiPane, caused BusinessDay crash)
+- `frontend/src/components/charts/TvMultiPane.tsx` — fixed `toChartTime` to handle Unix timestamp strings correctly
+- `frontend/src/pages/OverviewNew.tsx` — uses `PortfolioEquityChart` + `DailyPnLChart`; Rolling Sharpe replaced with `InteractiveChart` (SVG, no lightweight-charts crash); `fetchAll` accepts `intervalOverride` param so interval change triggers immediate re-fetch with correct value; `rollingSharpe30` and `dailyPnlBars` filter to daily-only points
+- `frontend/src/pages/analytics/PerformanceTab.tsx` — uses `PortfolioEquityChart`; `pm?.equity_curve` takes priority over `perfStats?.equity_curve` (respects interval)
+- `frontend/src/lib/chart-utils.ts` — `filterDataByPeriod` normalises date strings to first 10 chars before `parseISO` (handles "YYYY-MM-DD HH:MM")
+- `frontend/src/components/DashboardLayout.tsx` — `BottomWidgetZone` moved here (persistent across navigation, no remount)
+- `frontend/src/components/PageTemplate.tsx` — removed `BottomWidgetZone` (now in DashboardLayout)
+
+### Outstanding Issue — MUST FIX NEXT SESSION
+
+**`time must be of type BusinessDay` crash on 4H/1H in Overview**
+
+Stack: `onIntervalChange @ OverviewNew` → `onClick @ TearSheetGenerator-qajbHZ-m.js:2:3656` → `setData` in lightweight-charts
+
+Root cause: `TvMultiPane.toChartTime` converts `"2026-04-22 00:00"` to `"2026-04-22"` (BusinessDay string). `PortfolioEquityChart.toTime` converts the same string to a UTC Unix timestamp. When both are mounted in the same app and a chart previously initialized with UTC timestamps receives BusinessDay strings (or vice versa), lightweight-charts throws.
+
+**The fix (do this first next session):**
+Update `TvMultiPane.toChartTime` to match `PortfolioEquityChart.toTime` exactly — convert `"YYYY-MM-DD HH:MM"` to UTC Unix timestamp instead of slicing to `"YYYY-MM-DD"`. This makes all lightweight-charts instances in the app use the same time format:
+
+```typescript
+function toChartTime(t: string | number): Time {
+  if (typeof t === 'number') return t as Time;
+  const s = String(t);
+  if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
+  // Sub-daily: convert to UTC Unix timestamp
+  if (s.length > 10 && s[10] === ' ') {
+    try {
+      const dt = new Date(s.replace(' ', 'T') + ':00Z');
+      if (!isNaN(dt.getTime())) return Math.floor(dt.getTime() / 1000) as Time;
+    } catch {}
+  }
+  return s.slice(0, 10) as Time;
+}
+```
+
+File: `frontend/src/components/charts/TvMultiPane.tsx`
+
+After fixing, SCP to EC2 and rebuild frontend. No backend changes needed.
+
+### System State (April 24, 2026)
+- **Equity:** ~$475,294
+- **Open positions:** ~138
+- **Active DEMO strategies:** ~87
+- **BACKTESTED:** ~264
+- **Scheduled cycles:** slot_1 (daily 15:15 UTC) + slot_1776883375962 (weekdays 19:00 UTC) — both now working after monitoring_service fix
+- **Charts:** PortfolioEquityChart working on both Overview (1D) and Analytics (1D/4H/1H); 4H/1H crashes on Overview due to TvMultiPane BusinessDay issue (fix above)

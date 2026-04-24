@@ -50,6 +50,13 @@ export const DailyPnLChart: FC<DailyPnLChartProps> = ({ data, height = 90 }) => 
   const chartRef     = useRef<IChartApi | null>(null);
   const roRef        = useRef<ResizeObserver | null>(null);
 
+  // Convert "YYYY-MM-DD" to Unix timestamp (midnight UTC) so this chart uses the
+  // same time format as PortfolioEquityChart — lightweight-charts requires all
+  // chart instances on the same page to use the same time format.
+  function dayToUnix(day: string): number {
+    return Math.floor(new Date(day + 'T00:00:00Z').getTime() / 1000);
+  }
+
   // Deduplicate to one point per calendar day (take last value per day)
   const dailyData = useMemo(() => {
     const map = new Map<string, number>();
@@ -59,7 +66,7 @@ export const DailyPnLChart: FC<DailyPnLChartProps> = ({ data, height = 90 }) => 
     }
     return [...map.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, pnl]) => ({ date, pnl }));
+      .map(([date, pnl]) => ({ time: dayToUnix(date) as Time, pnl }));
   }, [data]);
 
   useEffect(() => {
@@ -120,8 +127,8 @@ export const DailyPnLChart: FC<DailyPnLChartProps> = ({ data, height = 90 }) => 
       priceFormat:      { type: 'custom', formatter: () => '', minMove: 1 },
     });
     baseline.setData([
-      { time: dailyData[0].date as Time,                    value: 0 },
-      { time: dailyData[dailyData.length - 1].date as Time, value: 0 },
+      { time: dailyData[0].time,                    value: 0 },
+      { time: dailyData[dailyData.length - 1].time, value: 0 },
     ]);
 
     // P&L histogram
@@ -131,7 +138,7 @@ export const DailyPnLChart: FC<DailyPnLChartProps> = ({ data, height = 90 }) => 
       priceFormat:      { type: 'custom', formatter: fmtDollar, minMove: 1 },
     });    hist.setData(
       dailyData.map(d => ({
-        time:  d.date as Time,
+        time:  d.time,
         value: d.pnl,
         color: d.pnl >= 0 ? THEME.positive : THEME.negative,
       })),

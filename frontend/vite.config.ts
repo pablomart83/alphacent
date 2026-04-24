@@ -14,6 +14,14 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // Charts
+          if (id.includes('node_modules/lightweight-charts')) {
+            return 'charts-vendor';
+          }
+          // PDF generation (only loaded on demand)
+          if (id.includes('node_modules/html2canvas') || id.includes('node_modules/jspdf')) {
+            return 'pdf-vendor';
+          }
           // React core
           if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/react-router')) {
             return 'react-vendor';

@@ -4,11 +4,9 @@
  * Replaces the old "Top Movers" widget which only showed your own positions
  * ranked by total unrealized P&L (not today's move, not actionable).
  */
-import { type FC, useState, useCallback, useEffect } from 'react';
+import { type FC, useMemo } from 'react';
 import { useTradingMode } from '../../contexts/TradingModeContext';
-import { usePolling } from '../../hooks/usePolling';
-import { apiClient } from '../../services/api';
-import { wsManager } from '../../services/websocket';
+import { usePositions } from '../../contexts/PositionsContext';
 import { cn } from '../../lib/utils';
 
 interface BookRow {
@@ -27,32 +25,22 @@ function daysAgo(dateStr: string): number {
 
 export const BookPulseWidget: FC = () => {
   const { tradingMode } = useTradingMode();
-  const [rows, setRows] = useState<BookRow[]>([]);
+  const { positions } = usePositions();
 
-  const fetch = useCallback(async () => {
-    if (!tradingMode) return;
-    try {
-      const positions = await apiClient.getPositions(tradingMode);
-      const mapped: BookRow[] = positions
-        .filter(p => !p.closed_at)
-        .map(p => ({
-          symbol: p.symbol || '?',
-          side: (p.side === 'SELL') ? 'S' as const : 'L' as const,
-          pnlPct: p.unrealized_pnl_percent ?? 0,
-          pnlUsd: p.unrealized_pnl ?? 0,
-          daysOpen: daysAgo(p.opened_at || ''),
-        }))
-        .sort((a, b) => Math.abs(b.pnlPct) - Math.abs(a.pnlPct))
-        .slice(0, 8);
-      setRows(mapped);
-    } catch { /* ignore */ }
-  }, [tradingMode]);
-
-  usePolling({ fetchFn: fetch, intervalMs: 15000, enabled: !!tradingMode, skipWhenWsConnected: true });
-  useEffect(() => {
-    if (!tradingMode) return;
-    return wsManager.onPositionUpdate(() => fetch());
-  }, [tradingMode, fetch]);
+  const rows = useMemo<BookRow[]>(() => {
+    if (!tradingMode) return [];
+    return positions
+      .filter(p => !p.closed_at)
+      .map(p => ({
+        symbol: p.symbol || '?',
+        side: (p.side === 'SELL') ? 'S' as const : 'L' as const,
+        pnlPct: p.unrealized_pnl_percent ?? 0,
+        pnlUsd: p.unrealized_pnl ?? 0,
+        daysOpen: daysAgo(p.opened_at || ''),
+      }))
+      .sort((a, b) => Math.abs(b.pnlPct) - Math.abs(a.pnlPct))
+      .slice(0, 8);
+  }, [positions, tradingMode]);
 
   if (rows.length === 0) {
     return <div className="text-xs text-gray-600 font-mono py-1">No open positions</div>;

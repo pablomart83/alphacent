@@ -6,6 +6,7 @@
 import { type FC, useState, useCallback, useEffect } from 'react';
 import { useTradingMode } from '../../contexts/TradingModeContext';
 import { usePolling } from '../../hooks/usePolling';
+import { useWidgetActive } from '../BottomWidgetZone';
 import { apiClient } from '../../services/api';
 import { wsManager } from '../../services/websocket';
 import { cn } from '../../lib/utils';
@@ -48,6 +49,7 @@ function truncateReason(r: string): string {
 
 export const SignalStatsWidget: FC = () => {
   const { tradingMode } = useTradingMode();
+  const active = useWidgetActive();
   const [snap, setSnap] = useState<SignalSnap | null>(null);
   const [tick, setTick] = useState(0);
 
@@ -81,7 +83,7 @@ export const SignalStatsWidget: FC = () => {
     } catch { /* ignore */ }
   }, [tradingMode, tick]);
 
-  usePolling({ fetchFn: fetch, intervalMs: 20000, enabled: !!tradingMode, skipWhenWsConnected: true });
+  usePolling({ fetchFn: fetch, intervalMs: 20000, enabled: !!tradingMode && active, skipWhenWsConnected: true });
 
   useEffect(() => {
     if (!tradingMode) return;

@@ -87,6 +87,13 @@ function toChartTime(t: string | number): Time {
   const s = String(t);
   // Unix timestamp string (all digits, 9-11 chars) → number
   if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
+  // Sub-daily "YYYY-MM-DD HH:MM" → UTC Unix timestamp (matches PortfolioEquityChart)
+  if (s.length > 10 && s[10] === ' ') {
+    try {
+      const dt = new Date(s.replace(' ', 'T') + ':00Z');
+      if (!isNaN(dt.getTime())) return Math.floor(dt.getTime() / 1000) as Time;
+    } catch {}
+  }
   if (s.length === 10) return s as Time;
   return s.slice(0, 10) as Time;
 }

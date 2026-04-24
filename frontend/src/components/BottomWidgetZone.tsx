@@ -6,10 +6,14 @@
  *   2. System Feed  — "What is the system doing right now?"
  *   3. Risk Pulse   — "Am I about to breach a limit?"
  */
-import { type FC, useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { type FC, useState, useEffect, useCallback, lazy, Suspense, createContext, useContext } from 'react';
 import { X, ChevronDown, ChevronUp } from 'lucide-react';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { cn } from '../lib/utils';
+
+// Context so widgets can read active state and gate their polling
+export const WidgetActiveContext = createContext<boolean>(true);
+export const useWidgetActive = () => useContext(WidgetActiveContext);
 
 const BookPulseWidget     = lazy(() => import('./widgets/BookPulseWidget').then(m => ({ default: m.BookPulseWidget })));
 const SystemFeedWidget    = lazy(() => import('./widgets/SystemFeedWidget').then(m => ({ default: m.SystemFeedWidget })));
@@ -26,7 +30,6 @@ interface WidgetDef {
   title: string;
   subtitle: string;
   component: FC;
-  /** flex-basis hint so Risk Pulse (compact 2×2 grid) gets less width */
   widthClass?: string;
 }
 
@@ -140,6 +143,7 @@ export const BottomWidgetZone: FC = () => {
 
       {/* Widget panels */}
       {!collapsed && (
+        <WidgetActiveContext.Provider value={true}>
         <div
           className={cn(
             isMobile ? 'flex flex-col' : 'flex',
@@ -158,9 +162,7 @@ export const BottomWidgetZone: FC = () => {
                   isMobile ? 'w-full border-r-0 border-b last:border-b-0' : widget.widthClass,
                 )}
               >
-                {/* Content — no separate header, name shown inline */}
                 <div className="flex-1 overflow-y-auto min-h-0 px-3 pt-1.5 pb-1.5 relative">
-                  {/* Widget name + close — minimal, top of content area */}
                   <div className="flex items-center justify-between mb-1 shrink-0">
                     <span className="text-[9px] font-semibold text-gray-600 uppercase tracking-widest">
                       {widget.title}
@@ -183,6 +185,7 @@ export const BottomWidgetZone: FC = () => {
             );
           })}
         </div>
+        </WidgetActiveContext.Provider>
       )}
     </div>
   );

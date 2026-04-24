@@ -1,4 +1,4 @@
-import { type FC, useState, useMemo, useCallback, useEffect } from 'react';
+import { type FC, useState, useMemo, useCallback, useEffect, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -114,13 +114,15 @@ function calcReturnsFromEquityCurve(
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
-export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
+export const OverviewNew: FC<OverviewNewProps> = memo(({ onLogout }) => {
   const { tradingMode, isLoading: tradingModeLoading } = useTradingMode();
   const navigate = useNavigate();
 
   // State
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [spyData, setSpyData] = useState<Array<{ date: string; close: number }> | undefined>(undefined);
+  // Equity curve fetched separately from analytics endpoint (same as PerformanceTab)
+  const [equityCurveData, setEquityCurveData] = useState<Array<{ date: string; equity: number; realized?: number }>>([]);
   const [_recentTrades, setRecentTrades] = useState<Position[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [loading, setLoading] = useState(true);
@@ -148,6 +150,26 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
       setStrategies(strats);
       setLastFetchedAt(new Date());
       setLoading(false);
+
+      // Fetch equity curve from analytics endpoint (same as PerformanceTab — handles
+      // intraday intervals correctly with Unix timestamps)
+      try {
+        const perfData = await apiClient.getPerformanceAnalytics(tradingMode, '3M', iv);
+        if (perfData?.equity_curve?.length) {
+          setEquityCurveData(
+            (perfData.equity_curve as Array<{ timestamp: string; equity: number; drawdown?: number; realized?: number }>).map(p => ({
+              date: p.timestamp,
+              equity: p.equity,
+              realized: p.realized ?? undefined,
+            }))
+          );
+        } else {
+          // Fallback to dashboard equity curve
+          setEquityCurveData(dashData?.equity_curve ?? []);
+        }
+      } catch {
+        setEquityCurveData(dashData?.equity_curve ?? []);
+      }
 
       // Fetch SPY benchmark (non-blocking)
       try {
@@ -403,9 +425,13 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
     <div className="flex flex-col h-full overflow-auto">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
         <div className="p-2 flex flex-col gap-3">
-          {d && d.equity_curve?.length ? (
+          {d && equityCurveData.length ? (
             <PortfolioEquityChart
-              equityData={d.equity_curve}
+              equityData={equityCurveData.map((p: any) => ({
+                date: typeof p.date === 'string' ? p.date : (p.timestamp ?? ''),
+                equity: p.portfolio ?? p.equity ?? p.value ?? 0,
+                realized: p.realized,
+              }))}
               spyData={showBenchmark ? spyData : undefined}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
@@ -519,4 +545,4 @@ export const OverviewNew: FC<OverviewNewProps> = ({ onLogout }) => {
       </PageTemplate>
     </DashboardLayout>
   );
-};
+});

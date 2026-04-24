@@ -1,4 +1,4 @@
-import { type FC, useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { type FC, useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, Activity, Download, FileText,
@@ -188,7 +188,7 @@ const MaeMfeScatter: FC<{
   );
 };
 
-export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
+export const AnalyticsNew: FC<AnalyticsNewProps> = memo(({ onLogout }) => {
   const { tradingMode, isLoading: tradingModeLoading } = useTradingMode();
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<'1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL'>('3M');
@@ -1964,4 +1964,4 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = ({ onLogout }) => {
       </PageTemplate>
     </DashboardLayout>
   );
-};
+});

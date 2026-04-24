@@ -1,9 +1,7 @@
-import { type FC, useState, useCallback, useEffect, memo } from 'react';
+import { type FC, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTradingMode } from '../contexts/TradingModeContext';
-import { usePolling } from '../hooks/usePolling';
-import { apiClient } from '../services/api';
-import { wsManager } from '../services/websocket';
+import { usePositions } from '../contexts/PositionsContext';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { cn } from '../lib/utils';
 import { AnimatedNumber } from './ui/animated-number';
@@ -17,51 +15,35 @@ interface TickerPosition {
 }
 
 export const PositionTickerStrip: FC = memo(() => {
-  const { tradingMode } = useTradingMode();
+  const { tradingMode: _tradingMode } = useTradingMode();
   const navigate = useNavigate();
   const isMobile = useMediaQuery('(max-width: 767px)');
-  const [positions, setPositions] = useState<TickerPosition[]>([]);
+  const { positions } = usePositions();
 
-  const fetchPositions = useCallback(async () => {
-    if (!tradingMode) return;
-    try {
-      const raw = await apiClient.getPositions(tradingMode);
-      const sorted = raw
-        .map(p => ({
-          symbol: p.symbol || '',
-          currentPrice: p.current_price ?? 0,
-          pnlPct: p.unrealized_pnl_percent ?? 0,
-          value: Math.abs(p.invested_amount ?? (p.quantity * p.entry_price)),
-        }))
-        .sort((a, b) => b.value - a.value)
-        .slice(0, 15);
-      setPositions(sorted);
-    } catch {
-      // Non-critical
-    }
-  }, [tradingMode]);
-
-  usePolling({ fetchFn: fetchPositions, intervalMs: 30000, enabled: !!tradingMode, skipWhenWsConnected: true });
-
-  useEffect(() => {
-    if (!tradingMode) return;
-    const unsub = wsManager.onPositionUpdate(() => {
-      fetchPositions();
-    });
-    return unsub;
-  }, [tradingMode, fetchPositions]);
+  const tickerPositions = useMemo<TickerPosition[]>(() => {
+    return positions
+      .filter(p => !p.closed_at)
+      .map(p => ({
+        symbol: p.symbol || '',
+        currentPrice: p.current_price ?? 0,
+        pnlPct: p.unrealized_pnl_percent ?? 0,
+        value: Math.abs(p.invested_amount ?? (p.quantity * p.entry_price)),
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 15);
+  }, [positions]);
 
   // Hidden below 768px
   if (isMobile) return null;
 
-  if (positions.length === 0) return null;
+  if (tickerPositions.length === 0) return null;
 
   return (
     <div
       className="flex items-center h-9 max-h-[36px] min-h-[36px] border-b overflow-x-auto scrollbar-hide gap-1 px-3"
       style={{ borderColor: 'var(--color-dark-border)', backgroundColor: '#080c14' }}
     >
-      {positions.map(pos => {
+      {tickerPositions.map(pos => {
         const isPositive = pos.pnlPct >= 0;
         return (
           <FlashWrapper

@@ -7,6 +7,7 @@
 import { type FC, useState, useCallback, useEffect } from 'react';
 import { useTradingMode } from '../../contexts/TradingModeContext';
 import { usePolling } from '../../hooks/usePolling';
+import { useWidgetActive } from '../BottomWidgetZone';
 import { apiClient } from '../../services/api';
 import { wsManager } from '../../services/websocket';
 import { cn } from '../../lib/utils';
@@ -45,6 +46,7 @@ function parseTs(ts: string | undefined): number {
 
 export const SystemFeedWidget: FC = () => {
   const { tradingMode } = useTradingMode();
+  const active = useWidgetActive();
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [now, setNow] = useState(Date.now());
 
@@ -142,7 +144,7 @@ export const SystemFeedWidget: FC = () => {
     } catch { /* ignore */ }
   }, [tradingMode]);
 
-  usePolling({ fetchFn: fetch, intervalMs: 20000, enabled: !!tradingMode, skipWhenWsConnected: true });
+  usePolling({ fetchFn: fetch, intervalMs: 20000, enabled: !!tradingMode && active, skipWhenWsConnected: true });
 
   useEffect(() => {
     if (!tradingMode) return;
