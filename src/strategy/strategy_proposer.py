@@ -3385,6 +3385,16 @@ Generate a CORRECTED strategy that addresses all errors:"""
                     strategy_symbol = [assigned_symbol] + [s for s in watchlist if s != assigned_symbol]
                 else:
                     strategy_symbol = [assigned_symbol] + watchlist[:watchlist_size - 1]
+
+            # Strip daily-only LME metals from watchlist of intraday/4h strategies.
+            # The watchlist builder filters them for new entries, but stale validated
+            # combos cache may still contain ALUMINUM/ZINC/NICKEL for intraday templates.
+            if (_is_intraday or _is_4h) and isinstance(strategy_symbol, list):
+                strategy_symbol = [s for s in strategy_symbol if s.upper() not in _DAILY_ONLY_SYMBOLS]
+                if not strategy_symbol:
+                    logger.debug(f"Skipping {template_name} — all symbols are daily-only after LME filter")
+                    skipped_dupes += 1
+                    continue
             
             # Use market-customized params (no parameter variations —
             # diversity comes from different symbols, not different BB std_dev)
@@ -4819,6 +4829,13 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 # — the per-timeframe cap (MAX_PER_SYMBOL_PER_TIMEFRAME) handles concentration.
                 is_crypto_template = bool(template.metadata and template.metadata.get('crypto_optimized'))
                 if not is_crypto_template and (template.name, symbol) in active_pairs:
+                    continue
+
+                # Skip daily-only LME metals for intraday/4h templates — no data available
+                _tmpl_is_intraday = bool(template.metadata and (
+                    template.metadata.get('intraday') or template.metadata.get('interval_4h')
+                ))
+                if _tmpl_is_intraday and symbol.upper() in _DAILY_ONLY_SYMBOLS:
                     continue
 
                 base_score = self._score_symbol_for_template(

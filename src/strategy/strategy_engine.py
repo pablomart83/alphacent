@@ -1346,8 +1346,19 @@ class StrategyEngine:
         # Fetch historical data for all symbols (with warmup period)
         all_data = {}
         data_quality_warnings = []
-        
+
+        # Import DAILY_ONLY_SYMBOLS to skip LME metals on intraday/4h backtests.
+        # These symbols have no intraday data on Yahoo Finance — requesting 1h/4h
+        # returns [] which would crash the entire backtest. Skip them gracefully.
+        try:
+            from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS as _DAILY_ONLY
+        except Exception:
+            _DAILY_ONLY = set()
+
         for symbol in strategy.symbols:
+            if interval in ("1h", "4h") and symbol.upper() in _DAILY_ONLY:
+                logger.debug(f"Skipping {symbol} in {interval} backtest — daily-only LME metal, no intraday data")
+                continue
             try:
                 # Use Yahoo Finance for backtesting (eToro doesn't provide historical OHLCV)
                 # Yahoo Finance is used consistently for all market data analysis
