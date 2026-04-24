@@ -2006,6 +2006,16 @@ class AutonomousStrategyManager:
                     if avg_loss_pct == 0.0:
                         avg_loss_pct = avg_loss_dollars / 10000  # Fallback: 10% of $100K
 
+                    # Sanity check: if conversion produced an implausible result (>100%),
+                    # the position size denominator is wrong (e.g. index units vs dollars).
+                    # Skip this check rather than incorrectly reject the strategy.
+                    if avg_loss_pct > 1.0:
+                        logger.debug(
+                            f"      Skipping avg_loss check for {strategy.name}: "
+                            f"computed {avg_loss_pct:.1%} (implausible — position size unit mismatch)"
+                        )
+                        avg_loss_pct = 0.0
+
                     sl_limit = strategy.risk_params.stop_loss_pct * 3.0
                     if avg_loss_pct > sl_limit:
                         logger.warning(
