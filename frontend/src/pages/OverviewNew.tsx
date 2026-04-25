@@ -115,33 +115,30 @@ function calcReturnsFromEquityCurve(
 
 // ── AutoHeightChart — fills 100% of its flex container ────────────────────
 
+// ── AutoHeightChart — measures available panel space and fills it ──────────
+
 type AutoHeightChartProps = Omit<React.ComponentProps<typeof PortfolioEquityChart>, 'height'>;
 
-const AutoHeightChart: FC<AutoHeightChartProps> = (props) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+const PANEL_HEADER_H = 32; // px — PanelHeader title bar height
+const PANEL_PADDING  = 16; // px — p-2 = 8px top + 8px bottom
+
+const AutoHeightChart: FC<AutoHeightChartProps & { containerRef: React.RefObject<HTMLDivElement> }> = ({ containerRef, ...props }) => {
   const [height, setHeight] = useState(480);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(entries => {
-      for (const e of entries) {
-        const h = Math.round(e.contentRect.height);
-        if (h > 80) setHeight(h);
-      }
-    });
+    const measure = () => {
+      const h = el.clientHeight;
+      if (h > 80) setHeight(Math.max(200, h - PANEL_HEADER_H - PANEL_PADDING));
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    // Set initial height
-    const h = el.clientHeight;
-    if (h > 80) setHeight(h);
+    measure();
     return () => ro.disconnect();
-  }, []);
+  }, [containerRef]);
 
-  return (
-    <div ref={containerRef} className="w-full h-full">
-      <PortfolioEquityChart {...props} height={height} />
-    </div>
-  );
+  return <PortfolioEquityChart {...props} height={height} />;
 };
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -415,14 +412,16 @@ export const OverviewNew: FC<OverviewNewProps> = memo(({ onLogout }) => {
     </div>
   );
 
+  const centerPanelRef = useRef<HTMLDivElement>(null);
+
   // ── Center Panel Content ───────────────────────────────────────────────
   const centerPanel = (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div ref={centerPanelRef} className="flex flex-col h-full overflow-hidden">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
-        {/* h-full fills the PanelHeader body (flex-1 min-h-0); overflow-hidden prevents scroll */}
-        <div className="h-full overflow-hidden p-2">
+        <div className="p-2">
           {d && equityCurveData.length ? (
             <AutoHeightChart
+              containerRef={centerPanelRef}
               equityData={equityCurveData.map((p: any) => ({
                 date: typeof p.date === 'string' ? p.date : (p.timestamp ?? ''),
                 equity: p.portfolio ?? p.equity ?? p.value ?? 0,
