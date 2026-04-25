@@ -2208,13 +2208,12 @@ async def get_metrics_bar(
     except Exception:
         pass
 
-    # Positions: filter by mode (positions table has mode column)
-    # Strategies: no mode column — count all active statuses
+    # Positions: no mode column on positions table — just count open ones
+    # Strategies: no mode column on strategies table either
     open_count = 0
     active_count = 0
     try:
         open_count = db.query(func.count(PositionORM.id)).filter(
-            PositionORM.mode == mode.value,
             PositionORM.closed_at.is_(None),
         ).scalar() or 0
         active_count = db.query(func.count(StrategyORM.id)).filter(
