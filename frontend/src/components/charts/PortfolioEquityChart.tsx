@@ -258,15 +258,17 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
       if (bars.length >= 2) pnlBars = bars;
     }
 
-    // Pane 2: Rolling 30d Sharpe (always daily)
-    // Use filteredDaily if it has enough points; otherwise fall back to filtered
-    // daily-only points from the main equity curve (analytics endpoint has more history).
-    const sharpeSource = filteredDaily.length >= 32
+    // Pane 2: Rolling Sharpe — dynamic window (up to 30d, min 10d)
+    // Use filteredDaily if available; otherwise fall back to daily-only points
+    // from the main equity curve. Window adapts to available data so Sharpe
+    // shows even when fewer than 32 daily snapshots exist.
+    const sharpeSource = filteredDaily.length >= 11
       ? filteredDaily
       : filtered.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(String(d.date)));
 
     let sharpe: Array<{ time: Time; value: number }> | null = null;
-    if (sharpeSource.length >= 32) {
+    if (sharpeSource.length >= 11) {
+      const win = Math.min(30, sharpeSource.length - 1);
       const returns: number[] = [];
       for (let i = 1; i < sharpeSource.length; i++) {
         const prev = sharpeSource[i - 1].equity;
@@ -274,13 +276,13 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
         returns.push(prev > 0 ? (curr - prev) / prev : 0);
       }
       const pts: Array<{ time: Time; value: number }> = [];
-      for (let i = 29; i < returns.length; i++) {
+      for (let i = win - 1; i < returns.length; i++) {
         const dateIdx = i + 1;
         if (dateIdx >= sharpeSource.length) break;
-        const window = returns.slice(i - 29, i + 1);
-        const mean   = window.reduce((s, v) => s + v, 0) / 30;
-        const std    = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / 30) || 0.0001;
-        const val    = Math.round((mean / std) * Math.sqrt(252) * 100) / 100;
+        const slice = returns.slice(i - (win - 1), i + 1);
+        const mean  = slice.reduce((s, v) => s + v, 0) / win;
+        const std   = Math.sqrt(slice.reduce((s, v) => s + (v - mean) ** 2, 0) / win) || 0.0001;
+        const val   = Math.round((mean / std) * Math.sqrt(252) * 100) / 100;
         if (Number.isFinite(val)) {
           pts.push({ time: toTime(sharpeSource[dateIdx].date, isIntraday), value: val });
         }
