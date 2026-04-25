@@ -92,9 +92,15 @@ const THEME = {
  *  The isIntraday flag determines the format for the entire chart instance —
  *  all series must use the same type. */
 function toTime(s: string, isIntraday: boolean): Time {
+  // Unix timestamp string (9-11 all-digit chars) — always convert to integer
+  if (/^\d{9,11}$/.test(s)) {
+    const unix = parseInt(s, 10);
+    if (isIntraday) return unix as Time;
+    // Daily mode but received a Unix string — convert to "YYYY-MM-DD"
+    return new Date(unix * 1000).toISOString().slice(0, 10) as Time;
+  }
+
   if (isIntraday) {
-    // Unix timestamp string (9-11 digits) — already correct
-    if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
     // "YYYY-MM-DD HH:MM" → UTC Unix
     if (s.length > 10 && s[10] === ' ') {
       const dt = new Date(s.replace(' ', 'T') + ':00Z');
@@ -104,12 +110,12 @@ function toTime(s: string, isIntraday: boolean): Time {
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
       return Math.floor(new Date(s + 'T00:00:00Z').getTime() / 1000) as Time;
     }
-    // Fallback: try parsing as number
+    // Fallback
     const n = parseInt(s, 10);
     if (!isNaN(n)) return n as Time;
     return Math.floor(new Date(s).getTime() / 1000) as Time;
   } else {
-    // Daily mode — BusinessDay string
+    // Daily mode — BusinessDay string "YYYY-MM-DD"
     return s.slice(0, 10) as Time;
   }
 }
@@ -146,7 +152,17 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
   const roRef         = useRef<ResizeObserver | null>(null);
   const prevIntervalRef = useRef<string>(interval);
 
-  const isIntraday = interval !== '1d';
+  // Derive isIntraday from the actual data content, not just the interval prop.
+  // This prevents the race condition where interval prop changes to '1d' but
+  // equityData still holds Unix timestamp strings from the previous 4h/1h fetch.
+  const isIntraday = useMemo(() => {
+    if (interval !== '1d') return true;
+    // Check if the data actually contains Unix timestamps (all-digit strings)
+    const sample = equityData.find(d => d.date);
+    if (sample && /^\d{9,11}$/.test(String(sample.date))) return true;
+    return false;
+  }, [interval, equityData]);
+
   const toolbarH   = 32; // px
   const chartH     = height - toolbarH;
 
@@ -224,12 +240,17 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
     // Pane 1: Daily P&L histogram (always daily)
     let pnlBars: Array<{ time: Time; value: number; color: string }> | null = null;
     if (filteredDaily.length >= 2) {
+      const seen = new Set<number | string>();
       const bars = filteredDaily.slice(1).map((d, i) => {
         const pnl = d.equity - filteredDaily[i].equity;
-        // Skip points where equity is missing or P&L is not a finite number
         if (!Number.isFinite(pnl) || !d.equity || !filteredDaily[i].equity) return null;
+        const t = toTime(d.date, isIntraday);
+        // Deduplicate: skip if this time value already appeared
+        const key = t as number | string;
+        if (seen.has(key)) return null;
+        seen.add(key);
         return {
-          time:  toTime(d.date, isIntraday),
+          time:  t,
           value: pnl,
           color: pnl >= 0 ? THEME.pnlPos : THEME.pnlNeg,
         };
