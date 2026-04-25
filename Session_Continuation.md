@@ -4,6 +4,12 @@ Read `#File:.kiro/steering/trading-system-context.md` for full system context, t
 
 ---
 
+## NEXT SESSION PRIORITY: Full System Audit
+
+**Use the prompt at the bottom of this file.** Do not start any other work until the audit is complete.
+
+---
+
 ## Observability & Log Access
 
 ### Log files on EC2 (`/home/ubuntu/alphacent/logs/`)
@@ -835,3 +841,101 @@ All panes share the same time axis. Crosshair syncs across all panes. Period and
 - **Signal gen:** working post-fixes, 9 signals / 6 orders in last cycle
 - **1h strategies:** still 0 DEMO/BACKTESTED — pipeline fixes shipped, need next cycle to validate
 - **Metrics bar:** now showing real equity, P&L, positions, strategies, regime
+
+---
+
+## Session April 25, 2026 (continued) — Chart Rewrite Attempt & Revert
+
+### What was attempted and why it failed
+
+A multi-pane `PortfolioEquityChart` rewrite was attempted to fix 5 chart issues (misaligned axes, wrong time scales, missing panes). The rewrite produced `Uncaught Error: Value is null` from lightweight-charts on every render, leaving the chart completely blank.
+
+**Root cause of the failure:** The rewrite was done iteratively — patch after patch — without first fully understanding the lightweight-charts v5 pane API constraints. Specifically:
+- All series on a single chart instance must use the same `Time` type (either all BusinessDay strings OR all Unix integers — never mixed)
+- The daily P&L and Rolling Sharpe panes used `YYYY-MM-DD` strings while the equity curve used Unix timestamps on 4h/1h — lightweight-charts threw on `setData`
+- Multiple fix attempts were made without a clean test environment, each introducing new issues
+
+**The revert:** All three files (`PortfolioEquityChart.tsx`, `OverviewNew.tsx`, `PerformanceTab.tsx`) were restored to the last known working state (commit `eeb04e8`). The system is stable.
+
+### Current chart state (as of revert)
+
+The Overview center panel has the original three separate chart components:
+- `PortfolioEquityChart` — equity curve + drawdown, working on 1D, broken on 4H/1H (time scale shows raw Unix numbers)
+- `DailyPnLChart` — separate lightweight-charts instance, misaligned with equity curve
+- `InteractiveChart` (Rolling Sharpe) — SVG-based, different font/scale, disappears on 1D
+
+These issues are documented and understood. They require a proper redesign, not patches.
+
+### System State (April 25, 2026 end of session)
+- **Equity:** ~$475,573
+- **Open positions:** ~134
+- **Active DEMO strategies:** ~95
+- **BACKTESTED:** ~250
+- **Backend:** all pipeline fixes from this session are live and working
+- **Frontend:** chart reverted to stable state; metrics bar working; build time ~17s (tsc removed)
+- **Build:** `npm run build` = Vite only (~17s on t3.medium); `npm run typecheck` = tsc separately
+
+---
+
+## FULL SYSTEM AUDIT PROMPT
+
+Use this prompt at the start of the next session:
+
+---
+
+```
+You are starting a full system audit of AlphaCent. Read Session_Continuation.md and the engineering standard section carefully before doing anything else.
+
+This session has two objectives:
+
+## Objective 1: Fix the Overview chart panel — correctly this time
+
+The chart panel in OverviewNew.tsx currently has three separate chart components that cannot share a time axis. The previous attempt to fix this with a multi-pane rewrite failed because it was done iteratively without fully understanding the lightweight-charts v5 constraints.
+
+Before writing a single line of code:
+
+1. Read the full lightweight-charts v5 documentation on panes: https://tradingview.github.io/lightweight-charts/docs/api/interfaces/IChartApi#addpane
+2. Read the current PortfolioEquityChart.tsx, DailyPnLChart.tsx, InteractiveChart.tsx, and OverviewNew.tsx completely
+3. Read the backend equity curve endpoint (analytics.py ~line 695) to understand exactly what data format is returned for 1d vs 4h vs 1h
+4. Write out the complete design BEFORE touching any code:
+   - Exactly which series go in which pane
+   - Exactly what Time format each series uses (BusinessDay string vs Unix integer) and how you guarantee they never mix
+   - How the dailyEquity prop flows from OverviewNew → PortfolioEquityChart → computeRollingSharpe/computeDailyPnl
+   - How the in-place update path (period change) vs full rebuild path (interval change) works
+   - What happens when data is empty or has fewer than 2 points for any pane
+5. Only then implement — in one complete, correct implementation. No iterative patches.
+
+The bar: switch between 1D, 4H, 1H. All three panes appear, all axes are aligned, time labels are correct (dates on 1D, HH:MM on 4H/1H), no console errors, no blank chart.
+
+## Objective 2: Full system audit — identify everything that violates the engineering standard
+
+Read the engineering standard in the Philosophy section. Then audit the entire codebase for violations. Specifically:
+
+### Backend audit
+1. Check errors.log and warnings.log — what recurring errors exist?
+2. Check cycle_history.log — are the pipeline fixes from April 25 working? Are 1h strategies now activating?
+3. Review every `except Exception: pass` or `except Exception as e: logger.debug(...)` in the codebase — silent failures that return wrong data instead of surfacing errors
+4. Review every hardcoded fallback that masks real failures (e.g. returning 0 when a query fails)
+5. Check the position sizing Sprint 10 redesign — still deferred, still broken (3x bump guard too conservative)
+6. Check the Triple EMA Alignment DSL bug (EMA(10) > EMA(10) always false) — still open
+7. Check the Gold Momentum GOLD duplicates (10 copies in BACKTESTED) — still open
+8. Check the FMP insider endpoint (403/404) — still using momentum proxy fallback
+
+### Frontend audit
+1. Every page that uses PortfolioEquityChart — does it pass dailyEquity correctly?
+2. Every chart component — are there any other SVG-based charts that should be lightweight-charts?
+3. The Returns section in the top bar (1D, 1W, 1M, YTD) — are these computing correctly from the equity curve?
+4. The Analytics page — does it work correctly after the PerformanceTab changes?
+5. Any other UI components showing $0.00, 0, or "Unknown" when they should have real data?
+
+### Architecture audit
+1. Is there any code that was written as a "minimal fix" that should be redesigned?
+2. Are there any features that work in one mode (DEMO) but would break in LIVE?
+3. Are there any endpoints that return hardcoded values instead of real data?
+
+For each issue found: document it, classify it (bug / design flaw / missing feature), and propose the correct fix. Then implement fixes in priority order — P0 bugs first, then design flaws, then missing features.
+
+Do not implement anything until you have the complete audit. The audit comes first.
+```
+
+---
