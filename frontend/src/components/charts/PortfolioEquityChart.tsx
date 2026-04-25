@@ -413,7 +413,6 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
       const pnl = chart.addSeries(HistogramSeries, {
         lastValueVisible: false,
         priceLineVisible: false,
-        priceScaleId:     'left',
         priceFormat:      { type: 'custom', formatter: fmtDollar, minMove: 1 },
       }, pane1.paneIndex());
       pnl.setData(chartData.pnlBars as any);
