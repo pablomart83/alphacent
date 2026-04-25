@@ -39,18 +39,22 @@ export function filterDataByPeriod<T extends Record<string, unknown>>(
 ): T[] {
   if (period === 'ALL' || data.length === 0) return data;
 
-  const lastDateStr = String(data[data.length - 1][xAxisKey]).slice(0, 10);
-  const anchor = parseISO(lastDateStr);
+  /** Parse a date field that may be "YYYY-MM-DD", "YYYY-MM-DD HH:MM", or a Unix timestamp string */
+  function parseField(raw: string): Date {
+    // Unix timestamp (9-11 digit number string)
+    if (/^\d{9,11}$/.test(raw)) return new Date(parseInt(raw, 10) * 1000);
+    // Sub-daily "YYYY-MM-DD HH:MM" — normalise to first 10 chars for period comparison
+    return parseISO(raw.slice(0, 10));
+  }
+
+  const anchor = parseField(String(data[data.length - 1][xAxisKey]));
   if (isNaN(anchor.getTime())) return data;
 
   const start = periodStartDate(period, anchor);
   if (!start) return data;
 
   return data.filter((d) => {
-    const raw = String(d[xAxisKey]);
-    // Normalise: take first 10 chars for date comparison (handles "YYYY-MM-DD HH:MM")
-    const dateStr = raw.slice(0, 10);
-    const date = parseISO(dateStr);
+    const date = parseField(String(d[xAxisKey]));
     return !isNaN(date.getTime()) && isAfter(date, start);
   });
 }
