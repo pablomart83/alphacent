@@ -1,4 +1,4 @@
-import { type FC, useState, useMemo, useCallback, useEffect, memo } from 'react';
+import { type FC, useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -112,6 +112,37 @@ function calcReturnsFromEquityCurve(
 
   return result;
 }
+
+// ── AutoHeightChart — fills 100% of its flex container ────────────────────
+
+type AutoHeightChartProps = Omit<React.ComponentProps<typeof PortfolioEquityChart>, 'height'>;
+
+const AutoHeightChart: FC<AutoHeightChartProps> = (props) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(480);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        const h = Math.round(e.contentRect.height);
+        if (h > 80) setHeight(h);
+      }
+    });
+    ro.observe(el);
+    // Set initial height
+    const h = el.clientHeight;
+    if (h > 80) setHeight(h);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} className="w-full h-full">
+      <PortfolioEquityChart {...props} height={height} />
+    </div>
+  );
+};
 
 // ── Main Component ─────────────────────────────────────────────────────────
 
@@ -386,28 +417,28 @@ export const OverviewNew: FC<OverviewNewProps> = memo(({ onLogout }) => {
 
   // ── Center Panel Content ───────────────────────────────────────────────
   const centerPanel = (
-    <div className="flex flex-col h-full overflow-auto">
+    <div className="flex flex-col h-full overflow-hidden">
       <PanelHeader title="Equity Curve" panelId="overview-equity" actions={centerToolbar}>
-        <div className="p-2 flex flex-col gap-3">
+        {/* h-full fills the PanelHeader body (flex-1 min-h-0); overflow-hidden prevents scroll */}
+        <div className="h-full overflow-hidden p-2">
           {d && equityCurveData.length ? (
-            <PortfolioEquityChart
+            <AutoHeightChart
               equityData={equityCurveData.map((p: any) => ({
                 date: typeof p.date === 'string' ? p.date : (p.timestamp ?? ''),
                 equity: p.portfolio ?? p.equity ?? p.value ?? 0,
                 realized: p.realized,
               }))}
               dailyEquity={(dashboard?.equity_curve ?? [])
-                .filter((d: any) => String(d.date).length === 10)
+                .filter((d: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(d.date)))
                 .map((d: any) => ({ date: d.date, equity: d.equity, realized: d.realized }))}
               spyData={showBenchmark ? spyData : undefined}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
               interval={equityInterval}
               onIntervalChange={(iv) => { setEquityInterval(iv); fetchAll(iv); }}
-              height={580}
             />
           ) : (
-            <ChartSkeleton height={580} />
+            <ChartSkeleton height={480} />
           )}
         </div>
       </PanelHeader>
