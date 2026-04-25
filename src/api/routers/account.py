@@ -2213,14 +2213,16 @@ async def get_metrics_bar(
     open_count = 0
     active_count = 0
     try:
-        open_count = db.query(func.count(PositionORM.id)).filter(
+        from sqlalchemy import func as _func
+        from src.models.orm import StrategyORM as _StrategyORM
+        open_count = db.query(_func.count(PositionORM.id)).filter(
             PositionORM.closed_at.is_(None),
         ).scalar() or 0
-        active_count = db.query(func.count(StrategyORM.id)).filter(
-            StrategyORM.status.in_(["DEMO", "LIVE", "ACTIVE"]),
+        active_count = db.query(_func.count(_StrategyORM.id)).filter(
+            _StrategyORM.status.in_(["DEMO", "LIVE", "ACTIVE"]),
         ).scalar() or 0
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"metrics-bar count query failed: {e}")
 
     # Market regime from config cache
     regime_str = "unknown"
