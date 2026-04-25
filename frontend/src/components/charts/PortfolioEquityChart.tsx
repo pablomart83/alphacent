@@ -119,6 +119,7 @@ function fmtPnl(v: number): string {
 function computeRollingSharpe(
   daily: EquityDataPoint[],
   window = 30,
+  asUnix = false,
 ): Array<{ time: Time; value: number }> {
   // Strictly daily: reject anything that isn't YYYY-MM-DD
   const pts = daily.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.date));
@@ -138,7 +139,10 @@ function computeRollingSharpe(
     const std  = Math.sqrt(slice.reduce((s, v) => s + (v - mean) ** 2, 0) / window) || 1e-9;
     const sharpe = (mean / std) * Math.sqrt(252);
     if (Number.isFinite(sharpe)) {
-      result.push({ time: pts[dateIdx].date as Time, value: Math.round(sharpe * 100) / 100 });
+      const t: Time = asUnix
+        ? Math.floor(new Date(pts[dateIdx].date + 'T12:00:00Z').getTime() / 1000) as Time
+        : pts[dateIdx].date as Time;
+      result.push({ time: t, value: Math.round(sharpe * 100) / 100 });
     }
   }
   return result;
@@ -148,16 +152,16 @@ function computeRollingSharpe(
 
 function computeDailyPnl(
   daily: EquityDataPoint[],
+  asUnix = false,
 ): Array<{ time: Time; value: number; color: string }> {
   const pts = daily.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d.date));
   if (pts.length < 2) return [];
   return pts.slice(1).map((d, i) => {
     const pnl = d.equity - pts[i].equity;
-    return {
-      time:  d.date as Time,
-      value: pnl,
-      color: pnl >= 0 ? THEME.pnlPos : THEME.pnlNeg,
-    };
+    const t: Time = asUnix
+      ? Math.floor(new Date(d.date + 'T12:00:00Z').getTime() / 1000) as Time
+      : d.date as Time;
+    return { time: t, value: pnl, color: pnl >= 0 ? THEME.pnlPos : THEME.pnlNeg };
   });
 }
 
@@ -238,14 +242,16 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
       }
     }
 
-    // Pane 1: daily P&L histogram
-    const dailyPnl = computeDailyPnl(filteredDaily);
+    // Pane 1: daily P&L histogram — use Unix timestamps when interval is intraday
+    // so all series on the chart share the same time format
+    const asUnix = interval !== '1d';
+    const dailyPnl = computeDailyPnl(filteredDaily, asUnix);
 
-    // Pane 2: rolling 30d Sharpe (always daily, always YYYY-MM-DD)
-    const sharpe = computeRollingSharpe(filteredDaily);
+    // Pane 2: rolling 30d Sharpe (always daily, same time format as P&L pane)
+    const sharpe = computeRollingSharpe(filteredDaily, 30, asUnix);
 
     return { portfolio, realized, spy, dailyPnl, sharpe, totalReturn, lastEquity };
-  }, [filtered, filteredDaily, spyData]);
+  }, [filtered, filteredDaily, spyData, interval]);
 
   // ── Build / rebuild chart ──────────────────────────────────────────────
   // Key insight: rebuild whenever interval changes (time format changes) or data changes.
