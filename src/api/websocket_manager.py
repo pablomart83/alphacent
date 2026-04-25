@@ -86,7 +86,7 @@ class WebSocketManager:
         """
         disconnected = []
         
-        for session_id, websocket in self.active_connections.items():
+        for session_id, websocket in list(self.active_connections.items()):
             try:
                 await websocket.send_json(message)
             except Exception as e:

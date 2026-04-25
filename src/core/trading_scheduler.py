@@ -248,6 +248,10 @@ class TradingScheduler:
         """
         result = {"signals_generated": 0, "signals_coordinated": 0, "signals_rejected": 0,
                   "orders_submitted": 0, "active_strategies": 0}
+        # Always initialise these so the TTL retirement loop never hits NameError
+        # even if _coordinate_signals throws or is skipped (empty strategy list, etc.)
+        _strategy_total_signals: dict = {}
+        _template_dup_rejected: dict = {}
 
         if not self._components_initialized:
             logger.warning("Trading components not initialized — skipping signal generation")
@@ -1314,8 +1318,8 @@ class TradingScheduler:
                         with open(_ttl_cp, 'r') as _f:
                             _ttl_cfg = _ttl_yaml.safe_load(_f) or {}
                             backtested_ttl_cycles = _ttl_cfg.get('autonomous', {}).get('backtested_ttl_cycles', 48)
-                except Exception:
-                    pass
+                except Exception as _ttl_err:
+                    logger.warning(f"Failed to load backtested_ttl_cycles from config: {_ttl_err}")
 
                 # Increment cycle counter for BACKTESTED+approved strategies that didn't fire
                 expired_count = 0

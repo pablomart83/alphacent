@@ -54,6 +54,11 @@ class NewsSentimentProvider:
         self._requests_reset_at = datetime.utcnow().replace(
             hour=0, minute=0, second=0, microsecond=0
         ) + timedelta(days=1)
+        # Circuit breaker: if Marketaux returns 402 (monthly limit exhausted),
+        # disable all fetches until midnight UTC to stop flooding warnings.log.
+        self._api_disabled_until: datetime = datetime.utcnow().replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )  # initialised to past — not disabled
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -212,6 +217,10 @@ class NewsSentimentProvider:
 
     def _fetch_from_marketaux(self, symbol: str) -> List[Dict]:
         """Call Marketaux API and return raw article list."""
+        # Circuit breaker: 402 means monthly quota exhausted — skip until midnight
+        if datetime.utcnow() < self._api_disabled_until:
+            raise ValueError("Marketaux API disabled (402 monthly limit) until midnight UTC")
+
         params = {
             "symbols": symbol,
             "filter_entities": "true",
@@ -221,6 +230,19 @@ class NewsSentimentProvider:
             "api_token": self.api_key,
         }
         resp = requests.get(_MARKETAUX_BASE, params=params, timeout=_REQUEST_TIMEOUT)
+
+        # 402 = monthly quota exhausted — disable until midnight to stop log spam
+        if resp.status_code == 402:
+            midnight_utc = (datetime.utcnow() + timedelta(days=1)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            self._api_disabled_until = midnight_utc
+            logger.warning(
+                f"Marketaux 402 Payment Required — monthly quota exhausted. "
+                f"News sentiment disabled until {midnight_utc.strftime('%Y-%m-%d %H:%M')} UTC."
+            )
+            raise ValueError("Marketaux 402: monthly quota exhausted")
+
         resp.raise_for_status()
         data = resp.json()
 

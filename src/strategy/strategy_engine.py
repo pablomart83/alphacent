@@ -1347,13 +1347,14 @@ class StrategyEngine:
         all_data = {}
         data_quality_warnings = []
 
-        # Import DAILY_ONLY_SYMBOLS to skip LME metals on intraday/4h backtests.
-        # These symbols have no intraday data on Yahoo Finance — requesting 1h/4h
-        # returns [] which would crash the entire backtest. Skip them gracefully.
+        # LME metals have no intraday data on Yahoo Finance — skip on 1h/4h backtests.
+        # Hardcoded inline so a failed import can never silently disable this guard.
+        _DAILY_ONLY = {'ALUMINUM', 'ZINC', 'NICKEL', 'PLATINUM'}
         try:
-            from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS as _DAILY_ONLY
-        except Exception:
-            _DAILY_ONLY = set()
+            from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS as _DAILY_ONLY_EXT
+            _DAILY_ONLY = _DAILY_ONLY | set(_DAILY_ONLY_EXT)
+        except Exception as _imp_err:
+            logger.warning(f"Could not import DAILY_ONLY_SYMBOLS from symbol_mapper: {_imp_err} — using hardcoded set")
 
         for symbol in strategy.symbols:
             if interval in ("1h", "4h") and symbol.upper() in _DAILY_ONLY:

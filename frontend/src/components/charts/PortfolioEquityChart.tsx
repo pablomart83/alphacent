@@ -1,17 +1,25 @@
 /**
- * PortfolioEquityChart
+ * PortfolioEquityChart — Multi-pane equity curve for AlphaCent.
  *
- * A ground-up rewrite of the equity curve chart for AlphaCent.
+ * Architecture (quant-first, lightweight-charts v5):
  *
- * Design (quant-first):
- *  - Single lightweight-charts instance, two price scales
- *  - Left scale  : absolute equity in dollars (portfolio + SPY scaled to same start)
- *  - Right scale : drawdown % (0 to -N%) as a red histogram
- *  - Realized P&L line on the left scale (dashed green)
- *  - Period selector filters data client-side (no re-fetch)
- *  - Interval selector triggers parent re-fetch (1d / 4h / 1h)
- *  - Handles both "YYYY-MM-DD" and Unix-timestamp data from backend
- *  - No normalization, no separate pane sync, no priceScaleId hacks
+ *  Single createChart instance with THREE panes sharing one time axis:
+ *    Pane 0 (~55%): Portfolio equity area + SPY benchmark line + Realized P&L line
+ *    Pane 1 (~25%): Daily P&L histogram  (always daily data regardless of interval)
+ *    Pane 2 (~20%): Rolling 30d Sharpe   (always daily data regardless of interval)
+ *
+ *  Time format rule — decided once from interval, applied to ALL series:
+ *    1d  → BusinessDay string "YYYY-MM-DD"
+ *    4h/1h → Unix integer (seconds since epoch)
+ *
+ *  Daily P&L and Rolling Sharpe always use daily equity snapshots (dailyEquity prop).
+ *  When interval is 4h/1h those daily dates are converted to Unix so they match
+ *  the time format used by the equity curve — lightweight-charts requires all series
+ *  on the same chart to use the same Time type.
+ *
+ *  Update paths:
+ *    Period change  → client-side filter → series.setData() in-place (no chart rebuild)
+ *    Interval change → time format changes → full chart teardown + rebuild
  */
 
 import { type FC, useEffect, useRef, useMemo } from 'react';
@@ -34,20 +42,22 @@ import { filterDataByPeriod } from '../../lib/chart-utils';
 // ── Types ─────────────────────────────────────────────────────────────────
 
 export interface EquityDataPoint {
-  /** "YYYY-MM-DD" or "YYYY-MM-DD HH:MM" or Unix timestamp string */
+  /** "YYYY-MM-DD" (daily) or Unix timestamp string (intraday) */
   date: string;
   equity: number;
-  /** Cumulative realized P&L (optional) */
   realized?: number | null;
 }
 
 export interface SpyDataPoint {
-  date: string;
+  date: string; // always "YYYY-MM-DD"
   close: number;
 }
 
 export interface PortfolioEquityChartProps {
   equityData: EquityDataPoint[];
+  /** Daily equity snapshots — used for P&L histogram and Rolling Sharpe.
+   *  Always daily regardless of the selected interval. */
+  dailyEquity?: EquityDataPoint[];
   spyData?: SpyDataPoint[];
   period: string;
   onPeriodChange: (p: string) => void;
@@ -60,36 +70,58 @@ export interface PortfolioEquityChartProps {
 
 const PERIODS = ['1W', '1M', '3M', '6M', '1Y', 'ALL'] as const;
 
+const PANE_HEIGHTS = { equity: 0.55, pnl: 0.25, sharpe: 0.20 };
+
 const THEME = {
-  bg:         '#0a0e1a',
-  grid:       '#1a2035',
-  text:       '#6b7280',
-  crosshair:  '#374151',
-  portfolio:  '#3b82f6',
-  spy:        '#6b7280',
-  realized:   '#22c55e',
-  drawdown:   'rgba(239,68,68,0.5)',
-  drawdownLine: 'rgba(239,68,68,0.8)',
+  bg:           '#0a0e1a',
+  grid:         '#1a2035',
+  text:         '#6b7280',
+  crosshair:    '#374151',
+  portfolio:    '#3b82f6',
+  spy:          '#6b7280',
+  realized:     '#22c55e',
+  pnlPos:       'rgba(34,197,94,0.75)',
+  pnlNeg:       'rgba(239,68,68,0.75)',
+  sharpe:       '#a78bfa',
+  sharpeZero:   '#374151',
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ── Time helpers ──────────────────────────────────────────────────────────
 
-/** Convert any date string or unix timestamp to lightweight-charts Time */
-function toTime(s: string): Time {
-  // Unix timestamp (all digits, 9-11 chars)
-  if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
-  // Sub-daily: "YYYY-MM-DD HH:MM" → convert to Unix timestamp for proper intraday rendering
-  if (s.length > 10 && s[10] === ' ') {
-    try {
+/** Convert any date string to a lightweight-charts Time value.
+ *  The isIntraday flag determines the format for the entire chart instance —
+ *  all series must use the same type. */
+function toTime(s: string, isIntraday: boolean): Time {
+  if (isIntraday) {
+    // Unix timestamp string (9-11 digits) — already correct
+    if (/^\d{9,11}$/.test(s)) return parseInt(s, 10) as Time;
+    // "YYYY-MM-DD HH:MM" → UTC Unix
+    if (s.length > 10 && s[10] === ' ') {
       const dt = new Date(s.replace(' ', 'T') + ':00Z');
       if (!isNaN(dt.getTime())) return Math.floor(dt.getTime() / 1000) as Time;
-    } catch { /* fall through */ }
+    }
+    // "YYYY-MM-DD" daily date in intraday mode → midnight UTC Unix
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      return Math.floor(new Date(s + 'T00:00:00Z').getTime() / 1000) as Time;
+    }
+    // Fallback: try parsing as number
+    const n = parseInt(s, 10);
+    if (!isNaN(n)) return n as Time;
+    return Math.floor(new Date(s).getTime() / 1000) as Time;
+  } else {
+    // Daily mode — BusinessDay string
+    return s.slice(0, 10) as Time;
   }
-  // Daily: "YYYY-MM-DD"
-  return s.slice(0, 10) as Time;
 }
 
-/** Format dollar value for axis labels */
+/** Extract "YYYY-MM-DD" from any date string (for SPY map lookup). */
+function toDayKey(s: string): string {
+  if (/^\d{9,11}$/.test(s)) {
+    return new Date(parseInt(s, 10) * 1000).toISOString().slice(0, 10);
+  }
+  return s.slice(0, 10);
+}
+
 function fmtDollar(v: number): string {
   if (Math.abs(v) >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
   if (Math.abs(v) >= 1_000)     return `$${(v / 1_000).toFixed(1)}K`;
@@ -100,19 +132,25 @@ function fmtDollar(v: number): string {
 
 export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
   equityData,
+  dailyEquity,
   spyData,
   period,
   onPeriodChange,
   interval = '1d',
   onIntervalChange,
-  height = 380,
+  height = 420,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef     = useRef<IChartApi | null>(null);
-  const seriesRef    = useRef<Record<string, ISeriesApi<SeriesType>>>({});
-  const roRef        = useRef<ResizeObserver | null>(null);
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const chartRef      = useRef<IChartApi | null>(null);
+  const seriesRef     = useRef<Record<string, ISeriesApi<SeriesType>>>({});
+  const roRef         = useRef<ResizeObserver | null>(null);
+  const prevIntervalRef = useRef<string>(interval);
 
-  // ── Filter data by period ──────────────────────────────────────────────
+  const isIntraday = interval !== '1d';
+  const toolbarH   = 32; // px
+  const chartH     = height - toolbarH;
+
+  // ── Filter equity curve by period ─────────────────────────────────────
   const filtered = useMemo(() => {
     if (!equityData?.length) return [];
     return filterDataByPeriod(
@@ -122,141 +160,164 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
     ) as EquityDataPoint[];
   }, [equityData, period]);
 
-  // ── Derived series data ────────────────────────────────────────────────
+  // ── Filter daily equity by period (for P&L + Sharpe panes) ────────────
+  const filteredDaily = useMemo(() => {
+    const src = dailyEquity?.length ? dailyEquity : equityData.filter(d => String(d.date).length === 10);
+    if (!src.length) return [];
+    return filterDataByPeriod(src.map(d => ({ ...d })), 'date', period) as EquityDataPoint[];
+  }, [dailyEquity, equityData, period]);
+
+  // ── Build all series data ──────────────────────────────────────────────
   const chartData = useMemo(() => {
     if (filtered.length < 2) return null;
 
     const startEquity = filtered[0].equity;
 
-    // Portfolio area
+    // Pane 0: Portfolio area
     const portfolio = filtered.map(d => ({
-      time: toTime(d.date),
+      time:  toTime(d.date, isIntraday),
       value: d.equity,
     }));
 
-    // Drawdown histogram (right scale)
-    let peak = startEquity;
-    const drawdown = filtered.map(d => {
-      if (d.equity > peak) peak = d.equity;
-      const dd = peak > 0 ? ((d.equity - peak) / peak) * 100 : 0;
-      return {
-        time: toTime(d.date),
-        value: dd,
-        color: dd < -5 ? 'rgba(239,68,68,0.7)' : 'rgba(239,68,68,0.4)',
-      };
-    });
-
-    // SPY scaled to same starting equity
-    // For intraday intervals, SPY is daily-only data — use the portfolio bar's own timestamp
-    // so all series on the chart share the same time format (Unix vs BusinessDay).
+    // Pane 0: SPY scaled to same starting equity
     let spy: Array<{ time: Time; value: number }> | null = null;
     if (spyData?.length) {
       const spyMap = new Map(spyData.map(s => [s.date.slice(0, 10), s.close]));
-
-      /** Convert a date field (YYYY-MM-DD, YYYY-MM-DD HH:MM, or Unix string) to YYYY-MM-DD */
-      const toDayKey = (raw: string): string => {
-        if (/^\d{9,11}$/.test(raw)) {
-          return new Date(parseInt(raw, 10) * 1000).toISOString().slice(0, 10);
-        }
-        return raw.slice(0, 10);
-      };
-
-      const startDate = toDayKey(filtered[0].date);
-      const startSpy  = spyMap.get(startDate)
-        ?? [...spyMap.entries()].find(([d]) => d >= startDate)?.[1];
+      const startDay   = toDayKey(filtered[0].date);
+      const startSpy   = spyMap.get(startDay)
+        ?? [...spyMap.entries()].find(([d]) => d >= startDay)?.[1];
       if (startSpy && startSpy > 0) {
         const scale = startEquity / startSpy;
-        const seenDates = new Set<string>();
+        const seen  = new Set<string>();
         spy = filtered
           .map(d => {
-            const dayKey = toDayKey(d.date);
-            const v = spyMap.get(dayKey);
-            if (v == null) return null;
-            // For intraday: emit once per day using the portfolio bar's own timestamp
-            // so SPY time format matches portfolio (Unix timestamp, not BusinessDay string)
-            if (seenDates.has(dayKey)) return null;
-            seenDates.add(dayKey);
-            return { time: toTime(d.date), value: v * scale };
+            const day = toDayKey(d.date);
+            const v   = spyMap.get(day);
+            if (v == null || seen.has(day)) return null;
+            seen.add(day);
+            return { time: toTime(d.date, isIntraday), value: v * scale };
           })
           .filter(Boolean) as Array<{ time: Time; value: number }>;
         if (spy.length < 2) spy = null;
       }
     }
 
-    // Realized P&L line (absolute: starting equity + cumulative realized)
+    // Pane 0: Realized P&L line
     let realized: Array<{ time: Time; value: number }> | null = null;
-    const hasRealized = filtered.some(d => d.realized != null);
-    if (hasRealized) {
-      const startRealized = filtered[0].realized ?? 0;
+    if (filtered.some(d => d.realized != null)) {
+      const startR = filtered[0].realized ?? 0;
       realized = filtered
         .filter(d => d.realized != null)
         .map(d => ({
-          time: toTime(d.date),
-          value: startEquity + ((d.realized ?? 0) - startRealized),
+          time:  toTime(d.date, isIntraday),
+          value: startEquity + ((d.realized ?? 0) - startR),
         }));
       if (realized.length < 2) realized = null;
     }
 
-    // Stats for header
-    const lastEquity = filtered[filtered.length - 1].equity;
+    // Pane 1: Daily P&L histogram (always daily)
+    let pnlBars: Array<{ time: Time; value: number; color: string }> | null = null;
+    if (filteredDaily.length >= 2) {
+      pnlBars = filteredDaily.slice(1).map((d, i) => {
+        const pnl = d.equity - filteredDaily[i].equity;
+        return {
+          time:  toTime(d.date, isIntraday),
+          value: pnl,
+          color: pnl >= 0 ? THEME.pnlPos : THEME.pnlNeg,
+        };
+      });
+    }
+
+    // Pane 2: Rolling 30d Sharpe (always daily)
+    let sharpe: Array<{ time: Time; value: number }> | null = null;
+    if (filteredDaily.length >= 32) {
+      const returns: number[] = [];
+      for (let i = 1; i < filteredDaily.length; i++) {
+        const prev = filteredDaily[i - 1].equity;
+        const curr = filteredDaily[i].equity;
+        returns.push(prev > 0 ? (curr - prev) / prev : 0);
+      }
+      const pts: Array<{ time: Time; value: number }> = [];
+      for (let i = 29; i < returns.length; i++) {
+        const dateIdx = i + 1;
+        if (dateIdx >= filteredDaily.length) break;
+        const window = returns.slice(i - 29, i + 1);
+        const mean   = window.reduce((s, v) => s + v, 0) / 30;
+        const std    = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / 30) || 0.0001;
+        const val    = Math.round((mean / std) * Math.sqrt(252) * 100) / 100;
+        if (Number.isFinite(val)) {
+          pts.push({ time: toTime(filteredDaily[dateIdx].date, isIntraday), value: val });
+        }
+      }
+      if (pts.length >= 2) sharpe = pts;
+    }
+
+    // Header stats
+    const lastEquity  = filtered[filtered.length - 1].equity;
     const totalReturn = ((lastEquity - startEquity) / startEquity) * 100;
-    const maxDD = Math.min(...drawdown.map(d => d.value));
 
-    return { portfolio, drawdown, spy, realized, totalReturn, maxDD, lastEquity };
-  }, [filtered, spyData]);
+    return { portfolio, spy, realized, pnlBars, sharpe, totalReturn, lastEquity };
+  }, [filtered, filteredDaily, spyData, isIntraday]);
 
-  // ── Create / destroy chart ─────────────────────────────────────────────
-  // Only recreate the chart when height changes or when the time format changes
-  // (switching between daily BusinessDay strings and intraday Unix timestamps).
-  // For period changes (client-side filter), just update series data in place.
-  const prevIntervalRef = useRef<string>(interval ?? '1d');
-
+  // ── Build / rebuild chart ──────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
-    const intervalChanged = prevIntervalRef.current !== (interval ?? '1d');
-    prevIntervalRef.current = interval ?? '1d';
+    const intervalChanged = prevIntervalRef.current !== interval;
+    prevIntervalRef.current = interval;
 
-    // If chart already exists and only data changed (not interval/height), update in place
+    // In-place update: period changed but interval (time format) did not
     if (chartRef.current && !intervalChanged && seriesRef.current['portfolio']) {
       if (!chartData) return;
       try {
+        seriesRef.current['portfolio'].setData(chartData.portfolio as any);
         if (chartData.spy && seriesRef.current['spy']) {
           seriesRef.current['spy'].setData(chartData.spy as any);
-        } else if (!chartData.spy && seriesRef.current['spy']) {
-          // spy disappeared — need full rebuild
         }
         if (chartData.realized && seriesRef.current['realized']) {
           seriesRef.current['realized'].setData(chartData.realized as any);
         }
-        seriesRef.current['portfolio'].setData(chartData.portfolio as any);
-        seriesRef.current['drawdown'].setData(chartData.drawdown as any);
+        if (chartData.pnlBars && seriesRef.current['pnl']) {
+          seriesRef.current['pnl'].setData(chartData.pnlBars as any);
+        }
+        if (chartData.sharpe && seriesRef.current['sharpe']) {
+          seriesRef.current['sharpe'].setData(chartData.sharpe as any);
+        }
         chartRef.current.timeScale().fitContent();
-        return; // skip full rebuild
+        return;
       } catch {
-        // fall through to full rebuild on any error
+        // Fall through to full rebuild on any error
       }
     }
 
-    // Full rebuild (first mount, interval change, or height change)
+    // Full rebuild
     roRef.current?.disconnect();
     chartRef.current?.remove();
     chartRef.current = null;
     seriesRef.current = {};
-    // Explicitly clear any leftover canvas elements from the previous chart instance
     el.innerHTML = '';
 
     if (!chartData) return;
 
+    const hasPnl    = !!chartData.pnlBars;
+    const hasSharpe = !!chartData.sharpe;
+
+    // Calculate pane heights in pixels
+    const pane0H = hasPnl || hasSharpe
+      ? Math.round(chartH * PANE_HEIGHTS.equity)
+      : chartH;
+    const pane1H = hasPnl    ? Math.round(chartH * PANE_HEIGHTS.pnl)    : 0;
+    const pane2H = hasSharpe ? Math.round(chartH * PANE_HEIGHTS.sharpe)  : 0;
+
     const chart = createChart(el, {
       width:  el.clientWidth,
-      height: height - 36, // subtract toolbar height
+      height: chartH,
       layout: {
-        background: { type: ColorType.Solid, color: THEME.bg },
-        textColor:  THEME.text,
-        fontFamily: "'JetBrains Mono', 'Courier New', monospace",
-        fontSize:   11,
+        background:   { type: ColorType.Solid, color: THEME.bg },
+        textColor:    THEME.text,
+        fontFamily:   "'JetBrains Mono', 'Courier New', monospace",
+        fontSize:     11,
         attributionLogo: false,
       },
       grid: {
@@ -264,35 +325,34 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
         horzLines: { color: THEME.grid, style: LineStyle.Dotted },
       },
       crosshair: {
-        mode: CrosshairMode.Normal,
+        mode:     CrosshairMode.Normal,
         vertLine: { color: THEME.crosshair, labelBackgroundColor: '#1f2937' },
         horzLine: { color: THEME.crosshair, labelBackgroundColor: '#1f2937' },
       },
       timeScale: {
         borderColor:  THEME.grid,
-        timeVisible:  interval !== '1d', // show HH:MM for intraday
+        timeVisible:  isIntraday,
         rightOffset:  8,
         barSpacing:   8,
         fixLeftEdge:  true,
         fixRightEdge: true,
       },
       leftPriceScale: {
-        visible:     true,
-        borderColor: THEME.grid,
-        scaleMargins: { top: 0.08, bottom: 0.28 }, // leave room for drawdown
+        visible:      true,
+        borderColor:  THEME.grid,
+        scaleMargins: { top: 0.06, bottom: 0.04 },
       },
-      rightPriceScale: {
-        visible:     true,
-        borderColor: THEME.grid,
-        scaleMargins: { top: 0.72, bottom: 0.02 }, // drawdown occupies bottom 28%
-      },
+      rightPriceScale: { visible: false },
       handleScroll: { mouseWheel: true, pressedMouseMove: true },
       handleScale:  { mouseWheel: true, pinch: true },
     });
 
     chartRef.current = chart;
 
-    // ── SPY (behind portfolio) ─────────────────────────────────────────
+    // Set pane 0 height
+    chart.panes()[0].setHeight(pane0H);
+
+    // ── Pane 0: SPY (behind portfolio) ────────────────────────────────
     if (chartData.spy) {
       const s = chart.addSeries(LineSeries, {
         color:            THEME.spy,
@@ -302,12 +362,12 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
         lastValueVisible: false,
         priceLineVisible: false,
         priceFormat:      { type: 'custom', formatter: fmtDollar, minMove: 1 },
-      });
-      s.setData(chartData.spy);
+      }, 0);
+      s.setData(chartData.spy as any);
       seriesRef.current['spy'] = s;
     }
 
-    // ── Realized P&L line ──────────────────────────────────────────────
+    // ── Pane 0: Realized P&L line ──────────────────────────────────────
     if (chartData.realized) {
       const s = chart.addSeries(LineSeries, {
         color:            THEME.realized,
@@ -317,12 +377,12 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
         lastValueVisible: false,
         priceLineVisible: false,
         priceFormat:      { type: 'custom', formatter: fmtDollar, minMove: 1 },
-      });
-      s.setData(chartData.realized);
+      }, 0);
+      s.setData(chartData.realized as any);
       seriesRef.current['realized'] = s;
     }
 
-    // ── Portfolio area (on top) ────────────────────────────────────────
+    // ── Pane 0: Portfolio area (on top) ────────────────────────────────
     const portfolio = chart.addSeries(AreaSeries, {
       lineColor:        THEME.portfolio,
       topColor:         'rgba(59,130,246,0.18)',
@@ -332,20 +392,55 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
       lastValueVisible: false,
       priceLineVisible: false,
       priceFormat:      { type: 'custom', formatter: fmtDollar, minMove: 1 },
-    });
-    portfolio.setData(chartData.portfolio);
+    }, 0);
+    portfolio.setData(chartData.portfolio as any);
     seriesRef.current['portfolio'] = portfolio;
 
-    // ── Drawdown histogram (right scale, bottom strip) ─────────────────
-    const dd = chart.addSeries(HistogramSeries, {
-      color:            THEME.drawdown,
-      priceScaleId:     'right',
-      lastValueVisible: false,
-      priceLineVisible: false,
-      priceFormat:      { type: 'custom', formatter: (v: number) => `${v.toFixed(1)}%`, minMove: 0.01 },
-    });
-    dd.setData(chartData.drawdown);
-    seriesRef.current['drawdown'] = dd;
+    // ── Pane 1: Daily P&L histogram ────────────────────────────────────
+    if (hasPnl && pane1H > 0) {
+      const pane1 = chart.addPane();
+      pane1.setHeight(pane1H);
+
+      const pnl = chart.addSeries(HistogramSeries, {
+        lastValueVisible: false,
+        priceLineVisible: false,
+        priceScaleId:     'left',
+        priceFormat:      { type: 'custom', formatter: fmtDollar, minMove: 1 },
+      }, pane1.paneIndex());
+      pnl.setData(chartData.pnlBars as any);
+      seriesRef.current['pnl'] = pnl;
+    }
+
+    // ── Pane 2: Rolling 30d Sharpe ─────────────────────────────────────
+    if (hasSharpe && pane2H > 0) {
+      const pane2 = chart.addPane();
+      pane2.setHeight(pane2H);
+
+      // Zero reference line
+      const zeroLine = chart.addSeries(LineSeries, {
+        color:            THEME.sharpeZero,
+        lineWidth:        1,
+        lineStyle:        LineStyle.Dashed,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        priceFormat:      { type: 'custom', formatter: () => '', minMove: 0.01 },
+      }, pane2.paneIndex());
+      const sharpeData = chartData.sharpe!;
+      zeroLine.setData([
+        { time: sharpeData[0].time,                    value: 0 },
+        { time: sharpeData[sharpeData.length - 1].time, value: 0 },
+      ]);
+
+      const sharpe = chart.addSeries(LineSeries, {
+        color:            THEME.sharpe,
+        lineWidth:        1,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        priceFormat:      { type: 'custom', formatter: (v: number) => v.toFixed(2), minMove: 0.01 },
+      }, pane2.paneIndex());
+      sharpe.setData(chartData.sharpe as any);
+      seriesRef.current['sharpe'] = sharpe;
+    }
 
     chart.timeScale().fitContent();
 
@@ -365,21 +460,21 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
       chartRef.current = null;
       seriesRef.current = {};
     };
-  // Recreate chart whenever data or height changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chartData, height]);
+  }, [chartData, chartH, isIntraday]);
 
   // ── Render ─────────────────────────────────────────────────────────────
+  const totalReturn = chartData?.totalReturn ?? null;
   const hasSpy      = !!chartData?.spy;
   const hasRealized = !!chartData?.realized;
-  const totalReturn = chartData?.totalReturn ?? null;
-  const maxDD       = chartData?.maxDD ?? null;
+  const hasSharpe   = !!chartData?.sharpe;
+  const hasPnl      = !!chartData?.pnlBars;
 
   return (
     <div className="w-full flex flex-col">
       {/* ── Toolbar ── */}
-      <div className="flex items-center justify-between px-0.5 mb-1 h-[28px] shrink-0">
-        {/* Left: period + interval */}
+      <div className="flex items-center justify-between px-0.5 mb-1 shrink-0" style={{ height: toolbarH }}>
+        {/* Period + interval selectors */}
         <div className="flex items-center gap-1.5">
           <div className="flex items-center gap-px">
             {PERIODS.map(p => (
@@ -420,19 +515,16 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
           )}
         </div>
 
-        {/* Right: stats + legend */}
+        {/* Stats + legend */}
         <div className="flex items-center gap-3 text-[10px] font-mono">
           {totalReturn != null && (
             <span className={cn('font-semibold', totalReturn >= 0 ? 'text-green-400' : 'text-red-400')}>
               {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
             </span>
           )}
-          {maxDD != null && maxDD < 0 && (
-            <span className="text-red-400/70">DD {maxDD.toFixed(2)}%</span>
-          )}
           <span className="flex items-center gap-1 text-gray-600">
             <span className="w-3 h-[2px] bg-blue-500 inline-block rounded" />
-            Total
+            Equity
           </span>
           {hasRealized && (
             <span className="flex items-center gap-1 text-gray-600">
@@ -446,20 +538,28 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
               SPY
             </span>
           )}
-          <span className="flex items-center gap-1 text-gray-600">
-            <span className="w-3 h-[2px] bg-red-500/60 inline-block rounded" />
-            DD
-          </span>
+          {hasPnl && (
+            <span className="flex items-center gap-1 text-gray-600">
+              <span className="w-3 h-[2px] bg-green-500/60 inline-block rounded" />
+              P&L
+            </span>
+          )}
+          {hasSharpe && (
+            <span className="flex items-center gap-1 text-gray-600">
+              <span className="w-3 h-[2px] bg-violet-400/60 inline-block rounded" />
+              Sharpe
+            </span>
+          )}
         </div>
       </div>
 
       {/* ── Chart container ── */}
       {chartData ? (
-        <div ref={containerRef} style={{ width: '100%', height: height - 36 }} />
+        <div ref={containerRef} style={{ width: '100%', height: chartH }} />
       ) : (
         <div
           className="flex items-center justify-center text-gray-700 text-xs font-mono"
-          style={{ height: height - 36 }}
+          style={{ height: chartH }}
         >
           No data
         </div>

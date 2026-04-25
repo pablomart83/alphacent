@@ -887,6 +887,13 @@ class MarketDataManager:
             }).dropna(subset=['Open', 'Close'])
             logger.info(f"Synthesized {len(hist_4h)} 4H bars from {len(hist)} 1H bars for {symbol}")
             hist = hist_4h
+        # Normalise index to UTC before iterating — prevents AmbiguousTimeError on DST
+        # transitions (e.g. EU clocks change on last Sunday of October/March).
+        # yfinance returns tz-aware timestamps; converting to UTC then stripping tz
+        # gives unambiguous naive datetimes for all downstream code.
+        if hasattr(hist.index, 'tz') and hist.index.tz is not None:
+            hist.index = hist.index.tz_convert('UTC').tz_localize(None)
+
         # Convert to MarketData objects (keep original symbol, not Yahoo ticker)
         data_list = []
         for timestamp, row in hist.iterrows():
