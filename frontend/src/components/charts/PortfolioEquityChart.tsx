@@ -152,7 +152,16 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
     let spy: Array<{ time: Time; value: number }> | null = null;
     if (spyData?.length) {
       const spyMap = new Map(spyData.map(s => [s.date.slice(0, 10), s.close]));
-      const startDate = filtered[0].date.slice(0, 10);
+
+      /** Convert a date field (YYYY-MM-DD, YYYY-MM-DD HH:MM, or Unix string) to YYYY-MM-DD */
+      const toDayKey = (raw: string): string => {
+        if (/^\d{9,11}$/.test(raw)) {
+          return new Date(parseInt(raw, 10) * 1000).toISOString().slice(0, 10);
+        }
+        return raw.slice(0, 10);
+      };
+
+      const startDate = toDayKey(filtered[0].date);
       const startSpy  = spyMap.get(startDate)
         ?? [...spyMap.entries()].find(([d]) => d >= startDate)?.[1];
       if (startSpy && startSpy > 0) {
@@ -160,7 +169,7 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
         const seenDates = new Set<string>();
         spy = filtered
           .map(d => {
-            const dayKey = d.date.slice(0, 10);
+            const dayKey = toDayKey(d.date);
             const v = spyMap.get(dayKey);
             if (v == null) return null;
             // For intraday: emit once per day using the portfolio bar's own timestamp
@@ -233,7 +242,10 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
     // Full rebuild (first mount, interval change, or height change)
     roRef.current?.disconnect();
     chartRef.current?.remove();
+    chartRef.current = null;
     seriesRef.current = {};
+    // Explicitly clear any leftover canvas elements from the previous chart instance
+    el.innerHTML = '';
 
     if (!chartData) return;
 
