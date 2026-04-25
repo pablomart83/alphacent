@@ -259,24 +259,30 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
     }
 
     // Pane 2: Rolling 30d Sharpe (always daily)
+    // Use filteredDaily if it has enough points; otherwise fall back to filtered
+    // daily-only points from the main equity curve (analytics endpoint has more history).
+    const sharpeSource = filteredDaily.length >= 32
+      ? filteredDaily
+      : filtered.filter(d => /^\d{4}-\d{2}-\d{2}$/.test(String(d.date)));
+
     let sharpe: Array<{ time: Time; value: number }> | null = null;
-    if (filteredDaily.length >= 32) {
+    if (sharpeSource.length >= 32) {
       const returns: number[] = [];
-      for (let i = 1; i < filteredDaily.length; i++) {
-        const prev = filteredDaily[i - 1].equity;
-        const curr = filteredDaily[i].equity;
+      for (let i = 1; i < sharpeSource.length; i++) {
+        const prev = sharpeSource[i - 1].equity;
+        const curr = sharpeSource[i].equity;
         returns.push(prev > 0 ? (curr - prev) / prev : 0);
       }
       const pts: Array<{ time: Time; value: number }> = [];
       for (let i = 29; i < returns.length; i++) {
         const dateIdx = i + 1;
-        if (dateIdx >= filteredDaily.length) break;
+        if (dateIdx >= sharpeSource.length) break;
         const window = returns.slice(i - 29, i + 1);
         const mean   = window.reduce((s, v) => s + v, 0) / 30;
         const std    = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / 30) || 0.0001;
         const val    = Math.round((mean / std) * Math.sqrt(252) * 100) / 100;
         if (Number.isFinite(val)) {
-          pts.push({ time: toTime(filteredDaily[dateIdx].date, isIntraday), value: val });
+          pts.push({ time: toTime(sharpeSource[dateIdx].date, isIntraday), value: val });
         }
       }
       if (pts.length >= 2) sharpe = pts;
