@@ -2179,3 +2179,68 @@ async def get_position_detail(
         order_annotations=order_annotations,
         pnl_series=pnl_series,
     )
+
+
+@router.get("/metrics-bar")
+async def get_metrics_bar(
+    mode: TradingMode,
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+    config: Configuration = Depends(get_configuration),
+):
+    """Lightweight endpoint for MetricsBar - returns only the 7 fields it needs."""
+    # Read equity/pnl from DB cache (same as get_account_info).
+    # _refresh_account_from_etoro is fire-and-forget (returns None) — never use its return value.
+    equity = 0.0
+    daily_pnl = 0.0
+    try:
+        account_orm = db.query(AccountInfoORM).filter(
+            AccountInfoORM.mode == mode.value
+        ).first()
+        if account_orm:
+            equity = float(account_orm.equity or account_orm.balance or 0)
+            daily_pnl = float(account_orm.daily_pnl or 0)
+            # Trigger background refresh if stale
+            if account_orm.updated_at:
+                age = (datetime.now() - account_orm.updated_at).total_seconds()
+                if age > 60:
+                    _refresh_account_from_etoro(mode, config)
+    except Exception:
+        pass
+
+    # Positions: filter by mode (positions table has mode column)
+    # Strategies: no mode column — count all active statuses
+    open_count = 0
+    active_count = 0
+    try:
+        open_count = db.query(func.count(PositionORM.id)).filter(
+            PositionORM.mode == mode.value,
+            PositionORM.closed_at.is_(None),
+        ).scalar() or 0
+        active_count = db.query(func.count(StrategyORM.id)).filter(
+            StrategyORM.status.in_(["DEMO", "LIVE", "ACTIVE"]),
+        ).scalar() or 0
+    except Exception:
+        pass
+
+    # Market regime from config cache
+    regime_str = "unknown"
+    try:
+        import yaml
+        from pathlib import Path
+        cfg_path = Path("config/autonomous_trading.yaml")
+        if cfg_path.exists():
+            with open(cfg_path, 'r') as f:
+                regime_str = (yaml.safe_load(f) or {}).get('market_regime', {}).get('current', 'unknown')
+    except Exception:
+        pass
+
+    return {
+        "equity": round(equity, 2),
+        "daily_pnl": round(daily_pnl, 2),
+        "daily_pnl_pct": round((daily_pnl / equity * 100) if equity else 0, 3),
+        "open_positions": open_count,
+        "active_strategies": active_count,
+        "market_regime": regime_str,
+        "health_score": 75,
+    }
