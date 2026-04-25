@@ -91,19 +91,12 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
             equity: d.portfolio ?? d.value ?? 0,
             realized: d.realized ?? undefined,
           }))}
-          dailyEquity={(pm?.equity_curve || perfStats?.equity_curve || [])
-            .filter((d: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(d.date ?? d.timestamp ?? '')))
-            .map((d: any) => ({
-              date: d.date ?? d.timestamp ?? '',
-              equity: d.portfolio ?? d.value ?? 0,
-              realized: d.realized ?? undefined,
-            }))}
           spyData={spyData}
           period={period}
           onPeriodChange={(p) => { setPeriod(p as any); }}
           interval={equityInterval as '1d' | '4h' | '1h'}
           onIntervalChange={(iv) => setEquityInterval(iv)}
-          height={420}
+          height={280}
         />
       </div>
 

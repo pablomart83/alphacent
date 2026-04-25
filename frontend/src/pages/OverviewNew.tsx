@@ -13,6 +13,8 @@ import type { CompactMetric } from '../components/trading/CompactMetricRow';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import { PageSkeleton, ChartSkeleton } from '../components/ui/skeleton';
 import { PortfolioEquityChart } from '../components/charts/PortfolioEquityChart';
+import { DailyPnLChart } from '../components/charts/DailyPnLChart';
+import { InteractiveChart } from '../components/charts/InteractiveChart';
 import { MultiTimeframeView } from '../components/charts/MultiTimeframeView';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 import { ActivityPanel } from '../components/ActivityPanel';
@@ -225,8 +227,46 @@ export const OverviewNew: FC<OverviewNewProps> = memo(({ onLogout }) => {
     setEquityPeriod(periodMap[period] || '3M');
   }, []);
 
-  // Rolling Sharpe and Daily P&L are now computed inside PortfolioEquityChart
-  // using the dailyEquity prop — no longer needed here.
+  // ── Rolling Sharpe series (30-day rolling) — always daily ─────────────
+  const rollingSharpe30 = useMemo(() => {
+    // Always use daily points only (date length == 10)
+    const curve = (dashboard?.equity_curve ?? []).filter((d: any) => String(d.date).length === 10);
+    if (curve.length < 32) return [];
+    const returns: number[] = [];
+    for (let i = 1; i < curve.length; i++) {
+      const prev = curve[i - 1].equity;
+      const curr = curve[i].equity;
+      returns.push(prev > 0 ? (curr - prev) / prev : 0);
+    }
+    const result: Array<{ time: string; value: number }> = [];
+    for (let i = 29; i < returns.length; i++) {
+      const dateIdx = i + 1;
+      if (dateIdx >= curve.length) break;
+      const window = returns.slice(i - 29, i + 1);
+      const mean = window.reduce((s, v) => s + v, 0) / 30;
+      const std = Math.sqrt(window.reduce((s, v) => s + (v - mean) ** 2, 0) / 30) || 0.0001;
+      const sharpe = (mean / std) * Math.sqrt(252);
+      const val = Math.round(sharpe * 100) / 100;
+      if (Number.isFinite(val)) {
+        result.push({ time: curve[dateIdx].date, value: val });
+      }
+    }
+    return result;
+  }, [dashboard?.equity_curve]);
+
+  // ── Daily P&L histogram ────────────────────────────────────────────────
+  const dailyPnlBars = useMemo(() => {
+    const table = (dashboard as any)?.daily_pnl_table as Array<{ date: string; daily_pnl: number }> | undefined;
+    if (table && table.length > 0) {
+      return table.map(r => ({ date: r.date.slice(0, 10), pnl: r.daily_pnl }));
+    }
+    // Use only daily points (date length == 10, e.g. "2026-04-22")
+    const curve = (dashboard?.equity_curve ?? []).filter((d: any) => String(d.date).length === 10);
+    return curve.slice(1).map((d: any, i: number) => ({
+      date: d.date,
+      pnl: d.equity - curve[i].equity,
+    }));
+  }, [dashboard]);
 
   // Build compact metrics for left panel
   const compactMetrics: CompactMetric[] = useMemo(() => {
@@ -392,23 +432,37 @@ export const OverviewNew: FC<OverviewNewProps> = memo(({ onLogout }) => {
                 equity: p.portfolio ?? p.equity ?? p.value ?? 0,
                 realized: p.realized,
               }))}
-              dailyEquity={(dashboard?.equity_curve ?? []).map((p: any) => ({
-                date: p.date,
-                equity: p.equity ?? 0,
-                realized: p.realized,
-              }))}
               spyData={showBenchmark ? spyData : undefined}
               period={equityPeriod}
               onPeriodChange={setEquityPeriod}
               interval={equityInterval}
               onIntervalChange={(iv) => { setEquityInterval(iv); fetchAll(iv); }}
-              height={560}
+              height={380}
             />
           ) : (
-            <ChartSkeleton height={560} />
+            <ChartSkeleton height={380} />
           )}
 
-          {/* Daily P&L and Rolling Sharpe are now panes inside PortfolioEquityChart */}
+          {/* Daily P&L Histogram */}
+          {dailyPnlBars.length > 1 && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">Daily P&L</div>
+              <DailyPnLChart data={dailyPnlBars} height={90} />
+            </div>
+          )}
+
+          {/* Rolling 30-day Sharpe */}
+          {rollingSharpe30.length > 1 && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 tracking-wide mb-1">Rolling Sharpe (30d)</div>
+              <InteractiveChart
+                data={rollingSharpe30.map(d => ({ date: d.time, sharpe: d.value }))}
+                dataKeys={[{ key: 'sharpe', color: '#3b82f6', type: 'line' }]}
+                xAxisKey="date"
+                height={90}
+              />
+            </div>
+          )}
         </div>
       </PanelHeader>
     </div>
