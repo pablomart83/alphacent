@@ -161,6 +161,8 @@ export const OverviewNew: FC<OverviewNewProps> = memo(({ onLogout }) => {
   const [equityInterval, setEquityInterval] = useState<'1d' | '4h' | '1h'>('1d');
   const [showBenchmark, setShowBenchmark] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Ref for the center panel container — used by AutoHeightChart to measure available height
+  const centerPanelRef = useRef<HTMLDivElement>(null);
 
   // Fetch all data
   const fetchAll = useCallback(async (intervalOverride?: '1d' | '4h' | '1h') => {
@@ -411,8 +413,6 @@ export const OverviewNew: FC<OverviewNewProps> = memo(({ onLogout }) => {
       </PanelHeader>
     </div>
   );
-
-  const centerPanelRef = useRef<HTMLDivElement>(null);
 
   // ── Center Panel Content ───────────────────────────────────────────────
   const centerPanel = (
