@@ -349,6 +349,11 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
         fontFamily:   "'JetBrains Mono', 'Courier New', monospace",
         fontSize:     11,
         attributionLogo: false,
+        panes: {
+          enableResize:        true,
+          separatorColor:      '#1e2433',  // very subtle — barely visible against bg
+          separatorHoverColor: 'rgba(99,102,241,0.25)',  // soft indigo on hover
+        },
       },
       grid: {
         vertLines: { color: THEME.grid, style: LineStyle.Dotted },
