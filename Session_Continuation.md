@@ -65,6 +65,32 @@ AlphaCent is not a side project. It is the technology backbone of a systematic t
 - Risk-first thinking. Every feature is evaluated through the lens of capital preservation.
 - Clean architecture. No dead code, no orphaned files, no "temporary" hacks that become permanent.
 
+### Engineering Standard — No Minimal Fixes
+
+**This is the most important rule for every session.**
+
+When a problem is identified, the answer is never the smallest patch that makes the symptom go away. The answer is the correct solution — the one a senior quant engineer at a top-tier fund would be proud to ship.
+
+**What this means in practice:**
+
+- **Diagnose fully before touching code.** Read the logs, read the source, understand the root cause completely. Never guess. Never patch symptoms.
+- **Propose the right architecture, not the easy one.** If three chart components have misaligned time axes because they're separate instances, the right fix is a unified chart — not three separate hacks to make them look aligned.
+- **No "minimal correct fix" framing.** That phrase is a red flag. If you find yourself writing "minimal fix" or "pragmatic patch", stop and redesign.
+- **No silent exception swallowing.** `except Exception: pass` is never acceptable. Every exception must be logged with context.
+- **No hardcoded fallbacks that mask real failures.** If data is missing, surface it — don't return zeros and pretend everything is fine.
+- **UI/UX is held to the same standard as backend.** A chart with misaligned axes, wrong time scales, or missing labels is a bug, not a cosmetic issue. A quant looking at a chart with two superposed time scales cannot trust the data.
+- **Think like a trader, not a software engineer.** A software engineer asks "does it compile and run?" A quant asks "would I make a trading decision based on this?" If the answer is no, it's not done.
+- **Complete features, not partial ones.** A feature that works in one mode but breaks in another is not a feature — it's a liability.
+
+**Before implementing any fix, ask:**
+1. What is the actual root cause — not the symptom?
+2. Is this the right architectural solution, or am I patching around a design flaw?
+3. Would a quant at a $100B fund trust this output to make decisions?
+4. Does this work correctly across all modes, intervals, and edge cases?
+5. Is there any silent failure path that returns wrong data instead of an error?
+
+If any answer is "no" or "not sure", redesign before implementing.
+
 ---
 
 ## System Architecture
@@ -675,3 +701,137 @@ After fixing, SCP to EC2 and rebuild frontend. No backend changes needed.
 - **BACKTESTED:** ~264
 - **Scheduled cycles:** slot_1 (daily 15:15 UTC) + slot_1776883375962 (weekdays 19:00 UTC) — both now working after monitoring_service fix
 - **Charts:** PortfolioEquityChart working on both Overview (1D) and Analytics (1D/4H/1H); 4H/1H crashes on Overview due to TvMultiPane BusinessDay issue (fix above)
+
+---
+
+## Session April 24, 2026 (continued) — Performance Optimisations & Signal Generation Audit
+
+### Fixes Shipped
+
+**Frontend Performance (9 optimisations)**
+- `frontend/src/components/AppShell.tsx` — NEW: persistent layout shell, mounts once for entire session. TopNavBar, MetricsBar, PositionTickerStrip, BottomWidgetZone never remount on navigation
+- `frontend/src/components/DashboardLayout.tsx` — now transparent passthrough when inside AppShell (zero page changes needed)
+- `frontend/src/App.tsx` — layout route pattern: AppShell wraps all authenticated routes via `<Outlet>`, PositionsProvider added
+- `frontend/src/contexts/PositionsContext.tsx` — NEW: single polling loop for positions shared by PositionTickerStrip, BookPulseWidget, RiskPulseWidget
+- `frontend/src/services/api.ts` — request deduplication: `getDashboardSummary`, `getPositions`, `getAccountInfo` share in-flight promises (800ms TTL). 3 simultaneous calls = 1 HTTP request
+- `frontend/src/components/MetricsBar.tsx` — now uses `/account/metrics-bar` lightweight endpoint instead of full `getDashboardSummary`
+- `frontend/src/components/BottomWidgetZone.tsx` — `WidgetActiveContext`: widget polling stops when zone is collapsed
+- `frontend/src/components/widgets/BookPulseWidget.tsx` — uses PositionsContext (no own fetch)
+- `frontend/src/components/widgets/RiskPulseWidget.tsx` — uses PositionsContext (no own fetch)
+- `frontend/src/components/widgets/SystemFeedWidget.tsx` — polling gated on `useWidgetActive()`
+- `frontend/src/components/widgets/StrategyPulseWidget.tsx` — polling gated on `useWidgetActive()`
+- `frontend/src/components/widgets/SignalStatsWidget.tsx` — polling gated on `useWidgetActive()`
+- `frontend/src/components/widgets/MarketPulseWidget.tsx` — polling gated on `useWidgetActive()`
+- `frontend/src/components/charts/PortfolioEquityChart.tsx` — period changes now call `series.setData()` in-place instead of full chart teardown/rebuild
+- `frontend/src/components/charts/TvChart.tsx` — `toChartTime` now converts `"YYYY-MM-DD HH:MM"` to Unix timestamp (matches TvMultiPane, PortfolioEquityChart)
+- `frontend/src/pages/OverviewNew.tsx` — `React.memo` wrapper
+- `frontend/src/pages/AnalyticsNew.tsx` — `React.memo` wrapper
+- `frontend/vite.config.ts` — `lightweight-charts` → `charts-vendor` chunk; `html2canvas`+`jspdf` → `pdf-vendor` chunk
+- `frontend/package.json` — Vite pinned from `^8.0.0-beta.13` to `^6.3.5` (stable)
+
+**Backend — new lightweight endpoint**
+- `src/api/routers/account.py` — `GET /account/metrics-bar`: returns only 7 fields MetricsBar needs (equity, daily_pnl, open_positions, active_strategies, market_regime, health_score). 2 fast COUNT queries instead of full dashboard build
+
+**Backend — MarketDataManager singleton**
+- `src/data/market_data_manager.py` — `get_market_data_manager()` + `set_market_data_manager()` singleton factory. Was being instantiated per-symbol in trailing stop loop (130+ times per 30s cycle), flooding logs with "Initialized MarketDataManager" + "Initialized DataQualityValidator"
+- `src/execution/position_manager.py` — uses `get_market_data_manager()` singleton
+- `src/execution/order_executor.py` — uses `get_market_data_manager()` singleton
+- `src/risk/risk_manager.py` — uses `get_market_data_manager()` singleton (also fixed IndentationError from bad edit)
+- `src/core/monitoring_service.py` — uses `get_market_data_manager()` singleton for regime detection
+
+**Backend — ALUMINUM crash fix (3-layer)**
+- `src/strategy/strategy_engine.py` — `backtest_strategy` skips DAILY_ONLY symbols (ALUMINUM, ZINC, NICKEL, PLATINUM) when interval is 1h/4h. Graceful skip instead of ValueError crash
+- `src/strategy/strategy_proposer.py` — DAILY_ONLY symbols filtered from `all_pairs` scoring for intraday/4h templates (upstream fix). Also stripped from `strategy_symbol` after watchlist assignment (belt-and-suspenders)
+
+### System State (April 24, 2026 ~17:30 UTC)
+- **Equity:** ~$475K
+- **Open positions:** ~130
+- **Active DEMO strategies:** ~86 (decay scorer retiring underperformers)
+- **BACKTESTED:** ~259 (141 eligible for signal gen, 22 pending retirement)
+- **Strategy interval breakdown:** 1d: 56 DEMO + 117 BACKTESTED | 4h: 30 DEMO + 56 BACKTESTED | 1h: **ZERO**
+- **Signal gen:** 6–9 signals per cycle, 2–5 orders, 226 strategies scanned
+
+### Outstanding Issue — MUST INVESTIGATE NEXT SESSION
+
+**Why are there zero 1h strategies active or backtested?**
+
+The system has 20+ 1h templates defined (`Intraday Momentum Burst`, `Hourly EMA Crossover Long`, `Hourly MACD Signal Cross Long`, `Hourly RSI Oversold Bounce`, `Hourly BB Squeeze Breakout`, etc.) but **zero 1h strategies in DEMO or BACKTESTED status**.
+
+From cycle logs, 1h strategies are being proposed but failing WF at very high rates:
+- `Hourly EMA Crossover Long` — consistently overfitted (train positive, test negative: e.g. train=1.64 test=-0.63, train=1.09 test=-1.88)
+- `Hourly MACD Signal Cross Long` — same pattern (train=1.75 test=-0.11, train=1.31 test=-1.32)
+- `Intraday Momentum Burst` — failing on ALUMINUM/ZINC watchlist crash (now fixed) AND low Sharpe/return-per-trade
+- `Hourly EMA Crossover Long ETH` — repeatedly failing with test_S=1.02–1.89 but wr=29–30% (below win rate threshold)
+
+**Root causes to investigate:**
+1. **Overfitting**: 1h strategies train well but fail OOS — the 180d train / 90d test window may be too short for 1h strategies to find durable edge. Consider longer windows.
+2. **Return-per-trade too low**: `Hourly MACD Signal Cross Long MU` — S=0.64, 28 trades, but return/trade=0.010% < 0.150% min. 1h strategies generate many small trades that don't clear the minimum return threshold.
+3. **Win rate floor**: ETH 1h strategies hitting Sharpe 1.0–1.9 but win rate 29–30% — below the regime-specific win rate threshold.
+4. **ALUMINUM crash was blocking 1h proposals** — now fixed. Next cycle should see cleaner 1h WF results.
+
+**What to check next session:**
+- Run a full autonomous cycle and check if any 1h strategies pass WF after the ALUMINUM fix
+- Check `config/autonomous_trading.yaml` for `min_trades_dsl_1h` and return-per-trade thresholds — may be too strict for 1h
+- Consider whether 1h templates need different WF windows (shorter test period = more recent data)
+- Check if the regime-directional filter is suppressing 1h SHORT templates in trending_up regime (correct) but also accidentally suppressing 1h LONG templates
+
+### Watchlist-Trapped BACKTESTED Strategies (ongoing)
+- 6 BACKTESTED 4h strategies generating signals but 100% rejected as same-template duplicates
+- `4H ADX Trend Swing SOXX LONG` → fires on PSA (watchlist) → blocked by existing PSA position
+- `4H ADX Trend Swing CAT LONG` → fires on CAT/NXPI/URI → all blocked by existing positions
+- TTL mechanism will expire these in ~48 cycles (~24h). No manual intervention needed.
+- 135 daily BACKTESTED strategies: zero signals — entry conditions not met in trending_up_weak regime. Normal behaviour, will fire on pullbacks.
+
+---
+
+## Session April 25, 2026 — Pipeline Fixes & UI Audit
+
+### Fixes Shipped
+
+**Backend**
+- `src/core/trading_scheduler.py` — Fix A: `_coordinate_signals` now returns tuple `(coordinated_results, _strategy_total_signals, _template_dup_rejected)`. Was crashing 1-in-8 trading cycles with NameError.
+- `src/strategy/portfolio_manager.py` — Fix C: interval-aware `min_return_per_trade` lookup (`stock_1h: 0.0003`, `stock_4h: 0.0008`, etc.). Fix B: Sharpe exception already existed at activation gate — confirmed working in rotated logs.
+- `src/strategy/strategy_proposer.py` — Fix D: added `_detect_strategy_type()`, apply 0.30 win rate floor for trend/breakout/momentum at WF stage instead of 0.45 mean-reversion floor.
+- `src/strategy/conviction_scorer.py` — Fix E: `breakout` → `strong` in `trending_up_weak` regime alignment. Was giving 12/20 pts (neutral), suppressing ~74 signals per batch.
+- `src/strategy/autonomous_strategy_manager.py` — Fix: avg_loss 3x stop-loss sanity cap at 100%. GER40 was being rejected with "Avg loss 12193.3%" due to dollar/unit mismatch in position size denominator.
+- `src/core/cycle_logger.py` — Fix G: split `WF LOW SHARPE` into `WF LOW TRADES` / `WF LOW WINRATE` / `WF LOW SHARPE` for accurate diagnostics.
+- `config/autonomous_trading.yaml` — `min_trades_dsl_1h` 20→15; interval-aware `min_return_per_trade` thresholds added.
+- `src/api/routers/account.py` — Fix metrics-bar endpoint: was calling `_refresh_account_from_etoro()` (returns None), using `StrategyORM.mode` (column doesn't exist), `func` not imported. Now reads from `AccountInfoORM` DB cache, removes mode filters, adds inline imports.
+
+**Frontend**
+- `frontend/src/lib/chart-utils.ts` — `filterDataByPeriod` now handles Unix timestamp strings (9-11 digit). Was slicing `"1776625200"` to `"1776625200"` and passing to `parseISO` which rejected it, filtering all intraday points.
+- `frontend/src/components/charts/PortfolioEquityChart.tsx` — `el.innerHTML = ''` before `createChart` to prevent leftover canvas elements causing two superposed time scales. `toDayKey()` helper for SPY lookup with Unix timestamps.
+
+### Outstanding — Overview Chart Panel (MUST DO NEXT SESSION, DO IT RIGHT)
+
+**Do not patch. Redesign.**
+
+The Overview center panel has three separate chart components (`PortfolioEquityChart`, `DailyPnLChart`, `InteractiveChart`) that cannot share a time axis. This produces:
+1. Misaligned X-axes between equity curve, daily P&L, and rolling Sharpe
+2. Different font sizes and visual styles
+3. Rolling Sharpe disappears on 1D (data source reads from intraday equity curve)
+4. Rolling Sharpe X-axis shows raw Unix timestamps (InteractiveChart is SVG, not lightweight-charts)
+5. 4H/1H shows dates not hours (chart not fully rebuilding on interval switch)
+6. Daily P&L missing Y-axis labels, asymmetric layout
+7. No resize capability on sub-charts
+
+**The correct solution:**
+Consolidate all three into a single `PortfolioEquityChart` with multiple panes sharing one time axis. Lightweight-charts supports this natively. The chart should have:
+- Pane 1 (main, ~55% height): equity curve + SPY benchmark + realized P&L line
+- Pane 2 (~25% height): daily P&L histogram with proper Y-axis both sides
+- Pane 3 (~20% height): rolling 30d Sharpe line with zero reference line
+
+All panes share the same time axis. Crosshair syncs across all panes. Period and interval selectors control all panes simultaneously. Rolling Sharpe always uses daily returns regardless of interval (computed from daily equity snapshots, not the intraday equity curve). The `InteractiveChart` SVG component should be removed from this context entirely.
+
+**Before starting:** Read the lightweight-charts v5 pane API documentation. Understand `createChart` pane configuration, `addPane()`, and how series are assigned to panes. Design the data flow first — one data fetch, one time format decision, one chart instance.
+
+**Standard:** A quant at a Bloomberg terminal would look at this chart and immediately trust the data. Every axis label is correct, every time scale is consistent, every pane is aligned. That is the bar.
+
+### System State (April 25, 2026)
+- **Equity:** ~$475,571
+- **Open positions:** ~134
+- **Active DEMO strategies:** ~95
+- **BACKTESTED:** ~250
+- **Signal gen:** working post-fixes, 9 signals / 6 orders in last cycle
+- **1h strategies:** still 0 DEMO/BACKTESTED — pipeline fixes shipped, need next cycle to validate
+- **Metrics bar:** now showing real equity, P&L, positions, strategies, regime
