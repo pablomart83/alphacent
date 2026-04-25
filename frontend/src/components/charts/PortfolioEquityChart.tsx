@@ -162,7 +162,13 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
 
   // ── Filter daily equity by period (for P&L + Sharpe panes) ────────────
   const filteredDaily = useMemo(() => {
-    const src = dailyEquity?.length ? dailyEquity : equityData.filter(d => String(d.date).length === 10);
+    // Daily points are ISO date strings "YYYY-MM-DD" — they contain a hyphen at index 4.
+    // Unix timestamp strings (e.g. "1776625200") are all digits — same length but no hyphens.
+    // Must use the hyphen check, not length check, to distinguish them.
+    const isIsoDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const src = dailyEquity?.length
+      ? dailyEquity
+      : equityData.filter(d => isIsoDate(String(d.date)));
     if (!src.length) return [];
     return filterDataByPeriod(src.map(d => ({ ...d })), 'date', period) as EquityDataPoint[];
   }, [dailyEquity, equityData, period]);
@@ -218,14 +224,17 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
     // Pane 1: Daily P&L histogram (always daily)
     let pnlBars: Array<{ time: Time; value: number; color: string }> | null = null;
     if (filteredDaily.length >= 2) {
-      pnlBars = filteredDaily.slice(1).map((d, i) => {
+      const bars = filteredDaily.slice(1).map((d, i) => {
         const pnl = d.equity - filteredDaily[i].equity;
+        // Skip points where equity is missing or P&L is not a finite number
+        if (!Number.isFinite(pnl) || !d.equity || !filteredDaily[i].equity) return null;
         return {
           time:  toTime(d.date, isIntraday),
           value: pnl,
           color: pnl >= 0 ? THEME.pnlPos : THEME.pnlNeg,
         };
-      });
+      }).filter(Boolean) as Array<{ time: Time; value: number; color: string }>;
+      if (bars.length >= 2) pnlBars = bars;
     }
 
     // Pane 2: Rolling 30d Sharpe (always daily)

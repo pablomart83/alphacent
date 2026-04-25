@@ -88,7 +88,10 @@ function calcReturnsFromEquityCurve(
   for (const [period, days] of Object.entries(periodDays)) {
     let startDate: Date;
     if (days === 'ALL') {
-      startDate = new Date(curve[0].date);
+      // curve[0].date is always "YYYY-MM-DD" (we filter to daily-only before calling this)
+      // but guard against any non-ISO string slipping through
+      const d = new Date(curve[0].date);
+      startDate = isNaN(d.getTime()) ? new Date(now.getFullYear() - 1, 0, 1) : d;
     } else if (days === 'YTD') {
       startDate = new Date(now.getFullYear(), 0, 1);
     } else {
@@ -97,7 +100,7 @@ function calcReturnsFromEquityCurve(
     }
 
     const startStr = startDate.toISOString().slice(0, 10);
-    const startPoint = curve.find(p => p.date >= startStr);
+    const startPoint = curve.find(p => /^\d{4}-\d{2}-\d{2}$/.test(p.date) && p.date >= startStr);
     if (!startPoint || startPoint.equity === 0) {
       result[period] = { absolute: null, alpha: null };
       continue;
