@@ -1799,6 +1799,14 @@ class StrategyProposer:
                         wl_pruned_total += 1
                         continue
 
+                    # Skip daily-only LME metals — no intraday OR reliable daily data
+                    # via Yahoo/FMP for these symbols. Stale _wf_validated_combos.json
+                    # entries can inject them here even after the proposal-stage filter.
+                    if sym.upper() in _DAILY_ONLY_SYMBOLS:
+                        logger.debug(f"  Watchlist WF skip: {sym} is daily-only LME metal, no data for WF")
+                        wl_pruned_total += 1
+                        continue
+
                     sym_class = self._get_asset_class(sym)
                     min_sharpe, min_trades = _wl_thresholds(primary_class, sym_class)
 

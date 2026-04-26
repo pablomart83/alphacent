@@ -1419,7 +1419,28 @@ class StrategyEngine:
             logger.warning(f"Data quality warnings: {len(data_quality_warnings)} symbol(s) with limited data")
         else:
             logger.info("✓ Data quality check passed - all symbols have sufficient historical data")
-        
+
+        # If every symbol was skipped by the DAILY_ONLY guard (all LME metals on
+        # an intraday/4h interval), return a zero-trade result instead of crashing
+        # _run_vectorbt_backtest with an empty dataset.  This is not an error —
+        # the guard worked correctly; we just need a graceful exit path.
+        if not all_data:
+            skipped_symbols = [s for s in strategy.symbols if s.upper() in _DAILY_ONLY]
+            logger.debug(
+                f"backtest_strategy: all symbols skipped (daily-only LME metals: "
+                f"{skipped_symbols}, interval={interval}) — returning zero-trade result"
+            )
+            return BacktestResults(
+                total_return=0.0,
+                sharpe_ratio=0.0,
+                sortino_ratio=0.0,
+                max_drawdown=0.0,
+                win_rate=0.0,
+                avg_win=0.0,
+                avg_loss=0.0,
+                total_trades=0,
+            )
+
         # Run backtest using vectorbt
         try:
             results = self._run_vectorbt_backtest(strategy, all_data, start, end, commission, slippage_bps, interval=interval)
