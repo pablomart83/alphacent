@@ -494,12 +494,17 @@ class OrderMonitor:
                         else:
                             logger.debug(f"  Order {order.id} ({order.symbol}) still pending (status {etoro_status})")
                     except EToroAPIError:
-                        # If we can't check the order, mark as FAILED (stale)
-                        order.status = OrderStatus.FAILED
-                        results["orders_failed"] += 1
-                        discrepancy = f"FAILED: Order {order.id} ({order.symbol}) - could not verify on eToro, marking as FAILED"
-                        results["discrepancies"].append(discrepancy)
-                        logger.warning(f"  {discrepancy}")
+                        # Cannot verify order status — 404 or CID mismatch after a
+                        # session rotation. This does NOT mean the order is invalid.
+                        # It may be a legitimately queued order waiting for market open.
+                        # Leave it PENDING so check_submitted_orders keeps polling it
+                        # on the normal cycle. cancel_stale_orders will handle it if
+                        # it genuinely ages out (>24h with no fill).
+                        logger.warning(
+                            f"  Could not verify order {order.id} ({order.symbol}) "
+                            f"eToro={order.etoro_order_id} — leaving PENDING "
+                            f"(session/CID mismatch, not a reason to cancel)"
+                        )
                 else:
                     # SUBMITTED order with no eToro ID - likely stale from a crash
                     age = datetime.now() - (order.submitted_at or datetime.now())

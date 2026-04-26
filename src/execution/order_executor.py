@@ -317,6 +317,28 @@ class OrderExecutor:
             # Store order
             self._orders[order.id] = order
 
+            # Market hours gate: don't submit to eToro when the market is closed
+            # for this asset class. eToro queues the order silently and executes it
+            # at the next open — creating positions we can't track until reconciliation.
+            # Crypto is 24/7 and always passes. Stocks/ETFs/indices/forex/commodities
+            # are blocked outside regular session hours.
+            # The signal will re-fire on the next scheduler cycle when market is open.
+            try:
+                from src.data.market_hours_manager import MarketHoursManager, AssetClass as _AssetClass
+                _mhm = MarketHoursManager()
+                _asset_cls = self._determine_asset_class(normalized_symbol)
+                if not _mhm.is_market_open(_asset_cls):
+                    raise OrderExecutionError(
+                        f"Market closed for {normalized_symbol} ({_asset_cls.value}) — "
+                        f"order not submitted to eToro. Signal will re-fire at next open."
+                    )
+            except OrderExecutionError:
+                raise
+            except Exception as _mh_err:
+                # If market hours check itself fails, log and proceed — fail-open
+                # is safer than blocking valid orders due to a timezone library issue.
+                logger.warning(f"Market hours check failed for {normalized_symbol}: {_mh_err} — proceeding with submission")
+
             # Always submit to eToro — eToro handles market hours internally
             # (stocks trade 24x5 Mon-Fri, crypto trades 24x7)
             # Submit order to eToro
