@@ -61,7 +61,7 @@ class ConvictionScorer:
         self.market_analyzer = market_analyzer
 
         alpha_edge_config = config.get('alpha_edge', {})
-        self.min_conviction_score = alpha_edge_config.get('min_conviction_score', 60)
+        self.min_conviction_score = alpha_edge_config.get('min_conviction_score', 57)
 
         logger.info(f"ConvictionScorer initialized - Min score: {self.min_conviction_score}")
 
@@ -120,8 +120,8 @@ class ConvictionScorer:
         # Theoretical max = 40+25+20+15+15+5+5+1+6 = 132.
         # (News sentiment was reduced from ±8 to ±1 — free-tier Marketaux has
         # too few articles per symbol to justify strong conviction impact.)
-        # Without normalization, the 60 threshold means ~45% of max — semantically misleading.
-        # After normalization, 60 means "60% of maximum possible evidence".
+        # Without normalization, the 57 threshold means ~43% of max — semantically misleading.
+        # After normalization, 57 means "57% of maximum possible evidence".
         THEORETICAL_MAX = 132.0
         total_score = min(100.0, total_score * (100.0 / THEORETICAL_MAX))
 

@@ -4689,7 +4689,7 @@ class StrategyEngine:
             
             # Get min conviction threshold from config
             _ae_config = config.get('alpha_edge', {}) if config else {}
-            min_conviction = _ae_config.get('min_conviction_score', 70)
+            min_conviction = _ae_config.get('min_conviction_score', 57)
             
             logger.info(
                 f"Applying conviction scoring (min: {min_conviction}), frequency limiting, "

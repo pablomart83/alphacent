@@ -254,7 +254,7 @@ data_management:
   cleanup_enabled: true
 alpha_edge:
   max_active_strategies: 10
-  min_conviction_score: 60
+  min_conviction_score: 57
   min_holding_period_days: 3
   max_holding_period_days: 30
   max_trades_per_strategy_per_month: 4

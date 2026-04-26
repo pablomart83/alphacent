@@ -615,7 +615,7 @@ async def get_alpha_edge_settings(
             
             # Trading frequency
             max_active_strategies=alpha_edge.get('max_active_strategies', 10),
-            min_conviction_score=alpha_edge.get('min_conviction_score', 70),
+            min_conviction_score=alpha_edge.get('min_conviction_score', 57),
             min_holding_period_days=alpha_edge.get('min_holding_period_days', 7),
             max_trades_per_strategy_per_month=alpha_edge.get('max_trades_per_strategy_per_month', 4),
             
