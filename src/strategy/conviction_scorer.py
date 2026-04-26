@@ -61,7 +61,7 @@ class ConvictionScorer:
         self.market_analyzer = market_analyzer
 
         alpha_edge_config = config.get('alpha_edge', {})
-        self.min_conviction_score = alpha_edge_config.get('min_conviction_score', 70)
+        self.min_conviction_score = alpha_edge_config.get('min_conviction_score', 60)
 
         logger.info(f"ConvictionScorer initialized - Min score: {self.min_conviction_score}")
 
@@ -103,8 +103,10 @@ class ConvictionScorer:
         crypto_cycle_adjustment = self._score_crypto_cycle(signal)
         total_score += crypto_cycle_adjustment
 
-        # News sentiment adjustment (±8 points) — DB lookup only, never blocks
+        # News sentiment adjustment (±1 point) — DB lookup only, never blocks
         # 0.0 when no data yet (neutral, trade proceeds normally)
+        # Capped at ±1: Marketaux free tier returns too few articles per symbol
+        # to justify stronger conviction impact. Used as a tiebreaker only.
         news_sentiment_adj = self._score_news_sentiment(signal)
         total_score += news_sentiment_adj
 
@@ -115,10 +117,12 @@ class ConvictionScorer:
         total_score += factor_adj
 
         # Normalize total score to 0-100 scale (3.4).
-        # Theoretical max = 40+25+20+15+15+5+5+8+6 = 139.
-        # Without normalization, the 60 threshold means ~43% of max — semantically misleading.
+        # Theoretical max = 40+25+20+15+15+5+5+1+6 = 132.
+        # (News sentiment was reduced from ±8 to ±1 — free-tier Marketaux has
+        # too few articles per symbol to justify strong conviction impact.)
+        # Without normalization, the 60 threshold means ~45% of max — semantically misleading.
         # After normalization, 60 means "60% of maximum possible evidence".
-        THEORETICAL_MAX = 139.0
+        THEORETICAL_MAX = 132.0
         total_score = min(100.0, total_score * (100.0 / THEORETICAL_MAX))
 
         breakdown = {
@@ -154,8 +158,8 @@ class ConvictionScorer:
             },
             'news_sentiment': {
                 'score': news_sentiment_adj,
-                'max': 8,
-                'details': {'symbol': signal.symbol, 'raw_score': news_sentiment_adj / 8.0 if news_sentiment_adj != 0 else 0.0},
+                'max': 1,
+                'details': {'symbol': signal.symbol, 'raw_score': news_sentiment_adj / 1.0 if news_sentiment_adj != 0 else 0.0},
             },
             'factor_exposure': {
                 'score': factor_adj,
