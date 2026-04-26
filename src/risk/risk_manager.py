@@ -604,162 +604,204 @@ class RiskManager:
         strategy_allocation_pct: float = 1.0
     ) -> float:
         """
-        Calculate position size based on account balance, risk percentage, and strategy allocation.
+        Calculate position size using risk-based fixed-fractional sizing.
 
-        Smart position sizing that:
-        1. Uses strategy allocation percentage to limit capital per strategy
-        2. Uses Kelly Criterion-inspired approach for optimal position sizing
-        3. Applies volatility-based adjustment (reduces size in high volatility)
-        4. Respects max position size limits
-        5. Accounts for existing exposure
-        6. Ensures minimum order size requirements
+        Design (Rob Carver / fixed-fractional / AQR volatility targeting):
+
+          position_size = (equity × risk_per_trade_pct) / stop_loss_pct
+
+        Sizing by risk-dollars, not by capital allocation, means the function
+        always produces a meaningful number. The strategy's allocation_pct
+        controls how many concurrent positions it may hold (not a capital
+        bucket that empties and blocks new trades).
+
+        Calculation pipeline:
+          1. Base risk per trade: 0.5% of equity (configurable)
+          2. Confidence scalar: scales risk 0.25%→0.5% between floor and 1.0
+          3. Volatility scalar: TARGET_VOL / realized_vol (Yang-Zhang / Parkinson / EWMA)
+          4. Convert to position size: risk_dollars / stop_loss_pct
+          5. Strategy concurrent-position cap (only legitimate early-zero)
+          6. Symbol concentration cap (5% of equity)
+          7. Sector soft cap (30% of equity → halve)
+          8. Portfolio heat cap (total open risk-dollars ≤ 8% of equity)
+          9. Drawdown sizing (50%/75% reduction at 5%/10% drawdown)
+         10. Available balance cap
+         11. Minimum floor ($2,000) — applied last, after all caps
 
         Args:
-            signal: Trading signal (may include volatility in metadata)
+            signal: Trading signal (may include price_history in metadata)
             account: Account information
-            positions: Current positions
-            strategy_allocation_pct: Percentage of portfolio allocated to this strategy (default: 1.0%)
+            positions: Current open positions
+            strategy_allocation_pct: Strategy's portfolio weight % (default 1.0%)
 
         Returns:
-            Position size in dollars
+            Position size in dollars, or 0.0 only on a hard limit.
         """
-        # Get available capital for new positions.
-        # CRITICAL: On eToro, balance = cash only, margin_used = capital in positions.
-        # When positions are profitable, equity > balance + margin_used because of
-        # unrealized gains. Using (balance - margin_used) goes negative when margin
-        # exceeds cash — which is normal when you have profitable positions.
-        # The correct available capital is equity minus what's already deployed.
-        portfolio_value = getattr(account, 'equity', None) or account.balance
-        if portfolio_value <= 0:
-            portfolio_value = account.balance
+        symbol = getattr(signal, 'symbol', '?')
 
-        # Calculate current exposure from ALL open positions
-        current_exposure = sum(
-            self._get_position_value(pos)
-            for pos in positions
-            if pos.closed_at is None
-            and not getattr(pos, 'pending_closure', False)
-        )
+        # ── Account state ────────────────────────────────────────────────────
+        equity = getattr(account, 'equity', None) or account.balance
+        if equity <= 0:
+            equity = account.balance
+        available_balance = account.balance
 
-        # Available capital = actual cash balance from eToro.
-        # This is the hard truth — it's what we can actually deploy.
-        # Don't use (equity - DB exposure) because our DB exposure can be
-        # out of sync with eToro's actual margin used.
-        available_capital = account.balance
-        
-        if available_capital <= 0:
-            logger.warning(
-                f"No available capital: balance=${account.balance:.0f}, "
-                f"equity=${portfolio_value:.0f}, exposure=${current_exposure:.0f}"
-            )
+        if available_balance <= 0:
+            logger.warning(f"No available balance for {symbol} (balance=${available_balance:.0f})")
             return 0.0
 
-        # Calculate remaining exposure capacity based on EQUITY
-        # Use eToro's actual margin_used (not DB exposure) for accuracy
-        actual_exposure = getattr(account, 'margin_used', None) or current_exposure
-        max_total_exposure = portfolio_value * self.config.max_exposure_pct
-        remaining_exposure = max_total_exposure - actual_exposure
-        
-        if remaining_exposure <= 0:
-            logger.warning(f"Max exposure reached: {actual_exposure:.2f} / {max_total_exposure:.2f} (equity=${portfolio_value:.0f})")
-            return 0.0
+        # ── Step 1: Base risk per trade ──────────────────────────────────────
+        # 0.5% of equity = $2,380 at current $476K equity.
+        # If this trade hits its stop loss, we lose $2,380 (0.5% of equity).
+        # This is the fixed-fractional anchor — independent of strategy allocation.
+        BASE_RISK_PCT = 0.005  # 0.5% of equity per trade
 
-        # Strategy allocation: use EQUITY (portfolio value) for the dollar amount.
-        # The allocation percentage represents the strategy's share of the total portfolio.
-        # Cash balance is low because capital is deployed in positions — that's normal.
-        # A 5% allocation on $461K equity = $23K, which is the right scale for a
-        # strategy managing positions worth $2-5K each.
-        # The available_capital and remaining_exposure caps below prevent over-deployment.
-        strategy_allocated_capital = portfolio_value * (strategy_allocation_pct / 100.0)
-        
-        # Calculate current exposure for THIS strategy
-        strategy_current_exposure = sum(
-            self._get_position_value(pos)
-            for pos in positions 
-            if pos.closed_at is None
-            and not getattr(pos, 'pending_closure', False)
-            and pos.strategy_id == signal.strategy_id
-        )
-        
-        # Calculate remaining capital for this strategy
-        strategy_remaining_capital = strategy_allocated_capital - strategy_current_exposure
-        
-        if strategy_remaining_capital <= 0:
-            logger.warning(
-                f"Strategy allocation exhausted: {strategy_current_exposure:.2f} / {strategy_allocated_capital:.2f} "
-                f"(allocation: {strategy_allocation_pct:.1f}%)"
-            )
+        # ── Step 2: Confidence scalar ────────────────────────────────────────
+        # Scales risk linearly from 0.5× at confidence floor to 1.0× at max.
+        # A 0.95 confidence signal risks the full 0.5%. A 0.60 signal risks ~0.36%.
+        CONFIDENCE_FLOOR = 0.30
+        confidence = signal.confidence if signal.confidence and signal.confidence > 0 else 0.5
+        if confidence < CONFIDENCE_FLOOR:
+            logger.warning(f"Signal confidence {confidence:.2f} below floor {CONFIDENCE_FLOOR} for {symbol}")
             return 0.0
+        confidence_scalar = 0.5 + 0.5 * (confidence - CONFIDENCE_FLOOR) / (1.0 - CONFIDENCE_FLOOR)
+        risk_pct = BASE_RISK_PCT * confidence_scalar  # 0.25%–0.50%
 
-        # Smart position sizing based on confidence and available capital
-        # Base position size: use signal confidence to scale between min and max
-        confidence_factor = signal.confidence if signal.confidence > 0 else 0.5
-        
-        # Volatility-scaled position sizing: normalize risk contribution across
-        # all asset classes by dividing by realized volatility.
-        # Target vol per position: equity-like 16% annualized.
-        # A crypto position with 60% vol gets sized ~3.75x smaller than a stock
-        # with 16% vol. A forex pair with 8% vol gets sized 2x larger.
-        # This is how institutional momentum funds (AQR, Barroso & Santa-Clara 2015)
-        # ensure high-vol assets don't dominate portfolio risk.
-        TARGET_VOL = 0.16  # 16% annualized — equity-like baseline
-        VOL_SCALE_MIN = 0.10  # Lowered from 0.25 — properly shrink high-vol (crypto) positions
-        VOL_SCALE_MAX = 1.50  # Lowered from 2.50 — cap forex over-sizing
-        
-        volatility_adjustment = 1.0
+        # ── Step 3: Volatility scalar ────────────────────────────────────────
+        # Normalize risk contribution across asset classes.
+        # TARGET_VOL / realized_vol: crypto (60% vol) → 0.27x, forex (8%) → 2.0x capped at 1.5x.
+        TARGET_VOL = 0.16
+        VOL_SCALE_MIN = 0.10
+        VOL_SCALE_MAX = 1.50
+        vol_scalar = 1.0
+
         if signal.metadata and 'price_history' in signal.metadata:
-            # Full OHLC history available — use asset-class-specific estimator
-            asset_class = _get_asset_class_for_vol(getattr(signal, 'symbol', ''))
+            asset_class = _get_asset_class_for_vol(symbol)
             realized_vol = estimate_realized_volatility(
                 signal.metadata['price_history'], asset_class=asset_class
             )
             if realized_vol and realized_vol > 0:
-                raw_scale = TARGET_VOL / realized_vol
-                volatility_adjustment = max(VOL_SCALE_MIN, min(VOL_SCALE_MAX, raw_scale))
+                vol_scalar = max(VOL_SCALE_MIN, min(VOL_SCALE_MAX, TARGET_VOL / realized_vol))
                 logger.debug(
-                    f"Vol-scaling {getattr(signal, 'symbol', '?')}: "
-                    f"realized_vol={realized_vol:.1%}, target={TARGET_VOL:.0%}, "
-                    f"scale={volatility_adjustment:.2f}x ({asset_class})"
+                    f"Vol-scaling {symbol}: realized={realized_vol:.1%}, "
+                    f"target={TARGET_VOL:.0%}, scalar={vol_scalar:.2f}x ({asset_class})"
                 )
         elif signal.metadata and 'volatility' in signal.metadata:
-            # Legacy path: single volatility number provided
-            volatility = signal.metadata['volatility']
-            if volatility > 0:
-                raw_scale = TARGET_VOL / volatility
-                volatility_adjustment = max(VOL_SCALE_MIN, min(VOL_SCALE_MAX, raw_scale))
-                logger.debug(f"Vol-scaling (legacy): vol={volatility:.4f} -> {volatility_adjustment:.2f}x")
-        
-        # Confidence scaling (3.5): reject outright if confidence < 0.30 (safety net).
-        # The conviction scorer already filtered weak signals; this is a hard floor.
-        CONFIDENCE_FLOOR = 0.30
-        if confidence_factor < CONFIDENCE_FLOOR:
-            logger.warning(
-                f"Signal confidence {confidence_factor:.2f} below floor {CONFIDENCE_FLOOR} "
-                f"for {getattr(signal, 'symbol', '?')} — rejecting"
+            v = signal.metadata['volatility']
+            if v and v > 0:
+                vol_scalar = max(VOL_SCALE_MIN, min(VOL_SCALE_MAX, TARGET_VOL / v))
+                logger.debug(f"Vol-scaling (legacy) {symbol}: vol={v:.4f} → {vol_scalar:.2f}x")
+
+        risk_pct *= vol_scalar
+
+        # ── Step 4: Convert risk to position size ────────────────────────────
+        # position_size = risk_dollars / stop_loss_pct
+        # stop_loss_pct from strategy risk_params (6% stocks, 2% forex, 8% crypto).
+        # Fallback to 6% if not available.
+        stop_loss_pct = 0.06  # default: stock SL
+        try:
+            _sl = getattr(signal, 'metadata', {}) or {}
+            _sl_val = _sl.get('stop_loss_pct') or _sl.get('stop_loss')
+            if _sl_val and 0 < float(_sl_val) < 1.0:
+                stop_loss_pct = float(_sl_val)
+        except Exception:
+            pass
+
+        risk_dollars = equity * risk_pct
+        position_size = risk_dollars / stop_loss_pct
+
+        logger.debug(
+            f"{symbol}: equity=${equity:.0f}, risk_pct={risk_pct:.3%}, "
+            f"risk_dollars=${risk_dollars:.0f}, sl={stop_loss_pct:.1%}, "
+            f"raw_size=${position_size:.0f}"
+        )
+
+        # ── Step 5: Strategy concurrent-position cap ─────────────────────────
+        # strategy_allocation_pct governs how many positions this strategy may
+        # hold simultaneously, NOT a capital bucket.
+        # 0.5% → 1 position, 1.0% → 2, 1.5% → 3, 2.0% → 4 (floor at 1).
+        max_concurrent = max(1, round(strategy_allocation_pct / 0.5))
+        strategy_open_count = sum(
+            1 for pos in positions
+            if pos.closed_at is None
+            and not getattr(pos, 'pending_closure', False)
+            and pos.strategy_id == signal.strategy_id
+        )
+        if strategy_open_count >= max_concurrent:
+            logger.info(
+                f"Strategy concurrent cap: {symbol} — {strategy_open_count}/{max_concurrent} "
+                f"positions open (allocation={strategy_allocation_pct:.1f}%)"
             )
             return 0.0
 
-        # Scale linearly from 0% at CONFIDENCE_FLOOR to 100% at 1.0
-        max_position_pct = 1.00
-        position_pct = (confidence_factor - CONFIDENCE_FLOOR) / (1.0 - CONFIDENCE_FLOOR) * max_position_pct
+        # ── Step 6: Symbol concentration cap ────────────────────────────────
+        # No single symbol > 5% of equity across all strategies.
+        symbol_cap = equity * 0.05
+        existing_symbol_exposure = sum(
+            self._get_position_value(pos)
+            for pos in positions
+            if pos.closed_at is None
+            and not getattr(pos, 'pending_closure', False)
+            and pos.symbol == symbol
+        )
+        if existing_symbol_exposure >= symbol_cap:
+            logger.info(
+                f"Symbol cap exhausted: {symbol} existing=${existing_symbol_exposure:.0f} "
+                f">= cap=${symbol_cap:.0f}"
+            )
+            return 0.0
+        position_size = min(position_size, symbol_cap - existing_symbol_exposure)
 
-        # Apply volatility adjustment to position percentage
-        position_pct *= volatility_adjustment
+        # ── Step 7: Sector soft cap ──────────────────────────────────────────
+        # If sector already > 30% of equity, halve the position size.
+        try:
+            symbol_sector = get_symbol_sector(symbol)
+            if symbol_sector and symbol_sector not in ('Unknown', 'Crypto', 'Forex', 'Index', 'Commodity'):
+                sector_exposure = sum(
+                    self._get_position_value(pos)
+                    for pos in positions
+                    if pos.closed_at is None
+                    and not getattr(pos, 'pending_closure', False)
+                    and get_symbol_sector(pos.symbol) == symbol_sector
+                )
+                if sector_exposure / equity > 0.30:
+                    logger.info(
+                        f"Sector soft cap: {symbol_sector} at {sector_exposure/equity:.1%} "
+                        f"— halving size ${position_size:.0f} → ${position_size/2:.0f}"
+                    )
+                    position_size *= 0.5
+        except Exception:
+            pass
 
-        # Calculate dollar amount based on strategy's allocated capital
-        position_size = strategy_allocated_capital * position_pct
+        # ── Step 8: Portfolio heat cap ───────────────────────────────────────
+        # Portfolio heat = sum of (position_value × stop_loss_pct) for all open
+        # positions. This is the total capital at risk if every stop fires.
+        # Cap at 8% of equity — conservative but allows ~130 positions at $2K each.
+        MAX_PORTFOLIO_HEAT_PCT = 0.08
+        max_heat = equity * MAX_PORTFOLIO_HEAT_PCT
+        current_heat = sum(
+            self._get_position_value(pos) * 0.06  # assume 6% SL as proxy
+            for pos in positions
+            if pos.closed_at is None
+            and not getattr(pos, 'pending_closure', False)
+        )
+        new_heat = position_size * stop_loss_pct
+        if current_heat + new_heat > max_heat:
+            heat_remaining = max(0.0, max_heat - current_heat)
+            if heat_remaining < 1.0:
+                logger.info(
+                    f"Portfolio heat cap reached: current=${current_heat:.0f}, "
+                    f"max=${max_heat:.0f} ({MAX_PORTFOLIO_HEAT_PCT:.0%} of equity)"
+                )
+                return 0.0
+            # Scale down to fit within remaining heat budget
+            position_size = min(position_size, heat_remaining / stop_loss_pct)
+            logger.info(
+                f"Portfolio heat cap: clamping {symbol} size to ${position_size:.0f} "
+                f"(heat remaining=${heat_remaining:.0f})"
+            )
 
-        # Cap at strategy's remaining capital
-        position_size = min(position_size, strategy_remaining_capital)
-
-        # Cap at remaining total exposure capacity
-        position_size = min(position_size, remaining_exposure)
-
-        # Cap at available capital
-        position_size = min(position_size, available_capital)
-
-        # ── 3.2 Drawdown-based position sizing ──────────────────────────────
-        # If portfolio is in drawdown from its 30-day peak, reduce new position sizes.
+        # ── Step 9: Drawdown-based sizing ────────────────────────────────────
+        # Reduce position sizes when portfolio is in drawdown from 30d peak.
         try:
             import yaml as _yaml
             from pathlib import Path as _Path
@@ -789,96 +831,54 @@ class RiskManager:
                     _equities = [r.equity for r in _rows if r.equity and r.equity > 0]
                     if len(_equities) >= 5:
                         _peak = max(_equities)
-                        _current_eq = portfolio_value
-                        _drawdown = (_peak - _current_eq) / _peak if _peak > 0 else 0.0
+                        _drawdown = (_peak - equity) / _peak if _peak > 0 else 0.0
                         if _drawdown > 0.10:
                             position_size *= dd_thresh10
                             logger.info(
-                                f"Drawdown sizing: {_drawdown:.1%} drawdown from 30d peak "
-                                f"— reducing position size by 75% (multiplier {dd_thresh10})"
+                                f"Drawdown sizing: {_drawdown:.1%} from 30d peak "
+                                f"— 75% reduction (×{dd_thresh10})"
                             )
                         elif _drawdown > 0.05:
                             position_size *= dd_thresh5
                             logger.info(
-                                f"Drawdown sizing: {_drawdown:.1%} drawdown from 30d peak "
-                                f"— reducing position size by 50% (multiplier {dd_thresh5})"
+                                f"Drawdown sizing: {_drawdown:.1%} from 30d peak "
+                                f"— 50% reduction (×{dd_thresh5})"
                             )
         except Exception as _dd_err:
             logger.debug(f"Drawdown sizing check failed — skipping: {_dd_err}")
 
-        # ── 3.5 Per-symbol concentration cap ────────────────────────────────
-        # Hard cap: no single symbol can exceed 5% of equity regardless of sizing.
-        symbol_cap = portfolio_value * 0.05
-        existing_symbol_exposure = sum(
-            self._get_position_value(pos)
-            for pos in positions
-            if pos.closed_at is None
-            and not getattr(pos, 'pending_closure', False)
-            and pos.symbol == getattr(signal, 'symbol', None)
-        )
-        if existing_symbol_exposure + position_size > symbol_cap:
-            allowed = max(0.0, symbol_cap - existing_symbol_exposure)
-            if allowed < position_size:
-                logger.info(
-                    f"Symbol concentration cap: {getattr(signal, 'symbol', '?')} "
-                    f"existing={existing_symbol_exposure:.0f}, cap={symbol_cap:.0f} "
-                    f"— clamping size {position_size:.0f} → {allowed:.0f}"
-                )
-                position_size = allowed
+        # ── Step 10: Available balance cap ───────────────────────────────────
+        position_size = min(position_size, available_balance)
 
-        # ── 3.5 Sector soft cap at sizing time ──────────────────────────────
-        # If sector already > 30% of equity, halve the position size (proactive penalty).
-        try:
-            symbol_sector = get_symbol_sector(getattr(signal, 'symbol', ''))
-            if symbol_sector and symbol_sector not in ('Unknown', 'Crypto', 'Forex', 'Index', 'Commodity'):
-                sector_exposure = sum(
-                    self._get_position_value(pos)
-                    for pos in positions
-                    if pos.closed_at is None
-                    and not getattr(pos, 'pending_closure', False)
-                    and get_symbol_sector(pos.symbol) == symbol_sector
-                )
-                sector_pct = sector_exposure / portfolio_value if portfolio_value > 0 else 0.0
-                if sector_pct > 0.30:
-                    logger.info(
-                        f"Sector soft cap: {symbol_sector} at {sector_pct:.1%} of equity "
-                        f"— halving position size {position_size:.0f} → {position_size/2:.0f}"
-                    )
-                    position_size *= 0.5
-        except Exception:
-            pass
-
-        # Ensure minimum order size: $2000 across all asset classes
+        # ── Step 11: Minimum floor — applied last ────────────────────────────
+        # If all caps reduced the size below $2K but didn't zero it out,
+        # bump to minimum. We decided to trade — submit at minimum rather than fail.
+        # Only return 0 if we genuinely can't afford the minimum.
         MINIMUM_ORDER_SIZE = 2000.0
-
+        if position_size <= 0:
+            return 0.0
         if position_size < MINIMUM_ORDER_SIZE:
-            # Always bump to $2K minimum if we have the capital.
-            # The vol-scaler sizes for equal risk contribution, but eToro won't accept
-            # less than $2K regardless. At $475K equity, $2K = 0.42% — always acceptable.
-            # The only legitimate rejection is insufficient available capital.
-            if available_capital >= MINIMUM_ORDER_SIZE and remaining_exposure >= MINIMUM_ORDER_SIZE:
+            if available_balance >= MINIMUM_ORDER_SIZE:
                 logger.info(
-                    f"Position size ${position_size:.2f} below eToro minimum ${MINIMUM_ORDER_SIZE:.0f} "
-                    f"for {getattr(signal, 'symbol', '?')} — bumping to minimum"
+                    f"Size ${position_size:.0f} below minimum ${MINIMUM_ORDER_SIZE:.0f} "
+                    f"for {symbol} — bumping to minimum"
                 )
                 position_size = MINIMUM_ORDER_SIZE
             else:
                 logger.warning(
-                    f"Calculated position size ${position_size:.2f} is below minimum ${MINIMUM_ORDER_SIZE:.0f}. "
-                    f"Insufficient capital (available=${available_capital:.0f}, remaining_exposure=${remaining_exposure:.0f})"
+                    f"Size ${position_size:.0f} below minimum and insufficient balance "
+                    f"(${available_balance:.0f}) for {symbol}"
                 )
                 return 0.0
 
-        logger.debug(
-            f"Position size calculation: balance=${account.balance:.2f}, "
-            f"strategy_allocation={strategy_allocation_pct:.1f}% (${strategy_allocated_capital:.2f}), "
-            f"confidence={confidence_factor:.2f}, position_pct={position_pct:.1%}, "
-            f"calculated_size=${position_size:.2f}, "
-            f"strategy_exposure={strategy_current_exposure:.2f}/{strategy_allocated_capital:.2f}, "
-            f"total_exposure={current_exposure:.2f}/{max_total_exposure:.2f}"
+        logger.info(
+            f"Position size: {symbol} ${position_size:.0f} "
+            f"(equity=${equity:.0f}, risk={risk_pct:.3%}, sl={stop_loss_pct:.1%}, "
+            f"conf={confidence:.2f}, vol_scalar={vol_scalar:.2f}x, "
+            f"strategy_positions={strategy_open_count}/{max_concurrent})"
         )
-
         return position_size
+
 
     def check_position_limits(
         self,
