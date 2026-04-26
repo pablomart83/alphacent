@@ -90,7 +90,9 @@ class MonitoringService:
         self._pending_closure_interval = position_sync_interval  # 60s default
         
         # Stale order cleanup (runs daily alongside fundamental checks)
-        self._last_stale_order_check: float = 0
+        # Initialize to now so the first run waits a full interval — prevents
+        # cancelling legitimately queued orders on every restart.
+        self._last_stale_order_check: float = time.time()
         self._stale_order_config = self._load_stale_order_config()
         
         # Partial exit check (same interval as trailing stops)

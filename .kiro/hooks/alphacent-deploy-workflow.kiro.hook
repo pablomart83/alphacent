@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "AlphaCent: Enforce Local-First Deployment",
+  "description": "Before any shell command runs, checks that it does not write or patch files directly on EC2 via SSH. Enforces the standard workflow: edit locally → getDiagnostics → SCP → restart/rebuild → health check → git commit+push.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse",
+    "toolTypes": [
+      "shell"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "DEPLOYMENT WORKFLOW ENFORCEMENT — AlphaCent\n\nBefore executing this shell command, verify it does NOT violate the standard deployment workflow.\n\nFORBIDDEN — these patterns mean you are editing EC2 files directly and MUST STOP:\n- ssh ... 'python3 /tmp/some_fix.py' (running a patch script on EC2)\n- ssh ... 'sed -i ...' (in-place edit on EC2)\n- ssh ... 'tee /home/ubuntu/alphacent/src/...' (writing via tee)\n- ssh ... 'cat > /home/ubuntu/alphacent/src/...' (writing via heredoc/cat)\n- ssh ... 'cp ... /home/ubuntu/alphacent/src/...' (overwriting source files)\n- ssh ... 'pip install ...' or 'npm install ...' (installing packages on EC2 outside of deployment)\n- Any command that writes, patches, or modifies source files under /home/ubuntu/alphacent/src/, /home/ubuntu/alphacent/frontend/src/, or /home/ubuntu/alphacent/config/ directly via SSH\n\nPERMITTED SSH operations:\n- READ-ONLY: cat, tail, head, grep, sed -n, wc, ls, find (reading logs, checking file content)\n- OPERATIONAL: sudo systemctl restart/reload/status, curl health checks\n- DB queries: sudo -u postgres psql alphacent -c 'SELECT ...' (read-only SELECT queries only)\n- DB WRITE (explicit approval only): sudo -u postgres psql alphacent -c 'UPDATE/INSERT ...' — ONLY permitted when the agent has explicitly diagnosed a data fix is needed and has explained the exact rows being changed\n- Log reading: journalctl, tail logs/, cat logs/\n- SCP: scp -i ~/Downloads/alphacent-key.pem <local_file> ubuntu@34.252.61.149:<remote_path> (this is the ONLY permitted write path to EC2 source files)\n- Health verification: curl -sf http://localhost:8000/health\n- Git operations: git add, git commit, git push (run locally, not on EC2)\n\nTHE CORRECT WORKFLOW (from Session_Continuation.md):\n1. Edit files LOCALLY in the workspace\n2. Run getDiagnostics to check for errors\n3. SCP changed files to EC2: scp -i ~/Downloads/alphacent-key.pem src/path/file.py ubuntu@34.252.61.149:/home/ubuntu/alphacent/src/path/file.py\n4. Restart backend if Python/config changed: ssh ... 'sudo systemctl restart alphacent && sleep 12 && curl -sf http://localhost:8000/health'\n5. Rebuild frontend if .tsx/.ts changed: ssh ... 'cd /home/ubuntu/alphacent/frontend && VITE_API_BASE_URL=https://alphacent.co.uk VITE_WS_BASE_URL=wss://alphacent.co.uk npm run build 2>&1 | tail -5'\n6. git add . && git commit -m \"...\" && git -c core.hooksPath=/dev/null push\n\nIf the command you are about to run violates any of the FORBIDDEN patterns above, DO NOT proceed. Instead, explain what local edits need to be made first, then follow the correct workflow."
+  }
+}

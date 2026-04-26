@@ -1864,6 +1864,11 @@ class OrderMonitor:
     def cancel_stale_orders(self, max_age_hours: int = 24, pending_timeout_hours: int = None, submitted_timeout_hours: int = None) -> dict:
         """Cancel orders that have been pending for too long.
 
+        Market-hours-aware: orders submitted outside market hours (after 4pm ET,
+        weekends) are legitimately queued for the next open. These are only
+        cancelled after 72h (covers a full weekend + buffer), not the standard
+        24h timeout. Orders submitted during market hours use the standard timeout.
+
         Args:
             max_age_hours: Default maximum age in hours (used if specific timeout not set)
             pending_timeout_hours: Timeout for PENDING orders (default: max_age_hours)
@@ -1873,30 +1878,75 @@ class OrderMonitor:
             Dictionary with counts of cancelled orders
         """
         pending_timeout = pending_timeout_hours or max_age_hours
+        # Orders submitted outside market hours get a longer grace period —
+        # they're queued for the next open, not stuck.
+        AFTER_HOURS_TIMEOUT = 72  # hours — covers full weekend
 
         session = self.db.get_session()
 
         try:
             from datetime import timedelta
+            import pytz
 
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             pending_cutoff = now - timedelta(hours=pending_timeout)
 
-            # Query stale PENDING orders
-            stale_pending = session.query(OrderORM).filter(
+            # Query all PENDING orders older than the standard timeout
+            candidates = session.query(OrderORM).filter(
                 OrderORM.status == OrderStatus.PENDING,
                 OrderORM.submitted_at < pending_cutoff
             ).all()
 
-            stale_orders = stale_pending
+            # Filter: skip orders submitted outside market hours unless they've
+            # exceeded the extended after-hours timeout.
+            stale_orders = []
+            after_hours_cutoff = now - timedelta(hours=AFTER_HOURS_TIMEOUT)
+            try:
+                et_tz = pytz.timezone('US/Eastern')
+            except Exception:
+                et_tz = None
+
+            for order in candidates:
+                submitted_at = order.submitted_at.replace(tzinfo=None) if order.submitted_at and order.submitted_at.tzinfo else (order.submitted_at or now)
+                age_hours = (now - submitted_at).total_seconds() / 3600
+
+                # Determine if order was submitted during market hours
+                submitted_during_market_hours = True
+                if et_tz:
+                    try:
+                        submitted_et = submitted_at.replace(tzinfo=pytz.utc).astimezone(et_tz)
+                        weekday = submitted_et.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
+                        hour = submitted_et.hour + submitted_et.minute / 60.0
+                        # Market hours: Mon-Fri 9:30am–4:00pm ET
+                        is_weekday = weekday < 5
+                        is_market_hours = is_weekday and 9.5 <= hour <= 16.0
+                        submitted_during_market_hours = is_market_hours
+                    except Exception:
+                        pass  # assume market hours if check fails
+
+                if submitted_during_market_hours:
+                    # Standard timeout applies
+                    stale_orders.append(order)
+                elif submitted_at < after_hours_cutoff:
+                    # After-hours order exceeded extended timeout — genuinely stuck
+                    logger.info(
+                        f"After-hours order {order.id} ({order.symbol}) aged out "
+                        f"({age_hours:.1f}h > {AFTER_HOURS_TIMEOUT}h extended timeout)"
+                    )
+                    stale_orders.append(order)
+                else:
+                    logger.debug(
+                        f"Skipping after-hours order {order.id} ({order.symbol}) "
+                        f"age={age_hours:.1f}h — within {AFTER_HOURS_TIMEOUT}h grace period"
+                    )
 
             if not stale_orders:
-                logger.debug(f"No stale orders found (PENDING>{pending_timeout}h)")
-                return {"checked": 0, "cancelled_pending": 0, "cancelled": 0, "failed": 0}
+                logger.debug(f"No stale orders found (PENDING>{pending_timeout}h, after-hours grace applied)")
+                return {"checked": len(candidates), "cancelled_pending": 0, "cancelled": 0, "failed": 0}
 
             logger.info(
-                f"Found {len(stale_orders)} stale orders "
-                f"({len(stale_pending)} PENDING>{pending_timeout}h)"
+                f"Found {len(stale_orders)} stale orders to cancel "
+                f"({len(candidates)} candidates, {len(candidates)-len(stale_orders)} skipped as after-hours)"
             )
 
             cancelled_pending = 0
