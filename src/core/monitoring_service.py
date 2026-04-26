@@ -2151,6 +2151,8 @@ class MonitoringService:
             from src.strategy.market_analyzer import MarketStatisticsAnalyzer
             from src.data.market_data_manager import get_market_data_manager
             _mdm = get_market_data_manager()
+            if not _mdm:
+                return {"checked": 0, "flagged": 0, "regime": "unknown"}
             _analyzer = MarketStatisticsAnalyzer(_mdm)
             _sub_regime, _, _, _ = _analyzer.detect_sub_regime()
             current_regime = _sub_regime.value.lower() if _sub_regime else 'unknown'
@@ -3842,6 +3844,8 @@ class MonitoringService:
 
             from src.data.market_data_manager import get_market_data_manager
             mdm = get_market_data_manager()
+            if not mdm:
+                return None, []
             analyzer = MarketStatisticsAnalyzer(mdm)
             regime_enum, _confidence, _quality, _metrics = analyzer.detect_sub_regime(symbols=["SPY"])
             regime_str = str(regime_enum).lower().replace("marketregime.", "")
