@@ -103,6 +103,7 @@ class EquityCurvePoint(BaseModel):
     timestamp: str
     equity: float
     drawdown: float
+    realized: Optional[float] = None  # cumulative realized P&L
 
 
 class PerformanceAnalyticsResponse(BaseModel):
@@ -792,7 +793,8 @@ async def get_performance_analytics(
             equity_curve.append(EquityCurvePoint(
                 timestamp=str(ts_value),
                 equity=round(eq, 2),
-                drawdown=round(drawdown, 2)
+                drawdown=round(drawdown, 2),
+                realized=round(float(row.realized_pnl_cumulative), 2) if row.realized_pnl_cumulative is not None else None,
             ))
             if i > 0:
                 prev_eq = snapshot_rows[i - 1].equity
