@@ -1045,10 +1045,96 @@ Do not implement anything until you have the complete audit. The audit comes fir
 
 ### Position Sizing — New Design (Sprint 10)
 - Model: `position_size = (equity × risk_per_trade_pct) / stop_loss_pct`
-- Base risk: 0.5% of equity per trade (~$2,380 at current equity)
+- Base risk: 0.2% of equity per trade (reduced from 0.5% on Apr 27 — vol scalar defaults to 1.0 when price_history not in metadata, was producing $23K positions)
 - Confidence scalar: 0.5x–1.0x between floor (0.30) and max
 - Vol scalar: TARGET_VOL/realized_vol (Yang-Zhang/Parkinson/EWMA), clamped 0.10–1.50x
 - strategy_allocation_pct = max concurrent positions (0.5%→1, 1.0%→2, 2.0%→4)
 - Caps: symbol (5% equity), sector (30% → halve), portfolio heat (8% equity), balance
 - Minimum floor: $2,000 applied last
-- Expected position sizes: $2K–$23K range (vs flat $2K before)
+- Expected position sizes: $2K–$8K range (was $8K–$24K at 0.5%)
+- Forex SL: 2%, Crypto SL: 8%, Stock/ETF SL: 6% (now correctly inferred from symbol when not in metadata)
+
+---
+
+## Session April 27, 2026 — Monday Market Open Audit & Fixes
+
+### System State (April 27, 2026 end of session)
+- **Equity:** ~$473,323 (down from $475,486 — oversized positions opened at 0.5% rate today)
+- **Open positions:** 154 (eToro=154, DB=154 — fully reconciled)
+- **Active DEMO strategies:** ~95
+- **BACKTESTED:** ~250+
+- **Signal cycles:** 55-65 signals/cycle, running every 10 min
+- **Orders today:** active during market hours (09:30–16:00 ET), blocked after close as expected
+- **Forex orders:** now flowing 24/5 after asset class fix
+
+### Fixes Shipped
+
+**Backend**
+- `src/core/order_monitor.py` — **critical**: all `etoro_position_id` comparisons normalised to `str()` throughout `sync_positions` (was int/str mismatch causing false orphan detection and missed position creation). In-memory dicts (`db_by_etoro_id`, `db_by_strategy_symbol`, `all_etoro_ids_in_db`) now updated immediately after creating a new position — fixes orphaned positions when multiple same-symbol orders fill simultaneously (e.g. 5 GEV orders at market open)
+- `src/risk/risk_manager.py` — BASE_RISK_PCT reduced 0.5%→0.2% (vol scalar defaults to 1.0 when price_history not in signal metadata, was producing $23K positions at 0.5%). Forex SL now defaults to 2%, crypto to 8% (was 6% for both)
+- `src/execution/order_executor.py` — `_determine_asset_class`: forex pairs (6-char EURUSD/GBPUSD/AUDUSD etc.) now correctly return `AssetClass.FOREX` (was STOCK, blocking forex orders after NYSE close). Added SymbolRegistry lookup for commodity/index classification
+- `src/api/routers/analytics.py` — `EquityCurvePoint` model now includes `realized` field populated from `realized_pnl_cumulative` in equity snapshots. Was always null — realized P&L line on equity chart was never drawn
+- `src/core/monitoring_service.py` — systemd service file fixed: `venv_312/bin/uvicorn` → `venv/bin/uvicorn` (venv_312 was missing uvicorn, caused backend crash loop at 14:55 UTC)
+
+**Frontend**
+- `frontend/src/services/api.ts` — `getStrategies()` now guards against undefined mode (`if (!mode) return []`) — prevents 422 on backend restart when auth context not yet restored
+
+**Scripts**
+- `scripts/diagnostics/etoro_position_diff.py` — new: compares eToro open positions vs DB open positions with correct str() ID normalisation. Run any time to check for orphans
+- `scripts/diagnostics/close_orphaned_positions.py` — updated: now inserts stub closed position record in DB (with computed P&L) before closing on eToro, so orphan P&L flows into trade journal and realized line
+- `.kiro/hooks/alphacent-deploy-workflow.kiro.hook` — updated to respond PROCEED/BLOCKED cleanly, allow `scripts/` directory execution, allow `venv_312/bin/python3 scripts/...`
+
+**DB fixes (manual)**
+- TLT order `b5594a31` marked FAILED (eToro 404 — never received by eToro due to SSL drop on Apr 24 submission)
+
+### Key Findings
+
+**17 pending orders from Apr 24:** 16/17 filled correctly at Monday open. TLT was never submitted to eToro (SSL drop) — marked FAILED. GEV×5 and ITW appeared as orphans due to int/str ID mismatch in sync_positions — fixed.
+
+**Orphaned positions (EWZ, GEV×5, ITW):** Closed via `close_orphaned_positions.py`. Root cause was int/str mismatch in `db_by_etoro_id` dict — eToro returns int IDs, DB stores strings. All comparisons now use `str()`. Future orphans will be correctly tracked with P&L.
+
+**Position sizing was too aggressive:** BASE_RISK_PCT 0.5% produced $23K positions (5% of equity) on every high-confidence signal because vol_scalar defaults to 1.0 when price_history not in metadata. Reduced to 0.2% → $2K–$8K range. Existing oversized positions (ETN $18K, MCHP $15K, AAPL $25K) run to SL/TP naturally.
+
+**Forex blocked after market close:** `_determine_asset_class` only checked for crypto, defaulted everything else to STOCK. AUDUSD/GBPUSD/NZDUSD were blocked after NYSE close. Fixed with 6-char currency pair detection.
+
+**Realized P&L line disappeared from equity chart:** `EquityCurvePoint` never included `realized` field — frontend always got null. Fixed: now populated from `realized_pnl_cumulative` in snapshots.
+
+**venv_312 crash:** systemd service was pointing to `venv_312/bin/uvicorn` which was missing uvicorn. Backend crashed at 14:55 UTC, restarted 6 times before fix. `venv` (Python 3.11) has uvicorn and is the correct venv.
+
+**No orders 15:06–20:00 UTC:** Expected — portfolio heat cap (8% of equity = $38K) was near-maxed with 154 positions. After 20:00 UTC (4pm ET) market closed, all stock signals correctly blocked. Forex signals were also incorrectly blocked (now fixed).
+
+### Open Items for Next Session
+
+**Monitoring (first thing)**
+- Check errors.log — should be clean after all fixes
+- Check cycle_history.log — forex orders should be flowing overnight (AUDUSD/GBPUSD/NZDUSD)
+- Monitor position sizing: new orders should be $2K–$8K range
+- Portfolio heat cap: as oversized positions (ETN, MCHP, AAPL) close, capacity opens up
+
+**Still Open**
+- **Overview chart panel** — three separate chart components with misaligned axes. Needs full redesign with lightweight-charts v5 multi-pane. See MUST DO section above.
+- **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false. Template generates 0 trades.
+- **Gold Momentum GOLD duplicates** — 10 copies in BACKTESTED; delete 9
+- **FMP insider endpoint** — 403/404 on current plan; using momentum proxy fallback
+- **Strategy lifespan** — avg 5.7 days; investigate whether healthy or retiring too fast
+- **Session persistence** — sessions wiped on restart, users must re-login. Low priority.
+- **`proposed` counter in UI** — showing wrong values (all 0 in DB). Counter never written. Fix or remove from UI.
+- **Portfolio heat cap tuning** — 8% with 154 positions at $3K avg = $27.7K heat, near the $38K cap. Consider raising to 12% or making it dynamic based on position count.
+- **Orphaned P&L gap** — 7 orphaned positions (EWZ, GEV×5, ITW) closed today without DB records. Their P&L (~small, opened/closed same day) is missing from trade journal. `close_orphaned_positions.py` now handles this going forward.
+
+### Position Sizing — Current State
+- BASE_RISK_PCT: 0.2% (reduced from 0.5% on Apr 27)
+- Expected range: $2K–$8K per new position
+- Forex SL: 2% → max forex position ~$4,750 at current equity
+- Crypto SL: 8% → max crypto position ~$1,188 (bumped to $2K minimum)
+- Stock SL: 6% → max stock position ~$15,833 (symbol cap at $23,750 won't be hit)
+- Portfolio heat cap: 8% of equity ($38K) — near-maxed with current 154 positions
+
+### Diagnostic Scripts Available
+```bash
+# Check eToro vs DB position diff
+cd /home/ubuntu/alphacent && venv_312/bin/python3 scripts/diagnostics/etoro_position_diff.py
+
+# Close orphaned positions (also records P&L in DB)
+cd /home/ubuntu/alphacent && venv_312/bin/python3 scripts/diagnostics/close_orphaned_positions.py
+```
