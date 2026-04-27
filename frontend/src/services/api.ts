@@ -430,6 +430,7 @@ class ApiClient {
   // ============================================================================
 
   async getStrategies(mode: TradingMode, includeRetired: boolean = false): Promise<Strategy[]> {
+    if (!mode) return [];
     const response = await this.client.get<ApiResponse<Strategy[]>>(
       `/strategies?mode=${mode}&include_retired=${includeRetired}`
     );
