@@ -650,10 +650,13 @@ class RiskManager:
             return 0.0
 
         # ── Step 1: Base risk per trade ──────────────────────────────────────
-        # 0.5% of equity = $2,380 at current $476K equity.
-        # If this trade hits its stop loss, we lose $2,380 (0.5% of equity).
-        # This is the fixed-fractional anchor — independent of strategy allocation.
-        BASE_RISK_PCT = 0.005  # 0.5% of equity per trade
+        # 0.2% of equity = ~$950 at current $476K equity.
+        # If this trade hits its stop loss, we lose ~$950 (0.2% of equity).
+        # Kept conservative because vol_scalar defaults to 1.0 when price_history
+        # is not in signal metadata — without vol scaling the raw size would be
+        # equity × 0.2% / 6% SL = ~$15,800, well within the 5% symbol cap.
+        # (Was 0.5% — produced $23K+ positions on every high-confidence signal.)
+        BASE_RISK_PCT = 0.002  # 0.2% of equity per trade
 
         # ── Step 2: Confidence scalar ────────────────────────────────────────
         # Scales risk linearly from 0.5× at confidence floor to 1.0× at max.
