@@ -376,20 +376,36 @@ class OrderExecutor:
             raise ValueError(f"Unknown signal action: {action}")
 
     def _determine_asset_class(self, symbol: str) -> AssetClass:
-        """Determine asset class from symbol.
-        
-        Args:
-            symbol: Instrument symbol
-            
-        Returns:
-            Asset class
-        """
-        # Simple heuristic - in production would use a proper symbol database
+        """Determine asset class from symbol."""
+        sym = symbol.upper()
+
         crypto_indicators = ["BTC", "ETH", "USDT", "XRP", "ADA", "DOGE", "SOL", "-USD"]
-        if any(indicator in symbol.upper() for indicator in crypto_indicators):
+        if any(ind in sym for ind in crypto_indicators):
             return AssetClass.CRYPTOCURRENCY
 
-        # Default to stock
+        # Forex: 6-char currency pairs (EURUSD, GBPUSD, AUDUSD, USDJPY, etc.)
+        forex_currencies = ["USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF", "SEK", "NOK"]
+        if len(sym) == 6 and sym[:3] in forex_currencies and sym[3:] in forex_currencies:
+            return AssetClass.FOREX
+
+        # Use SymbolRegistry if available for accurate classification
+        try:
+            from src.core.symbol_registry import SymbolRegistry
+            registry = SymbolRegistry()
+            info = registry.get_symbol_info(symbol)
+            if info:
+                asset_type = (info.get('asset_class') or info.get('type') or '').lower()
+                if 'forex' in asset_type or 'currency' in asset_type:
+                    return AssetClass.FOREX
+                if 'crypto' in asset_type:
+                    return AssetClass.CRYPTOCURRENCY
+                if 'commodity' in asset_type:
+                    return AssetClass.COMMODITY
+                if 'index' in asset_type:
+                    return AssetClass.INDEX
+        except Exception:
+            pass
+
         return AssetClass.STOCK
 
     def _submit_order(self, order: Order) -> None:

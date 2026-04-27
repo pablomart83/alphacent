@@ -706,6 +706,17 @@ class RiskManager:
             _sl_val = _sl.get('stop_loss_pct') or _sl.get('stop_loss')
             if _sl_val and 0 < float(_sl_val) < 1.0:
                 stop_loss_pct = float(_sl_val)
+            else:
+                # Infer from asset class if not in metadata
+                _sym = getattr(signal, 'symbol', '') or ''
+                _sym_up = _sym.upper()
+                _forex_ccy = ["USD","EUR","GBP","JPY","AUD","NZD","CAD","CHF","SEK","NOK"]
+                _is_forex = len(_sym_up) == 6 and _sym_up[:3] in _forex_ccy and _sym_up[3:] in _forex_ccy
+                _is_crypto = any(c in _sym_up for c in ["BTC","ETH","XRP","ADA","DOGE","SOL"])
+                if _is_forex:
+                    stop_loss_pct = 0.02  # forex: 2% SL
+                elif _is_crypto:
+                    stop_loss_pct = 0.08  # crypto: 8% SL
         except Exception:
             pass
 
