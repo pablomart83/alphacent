@@ -1165,8 +1165,9 @@ class OrderMonitor:
             # Import symbol normalizer
             from src.utils.symbol_normalizer import normalize_symbol
             
-            # Build set of eToro position IDs for quick lookup
-            etoro_position_ids = {pos.etoro_position_id for pos in positions}
+            # Build set of eToro position IDs for quick lookup — normalize to string
+            # to avoid int/str mismatches between eToro API response and DB values.
+            etoro_position_ids = {str(pos.etoro_position_id) for pos in positions}
             
             # Track price updates for WebSocket broadcasting after commit
             _price_updates: Dict[str, float] = {}
@@ -1176,7 +1177,7 @@ class OrderMonitor:
             all_db_positions = session.query(PositionORM).filter(
                 PositionORM.closed_at.is_(None)
             ).all()
-            db_by_etoro_id = {p.etoro_position_id: p for p in all_db_positions}
+            db_by_etoro_id = {str(p.etoro_position_id): p for p in all_db_positions}
             db_by_id = {p.id: p for p in all_db_positions}
             # Index by (strategy_id, symbol, side) for strategy-match lookups
             db_by_strategy_symbol = {}
@@ -1188,7 +1189,7 @@ class OrderMonitor:
             # Build a set of ALL etoro_position_ids (open AND closed) to prevent
             # UniqueViolation when trying to assign an ID already held by a closed row.
             all_etoro_ids_in_db: set = set(
-                row[0] for row in session.query(PositionORM.etoro_position_id)
+                str(row[0]) for row in session.query(PositionORM.etoro_position_id)
                 .filter(PositionORM.etoro_position_id.isnot(None)).all()
             )
             
@@ -1198,7 +1199,7 @@ class OrderMonitor:
                 normalized_symbol = normalize_symbol(pos.symbol)
                 
                 # Check if position exists — use pre-loaded dict instead of per-query
-                existing_pos = db_by_etoro_id.get(pos.etoro_position_id)
+                existing_pos = db_by_etoro_id.get(str(pos.etoro_position_id))
                 
                 if existing_pos:
                     # Update existing position - preserve strategy_id
@@ -1336,8 +1337,8 @@ class OrderMonitor:
                         # If a closed duplicate holds it, skip the ID update to avoid UniqueViolation.
                         new_etoro_id = pos.etoro_position_id
                         id_already_taken = (
-                            new_etoro_id in all_etoro_ids_in_db
-                            and new_etoro_id != existing_by_strategy.etoro_position_id
+                            str(new_etoro_id) in all_etoro_ids_in_db
+                            and str(new_etoro_id) != str(existing_by_strategy.etoro_position_id)
                         )
                         if id_already_taken:
                             logger.debug(
@@ -1491,6 +1492,12 @@ class OrderMonitor:
                     session.add(new_pos)
                     created_count += 1
                     logger.info(f"Created new position from eToro: {normalized_symbol} {pos_side_str} (eToro ID: {pos.etoro_position_id})")
+                    # Update in-memory dicts so subsequent iterations in this same sync
+                    # cycle don't treat this newly created position as missing and try
+                    # to create it again (or skip a different position that should be created).
+                    db_by_etoro_id[str(pos.etoro_position_id)] = new_pos
+                    db_by_strategy_symbol[(matched_strategy_id, normalized_symbol, pos_side_str)] = new_pos
+                    all_etoro_ids_in_db.add(str(pos.etoro_position_id))
             
             # Close positions that are open in DB but no longer exist on eToro
             open_db_positions = session.query(PositionORM).filter(
@@ -1509,7 +1516,7 @@ class OrderMonitor:
                 seen_this_sync = set()
                 
                 for db_pos in open_db_positions:
-                    pos_key = db_pos.etoro_position_id
+                    pos_key = str(db_pos.etoro_position_id)
                     
                     if pos_key in etoro_position_ids:
                         # Position found on eToro — reset miss counter
