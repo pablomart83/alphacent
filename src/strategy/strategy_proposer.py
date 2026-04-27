@@ -6198,30 +6198,63 @@ Make this strategy distinct and innovative while following all threshold and pai
             if excluded:
                 logger.info(f"VIX risk-off ({vix:.1f}): excluded {excluded} momentum/breakout templates")
 
-        # Regime-directional filter: in trending_up regimes, suppress SHORT-direction
-        # templates (except market-neutral and alpha_edge which self-manage direction).
-        # Short strategies generate 0 trades in uptrends, waste proposal slots, and
-        # accumulate in the zero-trade blacklist. Standard quant practice: only propose
-        # strategies whose direction aligns with the prevailing regime.
+        # Regime-directional filter: in trending_up regimes, suppress generic SHORT-direction
+        # templates that are NOT designed for uptrends (they generate 0 trades, waste proposal
+        # slots, and accumulate in the zero-trade blacklist).
+        #
+        # CRITICAL EXEMPTION: templates whose market_regimes explicitly include a trending_up
+        # variant are uptrend-specific shorts (exhaustion, parabolic, BB squeeze, EMA rejection,
+        # MACD divergence, volume climax). These are the HEDGE — they wait for the correction
+        # inside an uptrend. Suppressing them defeats their entire purpose and leaves the book
+        # with zero short equity exposure going into corrections.
         trending_up_regimes = {
             'trending_up', 'trending_up_weak', 'trending_up_strong'
         }
         regime_str = market_regime.value if hasattr(market_regime, 'value') else str(market_regime)
         if regime_str in trending_up_regimes:
             before = len(dsl_templates)
+            suppressed = []
+            kept_uptrend_shorts = []
+            for t in dsl_templates:
+                meta = t.metadata or {}
+                is_short = meta.get('direction', '').lower() == 'short'
+                is_neutral = meta.get('market_neutral', False)
+                is_ae = meta.get('strategy_category', '') == 'alpha_edge'
+                # Check if this template explicitly targets trending_up regimes
+                template_regimes = getattr(t, 'market_regimes', None) or []
+                targets_uptrend = any(
+                    (r.value if hasattr(r, 'value') else str(r)) in trending_up_regimes
+                    for r in template_regimes
+                )
+                if is_short and not is_neutral and not is_ae and not targets_uptrend:
+                    suppressed.append(t)
+                else:
+                    if is_short and targets_uptrend:
+                        kept_uptrend_shorts.append(t.name)
+                    dsl_templates  # keep — handled below via list comprehension
+
             dsl_templates = [
                 t for t in dsl_templates
                 if not (
                     (t.metadata or {}).get('direction', '').lower() == 'short'
                     and not (t.metadata or {}).get('market_neutral', False)
                     and (t.metadata or {}).get('strategy_category', '') != 'alpha_edge'
+                    and not any(
+                        (r.value if hasattr(r, 'value') else str(r)) in trending_up_regimes
+                        for r in (getattr(t, 'market_regimes', None) or [])
+                    )
                 )
             ]
             excluded = before - len(dsl_templates)
             if excluded:
                 logger.info(
-                    f"Regime filter ({regime_str}): suppressed {excluded} SHORT-direction templates "
-                    f"(non-neutral, non-AE) — direction misaligned with uptrend"
+                    f"Regime filter ({regime_str}): suppressed {excluded} generic SHORT templates "
+                    f"(not designed for uptrends)"
+                )
+            if kept_uptrend_shorts:
+                logger.info(
+                    f"Regime filter ({regime_str}): kept {len(kept_uptrend_shorts)} uptrend-specific "
+                    f"SHORT templates (exhaustion/reversal hedges): {kept_uptrend_shorts}"
                 )
         
         filtered = dsl_templates + alpha_edge_templates

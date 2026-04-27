@@ -394,8 +394,17 @@ class ConvictionScorer:
 
             regime_key = sub_regime.value.lower().replace(' ', '_') if hasattr(sub_regime, 'value') else 'unknown'
 
-            # Detect strategy type
+            # Detect strategy type and direction
             strategy_type = self._detect_strategy_type(strategy)
+            direction = (strategy.metadata or {}).get('direction', 'long').lower() if strategy.metadata else 'long'
+
+            # Direction-aware override: uptrend-specific SHORT strategies (exhaustion,
+            # parabolic, BB squeeze, EMA rejection, MACD divergence, volume climax) are
+            # mean_reversion or volatility typed but are the CORRECT tool in trending_up —
+            # they're the hedge waiting for the correction. Give them a strong regime score.
+            if direction == 'short' and 'trending_up' in regime_key:
+                if strategy_type in ['mean_reversion', 'volatility', 'trend_following']:
+                    return 20.0  # Uptrend exhaustion shorts are perfectly regime-aligned
 
             # Alignment map — which strategy types thrive in which regimes
             alignment = {

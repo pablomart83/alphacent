@@ -1500,8 +1500,8 @@ class StrategyTemplateLibrary:
                 "cover_threshold": 50,
                 "sma_period": 20,
                 "extension_pct": 1.05,
-                "stop_loss_pct": 0.025,
-                "take_profit_pct": 0.04
+                "stop_loss_pct": 0.04,   # 4% — needs room in trending market before correction
+                "take_profit_pct": 0.08  # 8% — real correction target, not a 4% blip
             },
             expected_trade_frequency="1-3 trades/month",
             expected_holding_period="2-5 days",
@@ -1527,8 +1527,8 @@ class StrategyTemplateLibrary:
                 "bb_std": 2.5,  # Wider bands for trending markets
                 "rsi_period": 14,
                 "rsi_confirmation": 70,
-                "stop_loss_pct": 0.025,
-                "take_profit_pct": 0.04
+                "stop_loss_pct": 0.04,   # 4% — trending market noise requires wider stop
+                "take_profit_pct": 0.08  # 8% — target the full mean-reversion move
             },
             expected_trade_frequency="1-2 trades/month",
             expected_holding_period="3-7 days",
@@ -1555,8 +1555,8 @@ class StrategyTemplateLibrary:
                 "signal_period": 9,
                 "rsi_period": 14,
                 "rsi_confirmation": 65,
-                "stop_loss_pct": 0.03,
-                "take_profit_pct": 0.05
+                "stop_loss_pct": 0.04,   # 4% — MACD divergence can take time to play out
+                "take_profit_pct": 0.08  # 8% — momentum reversal target
             },
             expected_trade_frequency="2-3 trades/month",
             expected_holding_period="3-7 days",
@@ -1584,8 +1584,8 @@ class StrategyTemplateLibrary:
                 "atr_exit_multiplier": 0.5,
                 "rsi_period": 14,
                 "rsi_confirmation": 70,
-                "stop_loss_pct": 0.03,
-                "take_profit_pct": 0.05
+                "stop_loss_pct": 0.04,   # 4% — parabolic moves can extend before reversing
+                "take_profit_pct": 0.10  # 10% — parabolic reversals are sharp and deep
             },
             expected_trade_frequency="1-2 trades/month",
             expected_holding_period="2-5 days",
@@ -1611,8 +1611,8 @@ class StrategyTemplateLibrary:
                 "resistance_buffer": 0.002,
                 "rsi_period": 14,
                 "rsi_confirmation": 65,
-                "stop_loss_pct": 0.025,
-                "take_profit_pct": 0.04
+                "stop_loss_pct": 0.04,   # 4% — double tops can retest before breaking
+                "take_profit_pct": 0.08  # 8% — target the full support-to-resistance range
             },
             expected_trade_frequency="1-2 trades/month",
             expected_holding_period="3-10 days",
@@ -1640,8 +1640,8 @@ class StrategyTemplateLibrary:
                 "rsi_confirmation": 70,
                 "rsi_exit": 45,
                 "sma_period": 10,
-                "stop_loss_pct": 0.025,
-                "take_profit_pct": 0.04
+                "stop_loss_pct": 0.04,   # 4% — volume climax can spike further before reversing
+                "take_profit_pct": 0.08  # 8% — exhaustion reversals tend to be sharp
             },
             expected_trade_frequency="1-2 trades/month",
             expected_holding_period="2-5 days",
@@ -1668,8 +1668,8 @@ class StrategyTemplateLibrary:
                 "rsi_period": 14,
                 "rsi_confirmation": 60,
                 "rsi_exit": 40,
-                "stop_loss_pct": 0.025,
-                "take_profit_pct": 0.04
+                "stop_loss_pct": 0.04,   # 4% — failed breakouts can whipsaw before confirming
+                "take_profit_pct": 0.08  # 8% — target the full pullback to next support
             },
             expected_trade_frequency="2-3 trades/month",
             expected_holding_period="2-5 days",

@@ -633,14 +633,14 @@ position_management:
       min_long_pct: 0.75
       min_short_pct: 0.0
     trending_up:
-      min_long_pct: 0.85
-      min_short_pct: 0.0
-    trending_up_weak:
       min_long_pct: 0.80
-      min_short_pct: 0.0
+      min_short_pct: 0.05   # Minimum 5% short — hedging floor even in bull markets
+    trending_up_weak:
+      min_long_pct: 0.75
+      min_short_pct: 0.08   # Weak uptrend = elevated correction risk, maintain larger hedge
     trending_up_strong:
-      min_long_pct: 0.90
-      min_short_pct: 0.0
+      min_long_pct: 0.85
+      min_short_pct: 0.03   # Strong uptrend = smaller hedge, but never zero
     trending_down:
       min_long_pct: 0.2
       min_short_pct: 0.5
