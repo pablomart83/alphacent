@@ -625,7 +625,7 @@ class RiskManager:
           7. Sector soft cap (30% of equity → halve)
           8. Portfolio heat cap (total open risk-dollars ≤ 8% of equity)
           9. Drawdown sizing (50%/75% reduction at 5%/10% drawdown)
-         10. Available balance cap
+         10. Available balance cap — re-read live from DB (not stale account object)
          11. Minimum floor ($2,000) — applied last, after all caps
 
         Args:
@@ -640,13 +640,39 @@ class RiskManager:
         symbol = getattr(signal, 'symbol', '?')
 
         # ── Account state ────────────────────────────────────────────────────
+        # Re-read balance live from DB for every order — the account object passed
+        # in was fetched once at the start of the signal cycle and is stale by the
+        # time the 2nd, 3rd... Nth order is sized. With 93 orders in a batch and
+        # only $4K cash, every order after the first would be sized against the
+        # same stale balance and hit eToro error 604 (insufficient funds).
+        # Each order is independent — it checks the real current balance right now.
+        available_balance = account.balance  # fallback if DB read fails
+        try:
+            from src.models.database import get_database
+            from src.models.orm import AccountInfoORM
+            _db = get_database()
+            _sess = _db.get_session()
+            try:
+                _acct_row = _sess.query(AccountInfoORM).order_by(
+                    AccountInfoORM.updated_at.desc()
+                ).first()
+                if _acct_row and _acct_row.balance is not None:
+                    available_balance = float(_acct_row.balance)
+            finally:
+                _sess.close()
+        except Exception as _bal_err:
+            logger.debug(f"Could not refresh balance from DB for {symbol}: {_bal_err} — using account object")
+
         equity = getattr(account, 'equity', None) or account.balance
         if equity <= 0:
             equity = account.balance
-        available_balance = account.balance
 
-        if available_balance <= 0:
-            logger.warning(f"No available balance for {symbol} (balance=${available_balance:.0f})")
+        MINIMUM_ORDER_SIZE = 2000.0
+        if available_balance < MINIMUM_ORDER_SIZE:
+            logger.warning(
+                f"Insufficient balance for {symbol}: ${available_balance:.0f} available "
+                f"(minimum order ${MINIMUM_ORDER_SIZE:.0f}) — skipping"
+            )
             return 0.0
 
         # ── Step 1: Base risk per trade ──────────────────────────────────────
@@ -868,7 +894,7 @@ class RiskManager:
         # If all caps reduced the size below $2K but didn't zero it out,
         # bump to minimum. We decided to trade — submit at minimum rather than fail.
         # Only return 0 if we genuinely can't afford the minimum.
-        MINIMUM_ORDER_SIZE = 2000.0
+        # (MINIMUM_ORDER_SIZE already defined at top of function — no redefinition needed)
         if position_size <= 0:
             return 0.0
         if position_size < MINIMUM_ORDER_SIZE:
