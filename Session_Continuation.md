@@ -1,6 +1,6 @@
 # AlphaCent — Session Continuation Prompt
 
-Read `#File:.kiro/steering/trading-system-context.md` for full system context, then read this prompt carefully before proceeding.
+> The steering file (`.kiro/steering/trading-system-context.md`) is always auto-loaded and contains permanent rules, infrastructure details, and current system state. Read this file for sprint history, open items, and recent changes.
 
 ---
 
@@ -1138,3 +1138,107 @@ cd /home/ubuntu/alphacent && venv_312/bin/python3 scripts/diagnostics/etoro_posi
 # Close orphaned positions (also records P&L in DB)
 cd /home/ubuntu/alphacent && venv_312/bin/python3 scripts/diagnostics/close_orphaned_positions.py
 ```
+
+---
+
+## Session April 29, 2026 — Trading System Overhaul
+
+### Current System State (April 29, 2026)
+- **Equity:** ~$470K (down from $477K peak Apr 22 — correction Apr 25-29)
+- **Open positions:** ~125 (down from 147 — 10 ATR strategies set to pending_retirement)
+- **Active DEMO strategies:** ~86 | **BACKTESTED:** ~63 (46 low-Sharpe retired)
+- **Market regime:** trending_up_weak → market rallied Apr 29 after correction
+- **Market Quality Score:** 85/100 High (ADX=51, ATR=1.0%, VIX=18)
+- **Balance:** ~$36K (freed from SL hits during correction)
+
+### 10-Fix Trading Upgrade (April 29, 2026)
+
+**Fix 1 — ATR Dynamic Trend Follow template strengthened**
+- Added `ADX(14) > 20` + `RSI 50-65` to entry conditions
+- Removed RANGING from market_regimes — trend-following has no edge in ranging markets
+- Root cause of -$3,052 losses: was entering on any bounce above MAs with no trend quality check
+
+**Fix 2 — 4H VWAP Trend Continuation template strengthened**
+- Added `ADX(14) > 18` + `VOLUME > VOLUME_MA(20) * 1.2` to entry conditions
+- Removed RANGING and RANGING_HIGH_VOL from market_regimes
+- Was firing on every minor VWAP bounce in choppy markets
+
+**Fix 3 — Fast 5-day performance feedback loop**
+- New `get_fast_performance_feedback()` in `trade_journal.py` (5-day lookback)
+- Templates with <30% win rate → 10% proposal weight; <35% → 40%; >65% → 150%
+- Wired into `_apply_performance_feedback()` and `_match_templates_to_symbols()`
+- Adapts to current market within days, not 60 days
+
+**Fix 4 — Position sizing: concentrated book**
+- `BASE_RISK_PCT`: 0.2% → 0.6% (produces $5-12K positions vs $2-4K)
+- `CONFIDENCE_FLOOR`: 0.30 → 0.50 (filters noise signals)
+- `MINIMUM_ORDER_SIZE`: $2,000 → $5,000
+- `MAX_PORTFOLIO_HEAT_PCT`: 8% → 30% (was blocking new trades constantly)
+- `symbol_cap`: 5% → 3% of equity
+
+**Fix 5 — Max 2 strategies per symbol per timeframe (was 5)**
+
+**Fix 6 — Conviction threshold: 57 → 70** (`autonomous_trading.yaml`)
+
+**Fix 7 — Differentiated zombie exit thresholds**
+- Trend-following: 3 days (1D) / 2 days (4H)
+- Mean reversion: 7 days (1D) / 4 days (4H)
+- Alpha Edge: 14 days (1D) / 7 days (4H)
+
+**Fix 8 — Accelerated retirement**
+- 46 BACKTESTED strategies with Sharpe < 2.0 retired immediately
+- 10 DEMO ATR Dynamic Trend Follow strategies with >-$50 P&L set to pending_retirement
+
+**Fix 9 — Template circuit breaker in `_check_strategy_decay`**
+- If template family has <30% win rate over last 10 closed trades → -1.5 extra decay penalty
+
+**Fix 10 — MarketQualityScore composite (0-100)**
+- New `get_market_quality_score()` in `market_analyzer.py`
+- Components: ADX(14) of SPY (40pts) + ATR/price inverted (30pts) + 5-day consistency (20pts) + VIX (10pts)
+- Score < 40 (low/choppy): position sizing -30%, trend templates -50% at proposal stage
+- Wired into `risk_manager.py` (sizing) and `autonomous_strategy_manager.py` (proposals)
+- Displayed in MarketPulseWidget bottom bar with score bar + grade + sizing multiplier
+
+### Market Quality Score — Full Integration (April 29, 2026)
+
+**Persistent storage:**
+- `equity_snapshots` table: added `market_quality_score` (FLOAT) + `market_quality_grade` (VARCHAR)
+- Migration: `migrations/add_market_quality_to_snapshots.py` (applied via psql)
+- `_write_equity_snapshot()` in monitoring_service now persists score with every daily/hourly snapshot
+- Historical quality scores queryable: `SELECT date, market_quality_score, market_quality_grade FROM equity_snapshots ORDER BY date DESC`
+
+**Signal generation gate:**
+- New pre-flight check in `run_signal_generation_sync()` in `trading_scheduler.py`
+- When `grade == 'low'` (score < 40): trend/momentum LONG entries blocked for that cycle
+- Mean reversion, market-neutral, and SHORT entries still run
+- Uses 10-min cached score — no extra latency per signal cycle
+- Logged as: `"Market quality gate: score=35/100 (low) — choppy market, trend/momentum LONG blocked"`
+
+**Frontend:**
+- MarketPulseWidget shows quality score below the 4 regime rows
+- Score bar (0-100), grade label (High/Normal/Choppy), sizing multiplier when < 100%
+
+### Files Changed (April 29, 2026)
+- `src/strategy/strategy_templates.py` — ATR + VWAP template improvements
+- `src/risk/risk_manager.py` — position sizing overhaul (BASE_RISK, CONFIDENCE_FLOOR, heat cap, symbol cap, min order, MQS sizing)
+- `src/core/trading_scheduler.py` — MAX_PER_SYMBOL 5→2, MQS signal gate, pre-flight balance/drawdown/pullback/quality gates
+- `src/core/monitoring_service.py` — differentiated zombie exits, template circuit breaker, MQS persistence in snapshots
+- `src/analytics/trade_journal.py` — `get_fast_performance_feedback()` (5-day)
+- `src/strategy/strategy_proposer.py` — fast feedback suppression + MQS trend weight multiplier in `_match_templates_to_symbols`
+- `src/strategy/autonomous_strategy_manager.py` — fast feedback wired, MQS computed before proposals
+- `src/strategy/market_analyzer.py` — `get_market_quality_score()` + `detect_pullback_state()`
+- `src/models/orm.py` — EquitySnapshotORM: market_quality_score + market_quality_grade columns
+- `src/api/routers/analytics.py` — `/analytics/regime-comprehensive` now includes `market_quality` field (synced from EC2)
+- `frontend/src/services/api.ts` — synced from EC2
+- `frontend/src/components/widgets/MarketPulseWidget.tsx` — Market Quality Score display
+- `config/autonomous_trading.yaml` — min_conviction_score: 57 → 70
+- `migrations/add_market_quality_to_snapshots.py` — DB migration (applied)
+
+### Open Items (April 29, 2026)
+- **Position sizing Sprint 10** — 3x bump guard redesign still pending (now less urgent with new BASE_RISK approach)
+- **Overview chart panel** — multi-pane rewrite deferred
+- **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false
+- **1h strategies** — still 0 active; pipeline fixes shipped, need next cycle to validate
+- **SHORT equity strategies** — uptrend-specific templates unblocked (Apr 27); need next autonomous cycle to activate
+- **Monitor next cycle** — expect: fewer proposals from ATR/VWAP templates (fast feedback suppression), higher conviction threshold filtering more noise, $5-12K positions instead of $2-4K
+- **Watch market quality score** — during next correction, verify score drops to <40 and trend gates fire correctly
