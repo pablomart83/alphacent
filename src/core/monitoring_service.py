@@ -2715,13 +2715,35 @@ class MonitoringService:
                         f"({pnl_pct:+.1f}%) for {age_days:.0f} days — blocking strategy demotion"
                     )
 
-                # Category 2: long-term flat — above p90 hold time for the strategy type
+                # Category 2: stale position — differentiated by strategy type
+                # Trend-following: 3 days. If the trend didn't materialize in 3 days, it's not coming.
+                # Mean reversion: 7 days. They need time to revert.
+                # Alpha Edge: 14 days. Fundamental thesis takes longer to play out.
+                # 4H strategies get half the daily threshold (faster timeframe).
                 elif not reason:
-                    flat_days_threshold = 7 if is_4h else 14
+                    strategy_type_str = ''
+                    if strategy:
+                        meta_check = strategy.strategy_metadata or {}
+                        strategy_type_str = str(meta_check.get('strategy_type', '')).lower()
+                        is_mean_reversion = any(t in strategy_type_str for t in ['mean_reversion', 'reversion', 'rsi_dip', 'bb_midband', 'stochastic'])
+                        is_alpha_edge = meta_check.get('strategy_category') == 'alpha_edge'
+                    else:
+                        is_mean_reversion = False
+                        is_alpha_edge = False
+
+                    if is_alpha_edge:
+                        flat_days_threshold = 7 if is_4h else 14
+                    elif is_mean_reversion:
+                        flat_days_threshold = 4 if is_4h else 7
+                    else:
+                        # Trend-following and everything else: faster exit
+                        flat_days_threshold = 2 if is_4h else 3
+
                     flat_pct_threshold = 1.0
                     if age_days >= flat_days_threshold and abs(pnl_pct) <= flat_pct_threshold:
+                        strategy_label = 'Alpha Edge' if is_alpha_edge else ('Mean Reversion' if is_mean_reversion else 'Trend')
                         reason = (
-                            f"Long-term flat: {'4H' if is_4h else '1D'} position flat "
+                            f"Stale underwater: {'4H' if is_4h else '1D'} {strategy_label} position flat "
                             f"({pnl_pct:+.1f}%) for {age_days:.0f} days — capital redeployment candidate"
                         )
 
@@ -3379,6 +3401,44 @@ class MonitoringService:
                         except Exception:
                             pass  # Factor data not available, skip
                     
+                    # --- Template-type circuit breaker ---
+                    # If this template family has < 30% win rate across all its strategies
+                    # over the last 10 closed trades, apply an additional decay penalty.
+                    # This accelerates retirement of underperforming template families
+                    # without requiring manual intervention.
+                    # Example: ATR Dynamic Trend Follow had 20% win rate in Apr 2026 correction.
+                    # All 19 ATR strategies would get -1.5 extra decay per check cycle,
+                    # retiring them ~2x faster than normal decay.
+                    template_name = meta.get('template_name', '')
+                    if template_name:
+                        try:
+                            from src.models.orm import PositionORM as _PosORM
+                            # Get last 10 closed trades across ALL strategies using this template
+                            _template_strats = [
+                                s for s in active_strategies
+                                if isinstance(s.strategy_metadata, dict)
+                                and s.strategy_metadata.get('template_name') == template_name
+                            ]
+                            _template_strat_ids = [s.id for s in _template_strats]
+                            if len(_template_strat_ids) >= 2:  # Only check if multiple strategies use this template
+                                _recent_closed = session.query(_PosORM).filter(
+                                    _PosORM.strategy_id.in_(_template_strat_ids),
+                                    _PosORM.closed_at.isnot(None),
+                                    _PosORM.realized_pnl.isnot(None),
+                                ).order_by(_PosORM.closed_at.desc()).limit(10).all()
+                                if len(_recent_closed) >= 5:  # Need at least 5 trades to judge
+                                    _wins = sum(1 for p in _recent_closed if (p.realized_pnl or 0) > 0)
+                                    _template_wr = _wins / len(_recent_closed)
+                                    if _template_wr < 0.30:
+                                        penalties['template_circuit_breaker'] = 1.5
+                                        logger.info(
+                                            f"[StrategyDecay] Template circuit breaker: {template_name} "
+                                            f"win rate {_template_wr:.0%} over last {len(_recent_closed)} trades "
+                                            f"— applying -1.5 decay penalty to {strat_orm.name}"
+                                        )
+                        except Exception as _cb_err:
+                            logger.debug(f"Template circuit breaker check failed: {_cb_err}")
+
                     # --- Apply penalties as incremental decay ---
                     # Each check subtracts penalties from the CURRENT score (not from 10).
                     # This makes decay cumulative: a strategy that stays in a bad regime

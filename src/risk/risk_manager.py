@@ -667,7 +667,7 @@ class RiskManager:
         if equity <= 0:
             equity = account.balance
 
-        MINIMUM_ORDER_SIZE = 2000.0
+        MINIMUM_ORDER_SIZE = 5000.0
         if available_balance < MINIMUM_ORDER_SIZE:
             logger.warning(
                 f"Insufficient balance for {symbol}: ${available_balance:.0f} available "
@@ -676,24 +676,29 @@ class RiskManager:
             return 0.0
 
         # ── Step 1: Base risk per trade ──────────────────────────────────────
-        # 0.2% of equity = ~$950 at current $476K equity.
-        # If this trade hits its stop loss, we lose ~$950 (0.2% of equity).
-        # Kept conservative because vol_scalar defaults to 1.0 when price_history
-        # is not in signal metadata — without vol scaling the raw size would be
-        # equity × 0.2% / 6% SL = ~$15,800, well within the 5% symbol cap.
-        # (Was 0.5% — produced $23K+ positions on every high-confidence signal.)
-        BASE_RISK_PCT = 0.002  # 0.2% of equity per trade
+        # 0.6% of equity = ~$2,800 at current $470K equity.
+        # If this trade hits its stop loss, we lose ~$2,800 (0.6% of equity).
+        # With a 6% SL: position_size = $470K × 0.6% / 6% = $4,700 raw.
+        # After vol scaling (0.5x-1.5x) this produces $2,350-$7,050 positions.
+        # With minimum floor of $5,000 this gives $5K-$10K positions — right for
+        # a concentrated 40-60 position book deploying ~$400K of $470K equity.
+        # (Was 0.2% — produced $1,567 raw → bumped to $2,000 minimum → avg $3,457.
+        #  That's 130 positions × $3.5K = noise trading, not systematic alpha.)
+        BASE_RISK_PCT = 0.006  # 0.6% of equity per trade
 
         # ── Step 2: Confidence scalar ────────────────────────────────────────
         # Scales risk linearly from 0.5× at confidence floor to 1.0× at max.
-        # A 0.95 confidence signal risks the full 0.5%. A 0.60 signal risks ~0.36%.
-        CONFIDENCE_FLOOR = 0.30
+        # A 0.95 confidence signal risks the full 0.6%. A 0.60 signal risks ~0.53%.
+        # Confidence floor raised from 0.30 to 0.50 — signals below 0.50 are noise.
+        # The data shows 0.30-0.45 confidence signals have < 35% win rate and
+        # negative expectancy. Only trade signals where the strategy is genuinely firing.
+        CONFIDENCE_FLOOR = 0.50
         confidence = signal.confidence if signal.confidence and signal.confidence > 0 else 0.5
         if confidence < CONFIDENCE_FLOOR:
-            logger.warning(f"Signal confidence {confidence:.2f} below floor {CONFIDENCE_FLOOR} for {symbol}")
+            logger.info(f"Signal confidence {confidence:.2f} below floor {CONFIDENCE_FLOOR} for {symbol} — skipping")
             return 0.0
         confidence_scalar = 0.5 + 0.5 * (confidence - CONFIDENCE_FLOOR) / (1.0 - CONFIDENCE_FLOOR)
-        risk_pct = BASE_RISK_PCT * confidence_scalar  # 0.25%–0.50%
+        risk_pct = BASE_RISK_PCT * confidence_scalar  # 0.30%–0.60%
 
         # ── Step 3: Volatility scalar ────────────────────────────────────────
         # Normalize risk contribution across asset classes.
@@ -774,8 +779,10 @@ class RiskManager:
             return 0.0
 
         # ── Step 6: Symbol concentration cap ────────────────────────────────
-        # No single symbol > 5% of equity across all strategies.
-        symbol_cap = equity * 0.05
+        # No single symbol > 3% of equity across all strategies.
+        # Reduced from 5% — with larger positions ($5-10K each), 5% = $23K per symbol
+        # is too concentrated for a 50-position book. 3% = $14K is the right limit.
+        symbol_cap = equity * 0.03
         existing_symbol_exposure = sum(
             self._get_position_value(pos)
             for pos in positions
@@ -815,8 +822,13 @@ class RiskManager:
         # ── Step 8: Portfolio heat cap ───────────────────────────────────────
         # Portfolio heat = sum of (position_value × stop_loss_pct) for all open
         # positions. This is the total capital at risk if every stop fires.
-        # Cap at 8% of equity — conservative but allows ~130 positions at $2K each.
-        MAX_PORTFOLIO_HEAT_PCT = 0.08
+        # Raised from 8% to 30% — with larger positions ($5-10K each) and a target
+        # of 40-60 positions, the old 8% cap was blocking new trades constantly:
+        # 125 positions × $3.5K × 6% SL = $26K heat vs $37K cap (8% of $470K).
+        # At 30%: $141K max heat allows ~50 positions × $8K × 6% = $24K — well within.
+        # This is still conservative: a 30% heat cap means worst-case drawdown if
+        # every single stop fires simultaneously is 30% of equity.
+        MAX_PORTFOLIO_HEAT_PCT = 0.30
         max_heat = equity * MAX_PORTFOLIO_HEAT_PCT
         current_heat = sum(
             self._get_position_value(pos) * 0.06  # assume 6% SL as proxy
@@ -842,6 +854,26 @@ class RiskManager:
 
         # ── Step 9: Drawdown-based sizing ────────────────────────────────────
         # Reduce position sizes when portfolio is in drawdown from 30d peak.
+        # Also applies Market Quality Score sizing multiplier — in choppy/noisy
+        # markets (low quality score), reduce all position sizes by up to 30%.
+        try:
+            from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+            from src.data.market_data_manager import get_market_data_manager
+            _mdm_mqs = get_market_data_manager()
+            if _mdm_mqs:
+                _mqs_analyzer = MarketStatisticsAnalyzer(_mdm_mqs)
+                _mqs = _mqs_analyzer.get_market_quality_score()
+                _mqs_mult = _mqs.get("sizing_multiplier", 1.0)
+                if _mqs_mult < 1.0:
+                    position_size *= _mqs_mult
+                    logger.info(
+                        f"Market quality sizing: {symbol} size reduced to ${position_size:.0f} "
+                        f"(quality={_mqs.get('score', 50):.0f}/100, grade={_mqs.get('grade', 'normal')}, "
+                        f"multiplier={_mqs_mult:.2f}x)"
+                    )
+        except Exception as _mqs_err:
+            logger.debug(f"Market quality sizing check failed: {_mqs_err}")
+
         try:
             import yaml as _yaml
             from pathlib import Path as _Path
@@ -891,7 +923,7 @@ class RiskManager:
         position_size = min(position_size, available_balance)
 
         # ── Step 11: Minimum floor — applied last ────────────────────────────
-        # If all caps reduced the size below $2K but didn't zero it out,
+        # If all caps reduced the size below $5K but didn't zero it out,
         # bump to minimum. We decided to trade — submit at minimum rather than fail.
         # Only return 0 if we genuinely can't afford the minimum.
         # (MINIMUM_ORDER_SIZE already defined at top of function — no redefinition needed)

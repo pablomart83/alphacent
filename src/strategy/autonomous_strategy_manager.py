@@ -1122,6 +1122,27 @@ class AutonomousStrategyManager:
         """
         try:
             proposal_count = self.config["autonomous"]["proposal_count"]
+
+            # Compute Market Quality Score and wire into proposer for template weighting.
+            # In choppy/low-quality markets, trend-following templates get suppressed
+            # at the proposal stage — before they waste WF compute slots.
+            try:
+                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                from src.data.market_data_manager import get_market_data_manager
+                _mdm_mqs = get_market_data_manager()
+                if _mdm_mqs:
+                    _mqs_analyzer = MarketStatisticsAnalyzer(_mdm_mqs)
+                    _mqs = _mqs_analyzer.get_market_quality_score()
+                    self.strategy_proposer._mqs_trend_weight_multiplier = _mqs.get("trend_weight_multiplier", 1.0)
+                    stats["market_quality_score"] = _mqs.get("score", 50)
+                    stats["market_quality_grade"] = _mqs.get("grade", "normal")
+                    logger.info(
+                        f"Market Quality Score: {_mqs.get('score', 50):.0f}/100 ({_mqs.get('grade', 'normal')}) "
+                        f"— trend template weight multiplier: {_mqs.get('trend_weight_multiplier', 1.0):.2f}x"
+                    )
+            except Exception as _mqs_err:
+                logger.debug(f"Market quality score failed (non-critical): {_mqs_err}")
+                self.strategy_proposer._mqs_trend_weight_multiplier = 1.0
             
             # Log disabled templates once per cycle
             try:
@@ -1199,6 +1220,9 @@ class AutonomousStrategyManager:
         Reads feedback config from ``self.config`` and delegates to
         ``TradeJournal.get_performance_feedback()`` and
         ``StrategyProposer.apply_performance_feedback()``.
+
+        Also runs the fast 5-day feedback to suppress underperforming templates
+        immediately — the 60-day feedback is too slow to react to regime changes.
         """
         try:
             from src.models.database import get_database
@@ -1224,6 +1248,26 @@ class AutonomousStrategyManager:
                 max_weight=max_weight,
                 min_weight=min_weight,
             )
+
+            # Fast 5-day feedback: suppress templates with < 30% win rate recently.
+            # This adapts to current market conditions within days, not 60 days.
+            try:
+                fast_feedback = trade_journal.get_fast_performance_feedback(
+                    lookback_days=5, min_trades=3
+                )
+                suppression = fast_feedback.get("template_suppression", {})
+                self.strategy_proposer._fast_template_suppression = suppression
+                if suppression:
+                    logger.info(
+                        f"  Fast feedback (5d): suppressing {len(suppression)} templates — "
+                        + ", ".join(f"{k}={v:.1f}x" for k, v in suppression.items())
+                    )
+                else:
+                    self.strategy_proposer._fast_template_suppression = {}
+                    logger.info(f"  Fast feedback (5d): no templates suppressed ({fast_feedback.get('total_trades', 0)} trades analyzed)")
+            except Exception as _ff_err:
+                logger.debug(f"Fast feedback failed (non-critical): {_ff_err}")
+                self.strategy_proposer._fast_template_suppression = {}
 
             stats["performance_feedback_applied"] = feedback.get("has_sufficient_data", False)
             stats["performance_feedback_trades"] = feedback.get("total_trades", 0)

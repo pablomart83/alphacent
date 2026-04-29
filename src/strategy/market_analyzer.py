@@ -1494,6 +1494,172 @@ class MarketStatisticsAnalyzer:
             logger.warning(f"Pullback detection failed: {e}")
             return {"in_pullback": False, "severity": "none", "reason": f"error: {e}"}
 
+    def get_market_quality_score(self) -> Dict:
+        """
+        Compute a composite Market Quality Score (0-100) that measures whether
+        the current market environment is conducive to systematic trend-following.
+
+        A high score means clean, directional, low-noise conditions — full sizing,
+        trend templates get boosted. A low score means choppy, news-driven,
+        high-noise conditions — reduce sizing, suppress trend templates, boost
+        mean reversion.
+
+        Components:
+        - ADX(14) of SPY: trend strength (0-40 pts). ADX>25 = strong trend.
+        - ATR/price of SPY (inverted): lower vol = cleaner trend (0-30 pts).
+        - 5-day directional consistency: are daily moves in the same direction? (0-20 pts)
+        - VIX level (inverted): lower fear = better conditions (0-10 pts)
+
+        Score interpretation:
+        - 70-100: High quality — full sizing, trend templates at normal weight
+        - 40-70:  Normal — standard sizing and weights
+        - 0-40:   Low quality / choppy — reduce sizing 30%, suppress trend templates
+
+        Returns:
+            Dict with score (0-100), grade ('high'/'normal'/'low'), and component breakdown
+        """
+        cache_key = "market_quality_score"
+        cached = self._get_cached(cache_key, ttl_seconds=600)  # 10-min cache
+        if cached is not None:
+            return cached
+
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30)
+
+            bars = self.market_data.get_historical_data(
+                symbol="SPY", start=start_date, end=end_date,
+                interval="1d", prefer_yahoo=True
+            )
+            if not bars or len(bars) < 15:
+                result = {"score": 50, "grade": "normal", "reason": "insufficient data"}
+                self._set_cached(cache_key, result)
+                return result
+
+            closes = [b.close for b in bars if b.close and b.close > 0]
+            highs = [b.high for b in bars if b.high and b.high > 0]
+            lows = [b.low for b in bars if b.low and b.low > 0]
+
+            if len(closes) < 15:
+                result = {"score": 50, "grade": "normal", "reason": "insufficient data"}
+                self._set_cached(cache_key, result)
+                return result
+
+            # --- Component 1: ADX(14) — trend strength (0-40 pts) ---
+            # ADX > 25 = strong trend (40 pts), ADX < 15 = no trend (0 pts)
+            adx_score = 0.0
+            adx_val = 0.0
+            try:
+                if len(closes) >= 15 and len(highs) >= 15 and len(lows) >= 15:
+                    # Simplified ADX calculation
+                    tr_list, plus_dm, minus_dm = [], [], []
+                    for i in range(1, len(closes)):
+                        h, l, pc = highs[i], lows[i], closes[i-1]
+                        tr_list.append(max(h - l, abs(h - pc), abs(l - pc)))
+                        plus_dm.append(max(highs[i] - highs[i-1], 0) if highs[i] - highs[i-1] > lows[i-1] - lows[i] else 0)
+                        minus_dm.append(max(lows[i-1] - lows[i], 0) if lows[i-1] - lows[i] > highs[i] - highs[i-1] else 0)
+                    period = 14
+                    if len(tr_list) >= period:
+                        atr14 = sum(tr_list[-period:]) / period
+                        pdm14 = sum(plus_dm[-period:]) / period
+                        mdm14 = sum(minus_dm[-period:]) / period
+                        if atr14 > 0:
+                            pdi = (pdm14 / atr14) * 100
+                            mdi = (mdm14 / atr14) * 100
+                            dx = abs(pdi - mdi) / (pdi + mdi) * 100 if (pdi + mdi) > 0 else 0
+                            adx_val = dx  # Simplified (true ADX is smoothed, this is DX)
+                            adx_score = min(40.0, max(0.0, (adx_val - 10) / 20 * 40))
+            except Exception:
+                adx_score = 20.0  # Neutral if calculation fails
+
+            # --- Component 2: ATR/price (inverted) — volatility level (0-30 pts) ---
+            # Low vol (ATR/price < 1%) = 30 pts, High vol (ATR/price > 3%) = 0 pts
+            atr_score = 0.0
+            atr_pct = 0.0
+            try:
+                if len(tr_list) >= 14:
+                    atr14_val = sum(tr_list[-14:]) / 14
+                    atr_pct = atr14_val / closes[-1] if closes[-1] > 0 else 0.02
+                    # Invert: lower vol = higher score
+                    atr_score = min(30.0, max(0.0, (0.03 - atr_pct) / 0.02 * 30))
+            except Exception:
+                atr_score = 15.0
+
+            # --- Component 3: 5-day directional consistency (0-20 pts) ---
+            # Are the last 5 daily moves in the same direction?
+            # 5/5 same direction = 20 pts, 3/5 = 10 pts, mixed = 0 pts
+            consistency_score = 0.0
+            try:
+                if len(closes) >= 6:
+                    daily_moves = [closes[-i] - closes[-i-1] for i in range(1, 6)]
+                    ups = sum(1 for m in daily_moves if m > 0)
+                    downs = sum(1 for m in daily_moves if m < 0)
+                    max_same = max(ups, downs)
+                    consistency_score = max(0.0, (max_same - 2) / 3 * 20)
+            except Exception:
+                consistency_score = 10.0
+
+            # --- Component 4: VIX level (inverted) (0-10 pts) ---
+            # VIX < 15 = 10 pts, VIX > 30 = 0 pts
+            vix_score = 5.0  # Default neutral
+            vix_val = None
+            try:
+                vix_bars = self.market_data.get_historical_data(
+                    symbol="^VIX", start=end_date - timedelta(days=5), end=end_date,
+                    interval="1d", prefer_yahoo=True
+                )
+                if vix_bars:
+                    vix_val = vix_bars[-1].close
+                    if vix_val:
+                        vix_score = min(10.0, max(0.0, (30 - vix_val) / 15 * 10))
+            except Exception:
+                pass
+
+            total_score = adx_score + atr_score + consistency_score + vix_score
+            total_score = max(0.0, min(100.0, total_score))
+
+            if total_score >= 70:
+                grade = "high"
+            elif total_score >= 40:
+                grade = "normal"
+            else:
+                grade = "low"
+
+            result = {
+                "score": round(total_score, 1),
+                "grade": grade,
+                "components": {
+                    "adx_score": round(adx_score, 1),
+                    "adx_val": round(adx_val, 1),
+                    "atr_score": round(atr_score, 1),
+                    "atr_pct": round(atr_pct * 100, 2),
+                    "consistency_score": round(consistency_score, 1),
+                    "vix_score": round(vix_score, 1),
+                    "vix_val": round(vix_val, 1) if vix_val else None,
+                },
+                "sizing_multiplier": 1.0 if grade == "high" else (0.85 if grade == "normal" else 0.70),
+                "trend_weight_multiplier": 1.0 if grade == "high" else (0.85 if grade == "normal" else 0.50),
+            }
+
+            logger.info(
+                f"Market Quality Score: {total_score:.0f}/100 ({grade}) — "
+                f"ADX={adx_val:.0f}({adx_score:.0f}pts), "
+                f"ATR={atr_pct*100:.1f}%({atr_score:.0f}pts), "
+                f"consistency={consistency_score:.0f}pts, "
+                f"VIX={vix_val:.0f}({vix_score:.0f}pts)" if vix_val else
+                f"Market Quality Score: {total_score:.0f}/100 ({grade})"
+            )
+
+            self._set_cached(cache_key, result)
+            return result
+
+        except Exception as e:
+            logger.warning(f"Market quality score failed: {e}")
+            result = {"score": 50, "grade": "normal", "reason": f"error: {e}",
+                      "sizing_multiplier": 1.0, "trend_weight_multiplier": 1.0}
+            self._set_cached(cache_key, result)
+            return result
+
     def detect_regime_change(
         self,
         strategy_id: str,

@@ -6339,16 +6339,16 @@ class StrategyTemplateLibrary:
         # VWAP Trend Continuation (4H) — swing version
         templates.append(StrategyTemplate(
             name="4H VWAP Trend Continuation",
-            description="Buy when 4H price holds above VWAP with RSI > 50. VWAP as dynamic support on swing timeframe.",
+            description="Buy when 4H price holds above VWAP with confirmed trend (ADX>18) and volume expansion. VWAP as dynamic support — only trade when the trend has real momentum behind it.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
-                "CLOSE > VWAP() AND CLOSE < VWAP() * 1.01 AND RSI(14) > 50"
+                "CLOSE > VWAP() AND CLOSE < VWAP() * 1.01 AND RSI(14) > 50 AND ADX(14) > 18 AND VOLUME > VOLUME_MA(20) * 1.2"
             ],
             exit_conditions=[
-                "CLOSE < VWAP() * 0.985 OR RSI(14) > 75"
+                "CLOSE < VWAP() * 0.985 OR RSI(14) > 75 OR ADX(14) < 15"
             ],
-            required_indicators=["VWAP", "RSI"],
+            required_indicators=["VWAP", "RSI", "ADX", "Volume MA"],
             default_parameters={
                 "stop_loss_pct": 0.03,
                 "take_profit_pct": 0.06,
@@ -6356,7 +6356,7 @@ class StrategyTemplateLibrary:
                 "sizing_method": "volatility",
                 "position_size_atr_multiplier": 1.0,
             },
-            expected_trade_frequency="2-4 trades/month",
+            expected_trade_frequency="1-3 trades/month",
             expected_holding_period="1-4 days",
             risk_reward_ratio=2.0,
             metadata={"direction": "long", "interval_4h": True, "interval": "4h", "skip_param_override": True}
@@ -7322,26 +7322,32 @@ class StrategyTemplateLibrary:
         # This template uses ATR for both entry confirmation (volatility expansion = breakout)
         # and exit (price reverts more than 2x ATR from recent high = trend exhaustion).
         # Works across all asset classes.
+        #
+        # STRENGTHENED (Apr 2026): Added ADX>20 trend quality filter and RSI 50-65 band.
+        # Original entry (CLOSE > SMA(20) AND CLOSE > SMA(50) AND RSI > 50) fired on every
+        # bounce above moving averages in choppy markets — no trend quality check.
+        # ADX>20 confirms a real trend exists. RSI 50-65 prevents entering overbought.
+        # Removed RANGING from market_regimes — trend-following has no edge in ranging markets.
         templates.append(StrategyTemplate(
             name="ATR Dynamic Trend Follow",
-            description="Enter when price breaks above SMA(20) with ATR expansion (volatility confirms the move). Exit when price drops 2x ATR from the high. Dynamic risk management.",
+            description="Enter when price breaks above SMA(20) with confirmed trend (ADX>20) and RSI in momentum zone (50-65). Exit when trend weakens. Quality-filtered trend following.",
             strategy_type=StrategyType.TREND_FOLLOWING,
             market_regimes=[
                 MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
-                MarketRegime.TRENDING_DOWN_WEAK, MarketRegime.RANGING,
+                MarketRegime.TRENDING_DOWN_WEAK,
             ],
             entry_conditions=[
-                "CLOSE > SMA(20) AND CLOSE > SMA(50) AND RSI(14) > 50"
+                "CLOSE > SMA(20) AND CLOSE > SMA(50) AND RSI(14) > 50 AND RSI(14) < 65 AND ADX(14) > 20"
             ],
             exit_conditions=[
-                "CLOSE < SMA(20) OR RSI(14) < 35"
+                "CLOSE < SMA(20) OR RSI(14) < 35 OR ADX(14) < 15"
             ],
-            required_indicators=["SMA:20", "SMA:50", "RSI", "ATR"],
+            required_indicators=["SMA:20", "SMA:50", "RSI", "ATR", "ADX"],
             default_parameters={
                 "stop_loss_pct": 0.04,
                 "take_profit_pct": 0.10,
             },
-            expected_trade_frequency="2-5 trades/month",
+            expected_trade_frequency="1-3 trades/month",
             expected_holding_period="5-20 days",
             risk_reward_ratio=2.5,
             metadata={"direction": "long", "skip_param_override": True}

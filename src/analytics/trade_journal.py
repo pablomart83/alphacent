@@ -1496,6 +1496,90 @@ class TradeJournal:
         finally:
             session.close()
 
+    def get_fast_performance_feedback(self, lookback_days: int = 5, min_trades: int = 3) -> Dict[str, Any]:
+        """
+        Fast 5-day performance feedback for real-time template weight suppression.
+
+        Runs every autonomous cycle to detect template families that are currently
+        underperforming. Unlike the 60-day feedback (which adjusts long-term weights),
+        this produces a suppression multiplier (0.1-1.0) applied immediately to
+        proposal weights for the current cycle.
+
+        A template with < 30% win rate over the last 5 days gets a 0.1 multiplier —
+        it can still be proposed but at 10% of normal weight. This means ATR Dynamic
+        Trend Follow would be suppressed after 2 days of a correction, not 7.
+
+        Returns:
+            Dict with 'template_suppression': {template_name: multiplier (0.1-1.0)}
+        """
+        start_date = datetime.now() - timedelta(days=lookback_days)
+        session = self.database.get_session()
+        try:
+            from src.models.orm import PositionORM, StrategyORM
+            # Use positions table directly — faster than trade journal for recent data
+            recent_closed = (
+                session.query(PositionORM, StrategyORM)
+                .join(StrategyORM, PositionORM.strategy_id == StrategyORM.id)
+                .filter(
+                    PositionORM.closed_at >= start_date,
+                    PositionORM.realized_pnl.isnot(None),
+                )
+                .all()
+            )
+
+            if len(recent_closed) < min_trades:
+                return {"template_suppression": {}, "total_trades": len(recent_closed)}
+
+            # Group by template name
+            template_groups: Dict[str, list] = {}
+            for pos, strat in recent_closed:
+                meta = strat.strategy_metadata or {}
+                tmpl = meta.get('template_name', '')
+                if tmpl:
+                    template_groups.setdefault(tmpl, []).append(pos.realized_pnl or 0)
+
+            suppression: Dict[str, float] = {}
+            for tmpl, pnls in template_groups.items():
+                if len(pnls) < min_trades:
+                    continue
+                wins = sum(1 for p in pnls if p > 0)
+                wr = wins / len(pnls)
+                total_pnl = sum(pnls)
+
+                if wr < 0.25 or total_pnl < -500:
+                    # Severely underperforming — suppress to 10%
+                    suppression[tmpl] = 0.1
+                    logger.info(
+                        f"Fast feedback: suppressing {tmpl} to 10% weight "
+                        f"(win rate {wr:.0%}, P&L ${total_pnl:.0f} over {len(pnls)} trades in {lookback_days}d)"
+                    )
+                elif wr < 0.35 or total_pnl < -200:
+                    # Underperforming — suppress to 40%
+                    suppression[tmpl] = 0.4
+                    logger.info(
+                        f"Fast feedback: reducing {tmpl} to 40% weight "
+                        f"(win rate {wr:.0%}, P&L ${total_pnl:.0f} over {len(pnls)} trades in {lookback_days}d)"
+                    )
+                elif wr > 0.65 and total_pnl > 200:
+                    # Outperforming — boost to 150%
+                    suppression[tmpl] = 1.5
+                    logger.info(
+                        f"Fast feedback: boosting {tmpl} to 150% weight "
+                        f"(win rate {wr:.0%}, P&L ${total_pnl:.0f} over {len(pnls)} trades in {lookback_days}d)"
+                    )
+
+            return {
+                "template_suppression": suppression,
+                "total_trades": len(recent_closed),
+                "lookback_days": lookback_days,
+            }
+
+        except Exception as e:
+            logger.warning(f"Fast performance feedback failed: {e}")
+            return {"template_suppression": {}, "total_trades": 0}
+        finally:
+            session.close()
+
     def _calculate_slippage_analytics(
         self, trades: List["TradeJournalEntryORM"]
     ) -> Dict[str, Any]:

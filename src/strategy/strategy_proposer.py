@@ -4887,6 +4887,30 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 ttype = (template.metadata or {}).get('strategy_type') or template.name
                 tw = template_weights.get(ttype, 1.0)
                 base_score *= tw
+
+                # Fast 5-day feedback suppression — applied on top of 60-day weights.
+                # If a template family has < 30% win rate in the last 5 days, suppress
+                # it to 10-40% of normal weight. This adapts to current market within days.
+                # Example: ATR Dynamic Trend Follow at 20% win rate → 0.1x multiplier.
+                fast_suppression = getattr(self, '_fast_template_suppression', {})
+                fast_mult = fast_suppression.get(template.name, 1.0)
+
+                # Market Quality Score: in low-quality (choppy) markets, additionally
+                # suppress trend-following templates by up to 50%.
+                mqs_trend_mult = getattr(self, '_mqs_trend_weight_multiplier', 1.0)
+                if mqs_trend_mult < 1.0:
+                    tmpl_type = (template.metadata or {}).get('strategy_type', '')
+                    tmpl_name_lower = template.name.lower()
+                    is_trend = (
+                        str(tmpl_type).lower() in ('trend_following', 'momentum', 'breakout') or
+                        any(kw in tmpl_name_lower for kw in ['trend', 'momentum', 'breakout', 'atr dynamic', 'ema ribbon', 'adx', 'vwap trend'])
+                    )
+                    if is_trend:
+                        fast_mult *= mqs_trend_mult
+
+                if fast_mult != 1.0:
+                    base_score *= fast_mult
+
                 sym_bonus = symbol_scores_fb.get(symbol, 0.0)
                 base_score += max(-15.0, min(15.0, sym_bonus))
 
