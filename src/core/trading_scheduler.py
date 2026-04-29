@@ -436,6 +436,32 @@ class TradingScheduler:
             except Exception as _pb_err:
                 logger.debug(f"Pullback detection failed: {_pb_err}")
 
+            # ── PRE-FLIGHT: Market Quality Score gate ─────────────────────────────
+            # When market quality is low (<40, choppy/noisy), block new trend-following
+            # and momentum LONG entries in the signal cycle — not just reduce their size.
+            # Mean reversion, market-neutral, and SHORT entries still run.
+            # The score is cached for 10 minutes so this is fast (no extra API calls).
+            _mqs_grade = "normal"
+            _mqs_score = 50.0
+            _mqs_block_trend = False
+            try:
+                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                _mqs_analyzer = MarketStatisticsAnalyzer(self._market_data)
+                _mqs_result = _mqs_analyzer.get_market_quality_score()
+                _mqs_score = _mqs_result.get("score", 50.0)
+                _mqs_grade = _mqs_result.get("grade", "normal")
+                if _mqs_grade == "low":
+                    _mqs_block_trend = True
+                    logger.warning(
+                        f"Market quality gate: score={_mqs_score:.0f}/100 (low) — "
+                        f"blocking trend/momentum LONG entries this cycle. "
+                        f"Mean reversion and market-neutral still active."
+                    )
+                else:
+                    logger.debug(f"Market quality: {_mqs_score:.0f}/100 ({_mqs_grade}) — no entry restrictions")
+            except Exception as _mqs_err:
+                logger.debug(f"Market quality gate check failed: {_mqs_err}")
+
             # Trend/momentum strategy types that should be paused during pullbacks
             _TREND_MOMENTUM_TYPES = {
                 'trend_following', 'momentum', 'breakout',
@@ -757,7 +783,30 @@ class TradingScheduler:
                             signals_rejected += 1
                             continue
 
-                    # Safety: stop if we've hit the max orders cap
+                    # Market quality gate: block trend/momentum LONGs when market is choppy
+                    # Score < 40 (low grade) = ADX weak + high vol + inconsistent direction.
+                    # Mean reversion, market-neutral, and SHORTs still run — they're designed
+                    # for exactly these conditions. Only trend-following is paused.
+                    if _mqs_block_trend and _sig_dir == "LONG":
+                        _strat_type = (strategy.metadata or {}).get('strategy_type', '') if strategy.metadata else ''
+                        _strat_type_lower = str(_strat_type).lower().replace(' ', '_').replace('-', '_')
+                        _is_trend_momentum = any(t in _strat_type_lower for t in _TREND_MOMENTUM_TYPES)
+                        _tmpl_name = (strategy.metadata or {}).get('template_name', '') if strategy.metadata else ''
+                        _tmpl_lower = str(_tmpl_name).lower()
+                        _is_trend_momentum = _is_trend_momentum or any(
+                            kw in _tmpl_lower for kw in ['trend', 'momentum', 'breakout', 'ema ribbon', 'adx', 'vwap trend', 'atr dynamic']
+                        )
+                        if _is_trend_momentum:
+                            self._log_signal_decision(
+                                session=session, signal=signal, strategy_name=strategy.name,
+                                decision="REJECTED",
+                                rejection_reason=(
+                                    f"Market quality gate: score={_mqs_score:.0f}/100 ({_mqs_grade}) — "
+                                    f"choppy market, trend/momentum LONG blocked"
+                                ),
+                            )
+                            signals_rejected += 1
+                            continue
                     if orders_executed >= MAX_ORDERS_PER_RUN:
                         logger.info(
                             f"Max orders per run reached ({MAX_ORDERS_PER_RUN}). "

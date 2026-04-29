@@ -356,6 +356,9 @@ class EquitySnapshotORM(Base):
     realized_pnl_cumulative = Column(Float, nullable=False, default=0.0)
     positions_count = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.now)
+    # Market quality score persisted with each snapshot for historical analysis
+    market_quality_score = Column(Float, nullable=True)   # 0-100
+    market_quality_grade = Column(String, nullable=True)  # 'high' | 'normal' | 'low'
 
     __table_args__ = (
         UniqueConstraint('date', 'snapshot_type', name='uq_equity_snapshot_date_type'),

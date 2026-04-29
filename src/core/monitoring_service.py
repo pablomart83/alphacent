@@ -1324,12 +1324,30 @@ class MonitoringService:
             existing = session.query(EquitySnapshotORM).filter_by(
                 date=date_key, snapshot_type=snapshot_type
             ).first()
+
+            # Compute market quality score to persist alongside equity data
+            _mqs_score = None
+            _mqs_grade = None
+            try:
+                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                from src.data.market_data_manager import get_market_data_manager
+                _mdm = get_market_data_manager()
+                if _mdm:
+                    _mqs = MarketStatisticsAnalyzer(_mdm).get_market_quality_score()
+                    _mqs_score = _mqs.get('score')
+                    _mqs_grade = _mqs.get('grade')
+            except Exception:
+                pass  # Non-critical — snapshot still saves without quality score
+
             if existing:
                 existing.equity = equity
                 existing.balance = balance
                 existing.unrealized_pnl = unrealized
                 existing.realized_pnl_cumulative = realized_cum
                 existing.positions_count = positions_count
+                if _mqs_score is not None:
+                    existing.market_quality_score = _mqs_score
+                    existing.market_quality_grade = _mqs_grade
             else:
                 snapshot = EquitySnapshotORM(
                     date=date_key,
@@ -1340,6 +1358,8 @@ class MonitoringService:
                     realized_pnl_cumulative=realized_cum,
                     positions_count=positions_count,
                     created_at=now,
+                    market_quality_score=_mqs_score,
+                    market_quality_grade=_mqs_grade,
                 )
                 session.add(snapshot)
 
