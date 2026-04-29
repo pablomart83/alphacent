@@ -57,6 +57,24 @@ class PositionManager:
         "index":     {"activation": 0.04, "distance": 0.05},
     }
 
+    # Breakeven stop thresholds — move SL to entry price when profit reaches this level.
+    # This is a one-time ratchet that fires BEFORE the trailing stop activation.
+    # Once SL >= entry price, the position cannot lose money (excluding spread/slippage).
+    # Set lower than trailing stop activation so there's always a profit-protection
+    # window between breakeven and the trailing stop taking over.
+    #
+    # Rationale: a position that reaches +3% and then reverses to -6% is a loss that
+    # could have been avoided. Moving SL to breakeven at +3% costs nothing and
+    # eliminates the "gave back a winner" scenario entirely.
+    BREAKEVEN_STOP_PARAMS = {
+        "stock":     0.03,   # Move SL to entry at +3% profit
+        "etf":       0.025,  # ETFs are less volatile — tighter breakeven
+        "crypto":    0.05,   # Crypto needs more room before locking in breakeven
+        "forex":     0.015,  # Forex: tight, 1.5% is meaningful
+        "commodity": 0.03,
+        "index":     0.025,
+    }
+
     # ATR multiplier for minimum trail distance.
     # Trail distance = max(distance_pct * price, ATR_TRAIL_MULTIPLIER * daily_ATR)
     # This prevents penny-stop whipsaws on high-priced instruments where a fixed
@@ -89,11 +107,19 @@ class PositionManager:
     def check_trailing_stops(self, positions: List[Position], skip_etoro_update: bool = False) -> List[Order]:
         """Check positions for trailing stop-loss adjustments.
 
-        Uses asset-class-aware activation thresholds and trailing distances:
-        - Stocks/ETFs: 3% activation, 4-5% distance (low daily vol)
-        - Crypto: 6% activation, 8% distance (high daily vol)
-        - Forex: 2% activation, 3% distance (very low daily vol)
-        - Commodities: 4% activation, 6% distance (moderate daily vol)
+        Two-stage profit protection:
+
+        Stage 1 — Breakeven stop (fires first, lower threshold):
+          When profit reaches BREAKEVEN_STOP_PARAMS threshold (3% stocks, 2% forex,
+          5% crypto), move SL to entry price. One-time ratchet — position can no
+          longer lose money. Eliminates the "gave back a winner" scenario.
+
+        Stage 2 — Trailing stop (fires after breakeven, higher threshold):
+          Uses asset-class-aware activation thresholds and trailing distances:
+          - Stocks/ETFs: 5% activation, 7% distance
+          - Crypto: 8% activation, 10% distance
+          - Forex: 2% activation, 3% distance
+          - Commodities/Indices: 4-5% activation, 5-7% distance
 
         The config-level trailing_stop_activation_pct and trailing_stop_distance_pct
         serve as overrides — if set, they take precedence over asset-class defaults.
@@ -134,6 +160,72 @@ class PositionManager:
                 params = self.TRAILING_STOP_PARAMS.get(asset_class, self.TRAILING_STOP_PARAMS["stock"])
                 activation_pct = params["activation"]
                 distance_pct = params["distance"]
+
+                # ── BREAKEVEN STOP ────────────────────────────────────────────────
+                # When profit reaches the breakeven threshold, move SL to entry price.
+                # This is a one-time ratchet — fires once, then becomes a no-op.
+                # Runs BEFORE the trailing stop check so there's always a protection
+                # window between breakeven and the trailing stop taking over.
+                #
+                # Example (stock): position reaches +3% → SL moves to entry price.
+                # If price then reverses, the position closes at breakeven (no loss).
+                # The trailing stop then takes over at +5% and follows price upward.
+                breakeven_threshold = self.BREAKEVEN_STOP_PARAMS.get(asset_class, 0.03)
+                if profit_pct >= breakeven_threshold and position.entry_price > 0:
+                    # Only apply if SL is currently below entry (still in loss territory)
+                    if position.side.value == "LONG":
+                        be_sl = position.entry_price  # Breakeven = entry price for longs
+                        if position.stop_loss is None or position.stop_loss < be_sl:
+                            # Move SL to entry price
+                            if skip_etoro_update:
+                                position.stop_loss = be_sl
+                                positions_updated += 1
+                                logger.info(
+                                    f"Breakeven stop set: {position.symbol} LONG "
+                                    f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.2f}"
+                                )
+                            else:
+                                try:
+                                    self.etoro_client.update_position_stop_loss(
+                                        position_id=position.etoro_position_id,
+                                        stop_loss_rate=be_sl
+                                    )
+                                    position.stop_loss = be_sl
+                                    positions_updated += 1
+                                    logger.info(
+                                        f"Breakeven stop set: {position.symbol} LONG "
+                                        f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.2f}"
+                                    )
+                                except EToroAPIError as e:
+                                    logger.warning(
+                                        f"Could not set breakeven stop for {position.symbol}: {e}"
+                                    )
+                    else:  # SHORT
+                        be_sl = position.entry_price  # Breakeven = entry price for shorts
+                        if position.stop_loss is None or position.stop_loss > be_sl:
+                            if skip_etoro_update:
+                                position.stop_loss = be_sl
+                                positions_updated += 1
+                                logger.info(
+                                    f"Breakeven stop set: {position.symbol} SHORT "
+                                    f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.2f}"
+                                )
+                            else:
+                                try:
+                                    self.etoro_client.update_position_stop_loss(
+                                        position_id=position.etoro_position_id,
+                                        stop_loss_rate=be_sl
+                                    )
+                                    position.stop_loss = be_sl
+                                    positions_updated += 1
+                                    logger.info(
+                                        f"Breakeven stop set: {position.symbol} SHORT "
+                                        f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.2f}"
+                                    )
+                                except EToroAPIError as e:
+                                    logger.warning(
+                                        f"Could not set breakeven stop for {position.symbol}: {e}"
+                                    )
 
                 # NOTE: Per-asset-class thresholds are always used.
                 # The config-level trailing_stop_activation_pct / trailing_stop_distance_pct
