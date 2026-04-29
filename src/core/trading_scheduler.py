@@ -374,6 +374,75 @@ class TradingScheduler:
 
             logger.info(f"Found {len(positions)} open positions and {len(pending_orders)} pending/recent orders")
 
+            # ── PRE-FLIGHT: Balance check ─────────────────────────────────────────
+            # If available balance is below the minimum order size, skip all entry
+            # signals immediately. Exit signals still run — they don't need balance.
+            # This avoids running 40+ signals through the full pipeline only to have
+            # every one rejected at the last step with eToro error 604.
+            MINIMUM_ORDER_SIZE = 2000.0
+            _available_balance = getattr(account_info, 'balance', 0) or 0
+            try:
+                from src.models.orm import AccountInfoORM
+                _db_bal_sess = db.get_session()
+                try:
+                    _acct_row = _db_bal_sess.query(AccountInfoORM).order_by(
+                        AccountInfoORM.updated_at.desc()
+                    ).first()
+                    if _acct_row and _acct_row.balance is not None:
+                        _available_balance = float(_acct_row.balance)
+                finally:
+                    _db_bal_sess.close()
+            except Exception:
+                pass
+            _skip_entries_balance = _available_balance < MINIMUM_ORDER_SIZE
+            if _skip_entries_balance:
+                logger.warning(
+                    f"Pre-flight: balance ${_available_balance:.0f} < minimum ${MINIMUM_ORDER_SIZE:.0f} "
+                    f"— skipping all ENTRY signals this cycle (EXIT signals will still run)"
+                )
+
+            # ── PRE-FLIGHT: Portfolio drawdown pause ──────────────────────────────
+            # If total unrealized P&L is below -1.5% of equity, pause new LONG entries
+            # from trend-following and momentum strategies. Mean reversion and
+            # market-neutral can still trade — they're designed for pullbacks.
+            # This is the circuit breaker that prevents adding to a losing book.
+            DRAWDOWN_PAUSE_THRESHOLD = -0.015  # -1.5% of equity
+            _account_equity = getattr(account_info, 'equity', None) or _available_balance
+            _total_unrealized = sum(
+                (p.unrealized_pnl or 0) for p in positions
+            )
+            _portfolio_drawdown_pct = _total_unrealized / _account_equity if _account_equity > 0 else 0
+            _in_drawdown_pause = _portfolio_drawdown_pct < DRAWDOWN_PAUSE_THRESHOLD
+            if _in_drawdown_pause:
+                logger.warning(
+                    f"Portfolio drawdown pause: unrealized P&L={_portfolio_drawdown_pct:.1%} of equity "
+                    f"(threshold={DRAWDOWN_PAUSE_THRESHOLD:.1%}) — blocking trend/momentum LONG entries. "
+                    f"Mean reversion and market-neutral still active."
+                )
+
+            # ── PRE-FLIGHT: Short-term pullback detection ─────────────────────────
+            # Detect intra-regime pullbacks that the 20d/50d regime detector misses.
+            # A 5-day correction of -2% doesn't move the 20d average enough to flip
+            # the regime label, but it's still a signal to pause trend-following LONGs.
+            _pullback_state = {"in_pullback": False, "severity": "none"}
+            try:
+                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                _pullback_analyzer = MarketStatisticsAnalyzer(self._market_data)
+                _pullback_state = _pullback_analyzer.detect_pullback_state()
+                if _pullback_state.get("in_pullback"):
+                    logger.warning(
+                        f"Pullback gate: {_pullback_state['reason']}"
+                    )
+            except Exception as _pb_err:
+                logger.debug(f"Pullback detection failed: {_pb_err}")
+
+            # Trend/momentum strategy types that should be paused during pullbacks
+            _TREND_MOMENTUM_TYPES = {
+                'trend_following', 'momentum', 'breakout',
+                'trend', 'ema_crossover', 'macd_trend', 'adx_trend',
+                'vwap_trend', 'ema_ribbon', 'atr_trend',
+            }
+
             # Convert ORM positions to dataclass positions
             position_dataclasses = []
             for pos_orm in positions:
@@ -627,6 +696,66 @@ class TradingScheduler:
                         )
                         signals_rejected += 1
                         continue
+
+                    # ── PRE-FLIGHT GATES ──────────────────────────────────
+                    # Balance gate: skip entries when no cash available
+                    if _skip_entries_balance:
+                        self._log_signal_decision(
+                            session=session, signal=signal, strategy_name=strategy.name,
+                            decision="REJECTED",
+                            rejection_reason=f"Insufficient balance: ${_available_balance:.0f} < ${MINIMUM_ORDER_SIZE:.0f}",
+                        )
+                        signals_rejected += 1
+                        continue
+
+                    # Drawdown pause gate: block trend/momentum LONGs when portfolio is bleeding
+                    if _in_drawdown_pause and _sig_dir == "LONG":
+                        _strat_type = (strategy.metadata or {}).get('strategy_type', '') if strategy.metadata else ''
+                        _strat_type_lower = str(_strat_type).lower().replace(' ', '_').replace('-', '_')
+                        _is_trend_momentum = any(t in _strat_type_lower for t in _TREND_MOMENTUM_TYPES)
+                        # Also check template name for trend/momentum keywords
+                        _tmpl_name = (strategy.metadata or {}).get('template_name', '') if strategy.metadata else ''
+                        _tmpl_lower = str(_tmpl_name).lower()
+                        _is_trend_momentum = _is_trend_momentum or any(
+                            kw in _tmpl_lower for kw in ['trend', 'momentum', 'breakout', 'ema ribbon', 'adx', 'vwap trend', 'atr dynamic']
+                        )
+                        if _is_trend_momentum:
+                            self._log_signal_decision(
+                                session=session, signal=signal, strategy_name=strategy.name,
+                                decision="REJECTED",
+                                rejection_reason=(
+                                    f"Drawdown pause: portfolio unrealized={_portfolio_drawdown_pct:.1%} "
+                                    f"— trend/momentum LONG blocked"
+                                ),
+                            )
+                            signals_rejected += 1
+                            continue
+
+                    # Pullback gate: block trend/momentum LONGs during short-term pullbacks
+                    if _pullback_state.get("in_pullback") and _sig_dir == "LONG":
+                        _strat_type = (strategy.metadata or {}).get('strategy_type', '') if strategy.metadata else ''
+                        _strat_type_lower = str(_strat_type).lower().replace(' ', '_').replace('-', '_')
+                        _is_trend_momentum = any(t in _strat_type_lower for t in _TREND_MOMENTUM_TYPES)
+                        _tmpl_name = (strategy.metadata or {}).get('template_name', '') if strategy.metadata else ''
+                        _tmpl_lower = str(_tmpl_name).lower()
+                        _is_trend_momentum = _is_trend_momentum or any(
+                            kw in _tmpl_lower for kw in ['trend', 'momentum', 'breakout', 'ema ribbon', 'adx', 'vwap trend', 'atr dynamic']
+                        )
+                        # Severe pullbacks block all LONGs; mild/moderate only block trend/momentum
+                        _severity = _pullback_state.get("severity", "none")
+                        _block = _is_trend_momentum or _severity == "severe"
+                        if _block:
+                            self._log_signal_decision(
+                                session=session, signal=signal, strategy_name=strategy.name,
+                                decision="REJECTED",
+                                rejection_reason=(
+                                    f"Pullback gate ({_severity}): 5d={_pullback_state.get('change_5d', 0):.1%}, "
+                                    f"RSI(5)={_pullback_state.get('rsi_5', 50):.0f} — "
+                                    f"trend/momentum LONG blocked"
+                                ),
+                            )
+                            signals_rejected += 1
+                            continue
 
                     # Safety: stop if we've hit the max orders cap
                     if orders_executed >= MAX_ORDERS_PER_RUN:
@@ -1967,14 +2096,39 @@ class TradingScheduler:
                                     pos_loss = (pos.entry_price - pos.current_price) / pos.entry_price
                                 else:
                                     pos_loss = (pos.current_price - pos.entry_price) / pos.entry_price
-                                # Get SL% for this position's strategy
-                                pos_sl_pct = 0.05
-                                strat_tuple = strategy_map.get(strategy_id, (None, None))
-                                if strat_tuple[0] and hasattr(strat_tuple[0], 'risk_params') and strat_tuple[0].risk_params:
-                                    pos_sl_pct = strat_tuple[0].risk_params.get('stop_loss_pct', 0.05)
-                                # Allow re-entry if loss is less than 80% of SL (safe margin)
-                                if pos_loss < pos_sl_pct * 0.8:
+                                # Get SL% for this position — use the actual stop_loss on the position
+                                # (set at order time with ATR floor), not the strategy's default.
+                                # Fall back to strategy risk_params if position has no SL.
+                                pos_sl_pct = 0.06  # default stock SL
+                                if pos.stop_loss and pos.entry_price and pos.entry_price > 0:
+                                    pos_sl_pct = abs(pos.entry_price - pos.stop_loss) / pos.entry_price
+                                else:
+                                    strat_tuple = strategy_map.get(strategy_id, (None, None))
+                                    if strat_tuple[0] and hasattr(strat_tuple[0], 'risk_params') and strat_tuple[0].risk_params:
+                                        rp = strat_tuple[0].risk_params
+                                        # risk_params can be a dataclass or dict
+                                        if hasattr(rp, 'stop_loss_pct'):
+                                            pos_sl_pct = rp.stop_loss_pct or 0.06
+                                        elif isinstance(rp, dict):
+                                            pos_sl_pct = rp.get('stop_loss_pct', 0.06)
+
+                                # Allow re-entry only if loss is less than 50% of SL distance.
+                                # Rationale: if we're already 50%+ into the SL, the trade is
+                                # failing — adding more doubles down into a losing position.
+                                # At <50% consumed, it's normal noise and the thesis is intact.
+                                sl_consumed = pos_loss / pos_sl_pct if pos_sl_pct > 0 else 1.0
+                                if sl_consumed < 0.50:
                                     allow_reentry = True
+                                    logger.debug(
+                                        f"Re-entry allowed: {strategy_name} on {normalized_symbol} "
+                                        f"(SL consumed {sl_consumed:.0%} < 50% — thesis intact)"
+                                    )
+                                else:
+                                    logger.info(
+                                        f"Re-entry blocked: {strategy_name} on {normalized_symbol} "
+                                        f"(SL consumed {sl_consumed:.0%} ≥ 50% — position failing, "
+                                        f"loss={pos_loss:.1%}, SL={pos_sl_pct:.1%})"
+                                    )
                                 break
 
                             if allow_reentry:

@@ -1368,6 +1368,132 @@ class MarketStatisticsAnalyzer:
             logger.error(f"Error detecting sub-regime: {e}")
             return MarketRegime.RANGING, 0.0, "POOR", {}
 
+    def detect_pullback_state(self, symbols: List[str] = None) -> Dict:
+        """
+        Detect whether the market is in a short-term pullback within the current regime.
+
+        The 20d/50d regime detector is a lagging indicator — it cannot see a 5-day
+        correction that's still dominated by a prior rally in the 20-day window.
+        This method uses fast (5d, 10d) price change and RSI(5) to detect intra-regime
+        pullbacks that the main regime detector misses.
+
+        A pullback is NOT a regime change. Strategies are not retired. New proposals
+        still run. But trend-following and momentum LONG entries are paused until the
+        pullback resolves — mean reversion and market-neutral can still trade.
+
+        Returns:
+            Dict with:
+                - in_pullback: bool — True if short-term pullback detected
+                - severity: str — 'mild' | 'moderate' | 'severe'
+                - change_5d: float — 5-day price change of SPY/QQQ/DIA average
+                - change_10d: float — 10-day price change
+                - rsi_5: float — fast RSI(5) of SPY
+                - reason: str — human-readable explanation
+        """
+        if symbols is None:
+            symbols = ["SPY", "QQQ", "DIA"]
+
+        try:
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=30)  # 30 days enough for 5d/10d + RSI(5)
+
+            changes_5d = []
+            changes_10d = []
+            rsi_5_values = []
+
+            for symbol in symbols:
+                try:
+                    bars = self.market_data.get_historical_data(
+                        symbol=symbol, start=start_date, end=end_date,
+                        interval="1d", prefer_yahoo=True
+                    )
+                    if not bars or len(bars) < 12:
+                        continue
+
+                    closes = [b.close for b in bars if b.close and b.close > 0]
+                    if len(closes) < 12:
+                        continue
+
+                    current = closes[-1]
+
+                    # 5-day and 10-day price changes
+                    if len(closes) >= 5:
+                        changes_5d.append((current - closes[-5]) / closes[-5])
+                    if len(closes) >= 10:
+                        changes_10d.append((current - closes[-10]) / closes[-10])
+
+                    # RSI(5) — fast RSI for short-term momentum
+                    if len(closes) >= 7:
+                        gains, losses = [], []
+                        for i in range(1, min(6, len(closes))):
+                            delta = closes[-i] - closes[-i - 1]
+                            if delta > 0:
+                                gains.append(delta)
+                                losses.append(0)
+                            else:
+                                gains.append(0)
+                                losses.append(abs(delta))
+                        avg_gain = sum(gains) / len(gains) if gains else 0
+                        avg_loss = sum(losses) / len(losses) if losses else 0
+                        if avg_loss > 0:
+                            rs = avg_gain / avg_loss
+                            rsi_5_values.append(100 - (100 / (1 + rs)))
+                        else:
+                            rsi_5_values.append(100.0)
+
+                except Exception as sym_err:
+                    logger.debug(f"Pullback detection: could not analyze {symbol}: {sym_err}")
+                    continue
+
+            if not changes_5d:
+                return {"in_pullback": False, "severity": "none", "reason": "insufficient data"}
+
+            avg_5d = sum(changes_5d) / len(changes_5d)
+            avg_10d = sum(changes_10d) / len(changes_10d) if changes_10d else avg_5d
+            avg_rsi5 = sum(rsi_5_values) / len(rsi_5_values) if rsi_5_values else 50.0
+
+            # Pullback detection thresholds:
+            # Mild:     5d < -1.0% AND RSI(5) < 50
+            # Moderate: 5d < -2.0% AND RSI(5) < 45
+            # Severe:   5d < -3.5% AND RSI(5) < 35
+            in_pullback = False
+            severity = "none"
+            reason = ""
+
+            if avg_5d < -0.035 and avg_rsi5 < 35:
+                in_pullback = True
+                severity = "severe"
+                reason = (f"Severe pullback: 5d={avg_5d:.1%}, RSI(5)={avg_rsi5:.0f} — "
+                          f"blocking all trend/momentum LONG entries")
+            elif avg_5d < -0.020 and avg_rsi5 < 45:
+                in_pullback = True
+                severity = "moderate"
+                reason = (f"Moderate pullback: 5d={avg_5d:.1%}, RSI(5)={avg_rsi5:.0f} — "
+                          f"blocking trend/momentum LONG entries")
+            elif avg_5d < -0.010 and avg_rsi5 < 50:
+                in_pullback = True
+                severity = "mild"
+                reason = (f"Mild pullback: 5d={avg_5d:.1%}, RSI(5)={avg_rsi5:.0f} — "
+                          f"reducing trend/momentum LONG entries")
+
+            if in_pullback:
+                logger.info(f"Pullback detected ({severity}): 5d={avg_5d:.1%}, 10d={avg_10d:.1%}, RSI(5)={avg_rsi5:.0f}")
+            else:
+                logger.debug(f"No pullback: 5d={avg_5d:.1%}, 10d={avg_10d:.1%}, RSI(5)={avg_rsi5:.0f}")
+
+            return {
+                "in_pullback": in_pullback,
+                "severity": severity,
+                "change_5d": avg_5d,
+                "change_10d": avg_10d,
+                "rsi_5": avg_rsi5,
+                "reason": reason,
+            }
+
+        except Exception as e:
+            logger.warning(f"Pullback detection failed: {e}")
+            return {"in_pullback": False, "severity": "none", "reason": f"error: {e}"}
+
     def detect_regime_change(
         self,
         strategy_id: str,

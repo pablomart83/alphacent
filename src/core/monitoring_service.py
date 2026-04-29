@@ -1248,6 +1248,15 @@ class MonitoringService:
             self._sync_news_sentiment()
         except Exception as e:
             logger.warning(f"  News sentiment sync failed (non-critical): {e}")
+
+        # 6. Loss tightening — tighten SL on positions that have been losing for 3+ days
+        try:
+            tighten_results = self._check_loss_tightening()
+            tightened = tighten_results.get("tightened", 0)
+            if tightened > 0:
+                logger.info(f"  Loss tightening: {tightened} stop-losses tightened on losing positions")
+        except Exception as e:
+            logger.warning(f"  Loss tightening failed (non-critical): {e}")
     
     def _save_equity_snapshot(self) -> None:
         """Save end-of-day equity snapshot (daily resolution).
@@ -3023,11 +3032,129 @@ class MonitoringService:
         
         return result
 
+    def _check_loss_tightening(self) -> Dict:
+        """
+        Tighten stop-losses on positions that have been losing for 3+ days.
+
+        The original SL is set at entry time for a position that might go against
+        you briefly before recovering. After 3 days of losses, that assumption is
+        no longer valid — the entry timing was wrong. Tighten the stop to limit
+        further damage without closing the position immediately.
+
+        Logic:
+        - Position must be LONG (shorts have inverted logic, handled separately)
+        - Must have been open for >= 3 days
+        - Must be in a loss (current_price < entry_price)
+        - Loss must be >= 2% (ignore tiny noise)
+        - New SL = current_price * (1 - TIGHTEN_DISTANCE)
+        - Only tighten — never widen (new SL must be > existing SL)
+
+        The tightened SL is 3% below current price for stocks/ETFs, 5% for crypto,
+        2% for forex. This caps further losses at those levels from the current price
+        rather than waiting for the original 6-12% SL from entry.
+
+        Returns:
+            Dict with tightened/checked/skipped counts
+        """
+        result = {"tightened": 0, "checked": 0, "skipped": 0}
+        session = self.db.get_session()
+
+        try:
+            from src.models.orm import PositionORM
+            from datetime import timedelta
+
+            now = datetime.now()
+            THREE_DAYS_AGO = now - timedelta(days=3)
+            MIN_LOSS_PCT = 0.02  # Only tighten if loss >= 2%
+
+            # Asset-class-aware tighten distances (% below current price for new SL)
+            TIGHTEN_DISTANCES = {
+                "crypto": 0.05,    # 5% — crypto is volatile, needs more room
+                "forex": 0.015,    # 1.5% — forex is tight
+                "commodity": 0.03, # 3%
+                "index": 0.025,    # 2.5%
+                "default": 0.03,   # 3% for stocks/ETFs
+            }
+
+            open_longs = session.query(PositionORM).filter(
+                PositionORM.closed_at.is_(None),
+                PositionORM.pending_closure == False,
+                PositionORM.side == "LONG",
+                PositionORM.opened_at <= THREE_DAYS_AGO,
+            ).all()
+
+            result["checked"] = len(open_longs)
+
+            for pos in open_longs:
+                try:
+                    if not pos.entry_price or pos.entry_price <= 0:
+                        result["skipped"] += 1
+                        continue
+                    if not pos.current_price or pos.current_price <= 0:
+                        result["skipped"] += 1
+                        continue
+
+                    loss_pct = (pos.entry_price - pos.current_price) / pos.entry_price
+                    if loss_pct < MIN_LOSS_PCT:
+                        result["skipped"] += 1
+                        continue  # Not losing enough to warrant tightening
+
+                    # Determine asset class for tighten distance
+                    sym = (pos.symbol or "").upper()
+                    from src.core.tradeable_instruments import (
+                        DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                        DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_INDICES,
+                    )
+                    if sym in set(DEMO_ALLOWED_CRYPTO):
+                        tighten_dist = TIGHTEN_DISTANCES["crypto"]
+                    elif sym in set(DEMO_ALLOWED_FOREX):
+                        tighten_dist = TIGHTEN_DISTANCES["forex"]
+                    elif sym in set(DEMO_ALLOWED_COMMODITIES):
+                        tighten_dist = TIGHTEN_DISTANCES["commodity"]
+                    elif sym in set(DEMO_ALLOWED_INDICES):
+                        tighten_dist = TIGHTEN_DISTANCES["index"]
+                    else:
+                        tighten_dist = TIGHTEN_DISTANCES["default"]
+
+                    new_sl = pos.current_price * (1 - tighten_dist)
+
+                    # Only tighten — never widen the stop
+                    if pos.stop_loss and new_sl <= pos.stop_loss:
+                        result["skipped"] += 1
+                        continue  # Existing SL is already tighter
+
+                    old_sl = pos.stop_loss
+                    pos.stop_loss = round(new_sl, 4)
+                    result["tightened"] += 1
+
+                    days_open = (now - pos.opened_at).days if pos.opened_at else 0
+                    logger.info(
+                        f"Loss tightening: {pos.symbol} LONG "
+                        f"entry={pos.entry_price:.2f} current={pos.current_price:.2f} "
+                        f"loss={loss_pct:.1%} ({days_open}d open) — "
+                        f"SL {old_sl:.2f} → {pos.stop_loss:.2f} "
+                        f"({tighten_dist:.1%} below current)"
+                    )
+
+                except Exception as pos_err:
+                    logger.debug(f"Loss tightening: error on position {getattr(pos, 'id', '?')}: {pos_err}")
+                    result["skipped"] += 1
+                    continue
+
+            if result["tightened"] > 0:
+                session.commit()
+
+        except Exception as e:
+            logger.error(f"Error in loss tightening: {e}")
+            session.rollback()
+        finally:
+            session.close()
+
+        return result
+
     def _check_strategy_decay(self) -> Dict:
         """
         Compute a decay score (countdown 10→0) for each active strategy.
-        
-        Measures whether the strategy's original backtest edge is still valid.
         Starts at 10 on activation, ticks down daily based on timeframe-aware
         degradation signals. When it hits 0, the edge is considered expired.
         
