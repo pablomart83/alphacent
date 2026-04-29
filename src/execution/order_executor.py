@@ -352,7 +352,11 @@ class OrderExecutor:
             return order
 
         except Exception as e:
-            logger.error(f"Failed to execute signal: {e}")
+            _msg = str(e)
+            if "Market closed" in _msg and "re-fire at next open" in _msg:
+                logger.info(f"Signal deferred (market closed): {e}")
+            else:
+                logger.error(f"Failed to execute signal: {e}")
             raise OrderExecutionError(f"Failed to execute signal: {e}")
 
     def _signal_to_order_params(self, action: SignalAction) -> tuple[OrderSide, OrderType]:

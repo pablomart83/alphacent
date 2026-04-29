@@ -1390,7 +1390,11 @@ class TradingScheduler:
                                     # Non-critical — order monitor will pick it up
 
                         except Exception as e:
-                            logger.error(f"Failed to execute signal for {signal.symbol}: {e}")
+                            _emsg = str(e)
+                            if "Market closed" in _emsg and "re-fire at next open" in _emsg:
+                                logger.info(f"Signal deferred (market closed): {signal.symbol}")
+                            else:
+                                logger.error(f"Failed to execute signal for {signal.symbol}: {e}")
                             # Count as rejected so the cycle summary is accurate
                             signals_rejected += 1
                             self._log_signal_decision(
