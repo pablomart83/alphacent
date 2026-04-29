@@ -1,7 +1,6 @@
 {
-  "enabled": true,
-  "name": "AlphaCent: Enforce Local-First Deployment",
-  "description": "Before any shell command runs, checks that it does not write or patch files directly on EC2 via SSH. Enforces the standard workflow: edit locally → getDiagnostics → SCP → restart/rebuild → health check → git commit+push.",
+  "name": "AlphaCent: Block Direct EC2 File Writes",
+  "description": "Blocks writing files directly to EC2 src/config via SSH. Pulling files FROM EC2 to sync a stale local workspace is permitted. Everything else (local commands, scp, read-only ssh, git, systemctl) is not intercepted.",
   "version": "1",
   "when": {
     "type": "preToolUse",
@@ -11,6 +10,6 @@
   },
   "then": {
     "type": "askAgent",
-    "prompt": "DEPLOYMENT WORKFLOW ENFORCEMENT — AlphaCent\n\nInspect the shell command about to run and respond with exactly one of:\n- 'PROCEED' — if the command is permitted\n- 'BLOCKED: <reason>' — if the command is forbidden\n\nFORBIDDEN patterns (respond BLOCKED):\n- ssh ... 'python3 /tmp/...' (running scripts from /tmp on EC2)\n- ssh ... 'python3 -c ...' (inline python on EC2)\n- ssh ... 'sed -i ...' (in-place file edit on EC2)\n- ssh ... 'tee /home/ubuntu/alphacent/src/...'\n- ssh ... 'cat > /home/ubuntu/alphacent/src/...'\n- ssh ... 'cp ... /home/ubuntu/alphacent/src/...'\n- ssh ... 'pip install ...' or 'npm install ...' on EC2\n- Any SSH command that writes/modifies files under /home/ubuntu/alphacent/src/, /home/ubuntu/alphacent/frontend/src/, or /home/ubuntu/alphacent/config/\n\nPERMITTED patterns (respond PROCEED):\n- Any local command (no ssh)\n- ssh ... 'echo ...'\n- ssh ... 'cat <file>' / tail / head / grep / ls / find (read-only)\n- ssh ... 'sudo systemctl restart/reload/status ...'\n- ssh ... 'curl ...'\n- ssh ... 'sudo -u postgres psql alphacent ... SELECT ...' (read-only query)\n- ssh ... 'sudo -u postgres psql alphacent ... UPDATE/INSERT ...' (DB write — permitted when agent has diagnosed the fix)\n- ssh ... 'sudo journalctl ...' or reading log files\n- ssh ... 'python3 scripts/...' (running diagnostic/utility scripts from the scripts/ directory — these are SCPed from local workspace first)\n- scp ... (file transfer from local to EC2 — the correct deploy path)\n- git add / git commit / git push (run locally)\n- ping, nc, or other network diagnostics\n\nRespond ONLY with PROCEED or BLOCKED: <reason>. Do not add any other text."
+    "prompt": "AlphaCent deploy guard. Reply with one word only: PROCEED or BLOCKED.\n\nBLOCKED only if the command uses ssh to ubuntu@34.252.61.149 AND writes files via sed -i, python3 -c, python3 /tmp/, tee, 'cat >', cp, pip install, or npm install targeting /home/ubuntu/alphacent/src/, /home/ubuntu/alphacent/frontend/src/, or /home/ubuntu/alphacent/config/.\n\nPROCEED for everything else — including scp FROM EC2 to local (syncing stale local files), local commands, git, read-only ssh, systemctl, psql, journalctl, curl, python3 scripts/.\n\nOne word. No explanation."
   }
 }

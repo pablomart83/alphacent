@@ -556,6 +556,13 @@ async def get_comprehensive_regime_analysis(
     except Exception as e:
         result['carry_rates'] = {}
 
+    # --- 5. Market Quality Score ---
+    try:
+        market_quality = analyzer.get_market_quality_score()
+        result['market_quality'] = market_quality
+    except Exception as e:
+        result['market_quality'] = {'score': 50, 'grade': 'normal', 'reason': str(e)}
+
     # --- 5. Performance by regime (from DB) ---
     try:
         strategies = session.query(StrategyORM).filter(
