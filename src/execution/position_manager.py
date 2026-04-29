@@ -75,6 +75,27 @@ class PositionManager:
         "index":     0.025,
     }
 
+    # Profit lock-in thresholds — move SL to entry + lock_pct when profit reaches this level.
+    # Fires between breakeven stop and trailing stop activation.
+    # Ensures a position that moves +5% and reverses still closes with a profit.
+    #
+    # Without this, the gap between breakeven (+3%) and trailing stop activation (+7.5%)
+    # means a position can go +6% then reverse to 0% and close at breakeven — you made
+    # nothing on a 6% move. The profit lock closes that gap.
+    #
+    # Three-stage ladder (stocks):
+    #   +3%  → SL to entry (breakeven)
+    #   +5%  → SL to entry + 2% (lock in 2% profit)
+    #   +7.5%+ → trailing stop takes over, follows price at 7% distance
+    PROFIT_LOCK_PARAMS = {
+        "stock":     {"trigger": 0.05, "lock": 0.02},   # At +5%, lock in +2%
+        "etf":       {"trigger": 0.04, "lock": 0.015},  # At +4%, lock in +1.5%
+        "crypto":    {"trigger": 0.08, "lock": 0.03},   # At +8%, lock in +3%
+        "forex":     {"trigger": 0.025,"lock": 0.01},   # At +2.5%, lock in +1%
+        "commodity": {"trigger": 0.05, "lock": 0.02},
+        "index":     {"trigger": 0.04, "lock": 0.015},
+    }
+
     # ATR multiplier for minimum trail distance.
     # Trail distance = max(distance_pct * price, ATR_TRAIL_MULTIPLIER * daily_ATR)
     # This prevents penny-stop whipsaws on high-priced instruments where a fixed
@@ -225,6 +246,72 @@ class PositionManager:
                                 except EToroAPIError as e:
                                     logger.warning(
                                         f"Could not set breakeven stop for {position.symbol}: {e}"
+                                    )
+
+                # ── PROFIT LOCK-IN ────────────────────────────────────────────────
+                # When profit reaches the lock trigger, move SL to entry + lock_pct.
+                # Closes the gap between breakeven (+3%) and trailing stop activation (+7.5%).
+                # A position that goes +5% then reverses will now close with +2% profit,
+                # not at breakeven.
+                lock_params = self.PROFIT_LOCK_PARAMS.get(asset_class, self.PROFIT_LOCK_PARAMS["stock"])
+                lock_trigger = lock_params["trigger"]
+                lock_pct = lock_params["lock"]
+                if profit_pct >= lock_trigger and position.entry_price > 0:
+                    if position.side.value == "LONG":
+                        lock_sl = position.entry_price * (1 + lock_pct)
+                        if position.stop_loss is None or position.stop_loss < lock_sl:
+                            if skip_etoro_update:
+                                position.stop_loss = lock_sl
+                                positions_updated += 1
+                                logger.info(
+                                    f"Profit lock: {position.symbol} LONG "
+                                    f"profit={profit_pct:.1%} → SL locked at +{lock_pct:.1%} "
+                                    f"({lock_sl:.2f})"
+                                )
+                            else:
+                                try:
+                                    self.etoro_client.update_position_stop_loss(
+                                        position_id=position.etoro_position_id,
+                                        stop_loss_rate=lock_sl
+                                    )
+                                    position.stop_loss = lock_sl
+                                    positions_updated += 1
+                                    logger.info(
+                                        f"Profit lock: {position.symbol} LONG "
+                                        f"profit={profit_pct:.1%} → SL locked at +{lock_pct:.1%} "
+                                        f"({lock_sl:.2f})"
+                                    )
+                                except EToroAPIError as e:
+                                    logger.warning(
+                                        f"Could not set profit lock for {position.symbol}: {e}"
+                                    )
+                    else:  # SHORT
+                        lock_sl = position.entry_price * (1 - lock_pct)
+                        if position.stop_loss is None or position.stop_loss > lock_sl:
+                            if skip_etoro_update:
+                                position.stop_loss = lock_sl
+                                positions_updated += 1
+                                logger.info(
+                                    f"Profit lock: {position.symbol} SHORT "
+                                    f"profit={profit_pct:.1%} → SL locked at +{lock_pct:.1%} "
+                                    f"({lock_sl:.2f})"
+                                )
+                            else:
+                                try:
+                                    self.etoro_client.update_position_stop_loss(
+                                        position_id=position.etoro_position_id,
+                                        stop_loss_rate=lock_sl
+                                    )
+                                    position.stop_loss = lock_sl
+                                    positions_updated += 1
+                                    logger.info(
+                                        f"Profit lock: {position.symbol} SHORT "
+                                        f"profit={profit_pct:.1%} → SL locked at +{lock_pct:.1%} "
+                                        f"({lock_sl:.2f})"
+                                    )
+                                except EToroAPIError as e:
+                                    logger.warning(
+                                        f"Could not set profit lock for {position.symbol}: {e}"
                                     )
 
                 # NOTE: Per-asset-class thresholds are always used.
