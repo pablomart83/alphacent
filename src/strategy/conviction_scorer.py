@@ -483,11 +483,16 @@ class ConvictionScorer:
             score = 13.0
         # --- Tier 3: Liquid ---
         elif sym in set(DEMO_ALLOWED_ETFS):
-            score = 12.0  # All ETFs are at least tier 3 — they're exchange-traded, liquid
+            # ETFs: raised from 12 → 13. Live data: 64.6% win rate, +$64 avg P&L.
+            # Exchange-traded, tight spreads, deep liquidity — deserve Tier 2 treatment.
+            score = 13.0
         elif sym in set(DEMO_ALLOWED_FOREX):
             score = 13.0
         elif sym in set(DEMO_ALLOWED_INDICES):
-            score = 12.0
+            # Indices: raised from 12 → 14. Live data: 85.7% win rate, +$142 avg P&L.
+            # CFDs on major indices (DJ30, GER40, UK100) have extremely tight spreads
+            # on eToro and the highest live win rate of any asset class.
+            score = 14.0
         elif sym in set(DEMO_ALLOWED_COMMODITIES):
             score = 11.0
         elif sym in set(DEMO_ALLOWED_CRYPTO):

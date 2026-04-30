@@ -16,9 +16,9 @@ autonomous_schedule:
   hour: 15
   minute: 15
 activation_thresholds:
-  min_sharpe: 0.4
-  min_sharpe_crypto: 0.1
-  min_sharpe_commodity: 0.3
+  min_sharpe: 1.0               # Raised from 0.4 — live data shows Sharpe 0.4-1.0 strategies have <30% live win rate
+  min_sharpe_crypto: 0.5        # Raised from 0.1 — crypto WF data was corrupted (P0 fix); conservative floor
+  min_sharpe_commodity: 0.5     # Raised from 0.3
   max_drawdown: 0.25
   min_win_rate: 0.45
   min_win_rate_crypto: 0.3

@@ -2751,8 +2751,12 @@ class MonitoringService:
                     elif is_mean_reversion:
                         flat_days_threshold = 4 if is_4h else 7
                     else:
-                        # Trend-following and everything else: faster exit
-                        flat_days_threshold = 2 if is_4h else 3
+                        # Trend-following and everything else.
+                        # Winners avg 5.4 days hold — 3 days was cutting profitable
+                        # positions before they had time to mature. A trend position
+                        # that's flat after 3 days may simply be consolidating before
+                        # the next leg. 5 days (1D) / 3 days (4H) gives it room.
+                        flat_days_threshold = 3 if is_4h else 5
 
                     flat_pct_threshold = 1.0
                     if age_days >= flat_days_threshold and abs(pnl_pct) <= flat_pct_threshold:
