@@ -400,16 +400,43 @@ class MarketDataManager:
         Raises:
             ValueError: If data cannot be fetched from any source
         """
-        # Normalize symbol to eToro format
+        # Two separate symbol forms are needed:
+        #   db_symbol   — the canonical display form used everywhere in the DB
+        #                 (positions, orders, trade_journal, historical_price_cache).
+        #                 For crypto: "BTC", "ETH". For stocks: "AAPL". Never "BTCUSD".
+        #   yahoo_symbol — the Yahoo Finance ticker used only for API calls.
+        #                 For crypto: "BTC-USD". For indices: "^GSPC". Stocks pass through.
+        #
+        # normalize_symbol (symbol_mapper) converts "BTC" → "BTCUSD" — this is the eToro
+        # wire format, NOT the canonical DB key. Using it for DB operations caused all
+        # historical_price_cache rows to be stored as "BTCUSD" while every other table
+        # uses "BTC", making 8,675 rows of BTC price history unreachable.
+        #
+        # The fix: use the input symbol (already canonical) for all DB operations.
+        # Only convert to Yahoo ticker format for the actual API fetch.
+        db_symbol = symbol.upper().strip()  # canonical form — used for all DB reads/writes
+        # Legacy: if caller passed "BTCUSD" or "ETHUSD" (eToro wire format), strip the USD suffix
+        # so we always store/retrieve under the display form ("BTC", "ETH").
+        _CRYPTO_WIRE_TO_DISPLAY = {
+            "BTCUSD": "BTC", "ETHUSD": "ETH", "SOLUSD": "SOL",
+            "XRPUSD": "XRP", "ADAUSD": "ADA", "AVAXUSD": "AVAX",
+            "DOTUSD": "DOT", "LINKUSD": "LINK", "NEARUSD": "NEAR",
+            "LTCUSD": "LTC", "BCHUSD": "BCH",
+        }
+        if db_symbol in _CRYPTO_WIRE_TO_DISPLAY:
+            db_symbol = _CRYPTO_WIRE_TO_DISPLAY[db_symbol]
+
+        # normalized_symbol kept for backward compat with the rest of this function
+        # (LME check, forex check, Yahoo fetch). It's the eToro wire format.
         normalized_symbol = normalize_symbol(symbol)
-        logger.debug(f"Symbol normalized: {symbol} -> {normalized_symbol}")
+        logger.debug(f"Symbol: db_key={db_symbol}, etoro_wire={normalized_symbol}")
 
         # LME metals (ZINC, ALUMINUM, NICKEL) only have daily data on Yahoo Finance.
         # Return empty immediately for any intraday request — no point going through
         # DB → Yahoo → FMP chain only to get nothing and crash in the strategy engine.
-        is_lme_metal = normalized_symbol.upper() in ("NICKEL", "ALUMINUM", "ZINC", "RUBBER")
+        is_lme_metal = db_symbol.upper() in ("NICKEL", "ALUMINUM", "ZINC", "RUBBER")
         if is_lme_metal and interval != '1d':
-            logger.warning(f"LME metal {normalized_symbol} only has daily data (requested {interval}). Skipping.")
+            logger.warning(f"LME metal {db_symbol} only has daily data (requested {interval}). Skipping.")
             return []
 
         # Cacheable intervals that get persisted to DB
@@ -417,7 +444,7 @@ class MarketDataManager:
         
         # In-memory cache check (fastest, avoids DB query)
         if _cacheable and not force_fresh:
-            cache_key = f"{normalized_symbol}_{interval}_{start.date()}_{end.date()}"
+            cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
             if cache_key in self._historical_memory_cache:
                 cached_data, cached_at = self._historical_memory_cache[cache_key]
                 cache_age = (datetime.now() - cached_at).total_seconds()
@@ -427,7 +454,7 @@ class MarketDataManager:
 
         # DB-first: check database cache (unless force_fresh)
         if _cacheable and not force_fresh:
-            db_data = self._get_historical_from_db(normalized_symbol, start, end, interval)
+            db_data = self._get_historical_from_db(db_symbol, start, end, interval)
             if db_data:
                 valid_data = [d for d in db_data if self.validate_data(d)]
                 if valid_data:
@@ -453,18 +480,18 @@ class MarketDataManager:
                         
                         # Forex and crypto trade on weekends, so skip this optimization for them
                         from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX
-                        is_always_trading = normalized_symbol in set(DEMO_ALLOWED_CRYPTO + DEMO_ALLOWED_FOREX)
+                        is_always_trading = db_symbol in set(DEMO_ALLOWED_CRYPTO + DEMO_ALLOWED_FOREX)
                         
                         if is_weekend_gap and not is_always_trading:
                             logger.debug(
-                                f"DB cache for {normalized_symbol} is {gap_days} days behind "
+                                f"DB cache for {db_symbol} is {gap_days} days behind "
                                 f"(weekend gap, skipping incremental fetch)"
                             )
                         else:
                             # DB is missing recent trading days — fetch only the gap
                             gap_start = latest_db_naive + timedelta(days=1)
                             logger.info(
-                                f"DB cache for {normalized_symbol} is {gap_days} days behind, "
+                                f"DB cache for {db_symbol} is {gap_days} days behind, "
                                 f"fetching incremental update from {gap_start.date()} to {end_naive.date()}"
                             )
                             try:
@@ -473,7 +500,7 @@ class MarketDataManager:
                                 
                                 # Yahoo failed for gap fill — try FMP as emergency fallback
                                 if not gap_valid and self._fmp_api_key and interval == '1d':
-                                    logger.info(f"Yahoo gap fill empty for {normalized_symbol}, trying FMP")
+                                    logger.info(f"Yahoo gap fill empty for {db_symbol}, trying FMP")
                                     gap_data = self._fetch_historical_from_fmp(normalized_symbol, gap_start, end, interval)
                                     gap_valid = [d for d in gap_data if self.validate_data(d)]
                                 if gap_valid:
@@ -482,16 +509,16 @@ class MarketDataManager:
                                     truly_new = [d for d in gap_valid 
                                                  if (d.timestamp.date() if hasattr(d.timestamp, 'date') and callable(d.timestamp.date) else d.timestamp) > latest_date_only]
                                     if truly_new:
-                                        self._save_historical_to_db(normalized_symbol, truly_new, interval)
+                                        self._save_historical_to_db(db_symbol, truly_new, interval)
                                         valid_data.extend(truly_new)
                                         valid_data.sort(key=lambda d: d.timestamp)
-                                        logger.info(f"Incremental update: added {len(truly_new)} new bars for {normalized_symbol}")
+                                        logger.info(f"Incremental update: added {len(truly_new)} new bars for {db_symbol}")
                             except Exception as e:
-                                logger.debug(f"Incremental update failed for {normalized_symbol}: {e} — using DB data as-is")
+                                logger.debug(f"Incremental update failed for {db_symbol}: {e} — using DB data as-is")
                     
-                    result = self._validate_and_return_historical_data(valid_data, normalized_symbol, from_db_cache=True)
+                    result = self._validate_and_return_historical_data(valid_data, db_symbol, from_db_cache=True)
                     # Cache in memory for fast subsequent access
-                    cache_key = f"{normalized_symbol}_{interval}_{start.date()}_{end.date()}"
+                    cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
                     self._historical_memory_cache[cache_key] = (result, datetime.now())
                     return result
 
@@ -515,12 +542,12 @@ class MarketDataManager:
                 if len(valid_data) > 0:
                     valid_data.sort(key=lambda d: d.timestamp)
                     if _cacheable:
-                        self._save_historical_to_db(normalized_symbol, valid_data, interval)
+                        self._save_historical_to_db(db_symbol, valid_data, interval)
                     self._raw_fetch_cache[f"{normalized_symbol}:{interval}"] = (valid_data, datetime.now())
                     logger.info(f"Retrieved {len(valid_data)} valid historical data points from FMP (forex)")
-                    result = self._validate_and_return_historical_data(valid_data, normalized_symbol)
+                    result = self._validate_and_return_historical_data(valid_data, db_symbol)
                     if _cacheable:
-                        cache_key = f"{normalized_symbol}_{interval}_{start.date()}_{end.date()}"
+                        cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
                         self._historical_memory_cache[cache_key] = (result, datetime.now())
                     return result
                 else:
@@ -574,7 +601,7 @@ class MarketDataManager:
             if len(valid_data) > 0:
                 valid_data.sort(key=lambda d: d.timestamp)
                 if _cacheable:
-                    self._save_historical_to_db(normalized_symbol, valid_data, interval)
+                    self._save_historical_to_db(db_symbol, valid_data, interval)
                 # Cache the full raw dataset for this symbol+interval so subsequent
                 # requests with different date ranges can slice from it.
                 # Merge with existing cache to accumulate the widest date range —
@@ -593,40 +620,40 @@ class MarketDataManager:
                     merged = sorted(existing_by_ts.values(), key=lambda d: d.timestamp)
                     self._raw_fetch_cache[raw_cache_key] = (merged, datetime.now())
                     if len(merged) > len(valid_data):
-                        logger.info(f"Merged raw fetch cache for {normalized_symbol} {interval}: {len(valid_data)} new + {len(existing_data)} existing = {len(merged)} total")
+                        logger.info(f"Merged raw fetch cache for {db_symbol} {interval}: {len(valid_data)} new + {len(existing_data)} existing = {len(merged)} total")
                 else:
                     self._raw_fetch_cache[raw_cache_key] = (valid_data, datetime.now())
                 logger.info(f"Retrieved {len(valid_data)} valid historical data points from Yahoo Finance")
-                result = self._validate_and_return_historical_data(valid_data, normalized_symbol)
+                result = self._validate_and_return_historical_data(valid_data, db_symbol)
                 if _cacheable:
-                    cache_key = f"{normalized_symbol}_{interval}_{start.date()}_{end.date()}"
+                    cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
                     self._historical_memory_cache[cache_key] = (result, datetime.now())
                 return result
             else:
-                logger.warning(f"No valid data from Yahoo Finance for {normalized_symbol}, trying FMP")
+                logger.warning(f"No valid data from Yahoo Finance for {db_symbol}, trying FMP")
         except Exception as e:
-            logger.warning(f"Yahoo Finance failed for {normalized_symbol}: {e}, trying FMP fallback")
+            logger.warning(f"Yahoo Finance failed for {db_symbol}: {e}, trying FMP fallback")
 
         # FMP: emergency fallback for daily data only (preserve API calls for fundamentals)
         if self._fmp_api_key and interval == '1d':
             try:
-                logger.info(f"Fetching historical data for {normalized_symbol} from FMP (fallback)")
+                logger.info(f"Fetching historical data for {db_symbol} from FMP (fallback)")
                 data_list = self._fetch_historical_from_fmp(normalized_symbol, start, end, interval)
                 valid_data = [d for d in data_list if self.validate_data(d)]
                 if len(valid_data) > 0:
                     valid_data.sort(key=lambda d: d.timestamp)
                     if _cacheable:
-                        self._save_historical_to_db(normalized_symbol, valid_data, interval)
+                        self._save_historical_to_db(db_symbol, valid_data, interval)
                     logger.info(f"Retrieved {len(valid_data)} valid historical data points from FMP")
-                    result = self._validate_and_return_historical_data(valid_data, normalized_symbol)
+                    result = self._validate_and_return_historical_data(valid_data, db_symbol)
                     if _cacheable:
-                        cache_key = f"{normalized_symbol}_{interval}_{start.date()}_{end.date()}"
+                        cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
                         self._historical_memory_cache[cache_key] = (result, datetime.now())
                     return result
                 else:
-                    logger.warning(f"No valid data from FMP for {normalized_symbol}")
+                    logger.warning(f"No valid data from FMP for {db_symbol}")
             except Exception as e:
-                logger.warning(f"FMP failed for {normalized_symbol}: {e}, trying eToro fallback")
+                logger.warning(f"FMP failed for {db_symbol}: {e}, trying eToro fallback")
 
         # eToro API: last resort fallback
         try:
@@ -641,23 +668,23 @@ class MarketDataManager:
                 valid_data.sort(key=lambda d: d.timestamp)
                 # Save to DB cache
                 if _cacheable:
-                    self._save_historical_to_db(normalized_symbol, valid_data, interval)
+                    self._save_historical_to_db(db_symbol, valid_data, interval)
                 logger.info(f"Retrieved {len(valid_data)} valid historical data points from eToro")
-                result = self._validate_and_return_historical_data(valid_data, normalized_symbol)
+                result = self._validate_and_return_historical_data(valid_data, db_symbol)
                 # Cache in memory for fast subsequent access
                 if _cacheable:
-                    cache_key = f"{normalized_symbol}_{interval}_{start.date()}_{end.date()}"
+                    cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
                     self._historical_memory_cache[cache_key] = (result, datetime.now())
                 return result
             else:
-                logger.error(f"No valid data from eToro for {normalized_symbol}")
+                logger.error(f"No valid data from eToro for {db_symbol}")
 
         except EToroAPIError as e:
-            logger.error(f"eToro API failed for {normalized_symbol}: {e}")
+            logger.error(f"eToro API failed for {db_symbol}: {e}")
         except Exception as e:
-            logger.error(f"eToro API error for {normalized_symbol}: {e}")
+            logger.error(f"eToro API error for {db_symbol}: {e}")
 
-        raise ValueError(f"Failed to fetch historical data for {normalized_symbol} from all sources")
+        raise ValueError(f"Failed to fetch historical data for {db_symbol} from all sources")
     
     def _validate_and_return_historical_data(
         self,

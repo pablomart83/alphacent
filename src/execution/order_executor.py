@@ -191,6 +191,12 @@ class OrderExecutor:
                     # relative to the instrument's actual volatility. This catches cases
                     # where a strategy's risk params were calibrated for a different asset
                     # class (e.g., forex primary symbol but trading a stock watchlist symbol).
+                    #
+                    # CRITICAL: use the strategy's timeframe for ATR, not always daily.
+                    # A 4H strategy has ~2.5x lower ATR than daily — using daily ATR for
+                    # a 4H strategy inflates the SL floor by 2.5x, producing 8-13% SLs
+                    # on strategies designed for 3.5% SLs.
+                    # Standard institutional floor: 1.5x ATR (Wilder's original ATR stop).
                     if stop_loss_pct and current_price > 0:
                         try:
                             from src.data.market_data_manager import get_market_data_manager
@@ -198,13 +204,20 @@ class OrderExecutor:
 
                             _mdm = get_market_data_manager()
                             if _mdm is None:
-                                # Fallback: use shared singleton
                                 from src.data.market_data_manager import get_market_data_manager
                                 _mdm = get_market_data_manager()
 
+                            # Detect strategy interval from signal metadata.
+                            # 4H strategies: use 4H bars for ATR (not daily).
+                            # Daily strategies: use daily bars.
+                            _sig_meta = signal.metadata or {}
+                            _is_4h = _sig_meta.get('interval_4h') or _sig_meta.get('interval') == '4h'
+                            _atr_interval = "4h" if _is_4h else "1d"
+                            # Fetch enough bars for 14-period ATR at the strategy's timeframe
+                            _atr_lookback_days = 30 if not _is_4h else 14  # 14 days of 4H = ~84 bars
                             _end = datetime.now()
-                            _start = _end - _td(days=30)
-                            _bars = _mdm.get_historical_data(normalized_symbol, _start, _end, interval="1d")
+                            _start = _end - _td(days=_atr_lookback_days)
+                            _bars = _mdm.get_historical_data(normalized_symbol, _start, _end, interval=_atr_interval)
 
                             if _bars and len(_bars) > 14:
                                 _highs = [b.high for b in _bars if b.high and b.low and b.close]
@@ -222,12 +235,10 @@ class OrderExecutor:
                                     if _tr_list:
                                         _atr14 = sum(_tr_list[-14:]) / min(14, len(_tr_list[-14:]))
                                         _atr_pct = _atr14 / current_price
-                                        # SL must be at least 2.5x ATR (raised from 2x).
-                                        # In ranging_low_vol regime, 2x ATR is too tight —
-                                        # normal intraday noise consumes the entire stop distance.
-                                        # 2.5x gives the trade room to breathe without being
-                                        # so wide that the R:R ratio collapses.
-                                        _atr_floor = _atr_pct * 2.5
+                                        # 1.5x ATR floor — standard institutional minimum
+                                        # (Wilder's original ATR stop, used by most systematic funds).
+                                        # Gives the trade 1.5 bars of normal volatility before stopping out.
+                                        _atr_floor = _atr_pct * 1.5
 
                                         if stop_loss_pct < _atr_floor:
                                             original_rr = (take_profit_pct / stop_loss_pct) if take_profit_pct and stop_loss_pct else 2.0
@@ -235,17 +246,17 @@ class OrderExecutor:
                                             stop_loss_pct = round(_atr_floor, 4)
                                             if take_profit_pct:
                                                 take_profit_pct = round(stop_loss_pct * original_rr, 4)
-                                            # Clamp SL to max 12% to avoid absurdly wide stops
-                                            if stop_loss_pct > 0.12:
-                                                stop_loss_pct = 0.12
+                                            # Clamp SL to asset-class max to avoid absurdly wide stops.
+                                            # Stocks/ETFs: 9% max. Crypto: 15% max. Forex: 4% max.
+                                            _is_crypto = any(c in normalized_symbol.upper() for c in ["BTC","ETH","XRP","ADA","SOL"])
+                                            _is_forex = len(normalized_symbol) == 6 and normalized_symbol[:3].isalpha() and normalized_symbol[3:].isalpha()
+                                            _sl_max = 0.15 if _is_crypto else (0.04 if _is_forex else 0.09)
+                                            if stop_loss_pct > _sl_max:
+                                                stop_loss_pct = _sl_max
                                                 if take_profit_pct:
-                                                    take_profit_pct = round(0.12 * original_rr, 4)
-                                            # CRITICAL: scale position size down proportionally
-                                            # to preserve the same dollar risk.
-                                            # Risk model: position_size was calculated assuming
-                                            # old_sl (e.g. 6%). ATR floor widened it to stop_loss_pct
-                                            # (e.g. 12%). Without adjustment, dollar risk doubles.
-                                            # new_size = old_size × (old_sl / new_sl)
+                                                    take_profit_pct = round(_sl_max * original_rr, 4)
+                                            # Scale position size down proportionally to preserve dollar risk.
+                                            # Risk model sized using old_sl — if SL widens, size must shrink.
                                             if old_sl > 0 and stop_loss_pct > old_sl:
                                                 size_scale = old_sl / stop_loss_pct
                                                 old_size = position_size
@@ -254,18 +265,18 @@ class OrderExecutor:
                                                     round(position_size * size_scale, 2)
                                                 )
                                                 logger.info(
-                                                    f"ATR floor at order time for {normalized_symbol}: "
+                                                    f"ATR floor at order time for {normalized_symbol} ({_atr_interval}): "
                                                     f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
-                                                    f"(ATR={_atr_pct:.2%}, floor=2.5x ATR={_atr_floor:.2%}). "
+                                                    f"(ATR={_atr_pct:.2%}, floor=1.5x ATR={_atr_floor:.2%}). "
                                                     f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x). "
                                                     f"Size scaled {old_size:.0f} → {position_size:.0f} "
                                                     f"(×{size_scale:.2f}) to preserve dollar risk."
                                                 )
                                             else:
                                                 logger.info(
-                                                    f"ATR floor at order time for {normalized_symbol}: "
+                                                    f"ATR floor at order time for {normalized_symbol} ({_atr_interval}): "
                                                     f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
-                                                    f"(ATR={_atr_pct:.2%}, floor=2.5x ATR={_atr_floor:.2%}). "
+                                                    f"(ATR={_atr_pct:.2%}, floor=1.5x ATR={_atr_floor:.2%}). "
                                                     f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x)"
                                                 )
                         except Exception as _atr_err:

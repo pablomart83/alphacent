@@ -787,10 +787,8 @@ class MonitoringService:
                                 cached_data.append(new_bar)
                                 hist_cache.set(cache_key, cached_data)
                                 try:
-                                    from src.utils.symbol_mapper import normalize_symbol
-                                    norm_sym = normalize_symbol(symbol)
                                     if hasattr(self, '_market_data') and self._market_data:
-                                        self._market_data._save_historical_to_db(norm_sym, [new_bar], interval)
+                                        self._market_data._save_historical_to_db(symbol, [new_bar], interval)
                                 except Exception:
                                     pass
                             else:
@@ -803,10 +801,8 @@ class MonitoringService:
                                 cached_data[-1] = updated_bar
                                 hist_cache.set(cache_key, cached_data)
                                 try:
-                                    from src.utils.symbol_mapper import normalize_symbol
-                                    norm_sym = normalize_symbol(symbol)
                                     if hasattr(self, '_market_data') and self._market_data:
-                                        self._market_data._save_historical_to_db(norm_sym, [updated_bar], interval)
+                                        self._market_data._save_historical_to_db(symbol, [updated_bar], interval)
                                 except Exception:
                                     pass
                     updated += 1
@@ -982,7 +978,7 @@ class MonitoringService:
                     # Check DB cache for 1d — use _get_historical_from_db directly
                     # to avoid falling through to Yahoo (Phase 2 handles that in batch).
                     start_1d = end - timedelta(days=220)
-                    db_data_1d = md._get_historical_from_db(normalize_symbol(symbol), start_1d, end, "1d")
+                    db_data_1d = md._get_historical_from_db(symbol, start_1d, end, "1d")
                     if db_data_1d and len(db_data_1d) > 10:
                         stats["1d"] += 1
                         stats["db_cached"] += 1
@@ -1006,7 +1002,7 @@ class MonitoringService:
                         need_yahoo_1h.append(symbol)
                     else:
                         # For inactive non-24/7 symbols, check DB directly (no Yahoo fallback)
-                        db_data_1h = md._get_historical_from_db(normalize_symbol(symbol), start_1h, end, "1h")
+                        db_data_1h = md._get_historical_from_db(symbol, start_1h, end, "1h")
                         if db_data_1h and len(db_data_1h) > 10:
                             stats["1h"] += 1
                             stats["db_cached"] += 1
@@ -1100,8 +1096,7 @@ class MonitoringService:
                                 
                                 if data_list:
                                     data_list.sort(key=lambda d: d.timestamp)
-                                    norm_sym = normalize_symbol(our_symbol)
-                                    md._save_historical_to_db(norm_sym, data_list, interval)
+                                    md._save_historical_to_db(our_symbol, data_list, interval)
                                     
                                     if interval == "1d":
                                         stats["1d"] += 1
