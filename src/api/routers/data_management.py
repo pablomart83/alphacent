@@ -474,9 +474,8 @@ def _run_sync_with_logging(mon) -> None:
                 try:
                     start_1h = end - timedelta(days=180)
                     # For 1h, check DB freshness (stale if latest bar > 2h old)
-                    from src.utils.symbol_mapper import normalize_symbol
-                    norm_symbol = normalize_symbol(symbol)
-                    db_1h = md._get_historical_from_db(norm_symbol, start_1h, end, "1h")
+                    # Use display symbol for DB lookup (not eToro wire format).
+                    db_1h = md._get_historical_from_db(symbol, start_1h, end, "1h")
                     # Check if DB data is fresh — latest bar should be within 2 hours
                     db_is_fresh = False
                     if db_1h and len(db_1h) > 20:

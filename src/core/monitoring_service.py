@@ -961,7 +961,7 @@ class MonitoringService:
             need_yahoo_1d = []  # symbols that need fresh 1d data
             need_yahoo_1h = []  # symbols that need fresh 1h data
             
-            from src.utils.symbol_mapper import to_yahoo_ticker, normalize_symbol
+            from src.utils.symbol_mapper import to_yahoo_ticker
             from src.models import MarketData, DataSource
             
             for symbol in all_symbols:

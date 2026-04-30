@@ -92,27 +92,37 @@ DAILY_ONLY_SYMBOLS = {
 }
 
 
-def normalize_symbol(symbol: str) -> str:
-    """Normalize symbol to eToro format.
+def to_etoro_wire_format(symbol: str) -> str:
+    """Convert display symbol to eToro wire format.
     
-    Converts user-friendly symbols to eToro's naming convention.
-    If the symbol is already in eToro format or not in the alias map,
-    returns it unchanged.
+    Maps user-friendly display symbols to eToro's internal naming convention.
+    This is the eToro wire format used for API calls — NOT the canonical DB key.
+    For DB operations, always use the display symbol (BTC, ETH, not BTCUSD, ETHUSD).
+    
+    BTC -> BTCUSD, ETH -> ETHUSD, EUR -> EURUSD, GBP -> GBPUSD, etc.
+    Stocks and ETFs pass through unchanged (AAPL -> AAPL).
+    
+    Previously named normalize_symbol — renamed to make intent explicit and prevent
+    confusion with symbol_normalizer.normalize_symbol (which resolves instrument IDs).
     
     Args:
-        symbol: User-provided symbol (e.g., "BTC", "BTCUSD", "AAPL")
+        symbol: User-friendly display symbol (e.g., "BTC", "AAPL")
         
     Returns:
-        eToro-formatted symbol (e.g., "BTCUSD", "BTCUSD", "AAPL")
+        eToro wire format symbol (e.g., "BTCUSD", "AAPL")
     """
     symbol_upper = symbol.upper().strip()
     
     if symbol_upper in SYMBOL_ALIASES:
         normalized = SYMBOL_ALIASES[symbol_upper]
-        logger.debug(f"Normalized symbol: {symbol} -> {normalized}")
+        logger.debug(f"eToro wire format: {symbol} -> {normalized}")
         return normalized
     
     return symbol_upper
+
+
+# Backward-compat alias — prefer to_etoro_wire_format in new code
+normalize_symbol = to_etoro_wire_format
 
 
 def to_yahoo_ticker(symbol: str) -> str:

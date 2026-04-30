@@ -43,7 +43,7 @@ def ensure_yfinance_cache():
 from src.api.etoro_client import EToroAPIClient, EToroAPIError
 from src.data.data_quality_validator import DataQualityValidator, DataQualityReport
 from src.models import DataSource, MarketData
-from src.utils.symbol_mapper import normalize_symbol, to_yahoo_ticker
+from src.utils.symbol_mapper import to_etoro_wire_format as normalize_symbol, to_yahoo_ticker
 
 logger = logging.getLogger(__name__)
 

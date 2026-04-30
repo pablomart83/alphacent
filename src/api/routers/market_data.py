@@ -16,7 +16,7 @@ from src.models.enums import DataSource, TradingMode
 from src.api.dependencies import get_current_user, get_configuration
 from src.api.etoro_client import EToroAPIClient, EToroAPIError
 from src.core.config import Configuration
-from src.utils.symbol_mapper import normalize_symbol, get_display_symbol, get_all_aliases
+from src.utils.symbol_mapper import to_etoro_wire_format, get_display_symbol, get_all_aliases
 
 logger = logging.getLogger(__name__)
 
