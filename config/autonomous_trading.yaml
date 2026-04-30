@@ -254,7 +254,7 @@ data_management:
   cleanup_enabled: true
 alpha_edge:
   max_active_strategies: 10
-  min_conviction_score: 70   # Raised from 57/60 — only high-quality signals execute
+  min_conviction_score: 65   # Lowered from 70 (Apr 30) — 70 was above practical ceiling for DSL strategies (max observed: 69.x). 65 gives ~25% pass rate.
   min_holding_period_days: 3
   max_holding_period_days: 30
   max_trades_per_strategy_per_month: 4

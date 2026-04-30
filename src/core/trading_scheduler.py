@@ -1420,6 +1420,7 @@ class TradingScheduler:
                                                     etoro_position_id=etoro_position_id,
                                                     stop_loss=order.stop_price,
                                                     take_profit=order.take_profit_price,
+                                                    invested_amount=order.quantity,  # order.quantity IS the dollar amount sent to eToro (/by-amount endpoint)
                                                 )
                                                 session.add(new_pos)
                                                 logger.info(f"Position created immediately: {order.symbol} {pos_side.value} (eToro: {etoro_position_id})")
