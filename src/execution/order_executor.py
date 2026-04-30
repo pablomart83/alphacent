@@ -240,12 +240,34 @@ class OrderExecutor:
                                                 stop_loss_pct = 0.12
                                                 if take_profit_pct:
                                                     take_profit_pct = round(0.12 * original_rr, 4)
-                                            logger.info(
-                                                f"ATR floor at order time for {normalized_symbol}: "
-                                                f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
-                                                f"(ATR={_atr_pct:.2%}, floor=2.5x ATR={_atr_floor:.2%}). "
-                                                f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x)"
-                                            )
+                                            # CRITICAL: scale position size down proportionally
+                                            # to preserve the same dollar risk.
+                                            # Risk model: position_size was calculated assuming
+                                            # old_sl (e.g. 6%). ATR floor widened it to stop_loss_pct
+                                            # (e.g. 12%). Without adjustment, dollar risk doubles.
+                                            # new_size = old_size × (old_sl / new_sl)
+                                            if old_sl > 0 and stop_loss_pct > old_sl:
+                                                size_scale = old_sl / stop_loss_pct
+                                                old_size = position_size
+                                                position_size = max(
+                                                    5000.0,  # never go below $5K minimum
+                                                    round(position_size * size_scale, 2)
+                                                )
+                                                logger.info(
+                                                    f"ATR floor at order time for {normalized_symbol}: "
+                                                    f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
+                                                    f"(ATR={_atr_pct:.2%}, floor=2.5x ATR={_atr_floor:.2%}). "
+                                                    f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x). "
+                                                    f"Size scaled {old_size:.0f} → {position_size:.0f} "
+                                                    f"(×{size_scale:.2f}) to preserve dollar risk."
+                                                )
+                                            else:
+                                                logger.info(
+                                                    f"ATR floor at order time for {normalized_symbol}: "
+                                                    f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
+                                                    f"(ATR={_atr_pct:.2%}, floor=2.5x ATR={_atr_floor:.2%}). "
+                                                    f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x)"
+                                                )
                         except Exception as _atr_err:
                             logger.debug(f"Could not compute ATR floor for {normalized_symbol}: {_atr_err}")
                     
