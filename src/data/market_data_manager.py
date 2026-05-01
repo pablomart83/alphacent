@@ -1243,6 +1243,20 @@ class MarketDataManager:
             db = get_database()
             session = db.get_session()
             try:
+                # Normalize 1d bar timestamps to midnight UTC for consistent storage.
+                # yfinance returns 1d bars with different tz conventions depending on API:
+                #   - ticker.history() often returns midnight UTC (00:00)
+                #   - yf.download() batch returns midnight market-local, which becomes
+                #     04:00 UTC (EDT) or 05:00 UTC (EST) after tz_convert
+                # Without normalization, the same trading day ends up with two DB rows
+                # (one per source), defeating the UniqueConstraint on (symbol, date, interval).
+                # Storing all 1d bars at midnight UTC makes the constraint effective and
+                # matches the convention of the ~190K existing 1d rows in the cache.
+                if interval == "1d":
+                    for md in data_list:
+                        if md.timestamp:
+                            md.timestamp = md.timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
+
                 # Get existing timestamps in one query to avoid per-bar lookups
                 existing_timestamps = set()
                 existing = session.query(HistoricalPriceCacheORM.date).filter(
