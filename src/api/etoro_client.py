@@ -590,6 +590,12 @@ class EToroAPIClient:
             if hist.empty:
                 raise ValueError(f"No historical data available for {yahoo_symbol}")
 
+            # Normalise index to UTC before iterating — prevents AmbiguousTimeError
+            # when the date range crosses a DST boundary. yfinance returns tz-aware
+            # timestamps; converting to UTC first gives unambiguous naive datetimes.
+            if hasattr(hist.index, 'tz') and hist.index.tz is not None:
+                hist.index = hist.index.tz_convert('UTC').tz_localize(None)
+
             # Convert to list of MarketData objects
             market_data_list = []
             for timestamp, row in hist.iterrows():

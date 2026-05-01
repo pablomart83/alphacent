@@ -4120,6 +4120,9 @@ async def get_stress_tests(
                     ticker = yf.Ticker("SPY")
                     hist = ticker.history(start=start_str, end=end_str, interval="1d")
                     if not hist.empty:
+                        # Normalise index to UTC — prevents AmbiguousTimeError on DST boundaries
+                        if hasattr(hist.index, 'tz') and hist.index.tz is not None:
+                            hist.index = hist.index.tz_convert('UTC').tz_localize(None)
                         spy_closes = [(str(d.date()), float(c)) for d, c in zip(hist.index, hist["Close"])]
                     else:
                         spy_closes = []

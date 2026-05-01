@@ -899,6 +899,15 @@ class MarketDataManager:
         if hist.empty:
             raise ValueError(f"No historical data available from Yahoo Finance for {symbol} (ticker: {yf_symbol})")
 
+        # Normalise index to UTC FIRST — before any resampling or iteration.
+        # yfinance returns tz-aware timestamps; when the lookback window crosses a DST
+        # boundary (EU last Sunday of Oct/Mar, US first Sunday of Nov/Mar), the ambiguous
+        # local hour causes pd.Timestamp.to_pydatetime() AND pd.resample() to raise
+        # AmbiguousTimeError. Converting to UTC then stripping tz makes everything
+        # downstream unambiguous.
+        if hasattr(hist.index, 'tz') and hist.index.tz is not None:
+            hist.index = hist.index.tz_convert('UTC').tz_localize(None)
+
         # Synthesize 4H bars from 1H data using proper OHLCV resampling.
         # This is how real trading platforms build higher-timeframe candles:
         # Open = first bar's open, High = max of all highs, Low = min of all lows,
@@ -914,12 +923,6 @@ class MarketDataManager:
             }).dropna(subset=['Open', 'Close'])
             logger.info(f"Synthesized {len(hist_4h)} 4H bars from {len(hist)} 1H bars for {symbol}")
             hist = hist_4h
-        # Normalise index to UTC before iterating — prevents AmbiguousTimeError on DST
-        # transitions (e.g. EU clocks change on last Sunday of October/March).
-        # yfinance returns tz-aware timestamps; converting to UTC then stripping tz
-        # gives unambiguous naive datetimes for all downstream code.
-        if hasattr(hist.index, 'tz') and hist.index.tz is not None:
-            hist.index = hist.index.tz_convert('UTC').tz_localize(None)
 
         # Convert to MarketData objects (keep original symbol, not Yahoo ticker)
         data_list = []

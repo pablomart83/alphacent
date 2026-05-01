@@ -1055,6 +1055,15 @@ class MonitoringService:
                         logger.warning(f"[bg-full-sync] Yahoo batch returned empty for {interval}")
                         continue
                     
+                    # Normalise index to UTC before iterating — prevents AmbiguousTimeError on DST
+                    # transitions (EU clocks fall back last Sunday of October, US last Sunday of
+                    # November). yfinance returns tz-aware timestamps; when the 180-day lookback
+                    # window crosses a DST boundary, the ambiguous local hour (e.g. 2025-11-02
+                    # 01:47 in America/New_York) causes pd.Timestamp.to_pydatetime() to raise.
+                    # Converting to UTC first gives unambiguous naive datetimes for all downstream.
+                    if hasattr(batch_data.index, 'tz') and batch_data.index.tz is not None:
+                        batch_data.index = batch_data.index.tz_convert('UTC').tz_localize(None)
+                    
                     # Parse batch response — structure depends on single vs multi ticker
                     yf_to_sym = {}
                     for sym, yf_t in sym_to_yf.items():
