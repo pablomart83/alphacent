@@ -1529,6 +1529,7 @@ class MarketDataManager:
                 # Bulk insert only new bars
                 new_records = []
                 now = datetime.now()
+                rejected_ohlc = 0  # F27: count bars rejected for invalid OHLC
                 for md in data_list:
                     if interval == "1d":
                         md_key = md.timestamp.date() if hasattr(md.timestamp, 'date') and callable(md.timestamp.date) else md.timestamp
@@ -1537,6 +1538,25 @@ class MarketDataManager:
                     
                     if md_key in existing_timestamps:
                         continue
+
+                    # F27 (2026-05-01): validate OHLC at write boundary.
+                    # Bars with high < max(open, close) or low > min(open, close)
+                    # are mathematically invalid. Historically such bars slipped in
+                    # via `monitoring_service._sync_price_data` (batch Yahoo path)
+                    # which didn't call `validate_data()` before save. Same rule as
+                    # `validate_data` uses at read-time, applied here so downstream
+                    # readers don't have to re-filter (and re-log warnings) every
+                    # cycle. Epsilon 1e-8 matches validate_data.
+                    _eps = 1e-8
+                    if md.high is not None and md.open is not None and md.close is not None:
+                        if md.high < md.open - _eps or md.high < md.close - _eps:
+                            rejected_ohlc += 1
+                            continue
+                    if md.low is not None and md.open is not None and md.close is not None:
+                        if md.low > md.open + _eps or md.low > md.close + _eps:
+                            rejected_ohlc += 1
+                            continue
+
                     new_records.append(HistoricalPriceCacheORM(
                         symbol=symbol,
                         date=md.timestamp,
@@ -1549,6 +1569,12 @@ class MarketDataManager:
                         source=md.source.value if hasattr(md.source, 'value') else str(md.source),
                         fetched_at=now
                     ))
+
+                if rejected_ohlc > 0:
+                    logger.info(
+                        f"F27 save-boundary: rejected {rejected_ohlc} invalid-OHLC "
+                        f"{interval} bars for {symbol} (likely partial/forming bars)"
+                    )
 
                 if new_records:
                     session.bulk_save_objects(new_records)

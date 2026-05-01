@@ -1717,6 +1717,16 @@ class StrategyProposer:
                 # Find the matching wf_results
                 for s, wf in validated_strategies:
                     if s.id == strategy.id:
+                        # Defensive: if wf is None (can happen if WF returned None from
+                        # an early-exit path or a cached null result), skip attachment
+                        # rather than crashing the whole proposal cycle. Observed once
+                        # at 2026-05-01 14:37 UTC; treating as latent bug, not regression.
+                        if wf is None:
+                            logger.warning(
+                                f"WF result is None for {strategy.name} — skipping "
+                                f"backtest_results attachment (strategy will still propose)"
+                            )
+                            break
                         strategy.backtest_results = wf['test_results']
                         if not hasattr(strategy, 'metadata') or strategy.metadata is None:
                             strategy.metadata = {}
