@@ -122,6 +122,29 @@ class OrderExecutor:
         
         logger.info(f"Executing signal: {signal.action.value} {normalized_symbol} (size: {position_size})")
 
+        # C1 (2026-05-01): VIX Signal-Time Gate.
+        # Block new LONG entries when VIX > 25 AND VIX_5d change > +15%.
+        # Reference: Bilello research — post-VIX-spike 1yr forward S&P return
+        # averaged only 4.4%; vol spikes mark turning points.
+        #
+        # Applies only to ENTER_LONG on equity/ETF/index/forex/commodity.
+        # Crypto 24/7 spikes frequently so excluded. Fail-open if VIX
+        # unavailable — don't block valid orders on data issues.
+        # Existing LONG positions continue to exit normally.
+        if signal.action == SignalAction.ENTER_LONG:
+            try:
+                vix_gate_reason = self._check_vix_entry_gate(normalized_symbol)
+                if vix_gate_reason:
+                    raise OrderExecutionError(
+                        f"VIX gate blocked LONG entry for {normalized_symbol}: "
+                        f"{vix_gate_reason}. Signal discarded."
+                    )
+            except OrderExecutionError:
+                raise
+            except Exception as _vix_err:
+                # Fail-open on gate-check error
+                logger.debug(f"VIX gate check skipped for {normalized_symbol}: {_vix_err}")
+
         try:
             # Validate minimum order size ($2000 for stocks/ETFs/crypto, $1000 for commodities/forex/indices)
             if position_size < 1000.0:
@@ -391,6 +414,72 @@ class OrderExecutor:
             else:
                 logger.error(f"Failed to execute signal: {e}")
             raise OrderExecutionError(f"Failed to execute signal: {e}")
+
+    def _check_vix_entry_gate(self, symbol: str) -> Optional[str]:
+        """Block LONG entries during VIX spike windows.
+
+        Returns a short reason string when the gate should block, None otherwise.
+
+        Trigger conditions (BOTH must be true):
+          - Current VIX > 25
+          - VIX 5-day change > +15%
+
+        Scoping:
+          - Crypto symbols exempt (24/7, frequent spikes unrelated to US vol)
+          - Only called on ENTER_LONG by caller
+          - Cached for 5 minutes to avoid repeated VIX fetches in a cycle
+          - Fail-open by raising — caller catches and allows the order through
+
+        Raises on any data/fetch error — caller's try/except converts
+        to fail-open behaviour (log debug, proceed).
+        """
+        import time as _t
+
+        # Scope: skip crypto (signal.symbol is already normalized to display form)
+        _u = (symbol or "").upper()
+        if _u in ("BTC", "ETH") or _u.startswith("BTC") or _u.startswith("ETH"):
+            return None
+
+        # 5-min TTL cache on the instance
+        now = _t.time()
+        cache = getattr(self, '_c1_vix_cache', None)
+        if cache and (now - cache[0] < 300):
+            return cache[1]
+
+        from datetime import datetime, timedelta
+        from src.data.market_data_manager import get_market_data_manager
+
+        mdm = get_market_data_manager()
+        if mdm is None:
+            return None  # No data manager available — fail-open via None
+
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=10)
+        vix_bars = mdm.get_historical_data(
+            symbol="^VIX",
+            start=start_date,
+            end=end_date,
+            interval="1d",
+            prefer_yahoo=True,
+        )
+        if not vix_bars or len(vix_bars) < 6:
+            return None
+
+        vix_now = vix_bars[-1].close
+        vix_5d_ago = vix_bars[-6].close
+        if not vix_now or not vix_5d_ago or vix_5d_ago <= 0:
+            return None
+
+        vix_5d_change = (vix_now - vix_5d_ago) / vix_5d_ago
+        reason = None
+        if vix_now > 25.0 and vix_5d_change > 0.15:
+            reason = (
+                f"VIX={vix_now:.1f} (>25) and VIX_5d={vix_5d_change*100:+.1f}% "
+                f"(>+15%). Post-spike window — LONG entries suppressed."
+            )
+
+        self._c1_vix_cache = (now, reason)
+        return reason
 
     def _signal_to_order_params(self, action: SignalAction) -> tuple[OrderSide, OrderType]:
         """Convert signal action to order parameters.

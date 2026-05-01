@@ -1077,94 +1077,17 @@ class StrategyTemplateLibrary:
             metadata={"high_sensitivity": True, "skip_param_override": True}
         ))
         
-        # 36. Short EMA Crossover — fast 5/13 EMA cross for quick entries
-        templates.append(StrategyTemplate(
-            name="Fast EMA Crossover",
-            description="Buy on fast EMA(5) crossing above EMA(13), exit on cross below",
-            strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[
-                MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL,
-                MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
-                MarketRegime.TRENDING_DOWN_WEAK,
-            ],
-            entry_conditions=[
-                "EMA(5) CROSSES_ABOVE EMA(13)"
-            ],
-            exit_conditions=[
-                "EMA(5) CROSSES_BELOW EMA(13)"
-            ],
-            required_indicators=["EMA:5", "EMA:13"],
-            default_parameters={
-                "fast_period": 5,
-                "slow_period": 13,
-                "stop_loss_pct": 0.02,
-                "take_profit_pct": 0.03
-            },
-            expected_trade_frequency="6-10 trades/month",
-            expected_holding_period="2-7 days",
-            risk_reward_ratio=1.5,
-            metadata={"high_sensitivity": True, "skip_param_override": True}
-        ))
-        
-        # 37. Close Near SMA — fires when price is within 1% of SMA(10)
-        # and RSI is not overbought. Catches mean-reversion near the average.
-        templates.append(StrategyTemplate(
-            name="SMA Proximity Entry",
-            description="Buy when price pulls back to within 1% of SMA(10) and RSI < 45, exit on 2% gain or RSI > 60",
-            strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[
-                MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL,
-                MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
-                MarketRegime.TRENDING_DOWN_WEAK,
-            ],
-            entry_conditions=[
-                "CLOSE > SMA(10) * 0.99 AND CLOSE < SMA(10) * 1.01 AND RSI(14) < 45"
-            ],
-            exit_conditions=[
-                "RSI(14) > 60 OR CLOSE > SMA(10) * 1.02"
-            ],
-            required_indicators=["SMA:10", "RSI"],
-            default_parameters={
-                "sma_period": 10,
-                "rsi_period": 14,
-                "stop_loss_pct": 0.015,
-                "take_profit_pct": 0.025
-            },
-            expected_trade_frequency="5-8 trades/month",
-            expected_holding_period="1-4 days",
-            risk_reward_ratio=1.5,
-            metadata={"high_sensitivity": True, "skip_param_override": True}
-        ))
-        
-        # 38. Bollinger Middle Band Bounce — fires when price crosses above
-        # the middle band (SMA 20), not requiring extreme oversold.
-        templates.append(StrategyTemplate(
-            name="BB Middle Band Bounce",
-            description="Buy when price crosses above BB middle band from below with RSI not overbought, exit at upper band",
-            strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[
-                MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL,
-                MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_DOWN_WEAK,
-            ],
-            entry_conditions=[
-                "CLOSE > BB_MIDDLE(20, 2) AND CLOSE < BB_UPPER(20, 2) AND RSI(14) < 55"
-            ],
-            exit_conditions=[
-                "CLOSE > BB_UPPER(20, 2) OR RSI(14) > 70"
-            ],
-            required_indicators=["Bollinger Bands", "RSI"],
-            default_parameters={
-                "bb_period": 20,
-                "bb_std": 2.0,
-                "rsi_period": 14,
-                "stop_loss_pct": 0.02,
-                "take_profit_pct": 0.03
-            },
-            expected_trade_frequency="4-7 trades/month",
-            expected_holding_period="2-5 days",
-            risk_reward_ratio=1.5,
-            metadata={"high_sensitivity": True, "skip_param_override": True}
-        ))
+        # R1/R2/R3 REMOVED 2026-05-01 per STRATEGY_LIBRARY_REVIEW_2026-05:
+        # - "Fast EMA Crossover" (EMA(5)/EMA(13)): raw MA crossover, no regime filter,
+        #   2% SL consumed by CFD spread. Live data: -$378 open drag. SSRN 5186655
+        #   shows 50/200 MA crossover underperformed buy-and-hold on mega-caps 2024.
+        # - "SMA Proximity Entry": price-within-1%-of-SMA(10) fires in trending
+        #   markets where pullbacks become continuations. No regime filter. Live: -$308.
+        # - "BB Middle Band Bounce": crossing above BB middle band is a zero-edge
+        #   signal without confluence. Live: -$141.
+        #
+        # All three were high_sensitivity/skip_param_override, meaning they bypassed
+        # param variation — minimal chance of "better params" redeeming them.
         
         # ===== SHORT STRATEGIES (for downtrending markets) =====
         # These strategies profit from price declines by selling high and buying back low
@@ -6336,31 +6259,14 @@ class StrategyTemplateLibrary:
             metadata={"direction": "long", "crypto_optimized": True, "skip_param_override": True, "intraday": True}
         ))
         
-        # VWAP Trend Continuation (4H) — swing version
-        templates.append(StrategyTemplate(
-            name="4H VWAP Trend Continuation",
-            description="Buy when 4H price holds above VWAP with confirmed trend (ADX>18) and volume expansion. VWAP as dynamic support — only trade when the trend has real momentum behind it.",
-            strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK],
-            entry_conditions=[
-                "CLOSE > VWAP() AND CLOSE < VWAP() * 1.01 AND RSI(14) > 50 AND ADX(14) > 18 AND VOLUME > VOLUME_MA(20) * 1.2"
-            ],
-            exit_conditions=[
-                "CLOSE < VWAP() * 0.985 OR RSI(14) > 75 OR ADX(14) < 15"
-            ],
-            required_indicators=["VWAP", "RSI", "ADX", "Volume MA"],
-            default_parameters={
-                "stop_loss_pct": 0.03,
-                "take_profit_pct": 0.06,
-                "risk_per_trade_pct": 0.01,
-                "sizing_method": "volatility",
-                "position_size_atr_multiplier": 1.0,
-            },
-            expected_trade_frequency="1-3 trades/month",
-            expected_holding_period="1-4 days",
-            risk_reward_ratio=2.0,
-            metadata={"direction": "long", "interval_4h": True, "interval": "4h", "skip_param_override": True}
-        ))
+        # R7 REMOVED 2026-05-01 per STRATEGY_LIBRARY_REVIEW_2026-05:
+        # - "4H VWAP Trend Continuation": VWAP on 4H bars spans multiple trading
+        #   sessions, muddling the intraday-anchor concept VWAP is built for.
+        #   VWAP resets session-by-session — meaningful at 1h within a session,
+        #   not meaningful as a 4H swing signal. Live: -$141 open drag.
+        #   Intraday 1h variants (Crypto Hourly VWAP Trend, Crypto Hourly VWAP
+        #   Reversion) retain the correct scope and are kept.
+        
         
         templates.append(StrategyTemplate(
             name="Crypto BB Squeeze Breakout Long",
@@ -6420,31 +6326,11 @@ class StrategyTemplateLibrary:
             risk_reward_ratio=1.7
         ))
 
-        # --- BB Middle Band Reversion (Tight) ---
-        # In low vol, price oscillates around the middle band. Don't wait for lower band.
-        templates.append(StrategyTemplate(
-            name="BB Midband Reversion Tight",
-            description="Buy when price dips below BB middle band with RSI < 50, sell on return above middle band. Low vol specialist.",
-            strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[MarketRegime.RANGING_LOW_VOL],
-            entry_conditions=[
-                "CLOSE < BB_MIDDLE(20, 2) AND RSI(14) < 50"
-            ],
-            exit_conditions=[
-                "CLOSE > BB_MIDDLE(20, 2) AND RSI(14) > 50"
-            ],
-            required_indicators=["Bollinger Bands", "RSI"],
-            default_parameters={
-                "bb_period": 20,
-                "bb_std": 2,
-                "rsi_period": 14,
-                "stop_loss_pct": 0.012,
-                "take_profit_pct": 0.02,
-            },
-            expected_trade_frequency="6-10 trades/month",
-            expected_holding_period="1-3 days",
-            risk_reward_ratio=1.5
-        ))
+        # R6 REMOVED 2026-05-01 per STRATEGY_LIBRARY_REVIEW_2026-05:
+        # - "BB Midband Reversion Tight": same zero-edge pattern as BB Middle Band
+        #   Bounce (also removed). Crossing BB middle is not a reliable signal
+        #   without other confluence. Structural concept flaw.
+        
 
         # --- Narrow BB Scalp Long ---
         # When bands are very tight, any touch of the lower band is a buy.
@@ -6497,55 +6383,13 @@ class StrategyTemplateLibrary:
             risk_reward_ratio=1.7
         ))
 
-        # --- SMA Envelope Reversion ---
-        # Price oscillates within ±1% of SMA(20) in low vol. Buy at -1%, sell at +1%.
-        templates.append(StrategyTemplate(
-            name="SMA Envelope Reversion Long",
-            description="Buy when price drops 1% below SMA(20), sell when it returns to SMA. Classic envelope strategy for quiet markets.",
-            strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[MarketRegime.RANGING_LOW_VOL],
-            entry_conditions=[
-                "CLOSE < SMA(20) AND RSI(14) < 45"
-            ],
-            exit_conditions=[
-                "CLOSE > SMA(20)"
-            ],
-            required_indicators=["SMA:20", "RSI"],
-            default_parameters={
-                "sma_period": 20,
-                "rsi_period": 14,
-                "stop_loss_pct": 0.015,
-                "take_profit_pct": 0.02,
-            },
-            expected_trade_frequency="6-10 trades/month",
-            expected_holding_period="1-3 days",
-            risk_reward_ratio=1.5
-        ))
-
-        # --- SMA Envelope Short ---
-        templates.append(StrategyTemplate(
-            name="SMA Envelope Reversion Short",
-            description="Short when price rises 1% above SMA(20), cover when it returns. Mirror of SMA Envelope Long.",
-            strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[MarketRegime.RANGING_LOW_VOL],
-            entry_conditions=[
-                "CLOSE > SMA(20) AND RSI(14) > 55"
-            ],
-            exit_conditions=[
-                "CLOSE < SMA(20)"
-            ],
-            required_indicators=["SMA:20", "RSI"],
-            default_parameters={
-                "sma_period": 20,
-                "rsi_period": 14,
-                "stop_loss_pct": 0.015,
-                "take_profit_pct": 0.02,
-            },
-            metadata={"direction": "short"},
-            expected_trade_frequency="6-10 trades/month",
-            expected_holding_period="1-3 days",
-            risk_reward_ratio=1.5
-        ))
+        # R4/R5 REMOVED 2026-05-01 per STRATEGY_LIBRARY_REVIEW_2026-05:
+        # - "SMA Envelope Reversion Long" and "SMA Envelope Reversion Short":
+        #   same envelope-proximity pattern as SMA Proximity Entry (also removed).
+        #   Fires on any close below/above SMA(20) with RSI extreme — no regime
+        #   filter, so signals fire in trending markets where envelope crossings
+        #   become continuations. Structural concept flaw, not an implementation bug.
+        
 
         # --- Stochastic Midrange Oscillator ---
         # In low vol, Stochastic oscillates 30-70 instead of 20-80. Trade the midrange.
@@ -7670,7 +7514,8 @@ class StrategyTemplateLibrary:
                 MarketRegime.RANGING_LOW_VOL,
             ],
             entry_conditions=[
-                "Earnings surprise > 2% (actual EPS > estimated EPS)",
+                "Earnings surprise > 4% (actual EPS > estimated EPS)",
+                "Revenue growth QoQ >= 8% (operating momentum confirmation)",
                 "Entry 2-5 days after earnings announcement",
                 "Price still below pre-earnings high (drift not yet captured)",
                 "RSI(14) < 70 (not overbought)",
@@ -7682,7 +7527,12 @@ class StrategyTemplateLibrary:
             ],
             required_indicators=["RSI:14", "SMA:20"],
             default_parameters={
-                "min_earnings_surprise_pct": 0.02,
+                # C3 (2026-05-01): tightened surprise threshold 2% → 4% and added
+                # revenue_growth_qoq requirement per Lord Abbett "confirmed momentum"
+                # research — price momentum with operating momentum has lower
+                # downside volatility and better persistence in 2025 regime.
+                "min_earnings_surprise_pct": 0.04,
+                "min_revenue_growth_qoq": 0.08,
                 "entry_days_after_earnings": 3,
                 "max_entry_days": 5,
                 "profit_target": 0.08,

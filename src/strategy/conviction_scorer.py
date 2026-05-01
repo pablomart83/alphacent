@@ -432,16 +432,123 @@ class ConvictionScorer:
                     regime_map = alignment[best_key]
 
             if strategy_type in regime_map.get('strong', []):
-                return 20.0
+                score = 20.0
             elif strategy_type in regime_map.get('neutral', []):
-                return 12.0
+                score = 12.0
             else:
                 # "Weak" match — but WF already validated, so give 5 not 0
-                return 5.0
+                score = 5.0
+
+            # C2 (2026-05-01): Momentum Crash Circuit Breaker.
+            # Steelman: Byun & Jeon (SSRN 2900073) documented momentum crashes during
+            # market rebounds — 52-week-high momentum strategies get hit hardest when
+            # oversold names rally off a drawdown. Combined with the general "raw
+            # momentum is crowded" evidence from the 2025 H1 quant unwind, we want
+            # to dial down momentum LONG conviction when the market has sold off
+            # AND vol is spiking (rebound window). We don't veto — WF already
+            # validated — we just reduce the regime component.
+            #
+            # Trigger: SPY 5-day return < -3% AND VIX 1-day change > +10%.
+            # Target: momentum/trend_following/breakout LONG strategies.
+            # Action: subtract 10 points from regime_fit (capped at floor=5 to
+            # match the existing "weak match" floor).
+            direction = (strategy.metadata or {}).get('direction', 'long').lower() if strategy.metadata else 'long'
+            if direction == 'long' and strategy_type in ('momentum', 'trend_following', 'breakout'):
+                try:
+                    crash_signal = self._check_momentum_crash_regime()
+                    if crash_signal:
+                        reduction = 10.0
+                        new_score = max(5.0, score - reduction)
+                        if new_score < score:
+                            logger.info(
+                                f"C2 momentum crash circuit breaker fired for "
+                                f"{strategy.name}: regime_fit {score:.1f} → {new_score:.1f} "
+                                f"({crash_signal})"
+                            )
+                            score = new_score
+                except Exception as _c2_err:
+                    # Never block a valid score on circuit-breaker failure
+                    logger.debug(f"C2 circuit breaker check failed: {_c2_err}")
+
+            return score
 
         except Exception as e:
             logger.warning(f"Error scoring regime fit: {e}")
             return 10.0
+
+    # ─── C2 HELPER: Momentum Crash Circuit Breaker ─────────────────────
+    def _check_momentum_crash_regime(self) -> Optional[str]:
+        """Detect the post-drawdown rebound window where raw momentum crashes.
+
+        Returns a short reason string when triggered, None otherwise.
+
+        Trigger conditions (BOTH must be true):
+          1. SPY 5-day return < -3% (market has sold off)
+          2. VIX 1-day change > +10% (fear spiking — rebound setup)
+
+        Cached for 5 minutes to avoid repeated MarketData fetches within
+        a signal-generation cycle. Fail-open — any error returns None
+        (i.e. no circuit breaker fires).
+        """
+        import time as _t
+        now = _t.time()
+        cache = getattr(self, '_c2_crash_cache', None)
+        if cache and (now - cache[0] < 300):  # 5min TTL
+            return cache[1]
+
+        try:
+            from datetime import datetime, timedelta
+            if not self.market_analyzer or not hasattr(self.market_analyzer, 'market_data'):
+                return None
+
+            md = self.market_analyzer.market_data
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=10)
+
+            # SPY 5-day return
+            spy_bars = md.get_historical_data(
+                symbol="SPY",
+                start=start_date,
+                end=end_date,
+                interval="1d",
+                prefer_yahoo=True,
+            )
+            if not spy_bars or len(spy_bars) < 6:
+                return None
+            spy_now = spy_bars[-1].close
+            spy_5d_ago = spy_bars[-6].close
+            if not spy_now or not spy_5d_ago or spy_5d_ago <= 0:
+                return None
+            spy_5d_return = (spy_now - spy_5d_ago) / spy_5d_ago
+
+            # VIX 1-day change
+            vix_bars = md.get_historical_data(
+                symbol="^VIX",
+                start=start_date,
+                end=end_date,
+                interval="1d",
+                prefer_yahoo=True,
+            )
+            if not vix_bars or len(vix_bars) < 2:
+                return None
+            vix_now = vix_bars[-1].close
+            vix_prev = vix_bars[-2].close
+            if not vix_now or not vix_prev or vix_prev <= 0:
+                return None
+            vix_1d_change = (vix_now - vix_prev) / vix_prev
+
+            if spy_5d_return < -0.03 and vix_1d_change > 0.10:
+                reason = f"SPY_5d={spy_5d_return*100:.1f}%, VIX_1d={vix_1d_change*100:+.1f}%"
+                self._c2_crash_cache = (now, reason)
+                return reason
+
+            # Negative result is also cacheable
+            self._c2_crash_cache = (now, None)
+            return None
+
+        except Exception as e:
+            logger.debug(f"C2 crash regime check error: {e}")
+            return None
 
     # ─── 4. ASSET TRADABILITY (max 15 points) ───────────────────────────
     def _score_asset_tradability(

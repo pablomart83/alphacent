@@ -3260,9 +3260,16 @@ Generate a CORRECTED strategy that addresses all errors:"""
         
         # Reserve slots for Alpha Edge (force-added separately)
         # When no DSL templates exist (e.g., user filtered to alpha_edge only),
-        # give all slots to Alpha Edge
+        # give all slots to Alpha Edge.
+        #
+        # Q2 (2026-05-01): raised AE cap from 5 → 8 when DSL templates exist.
+        # With 25 AE templates in the library and only 5 slots per cycle, most
+        # templates never got a chance to propose (confirmed: 5 live AE strategies
+        # for 25 templates). Raising to 8 gives AE templates ~1.6x more cycles
+        # per rotation without overwhelming the DSL pool. WF + conviction still
+        # decide what activates.
         if dsl_templates:
-            ae_slots = min(5, len(ae_templates))
+            ae_slots = min(8, len(ae_templates))
         else:
             ae_slots = len(ae_templates)  # All slots go to AE when no DSL
         dsl_target = adjusted_count - ae_slots
@@ -3520,6 +3527,37 @@ Generate a CORRECTED strategy that addresses all errors:"""
             t for t in alpha_edge_templates_filtered
             if t.name.lower() not in UNDERPERFORMING_AE_TEMPLATES
         ]
+
+        # Q1 (2026-05-01): rotate AE template order across cycles so ALL templates
+        # in the library get a shot, not just the first N in definition order.
+        #
+        # Prior behaviour: templates are evaluated in the order defined in
+        # strategy_templates.py. With ae_slots=5-8, templates defined later
+        # in the file never reached the loop. Confirmed: 0 Post-Earnings Drift
+        # Long, 0 Sector Rotation, 0 52-Week High Momentum, 0 Analyst Revision,
+        # 0 Share Buyback Momentum — all valid templates that never proposed.
+        #
+        # Anchor on hour-of-year: advances once per hour, giving the autonomous
+        # scheduler (runs daily 15:15 UTC + weekday 19:00 UTC, plus intraday
+        # signal cycles that also reach this code) a stable rotation that
+        # spreads fairly across the template list without depending on a
+        # persisted counter. Two cycles on the same hour see the same order —
+        # that's fine; adjacent cycles rotate.
+        try:
+            import time as _time_q1
+            _rotation_offset = int(_time_q1.time() // 3600) % max(1, len(alpha_edge_templates_filtered))
+            if _rotation_offset and alpha_edge_templates_filtered:
+                alpha_edge_templates_filtered = (
+                    alpha_edge_templates_filtered[_rotation_offset:] +
+                    alpha_edge_templates_filtered[:_rotation_offset]
+                )
+                logger.info(
+                    f"AE template rotation: offset={_rotation_offset}, "
+                    f"starting with '{alpha_edge_templates_filtered[0].name}' "
+                    f"(of {len(alpha_edge_templates_filtered)} templates)"
+                )
+        except Exception as _rot_err:
+            logger.debug(f"AE rotation skipped: {_rot_err}")
 
         # Check which Alpha Edge templates already have active strategies in DB
         active_ae_template_symbols = set()  # (template_name, symbol) pairs already active
