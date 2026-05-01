@@ -27,7 +27,7 @@
 | 5 | Alpha + polish | [ ] Not started | F06, F16, F17, F24-25, F27-29 |
 | Deferred | Future sessions | [!] Deferred | F01/F12 Phase 3, F14, F11 full |
 
-**Overall progress:** 12 / 29 findings deployed (awaiting verification). 4 new findings (F26-F29) surfaced during audit of warnings log; F26 and F20 now deployed.
+**Overall progress:** 13 / 31 findings deployed (awaiting verification). F30-F31 surfaced during F26 investigation — F30 positions closed, F30+F31 root-cause fixes pending.
 
 ---
 
@@ -331,6 +331,48 @@ Incremental fetch back-offs 2 bars for 1h / 8h (2 bars) for 4h to ensure overlap
 
 **Remaining stale 4H:** GS 4h (17 days) is stale because no active 4H GS strategy requests it; refresh is on-demand. When a strategy does request it, freshness SLA will correctly block signals until the refetch completes. This is correct behaviour.
 
+### F30 — Proposer mixing forex symbols into stock-classified strategies (P1)
+
+**Discovered 2026-05-01 while investigating F26 freshness warnings.**
+
+Two active DEMO strategies had mixed-asset-class symbol lists:
+- `97b6766c` "4H EMA Ribbon Trend Long HII LONG" — `asset_class=stock`, `direction=long`, `interval=4h`, symbols = `["HII", "AUDUSD", "GBPUSD", "NZDUSD"]`
+- `99248e4c` "SMA Proximity Entry Multi V51" — `asset_class=stock`, symbols = `["ZIM", "USDCAD", "USDJPY"]`
+
+Because the strategies are classified as stock, their risk params used stock-class SL (6%) instead of forex-class (2%). 4 open forex positions were running with 3× the appropriate SL distance, meaning a stop-hit would lose 6% of position size where 2% was intended. USDJPY already -$27 unrealised.
+
+**Immediate action (2026-05-01 10:54 UTC):**
+- Flagged 4 contaminated positions with `pending_closure=True`
+- Pending-closure processor auto-submitted close orders within 60s (F31 also surfaced — see below)
+- Realised P&L: USDJPY -$27.30, NZDUSD -$4.43, AUDUSD +$5.77, GBPUSD +$59.63 → net +$33.67
+
+**Root-cause investigation needed** (Batch 4 adjacent):
+- How did forex symbols enter a stock-classified template's `symbols` list?
+- Likely culprit: "Multi" variant generator in `strategy_proposer` that picks correlated-with-primary symbols without respecting `asset_class`
+- Need defensive assertion: reject any strategy where `asset_class(symbol) != strategy.asset_class` for any symbol in the list
+
+**Status:** [D] Positions closed. Proposer fix: [ ] not started. Scope: Batch 4.
+
+### F31 — Pending-closure processor auto-submits without approval gate (documentation vs reality mismatch)
+
+Discovered while processing F30. The comment at `strategy_engine.py:10493` and other call sites say "Marked {N} positions for closure approval" — implying a human approval gate. Reality: `monitoring_service._process_pending_closures` runs every 60s and auto-submits close orders to eToro for every `pending_closure=True` position without any approval step.
+
+**Observed:** F30's 4 forex positions were flagged at 10:54:00 UTC; all 4 close orders filled by 10:54:12 UTC (12 seconds later) with no human interaction.
+
+**Not inherently a bug** — auto-closure is the safer default for protecting from trailing stop breaches, fundamental exits, etc. BUT:
+1. **Documentation implies approval exists** → misleading. Needs cleanup.
+2. **No mass-closure guard** → if some bug flagged all 86 positions, they'd all close in <1 min. No rate limit, no circuit breaker on closures, no per-cycle max-closures cap.
+3. **No audit trail**: no record of who/what triggered the flag beyond `closure_reason`.
+
+**Decision needed:**
+- (a) Add a real approval gate — requires UI work + monitoring-service flag check. Larger effort (M-L).
+- (b) Keep auto-close but add a mass-closure guard: per-cycle max-closures cap (e.g. 10) with an escalation warning. Small effort (S).
+- (c) Fix only the misleading docs. Minimal effort but doesn't address the mass-flag risk.
+
+Recommendation: (b). Preserves the speed-of-risk-exit benefit while preventing a catastrophic bug from closing the whole book.
+
+**Status:** [ ]
+
 ### F27 — Pre-existing OHLC validation warnings on forex (low priority)
 
 177x "Market data for USDJPY has high < open or close" + similar for AUDUSD/GBPUSD. FMP/Yahoo forex data has inconsistent OHLC sometimes. Validator presumably rejects the bad bars — would be nice to confirm and fix at source.
@@ -458,5 +500,15 @@ ssh ... 'tail -30 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
 1. Monitor 20:00 UTC daily sync for Batch 1 + this batch's full verification
 2. Monitor 01:47 UTC tomorrow for DST-boundary overnight sync
 3. After 24-48h clean window, start Batch 2 (execution observability)
+
+---
+
+### Session 1 — 2026-05-01 10:54 UTC: F30 positions closed, F31 discovered
+
+- Follow-up on F26 warnings surfaced F30: two DEMO strategies classified `asset_class=stock` had forex symbols in their lists → 4 forex positions running with stock-class 6% SL instead of forex-class 2% SL.
+- User flagged the 4 positions for closure via DB update (pending_closure=true + closure_reason).
+- Positions auto-closed within ~60s: USDJPY -$27.30, NZDUSD -$4.43, AUDUSD +$5.77, GBPUSD +$59.63 → net +$33.67.
+- Closure happened WITHOUT user approval in UI — discovered F31: docs say "flag for approval" but `_process_pending_closures` auto-submits to eToro. No approval gate, no mass-closure rate limit.
+- Filed F30 (proposer mixed asset classes — P1, Batch 4 work) and F31 (auto-close policy / mass-closure guard — decision needed).
 
 [continue log as work progresses]
