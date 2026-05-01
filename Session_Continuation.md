@@ -15,18 +15,26 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 1, 2026, post-Batch-1 deploy)
+## Current System State (May 1, 2026, post Strategy Library deploy)
 
 - **Equity:** ~$475,886
 - **Balance:** ~$61K freed
-- **Open positions:** 86 | $403K deployed | +$4,552 unrealized (59 green / 27 red ≈ 69% WR on open book)
-- **Active strategies:** 64 DEMO | 109 BACKTESTED | 42 RETIRED
-- **Directional split:** 75 LONG / 11 SHORT (6 forex short + 5 other short) — still below 8% target for `trending_up_weak`
-- **Market regime:** trending_up_weak | Market Quality Score: NOT PERSISTED (open issue — see below)
+- **Open positions:** 86 | $403K deployed | +$4,552 unrealized (~69% WR on open book)
+- **Active strategies:** 157+ (autonomous cycle ran 400-target, 392 DSL + 8 AE proposed)
+- **Active AE strategies:** 5 in DB pre-deploy → 8 new proposed this cycle. First 2 already activated (Insider Buying LEU, Earnings Momentum APP). Templates that graduated NEW include Earnings Momentum, Gross Profitability Long, Price Target Upside Long, Earnings Momentum Combo Long, Sector Rotation, Revenue Acceleration, Multi-Factor Composite Long.
+- **Directional split:** ~75 LONG / ~11 SHORT (still below target for `trending_up_weak`)
+- **Market regime:** `trending_up_strong` per regime gate (VIX=18.8, 50d=+10.64%) | Market Quality Score: NOT PERSISTED (open issue — see below)
 - **Symbol universe:** 297 instruments (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, **2 crypto** — BTC/ETH only, altcoins disabled due to eToro 1% fee)
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
-**Batch 1 deployed at 2026-05-01 10:02 UTC** — DST fix + freshness SLA. See `AUDIT_FIX_TRACKER.md` for progress across all 25 audit findings.
+**Deploys shipped today (2026-05-01):**
+- 10:02 UTC — **Batch 1** (F02 DST fix + F09 freshness SLA)
+- 10:19 UTC — **Quick-wins** (F13, F15, F19, F21, F22)
+- 10:44 UTC — **F18-rest + F20 + F26** (silent-default logging + FRED retry + interval-aware incremental fetch)
+- 10:54 UTC — **F30 positions closed** (mixed-asset-class forex positions, +$33.67 realised)
+- 12:02 UTC — **Strategy Library** (commit `4acfadb`): R1-R7 template removals + C1 VIX gate + C2 momentum crash breaker + C3 PEAD tightening + Q1 AE rotation + Q2 AE cap 5→8
+
+See `AUDIT_FIX_TRACKER.md` for live status and `STRATEGY_LIBRARY_REVIEW_2026-05.md` for the review that produced today's strategy-library changes.
 
 ---
 
@@ -211,7 +219,32 @@ Full audit complete — see `AUDIT_REPORT_2026-05-01.md` for all 25 findings and
 - **F19** — `pool_pre_ping=True` on SQLAlchemy engine (SSL pool resilience)
 - **F21** — phantom altcoin/delisted rows purged from `historical_price_cache`
 - **F22** — `errors.log` rotated (was 4.7MB/31k lines of stale noise)
+- **F18-rest** — typed excepts + debug logging on 6 silent-default paths (not sizing-critical)
+- **F20** — FRED retry wrapper (3 attempts, 1s/3s backoff, transient-only)
+- **F26** — interval-aware incremental fetch gate (1h >3h / 4h >6h / 1d >1d); fixed forex/stock 4H bars lagging 17-19h
+- **F30** — 4 mixed-asset-class forex positions closed (net +$33.67 realised); proposer root-cause fix pending (Batch 4)
 - Docs: steering file + this file updated to match actual code state
+
+### Strategy Library deploy (2026-05-01 12:02 UTC, commit `4acfadb`)
+
+Standalone batch driven by `STRATEGY_LIBRARY_REVIEW_2026-05.md` — web-research-backed review of the ~246-template library against 2025-2026 hedge-fund practice and live P&L.
+
+- **R1-R7** — 7 losing templates removed: Fast EMA Crossover, SMA Proximity Entry, BB Middle Band Bounce, SMA Envelope Reversion Long/Short, BB Midband Reversion Tight, 4H VWAP Trend Continuation. Stops ~$4-8K/yr drag. Academic evidence (SSRN 5186655, Chen 2024) + live -$378/-$308/-$141 open P&L aligned.
+- **C1** — VIX signal-time gate in `order_executor.execute_signal`. Blocks ENTER_LONG when VIX > 25 AND VIX_5d > +15%. Crypto exempt, 5-min cache, fail-open. Reference: Bilello post-spike research.
+- **C2** — Momentum crash circuit breaker in `conviction_scorer._score_regime_fit`. Subtracts 10 points from regime_fit when SPY_5d < -3% AND VIX_1d > +10%, for LONG momentum/trend/breakout only. Floored at 5. Reference: Byun & Jeon SSRN 2900073.
+- **C3** — Post-Earnings Drift Long tightening: `min_earnings_surprise_pct` 2% → 4%, added `min_revenue_growth_qoq: 0.08` ("confirmed momentum" per Lord Abbett research).
+- **Q1** — AE template rotation. `alpha_edge_templates_filtered` is shuffled by hour-of-year offset each cycle so the proposer visits different AE templates across cycles instead of always the first N in definition order.
+- **Q2** — AE proposal cap raised 5 → 8 when DSL templates exist. Root cause of 5-template-bottleneck identified: the cap was blocking 20 of 25 AE templates per cycle. Over 1-2 business days with Q1 rotation, all regime-eligible AE templates now get visited.
+
+Verified post-deploy:
+- 400-strategy cycle at 13:06 UTC produced 392 DSL + 8 AE — hit target exactly.
+- 8 NEW Alpha Edge template types proposed this cycle (Gross Profitability Long, Price Target Upside Long, Earnings Momentum Combo Long, Earnings Momentum, Sector Rotation, Insider Buying, Revenue Acceleration, Multi-Factor Composite Long). Pre-deploy only 5 AE strategies existed in DB, mostly duplicates of 2 template types.
+- 2 already activated within 30 minutes: Insider Buying LEU, Earnings Momentum APP.
+- C1/C2 armed but did NOT fire (VIX=18.8, market trending_up — correct behavior).
+- Regime gate at cycle output: `trending_up_strong → 36 matching templates (VIX=18.8)` with `{alpha_edge: 8}` — confirms regime filter correctly narrows AE pool; Q1+Q2 operate on the filtered pool.
+- Service healthy, zero new post-deploy errors related to changes. 5 yfinance "possibly delisted" errors for MRK/COP/PSA are pre-existing F14 behavior, unrelated.
+
+**Known regime-classification inconsistency (not new):** market_analyzer detected "HIGH VOLATILITY RANGING (57% confidence)" while proposer gate locked in `trending_up_strong`. Two-tier regime system — worth verifying in a follow-up session, but not a regression from this deploy.
 
 ### Pre-existing items (deferred, low priority)
 - **Overview chart panel** — 3 separate chart components with misaligned axes. Multi-pane rewrite needed. Previous attempt failed due to lightweight-charts v5 pane API complexity. Design before coding next time.
@@ -220,27 +253,39 @@ Full audit complete — see `AUDIT_REPORT_2026-05-01.md` for all 25 findings and
 - **`historical_price_cache` duplicate 1d rows** — low priority cleanup (00:00 vs 04:00 same-day entries).
 - **`proposed` counter in UI** — showing all 0, counter never written. Fix or remove.
 - **Session persistence** — sessions wiped on restart, users re-login. Low priority.
-- **1h strategies** — still 0 active/BACKTESTED. Re-evaluate after Batch 4 WF gate tightening.
+- **1h strategies** — still 1 BACKTESTED / 0 DEMO. No explicit gate blocks them; emergent from `min_trades_dsl_1h=15` + F07 MC annualization bug. Expect graduation to resume once F07 (Batch 4) ships on clean post-F02 data. Observe 2 weeks post-Batch 4; only nudge (`min_trades_dsl_1h` to 10 or add 1h quota) if <5 active.
 - **Strategy lifespan** — avg 5.7 days. Batch 4 may rebalance naturally via stricter gate.
+- **AE pipeline deferred items** — Sector Rotation template has `fixed_symbols: [XLF, XLK, XLI, XLP, XLY]` covering only 5 of 11 SPDR sectors (missing XLE/XLV/XLY/XLP/XLU/XLRE/XLC). Pairs Trading Market Neutral's DSL entry conditions are momentum-long signals, not actual pairs — z-score logic in `default_parameters` never consumed by any execution path. Both need design work, not parameter tweaks. Dedicated follow-up session.
+- **Regime classification two-tier inconsistency** — sub-regime analyzer and proposer regime gate disagree (analyzer said RANGING_HIGH_VOL 57%, proposer used trending_up_strong). Not a regression, worth tracing in a follow-up.
 
 ---
 
 ## Files Changed (May 1, 2026)
 
 ### Backend
-- `src/data/market_data_manager.py` — crypto symbol split (db_symbol vs normalized_symbol), DST tz normalization before resample
-- `src/core/monitoring_service.py` — stale-1d detection in full sync, 1d update removed from quick update, DST fix in batch yf.download
-- `src/api/etoro_client.py` — DST fix in legacy yfinance path
+- `src/data/market_data_manager.py` — crypto symbol split (db_symbol vs normalized_symbol), DST tz normalization before resample, F26 interval-aware incremental-fetch gate (1h >3h / 4h >6h / 1d >1d)
+- `src/core/monitoring_service.py` — stale-1d detection in full sync, 1d update removed from quick update, DST fix in batch yf.download, freshness SLA bundled into trailing stops
+- `src/api/etoro_client.py` — DST fix in legacy yfinance path, F18-rest typed excepts
 - `src/api/routers/analytics.py` — DST fix in SPY benchmark
 - `src/api/routers/data_management.py` — DB lookup uses display symbol (P0 fix applied to data_management router)
-- `src/execution/order_executor.py` — ATR floor: 2.5× → 1.5×, interval-aware (4H strategies use 4H ATR), position size scales on SL widen
-- `src/strategy/conviction_scorer.py` — ETF 12→13, Index 12→14 asset tradability scores
+- `src/execution/order_executor.py` — ATR floor: 2.5× → 1.5×, interval-aware (4H strategies use 4H ATR), position size scales on SL widen, **C1 VIX signal-time gate in `execute_signal`**
+- `src/strategy/conviction_scorer.py` — ETF 12→13, Index 12→14 asset tradability scores, **C2 momentum crash circuit breaker in `_score_regime_fit` with 5-min TTL cache on SPY_5d/VIX_1d check**
+- `src/strategy/strategy_proposer.py` — **Q1 AE template rotation by hour-of-year offset, Q2 AE cap 5 → 8**
+- `src/strategy/strategy_templates.py` — R1-R7 losing templates removed (Fast EMA Crossover, SMA Proximity Entry, BB Middle Band Bounce, SMA Envelope Reversion Long/Short, BB Midband Reversion Tight, 4H VWAP Trend Continuation), C3 Post-Earnings Drift Long tightened
+- `src/strategy/market_analyzer.py` — F18-rest typed excepts with debug logging, F20 FRED retry wrapper (3 attempts, 1s/3s backoff)
+- `src/data/news_sentiment_provider.py` — F18-rest typed excepts
+- `src/strategy/strategy_engine.py` — F18-rest typed excepts in datetime deserialize path
+- `src/strategy/autonomous_strategy_manager.py` — F18-rest typed excepts in JSON parse
+- `src/llm/llm_service.py` — F18-rest debug logging on DEMO credentials fallback
+- `src/models/database.py` — `pool_pre_ping=True` (F19)
 - `src/utils/symbol_mapper.py` — `normalize_symbol` renamed to `to_etoro_wire_format` (with backward-compat alias)
+- `src/utils/yfinance_compat.py` — NEW module: `to_tz_aware_utc`, `normalize_yf_index_to_utc_naive`
 - `src/core/trading_scheduler.py` — `invested_amount=order.quantity` on immediate position creation (UI fix)
-- `config/autonomous_trading.yaml` — min_conviction_score 70→65, min_sharpe 0.4→1.0, min_sharpe_crypto 0.1→0.5, min_sharpe_commodity 0.3→0.5
+- `config/autonomous_trading.yaml` — min_conviction_score 70→65, min_sharpe 0.4→1.0, min_sharpe_crypto 0.1→0.5, min_sharpe_commodity 0.5, `atr_sl_multiplier` removed (was dead config)
 
 ### DB migration
 - `UPDATE historical_price_cache SET symbol='BTC' WHERE symbol='BTCUSD'` (+ 10 other crypto). 58,000+ rows renamed.
+- `DELETE FROM historical_price_cache WHERE symbol IN (...)` — 79,785 phantom altcoin/delisted rows purged (F21).
 
 ---
 

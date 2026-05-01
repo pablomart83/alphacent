@@ -191,6 +191,25 @@ Frontend (React/Vite) → Nginx (SSL/443) → Backend (FastAPI/uvicorn)
 - Uptrend-specific shorts (Exhaustion Gap, BB Squeeze Reversal, MACD Divergence, EMA Rejection, Parabolic Move, Volume Climax) are **exempted** — they are the hedge designed for corrections within uptrends
 - Exemption logic: templates whose `market_regimes` explicitly include a trending_up variant pass through the regime filter
 
+### Alpha Edge Proposer Flow (post-2026-05-01)
+
+Alpha Edge templates use the fundamental signal path (not DSL walk-forward). Proposer rules:
+
+- **Per-cycle cap**: up to 8 Alpha Edge strategies proposed per cycle (raised 5 → 8 on 2026-05-01)
+- **Template rotation**: `alpha_edge_templates_filtered` is shuffled by hour-of-year offset each cycle so different AE templates get first shot across cycles. Without this, templates defined later in `strategy_templates.py` never reached the loop.
+- **Regime filter** applies upstream: `get_templates_for_regime(market_regime)` narrows the pool before AE phase. Under `trending_up_strong` typically ~8 AE templates match; under `trending_up_weak` or `ranging` typically ~15-20 match.
+- **Dedup is per (template, symbol)**, not per template. A template with active strategies keeps being proposed with different symbols.
+- **Failure modes don't consume slots**: templates that find no eligible symbols or raise during generation do NOT decrement `alpha_edge_count`. Slot-consumption is success-path only.
+
+### Signal-Time Risk Gates (post-2026-05-01)
+
+Two runtime gates sit between signal generation and execution:
+
+- **C1 VIX Signal-Time Gate** (`order_executor.execute_signal`): blocks ENTER_LONG when VIX > 25 AND VIX_5d > +15%. Rationale: post-VIX-spike forward returns are weak (Bilello research). Crypto exempt. Fail-open on data error (log + proceed). 5-min TTL cache. Existing LONG positions continue to exit normally.
+- **C2 Momentum Crash Circuit Breaker** (`conviction_scorer._score_regime_fit`): when SPY_5d < -3% AND VIX_1d > +10%, reduces regime_fit by 10 points for LONG momentum/trend_following/breakout strategies. Floored at 5 (matches existing weak-match floor). Rationale: Byun & Jeon (SSRN 2900073) — momentum crashes during market rebounds. Fail-open.
+
+Both gates are armed by default and use live SPY/VIX data via `market_data_manager`. Scope: equity/ETF/index/forex/commodity LONG. Neither blocks exits, stops, or SHORT entries.
+
 ---
 
 ## Data Pipeline — Critical Rules
@@ -221,24 +240,27 @@ The price data pipeline has three layers. Each has distinct responsibilities. Vi
 
 ---
 
-## Known Open Issues (as of May 1, 2026, post-Batch-1 audit)
+## Known Open Issues (as of May 1, 2026, post-Strategy-Library deploy)
 
 - **Walk-forward bypass paths admit regime-luck** — test-dominant + excellent-OOS paths in `strategy_proposer.py:1638-1651` allow strategies with near-zero train Sharpe and strong test Sharpe to pass. Average test Sharpe 2.70 vs train 0.79 across 173 live strategies. Fix scheduled for Batch 4.
 - **Entry order 82% FAILED rate** — cosmetic: market-closed deferrals written as FAILED then re-fired each cycle. Batch 2 fix pending.
 - **NVDA and AMZN at 7.43% of equity each** — symbol concentration cap not enforced cumulatively across strategies. Batch 3 fix pending.
 - **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false, generates 0 trades. Regex-based param substitution collapses positional literals. Batch 4 fix pending.
 - **MQS persistence** — recent `equity_snapshots` have NULL `market_quality_score` despite code path being present. `_save_hourly_equity_snapshot` wraps MQS computation in `except: pass` hiding the real error. Investigation open.
+- **Sector Rotation + Pairs Trading templates structurally broken** — Sector Rotation `fixed_symbols` covers only 5 of 11 SPDR sectors (XLF/XLK/XLI/XLP/XLY; missing XLE/XLV/XLY/XLP/XLU/XLRE/XLC). Pairs Trading Market Neutral's DSL entry conditions are momentum-long signals, not pairs — z-score params in `default_parameters` never consumed by engine. Both templates get proposed now (post Q1/Q2) but the variants produced are design-incorrect. Dedicated design session needed; don't fix piecemeal.
+- **Regime classification two-tier inconsistency** — `market_analyzer.detect_sub_regime` and proposer regime gate can disagree (observed 2026-05-01: analyzer said RANGING_HIGH_VOL 57% confidence, proposer used `trending_up_strong`). Not a regression from any recent deploy, but worth tracing — it affects which template pool gets used.
 - **Overview chart panel** — 3 separate chart components with misaligned axes; needs multi-pane rewrite (previous attempt failed, design first)
 - **FMP insider endpoint** — 403/404 on current plan; insider_buying uses momentum proxy fallback
-- **1h strategies** — 0 active; need next cycle on clean data (post May 1 fixes) to validate
+- **1h strategies** — 1 BACKTESTED / 0 DEMO. Emergent from `min_trades_dsl_1h=15` + F07 MC annualization inflation, not an explicit block. Expect to reconsider after Batch 4 (F07 fix) on clean data; only nudge `min_trades_dsl_1h` or add quota if <5 active after 2 weeks observation.
 - **`proposed` counter in UI** — all 0 in DB, counter never written. Fix or remove.
 
-## Current System State (May 1, 2026)
+## Current System State (May 1, 2026, post-Strategy-Library deploy)
 
-- **Equity:** ~$476,900
-- **Open positions:** ~87 | $409K deployed | +$5,560 unrealized (68% WR open book)
-- **Active DEMO:** 64 | **BACKTESTED:** 109 | **RETIRED:** 42
-- **Directional split:** 199 LONG / 6 SHORT (all forex — SHORT equity pipeline unblocked but not yet activated)
-- **Market regime:** trending_up_weak (80% confidence) | Market Quality Score: 85/100 High
+- **Equity:** ~$475,900
+- **Open positions:** ~87 | ~$409K deployed
+- **Active strategies:** 157+ across DEMO/BACKTESTED (400-strategy autonomous cycle ran at 13:06 UTC producing 392 DSL + 8 AE)
+- **Alpha Edge live types now proposing** (up from 2 template types pre-deploy): Earnings Momentum, Gross Profitability Long, Price Target Upside Long, Earnings Momentum Combo Long, Sector Rotation, Insider Buying, Revenue Acceleration, Multi-Factor Composite Long. 2 new activations confirmed in DB within 30 min of deploy.
+- **Directional split:** ~75 LONG / ~11 SHORT (SHORT equity pipeline unblocked but not yet saturating quota)
+- **Market regime:** `trending_up_strong` per proposer gate (VIX=18.8, 50d=+10.64%) — note analyzer disagreement above
 - **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
