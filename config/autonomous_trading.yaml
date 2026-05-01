@@ -201,8 +201,13 @@ backtest:
   period_days: 730
   adaptive_risk:
     enabled: true
-    atr_sl_multiplier: 2.5   # Raised from 1.5 — 2.5x ATR gives trades room to breathe
-    atr_tp_multiplier: 5.0   # Maintain ~2:1 R:R with wider SL
+    # NOTE: ATR multipliers for SL and TP are hardcoded in
+    # src/execution/order_executor.py (1.5× ATR SL, Wilder's standard;
+    # TP from template risk_reward_ratio). Config keys previously here
+    # (atr_sl_multiplier, atr_tp_multiplier) were never read — removed
+    # 2026-05-01 to eliminate documentation-vs-code drift. If you need
+    # to tune multipliers, edit order_executor.py and update the
+    # steering file / Session_Continuation.md in the same change.
     min_sl_pct: 0.02
     max_sl_pct: 0.08
     min_tp_pct: 0.04

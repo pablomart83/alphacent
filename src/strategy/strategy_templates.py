@@ -7520,47 +7520,16 @@ class StrategyTemplateLibrary:
             metadata={"direction": "short", "skip_param_override": True}
         ))
 
-        # ===== BTC LEAD-LAG ALTCOIN MOMENTUM (Tier 3) =====
-        # Academic evidence (Asia-Pacific Financial Markets, 2026) shows unidirectional
-        # Granger causality from BTC to altcoins with 1-4 hour lag. Small-cap cryptos
-        # exhibit the strongest delayed response. Altcoins with >90% BTC correlation
-        # include LINK, LTC, ETH. This template uses BTC's momentum as a leading
-        # indicator for altcoin entries — when BTC breaks out, altcoins follow.
-        # Uses daily timeframe since our crypto data is daily-gated for non-intraday.
-        templates.append(StrategyTemplate(
-            name="BTC Lead-Lag Altcoin Momentum",
-            description="Buy altcoins when BTC shows strong upward momentum (RSI > 60, price > EMA 20). BTC leads altcoins by hours to days — ride the spillover. Exit when BTC momentum fades.",
-            strategy_type=StrategyType.MOMENTUM,
-            market_regimes=[
-                MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG,
-                MarketRegime.TRENDING_UP_WEAK,
-            ],
-            entry_conditions=[
-                "CLOSE > EMA(20) AND RSI(14) > 55 AND CLOSE > SMA(50)"
-            ],
-            exit_conditions=[
-                "RSI(14) < 40 OR CLOSE < EMA(20)"
-            ],
-            required_indicators=["EMA:20", "SMA:50", "RSI"],
-            default_parameters={
-                "ema_period": 20,
-                "sma_period": 50,
-                "rsi_period": 14,
-                "rsi_entry_threshold": 55,
-                "rsi_exit_threshold": 40,
-                "stop_loss_pct": 0.05,
-                "take_profit_pct": 0.12,
-            },
-            expected_trade_frequency="1-3 trades/month",
-            expected_holding_period="3-14 days",
-            risk_reward_ratio=2.4,
-            metadata={
-                "direction": "long",
-                "crypto_optimized": True,
-                "skip_param_override": True,
-                "lead_lag_note": "BTC leads altcoins — propose on altcoins when BTC is trending"
-            }
-        ))
+        # [REMOVED 2026-05-01] BTC Lead-Lag Altcoin Momentum
+        # Template was proposing altcoin (SOL/XRP/ADA/etc.) longs when BTC had
+        # upward momentum. Altcoins are disabled in the symbol universe (eToro
+        # 1% per-side fee makes high-frequency altcoin strategies unprofitable;
+        # only BTC and ETH are tradeable). The template's edge — riding 1-4h
+        # spillover from BTC into small-caps — requires those small-caps to be
+        # tradeable. With only BTC and ETH, BTC leading ETH by hours isn't
+        # enough differentiation to extract alpha vs plain BTC/ETH momentum
+        # templates. One active DEMO instance on ETH had -$88 unrealised and
+        # no closed trades. Removed to reduce template proposal noise.
 
         # ===== CRYPTO HIGH-CONVICTION MOMENTUM TEMPLATES =====
         # Designed for eToro's 1% per-side fee structure.

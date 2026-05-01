@@ -151,7 +151,7 @@ Frontend (React/Vite) → Nginx (SSL/443) → Backend (FastAPI/uvicorn)
 - Drawdown sizing: 50% reduction >5% DD, 75% reduction >10% DD (30d rolling peak)
 
 ### ATR floor (order_executor, applied at order time)
-- Multiplier: **1.5× ATR** (standard Wilder, was 2.5× — too wide)
+- Multiplier: **1.5× ATR** (standard Wilder — hardcoded at `order_executor.py:241`. Note: `atr_sl_multiplier` in `autonomous_trading.yaml` is unused; the code value is the source of truth.)
 - **Timeframe-aware**: 4H strategies use 4H ATR bars, daily strategies use daily
 - Max SL clamps: stocks/ETFs 9%, crypto 15%, forex 4%
 - When SL widens, position size scales down to preserve dollar risk: `new_size = old_size × old_sl / new_sl`
@@ -178,7 +178,7 @@ Frontend (React/Vite) → Nginx (SSL/443) → Backend (FastAPI/uvicorn)
 - Components: ADX(14) of SPY (40pts) + ATR/price inverted (30pts) + 5-day consistency (20pts) + VIX (10pts)
 - Grades: High (>70) / Normal (40-70) / Choppy (<40)
 - Actions: score < 40 → position sizing -30%, trend templates -50% weight, trend/momentum LONG entries blocked
-- Persisted in `equity_snapshots` (market_quality_score, market_quality_grade)
+- Persisted in `equity_snapshots` (market_quality_score, market_quality_grade). **Known issue:** persistence path in `_save_hourly_equity_snapshot` wraps MQS computation in `except: pass`; recent snapshots have NULL values because the computation is silently failing. Investigation open (see Session_Continuation).
 
 ### Directional Quotas (trending_up regimes)
 - `trending_up`: min_long 80%, min_short 5%
@@ -208,9 +208,10 @@ The price data pipeline has three layers. Each has distinct responsibilities. Vi
 - Rationale: 1d bars are end-of-day data. Building an intraday-provisional "today" 1d bar mislead daily indicators (RSI(14) treats it as complete).
 
 **Yahoo/yfinance handling:**
-- All yfinance DataFrame indices MUST be normalized to UTC-naive **before** any resample or iteration: `hist.index = hist.index.tz_convert('UTC').tz_localize(None)`
-- DST boundaries (EU last Sunday Oct/Mar, US first Sunday Nov/Mar) create ambiguous local hours that crash `pd.resample()` and `Timestamp.to_pydatetime()` with AmbiguousTimeError
-- Yahoo returns 1h for 4H requests — system resamples to 4H in `_fetch_historical_from_yahoo_finance`. tz_convert must happen BEFORE resample.
+- All yfinance calls pass **tz-aware UTC datetimes** for `start`/`end` bounds. Naive datetimes trigger yfinance's internal local-tz inference, which crashes on DST ambiguous hours (e.g. 2025-11-02 01:30 in America/New_York). See `src/utils/yfinance_compat.py` — `to_tz_aware_utc()` for input conversion, `normalize_yf_index_to_utc_naive()` for post-return safety.
+- DST boundaries (EU last Sunday Oct/Mar, US first Sunday Nov/Mar) create ambiguous local hours that crash `pd.resample()` and `Timestamp.to_pydatetime()` with AmbiguousTimeError. tz-aware UTC input prevents the crash; post-return tz_localize(None) makes downstream iteration safe.
+- Batch downloads that return partial data trigger per-ticker retry (capped at 20 misses) for defence in depth.
+- Yahoo returns 1h for 4H requests — system resamples to 4H in `_fetch_historical_from_yahoo_finance`. Normalise tz BEFORE resample.
 
 **Symbol canonicalization:**
 - **DB key**: always display form — `BTC`, `ETH`, `AAPL`, `EURUSD` (used in positions, orders, trade_journal, historical_price_cache)
@@ -220,13 +221,16 @@ The price data pipeline has three layers. Each has distinct responsibilities. Vi
 
 ---
 
-## Known Open Issues (as of May 1, 2026)
+## Known Open Issues (as of May 1, 2026, post-Batch-1 audit)
 
-- **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false, generates 0 trades
+- **Walk-forward bypass paths admit regime-luck** — test-dominant + excellent-OOS paths in `strategy_proposer.py:1638-1651` allow strategies with near-zero train Sharpe and strong test Sharpe to pass. Average test Sharpe 2.70 vs train 0.79 across 173 live strategies. Fix scheduled for Batch 4.
+- **Entry order 82% FAILED rate** — cosmetic: market-closed deferrals written as FAILED then re-fired each cycle. Batch 2 fix pending.
+- **NVDA and AMZN at 7.43% of equity each** — symbol concentration cap not enforced cumulatively across strategies. Batch 3 fix pending.
+- **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false, generates 0 trades. Regex-based param substitution collapses positional literals. Batch 4 fix pending.
+- **MQS persistence** — recent `equity_snapshots` have NULL `market_quality_score` despite code path being present. `_save_hourly_equity_snapshot` wraps MQS computation in `except: pass` hiding the real error. Investigation open.
 - **Overview chart panel** — 3 separate chart components with misaligned axes; needs multi-pane rewrite (previous attempt failed, design first)
 - **FMP insider endpoint** — 403/404 on current plan; insider_buying uses momentum proxy fallback
 - **1h strategies** — 0 active; need next cycle on clean data (post May 1 fixes) to validate
-- **`historical_price_cache` duplicate 1d rows** — low priority: same OHLC under different times-of-day for same date
 - **`proposed` counter in UI** — all 0 in DB, counter never written. Fix or remove.
 
 ## Current System State (May 1, 2026)

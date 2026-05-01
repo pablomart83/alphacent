@@ -57,7 +57,15 @@ class Database:
                 echo=False,
                 pool_size=20,
                 max_overflow=10,
-                pool_pre_ping=False,  # Skip per-connection health check (saves ~1ms per query)
+                # pool_pre_ping=True issues a lightweight SELECT 1 on checkout
+                # to detect dead connections (SSL drops, server restarts,
+                # network partition). Cost is ~1ms per query; benefit is that
+                # a dropped connection doesn't surface as a user-visible error.
+                # Flipped from False on 2026-05-01 (F19) after the Apr 30
+                # "SSL connection has been closed unexpectedly" incident — the
+                # 1ms cost is cheap insurance against silent write failures
+                # during position sync / trailing stop updates.
+                pool_pre_ping=True,
                 pool_recycle=1800,
                 pool_timeout=10,
                 # Use prepared statements and keep connections warm

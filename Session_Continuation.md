@@ -15,16 +15,18 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 1, 2026)
+## Current System State (May 1, 2026, post-Batch-1 deploy)
 
-- **Equity:** ~$476,900 (+$5.4K since Apr 29 correction, record high in May)
+- **Equity:** ~$475,886
 - **Balance:** ~$61K freed
-- **Open positions:** 87 | $409K deployed | +$5,560 unrealized (59 green / 28 red = 68% WR on open book)
+- **Open positions:** 86 | $403K deployed | +$4,552 unrealized (59 green / 27 red ≈ 69% WR on open book)
 - **Active strategies:** 64 DEMO | 109 BACKTESTED | 42 RETIRED
-- **Directional split:** 199 LONG / 6 SHORT (all forex) — SHORT equity pipeline unblocked but nothing activated yet
-- **Market regime:** trending_up_weak | Market Quality Score: 85/100 High (ADX 51, ATR 1.0%, VIX 18)
-- **Symbol universe:** 297 instruments (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
+- **Directional split:** 75 LONG / 11 SHORT (6 forex short + 5 other short) — still below 8% target for `trending_up_weak`
+- **Market regime:** trending_up_weak | Market Quality Score: NOT PERSISTED (open issue — see below)
+- **Symbol universe:** 297 instruments (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, **2 crypto** — BTC/ETH only, altcoins disabled due to eToro 1% fee)
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
+
+**Batch 1 deployed at 2026-05-01 10:02 UTC** — DST fix + freshness SLA. See `AUDIT_FIX_TRACKER.md` for progress across all 25 audit findings.
 
 ---
 
@@ -71,7 +73,7 @@ Stock/ETF: SL 6%, TP 15% | Forex: SL 2%, TP 5% | Crypto: SL 8%, TP 20% | Index: 
 - Uptrend SHORT strategies get 20/20 regime fit (they are the hedge)
 
 ### ATR floor (SL adjustment at order time)
-- Multiplier: **1.5× ATR** (standard Wilder, lowered from 2.5× May 1 — was inflating SLs 2.5x)
+- Multiplier: **1.5× ATR** — HARDCODED at `order_executor.py:241`. Config key `atr_sl_multiplier: 2.5` in `autonomous_trading.yaml` is **unread** (confirmed by grep — no call sites). Code is source of truth.
 - **Timeframe-aware**: 4H strategies use 4H ATR bars, 1D use daily
 - Max SL clamp: Stocks/ETFs 9%, Crypto 15%, Forex 4%
 - When SL widens, position size scales down proportionally (`new_size = old_size × old_sl / new_sl`) to preserve dollar risk
@@ -188,26 +190,38 @@ Can't replay to quantify exact P&L impact. What we can do: give the pipeline a c
 
 ---
 
-## Open Items (May 1, 2026)
+## Open Items (May 1, 2026, post-audit)
 
-### Monitor
-- **First autonomous cycle after May 1 fixes** — first run on clean data. Expected: fewer activations (Sharpe ≥ 1.0 gate), backtest Sharpes on crypto may change significantly now that vol-scaling uses real data.
-- **Monday market open** — watch first 5-10 orders for new ATR floor behavior. Check for `ATR floor at order time for SYMBOL (4h)` log lines with 3-4% SLs, not 8-13%.
-- **Sharpe 1.0-2.0 BACKTESTED strategies (14 of them)** — decay scorer will retire underperformers naturally. Don't force.
-- **Index/ETF signal flow** — with conviction tier bump, expect more SPY/QQQ/DJ30/GER40 signals passing 65 threshold.
+Full audit complete — see `AUDIT_REPORT_2026-05-01.md` for all 25 findings and `AUDIT_FIX_TRACKER.md` for live status and batching plan.
 
-### Still open
-- **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false, 0 trades. 10-min fix.
+### Batch 1 — deployed 2026-05-01 10:02 UTC, awaiting 24-48h verification
+- F02 A/B/C: tz-aware UTC to yfinance + per-ticker retry + freshness SLA
+- F09: freshness gate on trailing stop updates
+- **Verification windows:** 20:00 UTC today (next daily sync), 01:47 UTC tomorrow (next DST-adjacent overnight), 24h open-position observation.
+
+### Batch 2-5 — scheduled (see tracker)
+- **Batch 2**: execution observability (F04 + F10) — after Batch 1 stable 24-48h
+- **Batch 3**: position risk (F03 concentration cap, F11 trailing step, F18-critical)
+- **Batch 4**: signal quality (F01/F12 WF bypass removal, F05 Triple EMA fix, F07 MC annualization, F08 fast feedback) — needs clean Batch-1 data
+- **Batch 5**: alpha + polish (MQS investigation, asset-class weighting, etc.)
+
+### Quick-wins shipped alongside Batch 1 (session 1)
+- **F13** — `atr_sl_multiplier` removed from config (was unread dead code)
+- **F15** — BTC Lead-Lag Altcoin template removed from active library (altcoins disabled)
+- **F19** — `pool_pre_ping=True` on SQLAlchemy engine (SSL pool resilience)
+- **F21** — phantom altcoin/delisted rows purged from `historical_price_cache`
+- **F22** — `errors.log` rotated (was 4.7MB/31k lines of stale noise)
+- Docs: steering file + this file updated to match actual code state
+
+### Pre-existing items (deferred, low priority)
 - **Overview chart panel** — 3 separate chart components with misaligned axes. Multi-pane rewrite needed. Previous attempt failed due to lightweight-charts v5 pane API complexity. Design before coding next time.
 - **Gold Momentum GOLD duplicates** — 10 copies in BACKTESTED, delete 9.
 - **FMP insider endpoint** — 403/404 on current plan; using momentum proxy fallback.
 - **`historical_price_cache` duplicate 1d rows** — low priority cleanup (00:00 vs 04:00 same-day entries).
 - **`proposed` counter in UI** — showing all 0, counter never written. Fix or remove.
-
-### Deferred / architectural
-- **1h strategies** — still 0 active/BACKTESTED. Pipeline fixes from Apr 25 shipped but no 1h strategies have passed WF yet. Re-evaluate after a few cycles on clean data.
-- **Strategy lifespan** — avg 5.7 days. Investigate whether healthy or retiring too fast.
 - **Session persistence** — sessions wiped on restart, users re-login. Low priority.
+- **1h strategies** — still 0 active/BACKTESTED. Re-evaluate after Batch 4 WF gate tightening.
+- **Strategy lifespan** — avg 5.7 days. Batch 4 may rebalance naturally via stricter gate.
 
 ---
 
