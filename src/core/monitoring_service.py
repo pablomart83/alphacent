@@ -980,11 +980,52 @@ class MonitoringService:
                     start_1d = end - timedelta(days=220)
                     db_data_1d = md._get_historical_from_db(symbol, start_1d, end, "1d")
                     if db_data_1d and len(db_data_1d) > 10:
-                        stats["1d"] += 1
-                        stats["db_cached"] += 1
-                        if is_active:
-                            hist_cache.set(f"{symbol}:1d:120", db_data_1d)
-                            stats["memory_loaded"] += 1
+                        # CRITICAL: check if DB data is stale before caching it.
+                        # Without this check, stale DB bars get pushed into the shared
+                        # in-memory cache and strategies run on data that's 1-2 days old
+                        # without ever triggering the gap-detection path in get_historical_data.
+                        #
+                        # Staleness rules:
+                        #  - Crypto/forex (24/7): stale if latest bar > 1 day old
+                        #  - Stocks/ETFs/indices/commodities: stale if we're missing bars
+                        #    from the most recent closed trading day (excludes weekend gaps).
+                        latest_bar = db_data_1d[-1]
+                        latest_ts = latest_bar.timestamp
+                        if hasattr(latest_ts, 'tzinfo') and latest_ts.tzinfo:
+                            latest_ts = latest_ts.replace(tzinfo=None)
+                        gap_days = (end - latest_ts).total_seconds() / 86400
+
+                        if is_always_on:
+                            # Crypto/forex — any gap > 1 day means stale
+                            _is_stale_1d = gap_days > 1.2
+                        else:
+                            # Stocks/ETFs/indices/commodities — skip weekend gaps.
+                            # Friday bar is present, today is Sat/Sun/Mon with gap ≤ 3: normal.
+                            # Thursday bar present on Friday morning before market open: also normal (gap ≈ 1 day).
+                            # Otherwise: stale.
+                            latest_weekday = latest_ts.weekday()  # 0=Mon .. 4=Fri
+                            today_weekday = end.weekday()
+                            is_weekend_gap = (
+                                # Latest = Friday, today = Sat/Sun/Mon
+                                (latest_weekday == 4 and today_weekday in (5, 6, 0) and gap_days <= 3.2)
+                                # Today = Sat/Sun, any recent bar
+                                or (today_weekday in (5, 6) and gap_days <= 2.2)
+                            )
+                            # Anything > 1 trading day behind and not explained by weekend = stale
+                            _is_stale_1d = gap_days > 1.2 and not is_weekend_gap
+
+                        if _is_stale_1d:
+                            logger.debug(
+                                f"[bg-full-sync] {symbol} 1d in DB is stale "
+                                f"(latest={latest_ts.date()}, gap={gap_days:.1f}d) — queuing Yahoo fetch"
+                            )
+                            need_yahoo_1d.append(symbol)
+                        else:
+                            stats["1d"] += 1
+                            stats["db_cached"] += 1
+                            if is_active:
+                                hist_cache.set(f"{symbol}:1d:120", db_data_1d)
+                                stats["memory_loaded"] += 1
                     else:
                         need_yahoo_1d.append(symbol)
                 except Exception as e:
