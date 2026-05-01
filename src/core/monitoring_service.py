@@ -358,16 +358,12 @@ class MonitoringService:
             except Exception as e:
                 logger.error(f"Error syncing positions: {e}")
         
-        # Check trailing stops (DB-only — eToro doesn't support SL modification)
+        # Check trailing stops (DB-only — eToro doesn't support SL modification).
         # Updates stop levels in DB and flags positions that breach their stop for closure.
+        # _check_trailing_stops emits its own per-cycle INFO summary, so no extra log here.
         if now - self._last_trailing_check >= self.trailing_stops_interval:
             try:
-                trailing_results = self._check_trailing_stops()
-                if trailing_results["updated"] > 0 or trailing_results.get("breach_closures", 0) > 0:
-                    logger.info(
-                        f"Trailing stops: {trailing_results['updated']} updated in DB, "
-                        f"{trailing_results.get('breach_closures', 0)} breach closures flagged"
-                    )
+                self._check_trailing_stops()
                 self._last_trailing_check = now
             except Exception as e:
                 logger.error(f"Error checking trailing stops: {e}")
@@ -1505,14 +1501,27 @@ class MonitoringService:
         """
         Check trailing stops for all open positions.
 
-        Calculates new stop-loss values from DB data, updates the DB.
-        eToro API does NOT support modifying SL/TP on open positions, so
-        trailing stops are enforced DB-side: this method updates the stop
-        level, and _check_stop_loss_breaches() (called separately) closes
-        positions that breach their stop.
+        Two independent passes, run every cycle:
+
+        1. **SL recalculation** (breakeven / profit-lock / ATR-aware trail).
+           Only runs for symbols whose market is open AND whose timeframe bars
+           are fresh — the trail recalc uses ATR from the strategy's own bars,
+           and stale bars produce a wrong trail distance. Stale / closed symbols
+           keep their existing SL (safe default: ratchet never moves backward).
+
+        2. **Breach enforcement**. Runs for ALL open positions regardless of
+           historical-bar freshness — it only needs `current_price` (from the
+           60s position sync) and `stop_loss` (from DB). An outage on Yahoo
+           historical bars must NOT disable stop-loss enforcement, because the
+           whole point of the DB-side SL is to close positions when price
+           crosses the stored stop.
+
+        eToro's API does not support SL modification on open positions, so this
+        DB-side pipeline IS the stop-loss system. Breach closures are
+        auto-submitted by `_process_pending_closures` on the 60s cadence.
 
         Returns:
-            Dictionary with counts of updated stops
+            Dict with counts of updated stops and breach closures.
         """
 
         session = self.db.get_session()
@@ -1527,16 +1536,20 @@ class MonitoringService:
             ).all()
 
             if not open_positions_orm:
-                return {"updated": 0, "etoro_updated": 0, "etoro_rate_limited": 0}
+                return {
+                    "checked": 0, "updated": 0, "skipped_market": 0, "skipped_stale": 0,
+                    "breakeven": 0, "lock": 0, "trail": 0, "breach_closures": 0, "errors": 0,
+                }
 
-            # Convert ORM to dataclass, skipping positions whose market is closed
-            open_positions = []
+            # Convert ORM to dataclass, filtering for SL recalculation (market + freshness).
+            # Breach enforcement below uses the unfiltered `open_positions_orm`.
+            open_positions: list = []
+            position_intervals: dict = {}
             skipped_market_closed = 0
-            skipped_stale_data = 0  # F09: positions skipped because price data is stale
-            
-            # Helper: resolve the strategy's configured interval for freshness check.
-            # Falls back to '1d' if strategy metadata is missing.
+            skipped_stale_data = 0
+
             def _get_strategy_interval_for_pos(pos_orm) -> str:
+                """Resolve the strategy's configured interval. Falls back to '1d'."""
                 try:
                     from src.models.orm import StrategyORM
                     strat = session.query(StrategyORM).filter_by(id=pos_orm.strategy_id).first()
@@ -1547,38 +1560,35 @@ class MonitoringService:
                 except Exception:
                     pass
                 return '1d'
-            
-            # F02 Part C / F09 — Freshness SLA gate for trailing stops.
-            # Trailing-stop recalculation uses ATR, which is derived from the
-            # strategy's timeframe bars. If those bars are stale (e.g. 17-day-old
-            # 4H bars on GS after a sync failure), the new ATR is wrong and the
-            # SL move is wrong. Better to leave the existing SL intact until
-            # data refreshes than silently mutate the stop based on stale ATR.
+
             stale_checker = None
             try:
                 from src.data.market_data_manager import get_market_data_manager
                 stale_checker = get_market_data_manager()
             except Exception:
                 stale_checker = None
-            
+
             for pos_orm in open_positions_orm:
                 if not self._is_symbol_market_open(pos_orm.symbol):
                     skipped_market_closed += 1
                     continue
-                
-                # Freshness check against the strategy's own interval
+
+                strat_interval = _get_strategy_interval_for_pos(pos_orm)
+
+                # Freshness check against the strategy's own interval.
+                # Only affects SL recalculation. Breach enforcement (below)
+                # ignores this filter — it only needs live current_price.
                 if stale_checker is not None:
                     try:
-                        strat_interval = _get_strategy_interval_for_pos(pos_orm)
                         is_fresh, reason = stale_checker.is_data_fresh_for_signal(
                             pos_orm.symbol, strat_interval
                         )
                         if not is_fresh:
                             skipped_stale_data += 1
                             logger.warning(
-                                f"[freshness-sla] Skipping trailing stop update for "
+                                f"[freshness-sla] Skipping trailing stop RECALC for "
                                 f"{pos_orm.symbol} ({strat_interval}): {reason}. "
-                                f"Existing SL preserved."
+                                f"Existing SL preserved; breach enforcement still active."
                             )
                             continue
                     except Exception as _fresh_err:
@@ -1586,7 +1596,7 @@ class MonitoringService:
                             f"[freshness-sla] Check failed for {pos_orm.symbol}: "
                             f"{_fresh_err} — proceeding"
                         )
-                
+
                 pos = Position(
                     id=pos_orm.id,
                     strategy_id=pos_orm.strategy_id,
@@ -1604,24 +1614,28 @@ class MonitoringService:
                     closed_at=pos_orm.closed_at
                 )
                 open_positions.append(pos)
-            
+                position_intervals[pos.id] = strat_interval
+
             if skipped_stale_data > 0:
                 logger.info(
                     f"[freshness-sla] {skipped_stale_data} positions skipped trailing "
-                    f"stop update due to stale data (existing SLs preserved)"
+                    f"stop RECALC due to stale data (existing SLs preserved)"
                 )
 
-            # Capture old stop_loss values before the check
-            old_stop_losses = {pos.id: pos.stop_loss for pos in open_positions}
+            # ── Pass 1: SL recalculation ──────────────────────────────────────
+            # PositionManager mutates Position.stop_loss in-memory.
+            # We persist below and read `_last_tsl_summary` for observability.
+            self.order_monitor.position_manager.check_trailing_stops(
+                open_positions,
+                skip_etoro_update=True,
+                position_intervals=position_intervals,
+            )
+            tsl_summary = getattr(
+                self.order_monitor.position_manager, "_last_tsl_summary", {}
+            )
 
-            # Check trailing stops (calculates new stop_loss values on Position objects)
-            # PositionManager handles the calculation; we handle eToro updates with rate limiting.
-            self.order_monitor.position_manager.check_trailing_stops(open_positions, skip_etoro_update=True)
-
-            # Update database with new stop-loss values and push to eToro with rate limiting
+            # Commit new stop_loss values to DB
             updated_count = 0
-            now = time.time()
-
             for pos in open_positions:
                 pos_orm = session.query(PositionORM).filter_by(id=pos.id).first()
                 if pos_orm and pos_orm.stop_loss != pos.stop_loss:
@@ -1630,51 +1644,83 @@ class MonitoringService:
                     updated_count += 1
                     logger.debug(
                         f"Trailing stop updated (DB) for {pos.symbol}: "
-                        f"{old_sl} -> {pos.stop_loss:.2f}"
+                        f"{old_sl} -> {pos.stop_loss:.4f}"
                     )
 
             session.commit()
 
-            # Check for stop-loss breaches — close positions where current price
-            # has breached the DB stop-loss. This is the enforcement mechanism since
-            # eToro API doesn't support modifying SL on open positions.
+            # ── Pass 2: Breach enforcement ────────────────────────────────────
+            # Runs for ALL open positions, NOT filtered by market-open or freshness.
+            # Only needs current_price + stop_loss, both live in DB. A historical-
+            # bar outage (Yahoo down, DST crash, forex-4H stale) must not disable
+            # stop-loss enforcement — that's the whole point of DB-side SL.
             breach_count = 0
-            for pos in open_positions:
-                if not pos.stop_loss or not pos.current_price:
+            for pos_orm in open_positions_orm:
+                if pos_orm.closed_at or pos_orm.pending_closure:
                     continue
-                pos_orm = session.query(PositionORM).filter_by(id=pos.id).first()
-                if not pos_orm or pos_orm.pending_closure or pos_orm.closed_at:
+                if not pos_orm.stop_loss or not pos_orm.current_price:
                     continue
+                if pos_orm.stop_loss <= 0 or pos_orm.current_price <= 0:
+                    continue
+
                 side_str = str(pos_orm.side).upper() if pos_orm.side else 'LONG'
                 is_long = 'LONG' in side_str or 'BUY' in side_str
+
                 breached = False
-                if is_long and pos.current_price <= pos.stop_loss:
+                if is_long and pos_orm.current_price <= pos_orm.stop_loss:
                     breached = True
-                elif not is_long and pos.current_price >= pos.stop_loss:
+                elif not is_long and pos_orm.current_price >= pos_orm.stop_loss:
                     breached = True
+
                 if breached:
                     pos_orm.pending_closure = True
                     pos_orm.closure_reason = (
-                        f"Trailing stop breached: price {pos.current_price:.2f} "
-                        f"{'<=' if is_long else '>='} stop {pos.stop_loss:.2f}"
+                        f"Trailing stop breached: price {pos_orm.current_price:.4f} "
+                        f"{'<=' if is_long else '>='} stop {pos_orm.stop_loss:.4f}"
                     )
                     breach_count += 1
                     logger.warning(
-                        f"Stop-loss breach for {pos.symbol} ({pos.id}): "
-                        f"price={pos.current_price:.2f}, stop={pos.stop_loss:.2f}, "
+                        f"Stop-loss breach for {pos_orm.symbol} ({pos_orm.id}): "
+                        f"price={pos_orm.current_price:.4f}, stop={pos_orm.stop_loss:.4f}, "
                         f"side={'LONG' if is_long else 'SHORT'}"
                     )
+
             if breach_count > 0:
                 session.commit()
                 logger.info(f"Flagged {breach_count} positions for closure (stop-loss breach)")
 
+            # ── Per-cycle INFO summary ────────────────────────────────────────
+            # Always emit so "cycle ran, nothing to do" is distinguishable from
+            # "cycle silently died" at INFO level. Previously this only showed
+            # when updates > 0, making outages (like 2026-05-01 10:02) invisible.
+            logger.info(
+                "TSL cycle: "
+                f"total={len(open_positions_orm)} "
+                f"recalc_eligible={len(open_positions)} "
+                f"skipped_market={skipped_market_closed} "
+                f"skipped_stale={skipped_stale_data} "
+                f"breakeven={tsl_summary.get('breakeven', 0)} "
+                f"lock={tsl_summary.get('lock', 0)} "
+                f"trail={tsl_summary.get('trail', 0)} "
+                f"db_updated={updated_count} "
+                f"breach={breach_count} "
+                f"errors={tsl_summary.get('errors', 0)}"
+            )
+
             return {
+                "checked": len(open_positions_orm),
                 "updated": updated_count,
+                "skipped_market": skipped_market_closed,
+                "skipped_stale": skipped_stale_data,
+                "breakeven": tsl_summary.get("breakeven", 0),
+                "lock": tsl_summary.get("lock", 0),
+                "trail": tsl_summary.get("trail", 0),
                 "breach_closures": breach_count,
+                "errors": tsl_summary.get("errors", 0),
             }
 
         except Exception as e:
-            logger.error(f"Error checking trailing stops: {e}")
+            logger.error(f"Error checking trailing stops: {e}", exc_info=True)
             session.rollback()
             return {"updated": 0, "breach_closures": 0, "error": str(e)}
 

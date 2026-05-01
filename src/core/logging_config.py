@@ -118,7 +118,7 @@ class LoggingConfig:
         log_dir: Path = Path("logs"),
         log_level: LogSeverity = LogSeverity.INFO,
         max_bytes: int = 10 * 1024 * 1024,  # 10 MB
-        backup_count: int = 5,
+        backup_count: int = 20,  # 20 × 10MB = 200MB main log = ~8h history at current rate
         console_output: bool = True
     ):
         """
@@ -192,8 +192,8 @@ class LoggingConfig:
         # Each component file captures INFO+ from its own source modules.
         # e.g. strategy.log gets everything from src.strategy.*, src.analytics.*, src.ml.*
         # Fewer backups than main log — component logs are for targeted debugging,
-        # not long-term audit. 3 backups = ~3 days of history at typical volume.
-        component_backup_count = 3
+        # not long-term audit. 10 backups = ~10 days of history at typical volume.
+        component_backup_count = 10
         for component in LogComponent:
             handler = logging.handlers.RotatingFileHandler(
                 log_dir / f"{component.value}.log",

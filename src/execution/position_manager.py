@@ -4,11 +4,19 @@ This module provides position management capabilities including:
 - Trailing stop-loss logic
 - Partial exit strategies
 - Position monitoring and adjustments
+
+Note on eToro: `etoro_client.update_position_stop_loss` is a no-op stub because
+eToro's public API does not expose an SL-modification endpoint for open
+positions. Trailing stops are enforced DB-side — this module updates
+`Position.stop_loss`, the monitoring service persists the new value to DB, and
+a separate breach-detection pass closes positions whose current price crosses
+the stored stop. Any `except EToroAPIError` in this module is dead code kept
+only for defensive signalling if the stub is ever replaced with a live call.
 """
 
 import logging
-from datetime import datetime
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 from uuid import uuid4
 
 from src.api.etoro_client import EToroAPIClient, EToroAPIError
@@ -30,6 +38,12 @@ class PositionManager:
         """
         self.etoro_client = etoro_client
         self.risk_config = risk_config or RiskConfig()
+        # Populated on every check_trailing_stops call. Consumers (monitoring_service)
+        # read this to emit a per-cycle INFO summary. See check_trailing_stops docstring.
+        self._last_tsl_summary: Dict = {
+            "checked": 0, "breakeven": 0, "lock": 0, "trail": 0,
+            "errors": 0, "invalid_entry": 0, "updated_ids": set(),
+        }
         logger.info("PositionManager initialized")
 
     # Asset-class-aware trailing stop thresholds.
@@ -96,11 +110,29 @@ class PositionManager:
         "index":     {"trigger": 0.04, "lock": 0.015},
     }
 
-    # ATR multiplier for minimum trail distance.
-    # Trail distance = max(distance_pct * price, ATR_TRAIL_MULTIPLIER * daily_ATR)
+    # ATR multiplier for minimum trail distance, per asset class.
+    # Trail distance = max(distance_pct * price, ATR_MULTIPLIER * ATR_pct)
     # This prevents penny-stop whipsaws on high-priced instruments where a fixed
-    # percentage produces a stop that's within normal intraday noise.
-    ATR_TRAIL_MULTIPLIER = 2.0  # Raised from 1.5 — 1.5x was within normal intraday noise for ranging markets
+    # percentage produces a stop within normal intraday noise.
+    #
+    # Per-class tuning rationale:
+    # - Stocks/commodities: 2.0x — high intraday noise, wide stop protects from whipsaw.
+    # - ETFs: 2.0x — diversified but still subject to sector-driven intraday moves.
+    # - Crypto: 1.5x — ATR is already ~5%, 2x produces 10%+ stops that erode edge.
+    # - Forex: 1.0x — ATR is tight (~0.5-1%), 2x would produce 1-2% stops eating into
+    #   the 2-3% fixed distance; 1x means ATR only lifts above the fixed 3% in
+    #   high-vol regimes (CPI days etc.), which is what we want.
+    # - Indices: 1.5x — ~1% ATR, 1.5x keeps trails near the 5% fixed distance.
+    ATR_MULTIPLIER_BY_ASSET_CLASS = {
+        "stock":     2.0,
+        "etf":       2.0,
+        "crypto":    1.5,
+        "forex":     1.0,
+        "commodity": 2.0,
+        "index":     1.5,
+    }
+    # Legacy single-value multiplier kept for any external callers that read it.
+    ATR_TRAIL_MULTIPLIER = 2.0
 
     def _get_asset_class(self, symbol: str) -> str:
         """Classify symbol for trailing stop parameter selection."""
@@ -125,305 +157,279 @@ class PositionManager:
             pass
         return "stock"
 
-    def check_trailing_stops(self, positions: List[Position], skip_etoro_update: bool = False) -> List[Order]:
+    def check_trailing_stops(
+        self,
+        positions: List[Position],
+        skip_etoro_update: bool = False,
+        position_intervals: Optional[Dict[str, str]] = None,
+    ) -> List[Order]:
         """Check positions for trailing stop-loss adjustments.
 
-        Two-stage profit protection:
+        Three-stage profit-protection ladder (stocks as example):
 
-        Stage 1 — Breakeven stop (fires first, lower threshold):
-          When profit reaches BREAKEVEN_STOP_PARAMS threshold (3% stocks, 2% forex,
-          5% crypto), move SL to entry price. One-time ratchet — position can no
-          longer lose money. Eliminates the "gave back a winner" scenario.
+        1. Breakeven stop: when profit ≥ BREAKEVEN_STOP_PARAMS[class], move SL to
+           entry. One-time ratchet — position can no longer lose money.
+        2. Profit lock:    when profit ≥ PROFIT_LOCK_PARAMS[class]["trigger"], move
+           SL to entry × (1 ± lock_pct). Closes the gap between breakeven and
+           trailing activation.
+        3. Trailing stop:  when profit ≥ TRAILING_STOP_PARAMS[class]["activation"],
+           compute trail_sl = current × (1 ± effective_distance). Only updates if
+           the new stop is a favourable move (ratchet).
 
-        Stage 2 — Trailing stop (fires after breakeven, higher threshold):
-          Uses asset-class-aware activation thresholds and trailing distances:
-          - Stocks/ETFs: 5% activation, 7% distance
-          - Crypto: 8% activation, 10% distance
-          - Forex: 2% activation, 3% distance
-          - Commodities/Indices: 4-5% activation, 5-7% distance
+        effective_distance = max(distance_pct, ATR_pct × ATR_MULTIPLIER[class]).
+        ATR is computed from the strategy's own timeframe bars when available
+        (via `position_intervals`) so 4H strategies don't inherit daily ATR.
 
-        The config-level trailing_stop_activation_pct and trailing_stop_distance_pct
-        serve as overrides — if set, they take precedence over asset-class defaults.
+        Note: eToro has no SL-modification API for open positions; the
+        `etoro_client.update_position_stop_loss` call is a no-op stub that
+        returns {"status": "db_only"}. Trailing stops are enforced DB-side:
+        this method mutates `position.stop_loss`; the caller persists; a
+        separate breach-detection pass closes positions that cross the stop.
 
         Args:
-            positions: List of open positions to check
-            skip_etoro_update: If True, only update Position objects without calling eToro API.
+            positions: List of open positions to check.
+            skip_etoro_update: Kept for API compatibility. eToro SL-modify is not
+                supported, so the flag is effectively a no-op — the "eToro path"
+                and "DB-only path" produce the same result.
+            position_intervals: Optional mapping of position.id → strategy interval
+                ('1d', '4h', '1h'). If omitted, ATR uses 1d bars (legacy behaviour).
 
         Returns:
-            List of orders created (empty for trailing stops)
+            List of orders created (always empty for trailing stops; kept for
+            signature compatibility with other check_* methods).
+
+        Side effects:
+            Sets `self._last_tsl_summary` to a dict with per-action counts so the
+            caller can emit an INFO-level per-cycle summary line.
         """
+        # Reset summary for this cycle
+        self._last_tsl_summary = {
+            "checked": len(positions),
+            "breakeven": 0,
+            "lock": 0,
+            "trail": 0,
+            "errors": 0,
+            "invalid_entry": 0,
+            "updated_ids": set(),
+        }
+
         if not self.risk_config.trailing_stop_enabled:
             logger.debug("Trailing stop-loss is disabled")
             return []
 
         logger.info(f"Checking {len(positions)} positions for trailing stop adjustments")
 
-        orders_created = []
-        positions_updated = 0
+        orders_created: List[Order] = []
 
         for position in positions:
             try:
                 if position.closed_at is not None:
                     continue
 
-                if position.entry_price <= 0:
-                    logger.warning(f"Position {position.id} has invalid entry_price: {position.entry_price}")
+                if position.entry_price is None or position.entry_price <= 0:
+                    logger.warning(
+                        f"Position {position.id} ({position.symbol}) has invalid "
+                        f"entry_price: {position.entry_price}"
+                    )
+                    self._last_tsl_summary["invalid_entry"] += 1
                     continue
 
-                # Profit calculation
+                if position.current_price is None or position.current_price <= 0:
+                    logger.debug(
+                        f"Position {position.id} ({position.symbol}) has no "
+                        f"current_price; skipping TSL"
+                    )
+                    continue
+
+                # Profit calculation (fraction, not percent)
                 if position.side.value == "LONG":
                     profit_pct = (position.current_price - position.entry_price) / position.entry_price
                 else:
                     profit_pct = (position.entry_price - position.current_price) / position.entry_price
 
-                # Asset-class-aware thresholds
                 asset_class = self._get_asset_class(position.symbol)
-                params = self.TRAILING_STOP_PARAMS.get(asset_class, self.TRAILING_STOP_PARAMS["stock"])
-                activation_pct = params["activation"]
-                distance_pct = params["distance"]
+                trail_params = self.TRAILING_STOP_PARAMS.get(asset_class, self.TRAILING_STOP_PARAMS["stock"])
+                activation_pct = trail_params["activation"]
+                distance_pct = trail_params["distance"]
 
-                # ── BREAKEVEN STOP ────────────────────────────────────────────────
-                # When profit reaches the breakeven threshold, move SL to entry price.
-                # This is a one-time ratchet — fires once, then becomes a no-op.
-                # Runs BEFORE the trailing stop check so there's always a protection
-                # window between breakeven and the trailing stop taking over.
-                #
-                # Example (stock): position reaches +3% → SL moves to entry price.
-                # If price then reverses, the position closes at breakeven (no loss).
-                # The trailing stop then takes over at +5% and follows price upward.
+                is_long = position.side.value == "LONG"
+
+                # ── Stage 1: Breakeven stop ──────────────────────────────────
                 breakeven_threshold = self.BREAKEVEN_STOP_PARAMS.get(asset_class, 0.03)
-                if profit_pct >= breakeven_threshold and position.entry_price > 0:
-                    # Only apply if SL is currently below entry (still in loss territory)
-                    if position.side.value == "LONG":
-                        be_sl = position.entry_price  # Breakeven = entry price for longs
-                        if position.stop_loss is None or position.stop_loss < be_sl:
-                            # Move SL to entry price
-                            if skip_etoro_update:
-                                position.stop_loss = be_sl
-                                positions_updated += 1
-                                logger.info(
-                                    f"Breakeven stop set: {position.symbol} LONG "
-                                    f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.2f}"
-                                )
-                            else:
-                                try:
-                                    self.etoro_client.update_position_stop_loss(
-                                        position_id=position.etoro_position_id,
-                                        stop_loss_rate=be_sl
-                                    )
-                                    position.stop_loss = be_sl
-                                    positions_updated += 1
-                                    logger.info(
-                                        f"Breakeven stop set: {position.symbol} LONG "
-                                        f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.2f}"
-                                    )
-                                except EToroAPIError as e:
-                                    logger.warning(
-                                        f"Could not set breakeven stop for {position.symbol}: {e}"
-                                    )
-                    else:  # SHORT
-                        be_sl = position.entry_price  # Breakeven = entry price for shorts
-                        if position.stop_loss is None or position.stop_loss > be_sl:
-                            if skip_etoro_update:
-                                position.stop_loss = be_sl
-                                positions_updated += 1
-                                logger.info(
-                                    f"Breakeven stop set: {position.symbol} SHORT "
-                                    f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.2f}"
-                                )
-                            else:
-                                try:
-                                    self.etoro_client.update_position_stop_loss(
-                                        position_id=position.etoro_position_id,
-                                        stop_loss_rate=be_sl
-                                    )
-                                    position.stop_loss = be_sl
-                                    positions_updated += 1
-                                    logger.info(
-                                        f"Breakeven stop set: {position.symbol} SHORT "
-                                        f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.2f}"
-                                    )
-                                except EToroAPIError as e:
-                                    logger.warning(
-                                        f"Could not set breakeven stop for {position.symbol}: {e}"
-                                    )
+                if profit_pct >= breakeven_threshold:
+                    be_sl = position.entry_price
+                    if self._is_favourable_move(position.stop_loss, be_sl, is_long):
+                        self._apply_sl(
+                            position,
+                            be_sl,
+                            f"Breakeven stop set: {position.symbol} {position.side.value} "
+                            f"profit={profit_pct:.1%} → SL moved to entry {be_sl:.4f}",
+                        )
+                        self._last_tsl_summary["breakeven"] += 1
 
-                # ── PROFIT LOCK-IN ────────────────────────────────────────────────
-                # When profit reaches the lock trigger, move SL to entry + lock_pct.
-                # Closes the gap between breakeven (+3%) and trailing stop activation (+7.5%).
-                # A position that goes +5% then reverses will now close with +2% profit,
-                # not at breakeven.
+                # ── Stage 2: Profit lock ─────────────────────────────────────
                 lock_params = self.PROFIT_LOCK_PARAMS.get(asset_class, self.PROFIT_LOCK_PARAMS["stock"])
                 lock_trigger = lock_params["trigger"]
                 lock_pct = lock_params["lock"]
-                if profit_pct >= lock_trigger and position.entry_price > 0:
-                    if position.side.value == "LONG":
-                        lock_sl = position.entry_price * (1 + lock_pct)
-                        if position.stop_loss is None or position.stop_loss < lock_sl:
-                            if skip_etoro_update:
-                                position.stop_loss = lock_sl
-                                positions_updated += 1
-                                logger.info(
-                                    f"Profit lock: {position.symbol} LONG "
-                                    f"profit={profit_pct:.1%} → SL locked at +{lock_pct:.1%} "
-                                    f"({lock_sl:.2f})"
-                                )
-                            else:
-                                try:
-                                    self.etoro_client.update_position_stop_loss(
-                                        position_id=position.etoro_position_id,
-                                        stop_loss_rate=lock_sl
-                                    )
-                                    position.stop_loss = lock_sl
-                                    positions_updated += 1
-                                    logger.info(
-                                        f"Profit lock: {position.symbol} LONG "
-                                        f"profit={profit_pct:.1%} → SL locked at +{lock_pct:.1%} "
-                                        f"({lock_sl:.2f})"
-                                    )
-                                except EToroAPIError as e:
-                                    logger.warning(
-                                        f"Could not set profit lock for {position.symbol}: {e}"
-                                    )
-                    else:  # SHORT
-                        lock_sl = position.entry_price * (1 - lock_pct)
-                        if position.stop_loss is None or position.stop_loss > lock_sl:
-                            if skip_etoro_update:
-                                position.stop_loss = lock_sl
-                                positions_updated += 1
-                                logger.info(
-                                    f"Profit lock: {position.symbol} SHORT "
-                                    f"profit={profit_pct:.1%} → SL locked at +{lock_pct:.1%} "
-                                    f"({lock_sl:.2f})"
-                                )
-                            else:
-                                try:
-                                    self.etoro_client.update_position_stop_loss(
-                                        position_id=position.etoro_position_id,
-                                        stop_loss_rate=lock_sl
-                                    )
-                                    position.stop_loss = lock_sl
-                                    positions_updated += 1
-                                    logger.info(
-                                        f"Profit lock: {position.symbol} SHORT "
-                                        f"profit={profit_pct:.1%} → SL locked at +{lock_pct:.1%} "
-                                        f"({lock_sl:.2f})"
-                                    )
-                                except EToroAPIError as e:
-                                    logger.warning(
-                                        f"Could not set profit lock for {position.symbol}: {e}"
-                                    )
+                if profit_pct >= lock_trigger:
+                    lock_sl = position.entry_price * (1 + lock_pct) if is_long else position.entry_price * (1 - lock_pct)
+                    if self._is_favourable_move(position.stop_loss, lock_sl, is_long):
+                        self._apply_sl(
+                            position,
+                            lock_sl,
+                            f"Profit lock: {position.symbol} {position.side.value} "
+                            f"profit={profit_pct:.1%} → SL locked at ±{lock_pct:.1%} ({lock_sl:.4f})",
+                        )
+                        self._last_tsl_summary["lock"] += 1
 
-                # NOTE: Per-asset-class thresholds are always used.
-                # The config-level trailing_stop_activation_pct / trailing_stop_distance_pct
-                # are legacy fields kept for backward compatibility but no longer override
-                # the asset-class-aware values. The per-asset-class calibration (based on
-                # daily volatility ranges) is far more appropriate than a single global value.
-
-                # Check activation threshold
+                # ── Stage 3: Trailing stop ───────────────────────────────────
                 if profit_pct < activation_pct:
-                    logger.debug(
-                        f"Position {position.id} ({position.symbol}) profit {profit_pct:.2%} "
-                        f"below {asset_class} activation {activation_pct:.0%}"
-                    )
-                    continue
+                    continue  # Not yet in trail zone
 
-                # Calculate new stop-loss level using ATR-aware minimum trail distance.
-                # Trail distance = max(distance_pct * price, ATR_TRAIL_MULTIPLIER * daily_ATR)
-                # This prevents penny-stop whipsaws on high-priced instruments where a fixed
-                # percentage produces a stop within normal intraday noise.
-                effective_distance = distance_pct
-                try:
-                    from src.data.market_data_manager import get_market_data_manager
-                    from datetime import timedelta as _td, datetime as _dt
-                    _mdm = get_market_data_manager()
-                    _end = _dt.now()
-                    _start = _end - _td(days=20)
-                    _bars = _mdm.get_historical_data(position.symbol, _start, _end, interval="1d")
-                    if _bars and len(_bars) >= 5:
-                        _tr_list = []
-                        for _i in range(1, len(_bars)):
-                            _h = getattr(_bars[_i], 'high', None) or position.current_price
-                            _l = getattr(_bars[_i], 'low', None) or position.current_price
-                            _c_prev = getattr(_bars[_i - 1], 'close', None) or position.current_price
-                            _tr_val = max(_h - _l, abs(_h - _c_prev), abs(_l - _c_prev))
-                            _tr_list.append(_tr_val)
-                        if _tr_list:
-                            _atr = sum(_tr_list[-14:]) / min(14, len(_tr_list[-14:]))
-                            _atr_pct = _atr / position.current_price if position.current_price > 0 else 0
-                            _atr_floor = _atr_pct * self.ATR_TRAIL_MULTIPLIER
-                            if _atr_floor > effective_distance:
-                                logger.debug(
-                                    f"ATR trail floor for {position.symbol}: "
-                                    f"{effective_distance:.2%} → {_atr_floor:.2%} "
-                                    f"(ATR={_atr_pct:.2%}, {self.ATR_TRAIL_MULTIPLIER}x)"
-                                )
-                                effective_distance = _atr_floor
-                except Exception as _atr_err:
-                    logger.debug(f"Could not compute ATR trail floor for {position.symbol}: {_atr_err}")
+                # ATR-aware effective distance, timeframe-aware when we know the strategy interval
+                strategy_interval = (position_intervals or {}).get(position.id, "1d")
+                effective_distance = self._compute_effective_trail_distance(
+                    symbol=position.symbol,
+                    current_price=position.current_price,
+                    asset_class=asset_class,
+                    fixed_distance_pct=distance_pct,
+                    interval=strategy_interval,
+                )
 
-                if position.side.value == "LONG":
-                    new_stop_loss = position.current_price * (1 - effective_distance)
-                else:
-                    new_stop_loss = position.current_price * (1 + effective_distance)
+                trail_sl = position.current_price * (1 - effective_distance) if is_long else position.current_price * (1 + effective_distance)
 
-                # Only update if new stop is better than current
-                should_update = False
-                if position.stop_loss is None:
-                    should_update = True
-                    logger.info(
-                        f"Position {position.id} ({position.symbol}) no stop-loss, "
-                        f"setting trailing stop at {new_stop_loss:.2f} "
-                        f"({asset_class}: {effective_distance:.2%} distance)"
+                if self._is_favourable_move(position.stop_loss, trail_sl, is_long):
+                    old_sl_str = f"{position.stop_loss:.4f}" if position.stop_loss else "None"
+                    self._apply_sl(
+                        position,
+                        trail_sl,
+                        f"Trailing stop: {position.symbol} {position.side.value} "
+                        f"{old_sl_str} → {trail_sl:.4f} "
+                        f"(profit={profit_pct:.2%}, {asset_class}/{strategy_interval}: {effective_distance:.2%} distance)",
                     )
-                elif position.side.value == "LONG" and new_stop_loss > position.stop_loss:
-                    should_update = True
-                    logger.info(
-                        f"Position {position.id} ({position.symbol}) trailing stop: "
-                        f"{position.stop_loss:.2f} -> {new_stop_loss:.2f} "
-                        f"(profit: {profit_pct:.2%}, {asset_class}: {effective_distance:.2%} distance)"
-                    )
-                elif position.side.value == "SHORT" and new_stop_loss < position.stop_loss:
-                    should_update = True
-                    logger.info(
-                        f"Position {position.id} ({position.symbol}) trailing stop: "
-                        f"{position.stop_loss:.2f} -> {new_stop_loss:.2f} "
-                        f"(profit: {profit_pct:.2%}, {asset_class}: {effective_distance:.2%} distance)"
-                    )
-
-                if should_update:
-                    if skip_etoro_update:
-                        position.stop_loss = new_stop_loss
-                        positions_updated += 1
-                    else:
-                        try:
-                            self.etoro_client.update_position_stop_loss(
-                                position_id=position.etoro_position_id,
-                                stop_loss_rate=new_stop_loss
-                            )
-                            position.stop_loss = new_stop_loss
-                            positions_updated += 1
-                            logger.info(
-                                f"Successfully updated trailing stop for {position.id} "
-                                f"({position.symbol}) to {new_stop_loss:.2f}"
-                            )
-                        except EToroAPIError as e:
-                            logger.error(
-                                f"Failed to update stop-loss for {position.id} "
-                                f"({position.symbol}): {e}"
-                            )
-                            continue
+                    self._last_tsl_summary["trail"] += 1
 
             except Exception as e:
-                logger.error(f"Error processing position {position.id}: {e}")
+                logger.error(
+                    f"Error processing position {position.id} ({position.symbol}): {e}"
+                )
+                self._last_tsl_summary["errors"] += 1
                 continue
 
-        if positions_updated > 0:
-            logger.info(f"Updated trailing stops for {positions_updated} positions")
+        updated_n = len(self._last_tsl_summary["updated_ids"])
+        if updated_n > 0:
+            logger.info(f"Updated trailing stops for {updated_n} positions")
         else:
             logger.debug("No trailing stop adjustments needed")
 
         return orders_created
+
+    # ── Helpers for check_trailing_stops ─────────────────────────────────────
+
+    @staticmethod
+    def _is_favourable_move(current_sl: Optional[float], new_sl: float, is_long: bool) -> bool:
+        """A SL move is favourable (ratchet) only in the direction that locks in more profit.
+        Longs: new_sl > current_sl. Shorts: new_sl < current_sl. None always favourable."""
+        if current_sl is None:
+            return True
+        if is_long:
+            return new_sl > current_sl
+        return new_sl < current_sl
+
+    def _apply_sl(self, position: Position, new_sl: float, log_message: str) -> None:
+        """Mutate Position.stop_loss, mark id as updated in the cycle summary, log.
+
+        eToro's public API does not support SL modification on open positions.
+        `etoro_client.update_position_stop_loss` is a no-op stub — we call it for
+        future-proofing but do not rely on it to persist anything. The caller
+        (monitoring_service) commits the new DB value.
+        """
+        try:
+            # Stub call — returns {"status": "db_only"}. Kept for symmetry.
+            if position.etoro_position_id:
+                self.etoro_client.update_position_stop_loss(
+                    position_id=position.etoro_position_id,
+                    stop_loss_rate=new_sl,
+                )
+        except EToroAPIError as e:
+            # Unreachable with the current stub, but preserved in case a live
+            # SL-modify endpoint is wired in later. We still apply the DB-side
+            # value because that's the enforcement mechanism.
+            logger.warning(f"eToro SL-modify returned error for {position.symbol}: {e}")
+
+        position.stop_loss = new_sl
+        self._last_tsl_summary["updated_ids"].add(position.id)
+        logger.info(log_message)
+
+    def _compute_effective_trail_distance(
+        self,
+        symbol: str,
+        current_price: float,
+        asset_class: str,
+        fixed_distance_pct: float,
+        interval: str = "1d",
+    ) -> float:
+        """Compute the trail distance as max(fixed_pct, ATR_pct × ATR_MULTIPLIER[class]).
+
+        Uses bars at the strategy's own interval so a 4H trail isn't forced to
+        use daily ATR (and vice versa). Falls back to the fixed percentage if
+        bars are unavailable or too few.
+        """
+        effective = fixed_distance_pct
+
+        try:
+            from src.data.market_data_manager import get_market_data_manager
+            from datetime import timedelta
+
+            mdm = get_market_data_manager()
+            # Window sized for the interval so we always have enough bars for ATR(14)
+            if interval == "1h":
+                lookback_days = 3  # ~24 bars
+            elif interval == "4h":
+                lookback_days = 10  # ~45 bars (6 bars/day × 10)
+            else:
+                lookback_days = 20  # 20 daily bars
+            end = datetime.now(timezone.utc).replace(tzinfo=None)
+            start = end - timedelta(days=lookback_days)
+
+            bars = mdm.get_historical_data(symbol, start, end, interval=interval)
+
+            if not bars or len(bars) < 5:
+                # Not enough bars on this interval; fall back to 1d if we asked for something else
+                if interval != "1d":
+                    start = end - timedelta(days=20)
+                    bars = mdm.get_historical_data(symbol, start, end, interval="1d")
+                    interval = "1d"
+
+            if bars and len(bars) >= 5:
+                tr_list = []
+                for i in range(1, len(bars)):
+                    h = getattr(bars[i], "high", None) or current_price
+                    l = getattr(bars[i], "low", None) or current_price
+                    c_prev = getattr(bars[i - 1], "close", None) or current_price
+                    tr_list.append(max(h - l, abs(h - c_prev), abs(l - c_prev)))
+
+                if tr_list:
+                    window = tr_list[-14:]
+                    atr = sum(window) / len(window)
+                    atr_pct = atr / current_price if current_price > 0 else 0.0
+                    multiplier = self.ATR_MULTIPLIER_BY_ASSET_CLASS.get(asset_class, self.ATR_TRAIL_MULTIPLIER)
+                    atr_floor = atr_pct * multiplier
+
+                    if atr_floor > effective:
+                        # Log only when the floor meaningfully widens the trail
+                        # (avoids noise for tiny upward adjustments)
+                        if atr_floor >= effective * 1.2 or (atr_floor - effective) >= 0.01:
+                            logger.info(
+                                f"ATR trail floor for {symbol} ({interval}): "
+                                f"{effective:.2%} → {atr_floor:.2%} "
+                                f"(ATR%={atr_pct:.2%}, multiplier={multiplier:.1f}x, class={asset_class})"
+                            )
+                        effective = atr_floor
+        except Exception as e:
+            logger.debug(f"Could not compute ATR trail floor for {symbol} ({interval}): {e}")
+
+        return effective
 
     def check_partial_exits(self, positions: List[Position]) -> List[Order]:
         """Check positions for partial exit opportunities.
