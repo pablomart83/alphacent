@@ -179,15 +179,26 @@ Rotated `errors.log` (4.7MB, 31k lines of pre-fix noise) to `errors.log.pre-audi
 
 ### F03 — Asset-class tiered concentration cap
 
-**Caps:** stock 3% / etf 5% / index 6% / forex 5% / crypto 2.5% / commodity 4%.  
-**Logic:** direction-aware netting, full-or-skip with 70% partial threshold.
+**Scope updated 2026-05-01 11:05** after observing cap working correctly in production.
+
+**What's already working (verified):**
+- Flat 3% cap for stocks IS enforced on new entries. Log at 11:05:12: "Symbol cap exhausted: CAT existing=\$17684 >= cap=\$14346" → signal correctly rejected, position size 0.
+- Cap computation: `existing_invested_per_symbol` summed across all open positions. `cap_usd = equity * 0.03`. Room-based sizing.
+- Original audit claim "cap not enforced cumulatively" was wrong. The cap IS enforced on new orders.
+
+**What still needs work (actual F03 scope):**
+1. **Asset-class tiering**: currently single 3% cap across all asset classes. Steering's direction was stock 3%, ETF 5%, index 6%, forex 5%, crypto 2.5%, commodity 4%. Indices (85% WR) and ETFs (65% WR) deserve wider caps given lower single-name risk and demonstrated edge.
+2. **Direction-aware netting**: treat LONG and SHORT separately so a legitimate hedge isn't blocked by concentration. e.g. LONG NVDA 2% + SHORT NVDA 2% should be allowed as a net-0 pair trade, not blocked as "4% NVDA exposure."
+3. **Full-or-skip partial threshold**: current behaviour is "scale to fit room"; better is "take full size if fits, else skip entirely (unless room >= 70% of intended)" to avoid noise-bet half-positions.
+
+**Pre-existing over-concentrations (NVDA/AMZN at 7.43%, CAT at 3.72%) are NOT a bug** — they predate current strict enforcement, and force-reducing them would crystallise losses. Natural close-out will bring them back under cap over time. New entries correctly rejected.
 
 **Files:**
-- [ ] `src/execution/order_executor.py` — pre-flight concentration gate
-- [ ] `config/autonomous_trading.yaml` — `symbol_concentration_caps_by_asset_class`
+- [ ] `src/execution/order_executor.py` / risk_manager — add asset-class lookup, direction-aware netting, full-or-skip
+- [ ] `config/autonomous_trading.yaml` — `symbol_concentration_caps_by_asset_class` section
 - [ ] `src/core/config_loader.py` — wire config
 
-**Status:** [ ]
+**Status:** [ ] (enforcement works; tiering + netting still to do — Batch 3)
 
 ### F11 — Intermediate trailing-stop ratchet
 
