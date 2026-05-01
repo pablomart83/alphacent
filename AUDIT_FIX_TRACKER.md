@@ -359,23 +359,39 @@ Discovered while processing F30. The comment at `strategy_engine.py:10493` and o
 
 **Observed:** F30's 4 forex positions were flagged at 10:54:00 UTC; all 4 close orders filled by 10:54:12 UTC (12 seconds later) with no human interaction.
 
+**Approval endpoints exist but are advisory:** `POST /account/positions/{id}/approve-closure` and `POST /account/positions/approve-closures-bulk` exist and work if called within the 60s window. But they don't GATE the auto-closure — it's a race between user and the background job. In prior sessions when approval-via-UI seemed to work, the user likely caught the positions before the 60s tick.
+
 **Not inherently a bug** — auto-closure is the safer default for protecting from trailing stop breaches, fundamental exits, etc. BUT:
-1. **Documentation implies approval exists** → misleading. Needs cleanup.
+1. **Documentation implies approval exists** → misleading. Needs cleanup or a real gate.
 2. **No mass-closure guard** → if some bug flagged all 86 positions, they'd all close in <1 min. No rate limit, no circuit breaker on closures, no per-cycle max-closures cap.
 3. **No audit trail**: no record of who/what triggered the flag beyond `closure_reason`.
 
 **Decision needed:**
-- (a) Add a real approval gate — requires UI work + monitoring-service flag check. Larger effort (M-L).
-- (b) Keep auto-close but add a mass-closure guard: per-cycle max-closures cap (e.g. 10) with an escalation warning. Small effort (S).
-- (c) Fix only the misleading docs. Minimal effort but doesn't address the mass-flag risk.
+- (a) **Real approval gate** — add a `closure_approved: bool` column; processor skips until approved (except for SL/TP/breach cases where we want auto-close). Larger effort (M-L). Trade-off: can't exit fast on breach.
+- (b) **Mass-closure guard only** — per-cycle max-closures cap (e.g. 10) with escalation warning. Preserves speed-of-exit; prevents catastrophic mass-close scenario. Small effort (S).
+- (c) **Hybrid** — distinguish auto-closure reasons (SL/TP/breach → immediate) from flag-for-review reasons (F30 audit-style → require approval); add mass-closure guard on both paths. Medium effort (M).
 
-Recommendation: (b). Preserves the speed-of-risk-exit benefit while preventing a catastrophic bug from closing the whole book.
+Recommendation: **(c) Hybrid** — matches real intent. "Pending closure because it hit SL" should fire immediately. "Pending closure because an audit script flagged it" should wait for human.
+
+Scope: Batch 3 (position risk) alongside F03 concentration cap and F11 trailing ratchet.
 
 **Status:** [ ]
 
-### F27 — Pre-existing OHLC validation warnings on forex (low priority)
+### F27 — Forex OHLC data quality: bad bars persist in DB and re-log warnings every read
 
-177x "Market data for USDJPY has high < open or close" + similar for AUDUSD/GBPUSD. FMP/Yahoo forex data has inconsistent OHLC sometimes. Validator presumably rejects the bad bars — would be nice to confirm and fix at source.
+177x "Market data for USDJPY has high < open or close" + similar for AUDUSD/GBPUSD/EURUSD. FMP/Yahoo forex data occasionally returns inconsistent OHLC (especially near current-day boundary when "today" is still forming).
+
+**Current handling (verified 2026-05-01):** `validate_data()` correctly REJECTS bad bars at read-time — downstream signal generation never sees them. Every fetch path calls `[d for d in data_list if self.validate_data(d)]`. So signals are safe.
+
+**But:** bad bars are NOT deleted from `historical_price_cache`. They're written once (e.g., from a Yahoo sync that grabbed mid-day forming data), then filtered on every subsequent read. This produces:
+- Repeated WARNING log spam on every signal-gen cycle for the same bars
+- Wasted CPU on validator filtering the same poisoned bars
+- DB cache size growth from data that's never usable
+
+**Fix (low priority):**
+- When `validate_data` returns False for a DB-sourced bar, issue DELETE for that specific row
+- OR: on startup, run a one-off cleanup query for known-bad bars
+- Target: get EURUSD/GBPUSD/USDJPY warning rates down to <5/day instead of 177/day
 
 **Status:** [ ]
 
