@@ -4963,6 +4963,7 @@ class StrategyEngine:
         end = datetime.now()
         
         shared_data: Dict[str, List] = {}
+        stale_skip_count = 0  # F02 Part C: track how many symbols we skipped for staleness
         for symbol, intervals in symbol_interval_to_strategies.items():
             for interval, strats in intervals.items():
                 # For intraday intervals, Yahoo only provides ~30 days
@@ -5009,6 +5010,39 @@ class StrategyEngine:
                         f"Cache hit for {symbol} {interval}: {len(data_list)} bars "
                         f"(shared by {len(strats)} strategies)"
                     )
+
+                # F02 Part C — Freshness SLA check.
+                # After fetch/cache-hit, verify the latest bar is within the
+                # max-age threshold for this (interval, asset_class). If stale,
+                # remove from shared_data so downstream strategies see no data
+                # and return []. Silent indicator computation on stale bars
+                # (root cause of the 2026-05-01 DST incident) is prevented here.
+                try:
+                    is_fresh, reason = self.market_data.is_data_fresh_for_signal(
+                        symbol, interval, as_of=end
+                    )
+                    if not is_fresh:
+                        data_key = f"{symbol}:{interval}"
+                        # Remove from shared_data so generate_signals sees no data
+                        if data_key in shared_data:
+                            del shared_data[data_key]
+                        if interval == "1d" and symbol in shared_data:
+                            del shared_data[symbol]
+                        stale_skip_count += 1
+                        logger.warning(
+                            f"[freshness-sla] Skipping {symbol} {interval} for signal "
+                            f"generation: {reason}. {len(strats)} strategies affected."
+                        )
+                except Exception as _fresh_err:
+                    # Fail-open on freshness-check errors — don't block signal gen
+                    # due to a bug in the staleness helper
+                    logger.debug(f"[freshness-sla] Check failed for {symbol} {interval}: {_fresh_err}")
+
+        if stale_skip_count > 0:
+            logger.warning(
+                f"[freshness-sla] {stale_skip_count} (symbol, interval) pairs "
+                f"skipped for signal generation due to stale data"
+            )
         
         data_fetch_time = _time.time() - batch_start
         logger.info(

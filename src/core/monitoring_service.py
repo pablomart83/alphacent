@@ -1064,6 +1064,7 @@ class MonitoringService:
             
             # Phase 2: Batch fetch from Yahoo Finance for symbols that missed DB cache
             import yfinance as yf
+            from src.utils.yfinance_compat import to_tz_aware_utc, normalize_yf_index_to_utc_naive
             
             # Initialize yfinance cache before batch download (thread-safe, once only)
             from src.data.market_data_manager import ensure_yfinance_cache
@@ -1091,10 +1092,17 @@ class MonitoringService:
                 logger.info(f"[bg-full-sync] Batch Yahoo download: {len(yf_tickers)} symbols for {interval}")
                 
                 try:
+                    # Pass tz-aware UTC bounds to yfinance. Naive datetimes trigger
+                    # yfinance's internal local-tz inference which crashes on DST
+                    # ambiguous hours (e.g. 2025-11-02 01:30 in America/New_York).
+                    # See src/utils/yfinance_compat.py for detailed rationale.
+                    start_dt_utc = to_tz_aware_utc(start_dt)
+                    end_utc = to_tz_aware_utc(end)
+
                     batch_data = yf.download(
                         yf_tickers,
-                        start=start_dt,
-                        end=end,
+                        start=start_dt_utc,
+                        end=end_utc,
                         interval=interval,
                         group_by='ticker',
                         progress=False,
@@ -1105,14 +1113,11 @@ class MonitoringService:
                         logger.warning(f"[bg-full-sync] Yahoo batch returned empty for {interval}")
                         continue
                     
-                    # Normalise index to UTC before iterating — prevents AmbiguousTimeError on DST
-                    # transitions (EU clocks fall back last Sunday of October, US last Sunday of
-                    # November). yfinance returns tz-aware timestamps; when the 180-day lookback
-                    # window crosses a DST boundary, the ambiguous local hour (e.g. 2025-11-02
-                    # 01:47 in America/New_York) causes pd.Timestamp.to_pydatetime() to raise.
-                    # Converting to UTC first gives unambiguous naive datetimes for all downstream.
-                    if hasattr(batch_data.index, 'tz') and batch_data.index.tz is not None:
-                        batch_data.index = batch_data.index.tz_convert('UTC').tz_localize(None)
+                    # Belt-and-braces: even with tz-aware UTC input above, yfinance
+                    # returns tz-aware timestamps. Normalise to UTC-naive before any
+                    # iteration or resample so downstream to_pydatetime() / .resample()
+                    # calls don't hit DST ambiguous hours.
+                    batch_data = normalize_yf_index_to_utc_naive(batch_data)
                     
                     # Parse batch response — structure depends on single vs multi ticker
                     yf_to_sym = {}
@@ -1120,6 +1125,7 @@ class MonitoringService:
                         yf_to_sym.setdefault(yf_t, []).append(sym)
                     
                     is_multi = len(yf_tickers) > 1
+                    successfully_fetched: set = set()  # yf_tickers that produced data
                     
                     for yf_ticker in yf_tickers:
                         try:
@@ -1162,6 +1168,7 @@ class MonitoringService:
                                     else:
                                         stats["1h"] += 1
                                     stats["yahoo_batch"] += 1
+                                    successfully_fetched.add(yf_ticker)
                                     
                                     is_active = our_symbol in active_symbols
                                     if is_active:
@@ -1172,6 +1179,72 @@ class MonitoringService:
                         except Exception as e:
                             logger.debug(f"[bg-full-sync] Failed to parse {yf_ticker}: {e}")
                             stats["errors"] += 1
+                    
+                    # Per-ticker retry for batch misses.
+                    # If the batch download returned empty or partial data for some tickers
+                    # (common cause: DST boundary in lookback window, Yahoo rate limiting,
+                    # or single ticker failure cascading the batch response), retry each
+                    # individually with tz-aware UTC bounds. Cap at 20 tickers to avoid
+                    # request-storming Yahoo when batch fails wholesale.
+                    missed = [t for t in yf_tickers if t not in successfully_fetched]
+                    if missed and len(missed) <= 20:
+                        logger.info(
+                            f"[bg-full-sync] Per-ticker retry for {len(missed)} missed {interval} tickers"
+                        )
+                        for yf_ticker in missed:
+                            try:
+                                single_ticker = yf.Ticker(yf_ticker)
+                                single_hist = single_ticker.history(
+                                    start=start_dt_utc,
+                                    end=end_utc,
+                                    interval=interval,
+                                )
+                                if single_hist.empty:
+                                    continue
+                                single_hist = normalize_yf_index_to_utc_naive(single_hist)
+                                for our_symbol in yf_to_sym.get(yf_ticker, []):
+                                    data_list = []
+                                    for ts, row in single_hist.iterrows():
+                                        try:
+                                            o = float(row.get('Open', 0))
+                                            h = float(row.get('High', 0))
+                                            l = float(row.get('Low', 0))
+                                            c = float(row.get('Close', 0))
+                                            v = float(row.get('Volume', 0))
+                                            if c > 0:
+                                                data_list.append(MarketData(
+                                                    symbol=our_symbol,
+                                                    timestamp=ts.to_pydatetime().replace(tzinfo=None),
+                                                    open=o, high=h, low=l, close=c, volume=v,
+                                                    source=DataSource.YAHOO_FINANCE,
+                                                ))
+                                        except (ValueError, TypeError):
+                                            continue
+                                    if data_list:
+                                        data_list.sort(key=lambda d: d.timestamp)
+                                        md._save_historical_to_db(our_symbol, data_list, interval)
+                                        if interval == "1d":
+                                            stats["1d"] += 1
+                                        else:
+                                            stats["1h"] += 1
+                                        stats.setdefault("yahoo_retry", 0)
+                                        stats["yahoo_retry"] += 1
+                                        is_active = our_symbol in active_symbols
+                                        if is_active:
+                                            cache_key = f"{our_symbol}:{interval}:{'120' if interval == '1d' else '25'}"
+                                            hist_cache.set(cache_key, data_list)
+                                            stats["memory_loaded"] += 1
+                            except Exception as e:
+                                logger.debug(f"[bg-full-sync] Per-ticker retry failed for {yf_ticker}: {e}")
+                                stats["errors"] += 1
+                    elif missed:
+                        # Too many misses (>20) — likely a systemic issue (Yahoo outage,
+                        # auth, rate limit). Don't retry individually; log for visibility.
+                        logger.warning(
+                            f"[bg-full-sync] {len(missed)} {interval} tickers missed batch "
+                            f"but retry capped at 20. Likely systemic (Yahoo outage/rate limit). "
+                            f"Sample: {missed[:5]}"
+                        )
                 
                 except Exception as e:
                     logger.warning(f"[bg-full-sync] Yahoo batch download failed for {interval}: {e}")
@@ -1459,10 +1532,61 @@ class MonitoringService:
             # Convert ORM to dataclass, skipping positions whose market is closed
             open_positions = []
             skipped_market_closed = 0
+            skipped_stale_data = 0  # F09: positions skipped because price data is stale
+            
+            # Helper: resolve the strategy's configured interval for freshness check.
+            # Falls back to '1d' if strategy metadata is missing.
+            def _get_strategy_interval_for_pos(pos_orm) -> str:
+                try:
+                    from src.models.orm import StrategyORM
+                    strat = session.query(StrategyORM).filter_by(id=pos_orm.strategy_id).first()
+                    if strat and strat.strategy_metadata:
+                        return strat.strategy_metadata.get('interval', '1d')
+                    if strat and strat.rules:
+                        return strat.rules.get('interval', '1d')
+                except Exception:
+                    pass
+                return '1d'
+            
+            # F02 Part C / F09 — Freshness SLA gate for trailing stops.
+            # Trailing-stop recalculation uses ATR, which is derived from the
+            # strategy's timeframe bars. If those bars are stale (e.g. 17-day-old
+            # 4H bars on GS after a sync failure), the new ATR is wrong and the
+            # SL move is wrong. Better to leave the existing SL intact until
+            # data refreshes than silently mutate the stop based on stale ATR.
+            stale_checker = None
+            try:
+                from src.data.market_data_manager import get_market_data_manager
+                stale_checker = get_market_data_manager()
+            except Exception:
+                stale_checker = None
+            
             for pos_orm in open_positions_orm:
                 if not self._is_symbol_market_open(pos_orm.symbol):
                     skipped_market_closed += 1
                     continue
+                
+                # Freshness check against the strategy's own interval
+                if stale_checker is not None:
+                    try:
+                        strat_interval = _get_strategy_interval_for_pos(pos_orm)
+                        is_fresh, reason = stale_checker.is_data_fresh_for_signal(
+                            pos_orm.symbol, strat_interval
+                        )
+                        if not is_fresh:
+                            skipped_stale_data += 1
+                            logger.warning(
+                                f"[freshness-sla] Skipping trailing stop update for "
+                                f"{pos_orm.symbol} ({strat_interval}): {reason}. "
+                                f"Existing SL preserved."
+                            )
+                            continue
+                    except Exception as _fresh_err:
+                        logger.debug(
+                            f"[freshness-sla] Check failed for {pos_orm.symbol}: "
+                            f"{_fresh_err} — proceeding"
+                        )
+                
                 pos = Position(
                     id=pos_orm.id,
                     strategy_id=pos_orm.strategy_id,
@@ -1480,6 +1604,12 @@ class MonitoringService:
                     closed_at=pos_orm.closed_at
                 )
                 open_positions.append(pos)
+            
+            if skipped_stale_data > 0:
+                logger.info(
+                    f"[freshness-sla] {skipped_stale_data} positions skipped trailing "
+                    f"stop update due to stale data (existing SLs preserved)"
+                )
 
             # Capture old stop_loss values before the check
             old_stop_losses = {pos.id: pos.stop_loss for pos in open_positions}

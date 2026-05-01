@@ -4113,16 +4113,21 @@ async def get_stress_tests(
             )
 
             if not spy_rows:
-                # Try Yahoo Finance fallback
+                # Try Yahoo Finance fallback.
+                # Pass tz-aware UTC bounds to prevent DST ambiguous-hour crashes.
+                # See src/utils/yfinance_compat.py.
                 try:
                     import yfinance as yf
                     from datetime import datetime as _dt, timedelta as _td
+                    from src.utils.yfinance_compat import to_tz_aware_utc, normalize_yf_index_to_utc_naive
                     ticker = yf.Ticker("SPY")
-                    hist = ticker.history(start=start_str, end=end_str, interval="1d")
+                    hist = ticker.history(
+                        start=to_tz_aware_utc(start_str),
+                        end=to_tz_aware_utc(end_str),
+                        interval="1d",
+                    )
                     if not hist.empty:
-                        # Normalise index to UTC — prevents AmbiguousTimeError on DST boundaries
-                        if hasattr(hist.index, 'tz') and hist.index.tz is not None:
-                            hist.index = hist.index.tz_convert('UTC').tz_localize(None)
+                        hist = normalize_yf_index_to_utc_naive(hist)
                         spy_closes = [(str(d.date()), float(c)) for d, c in zip(hist.index, hist["Close"])]
                     else:
                         spy_closes = []

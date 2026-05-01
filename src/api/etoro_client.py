@@ -583,18 +583,23 @@ class EToroAPIClient:
 
             logger.debug(f"Fetching {symbol} historical data from Yahoo Finance as {yahoo_symbol}")
 
-            # Fetch historical data
+            # Fetch historical data.
+            # Pass tz-aware UTC bounds to yfinance — naive datetimes trigger internal
+            # local-tz inference that crashes on DST ambiguous hours. See
+            # src/utils/yfinance_compat.py for the full rationale.
+            from src.utils.yfinance_compat import to_tz_aware_utc, normalize_yf_index_to_utc_naive
+            start_utc = to_tz_aware_utc(start_date)
+            end_utc = to_tz_aware_utc(end_date)
+
             ticker = yf.Ticker(yahoo_symbol)
-            hist = ticker.history(start=start_date, end=end_date)
+            hist = ticker.history(start=start_utc, end=end_utc)
 
             if hist.empty:
                 raise ValueError(f"No historical data available for {yahoo_symbol}")
 
-            # Normalise index to UTC before iterating — prevents AmbiguousTimeError
-            # when the date range crosses a DST boundary. yfinance returns tz-aware
-            # timestamps; converting to UTC first gives unambiguous naive datetimes.
-            if hasattr(hist.index, 'tz') and hist.index.tz is not None:
-                hist.index = hist.index.tz_convert('UTC').tz_localize(None)
+            # Normalise index to UTC-naive before iterating. Belt-and-braces
+            # on top of the tz-aware input above — output can still be tz-aware.
+            hist = normalize_yf_index_to_utc_naive(hist)
 
             # Convert to list of MarketData objects
             market_data_list = []

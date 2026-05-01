@@ -1,8 +1,8 @@
 """Market data manager with caching and fallback to Yahoo Finance."""
 
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Tuple
 
 import requests
 import yfinance as yf
@@ -369,6 +369,166 @@ class MarketDataManager:
         except Exception as e:
             logger.error(f"Yahoo Finance fallback failed for {normalized_symbol}: {e}")
             raise ValueError(f"Failed to fetch market data for {normalized_symbol} from all sources: {e}")
+
+    # ------------------------------------------------------------------
+    # Freshness SLA — F02 Part C
+    # ------------------------------------------------------------------
+    # Max age thresholds for signal-generation. If the latest bar for a
+    # (symbol, interval) is older than the threshold (adjusted for weekend
+    # gaps for stock/etf/index), `is_data_fresh_for_signal()` returns
+    # (False, reason) and callers must skip the signal rather than compute
+    # indicators on stale data.
+    #
+    # Tighter than _get_historical_from_db's staleness check: that one
+    # decides whether to hit Yahoo; this one decides whether to emit
+    # signals at all.
+    _FRESHNESS_MAX_AGE_HOURS = {
+        # (interval, asset_class_family) -> max age in hours
+        ("1d", "stock_etf_index"): 48,    # allows 2 closed weekdays
+        ("1d", "forex"):           48,
+        ("1d", "commodity"):       48,
+        ("1d", "crypto"):          30,    # 24/7 — shouldn't lag
+        ("4h", "stock_etf_index"): 30,    # 4H bar during RTH
+        ("4h", "forex"):           12,
+        ("4h", "commodity"):       30,
+        ("4h", "crypto"):          8,
+        ("1h", "stock_etf_index"): 24,    # allows overnight close
+        ("1h", "forex"):           6,
+        ("1h", "commodity"):       12,
+        ("1h", "crypto"):          6,
+    }
+
+    def _get_asset_class_family(self, symbol: str) -> str:
+        """Coarse asset-class family for freshness SLA lookup.
+
+        Returns one of: 'crypto', 'forex', 'commodity', 'stock_etf_index'.
+        """
+        sym = symbol.upper()
+        try:
+            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX
+            # Normalise crypto (BTCUSD -> BTC, BTC -> BTC)
+            crypto_base = {s.replace("USD", "") for s in DEMO_ALLOWED_CRYPTO}
+            if sym.replace("USD", "") in crypto_base:
+                return "crypto"
+            if sym in set(DEMO_ALLOWED_FOREX):
+                return "forex"
+        except ImportError:
+            pass
+        # Commodity check via existing symbol_mapper DAILY_ONLY_SYMBOLS heuristic
+        try:
+            from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS
+            commodity_syms = {"GOLD", "SILVER", "OIL", "COPPER", "NATGAS", "PLATINUM",
+                              "ALUMINUM", "ZINC"} | set(DAILY_ONLY_SYMBOLS)
+            if sym in commodity_syms:
+                return "commodity"
+        except ImportError:
+            pass
+        # Default bucket covers stocks, ETFs, indices (all share market-hours profile)
+        return "stock_etf_index"
+
+    def get_latest_bar_timestamp(self, symbol: str, interval: str) -> Optional[datetime]:
+        """Return the timestamp of the latest cached bar for (symbol, interval).
+
+        Returns None if no cached data exists. Used by freshness SLA check.
+        """
+        try:
+            from src.models.orm import HistoricalPriceCacheORM
+            from src.models.database import Database
+            db = Database()
+            with db.session_scope() as session:
+                latest = (
+                    session.query(HistoricalPriceCacheORM.date)
+                    .filter(
+                        HistoricalPriceCacheORM.symbol == symbol,
+                        HistoricalPriceCacheORM.interval == interval,
+                    )
+                    .order_by(HistoricalPriceCacheORM.date.desc())
+                    .first()
+                )
+                if latest is None:
+                    return None
+                ts = latest[0]
+                # Strip tz if present — our DB stores naive UTC
+                if hasattr(ts, 'tzinfo') and ts.tzinfo is not None:
+                    ts = ts.replace(tzinfo=None)
+                return ts
+        except Exception as e:
+            logger.debug(f"get_latest_bar_timestamp failed for {symbol} {interval}: {e}")
+            return None
+
+    def _subtract_weekend_hours(self, latest: datetime, now: datetime) -> timedelta:
+        """Compute data age, subtracting weekend gaps when the latest bar is Friday close.
+
+        Only relevant for stock/etf/index intervals. Crypto and forex aren't adjusted.
+        Conservative: if the latest bar is from Friday and `now` is Saturday/Sunday/Monday,
+        subtract the weekend (approx. 64 hours) from the raw age.
+        """
+        raw_age = now - latest
+        # If both dates are in the same week, no weekend to subtract
+        if latest.weekday() == 4 and now.weekday() >= 5:
+            # Friday bar, now Sat or Sun — subtract remaining Friday evening + weekend
+            return raw_age - timedelta(hours=48)
+        if latest.weekday() == 4 and now.weekday() == 0:
+            # Friday bar, now Monday — subtract full weekend
+            return raw_age - timedelta(hours=48)
+        return raw_age
+
+    def is_data_fresh_for_signal(
+        self,
+        symbol: str,
+        interval: str,
+        as_of: Optional[datetime] = None,
+    ) -> tuple:
+        """Check if cached data is fresh enough to generate signals.
+
+        Returns (is_fresh, reason). If not fresh, callers MUST skip the symbol
+        in signal generation and in ATR-based stop-loss recalculation. Silently
+        computing indicators on stale bars poisons signals — the F02 root-cause
+        incident (166-symbol DST crash) is exactly this failure mode left
+        unguarded.
+
+        Args:
+            symbol: DB-canonical symbol (e.g. 'AAPL', 'BTC', 'EURUSD').
+            interval: '1d', '4h', or '1h'.
+            as_of: Reference 'now' (UTC-naive). Defaults to datetime.utcnow().
+
+        Returns:
+            (True, '') if fresh; (False, human-readable reason) if stale or missing.
+        """
+        if as_of is None:
+            as_of = datetime.utcnow()
+        elif as_of.tzinfo is not None:
+            as_of = as_of.astimezone(timezone.utc).replace(tzinfo=None)
+
+        latest = self.get_latest_bar_timestamp(symbol, interval)
+        if latest is None:
+            return (False, f"no cached data for {symbol} {interval}")
+
+        family = self._get_asset_class_family(symbol)
+        max_age_hours = self._FRESHNESS_MAX_AGE_HOURS.get((interval, family))
+        if max_age_hours is None:
+            # Unknown interval — be permissive, log and return fresh
+            logger.debug(f"is_data_fresh_for_signal: no SLA for ({interval}, {family}); passing")
+            return (True, "")
+
+        raw_age = as_of - latest
+        # Weekend-gap adjustment for stock/etf/index
+        if family == "stock_etf_index":
+            effective_age = self._subtract_weekend_hours(latest, as_of)
+            # Floor at 0 — don't report negative age if math overshoots
+            if effective_age < timedelta(0):
+                effective_age = timedelta(0)
+        else:
+            effective_age = raw_age
+
+        max_age = timedelta(hours=max_age_hours)
+        if effective_age > max_age:
+            return (
+                False,
+                f"{symbol} {interval} age={effective_age} (raw={raw_age}) "
+                f"> limit={max_age} for {family}"
+            )
+        return (True, "")
 
     def get_historical_data(
         self,
@@ -833,8 +993,13 @@ class MarketDataManager:
         ensure_yfinance_cache()
         ticker = yf.Ticker(yf_symbol)
         
-        # Get current data
+        # Get current data.
+        # period="1d" is pre-computed by yfinance (no user-supplied datetime), so
+        # DST ambiguous-hour risk is low here. Still, normalise the returned index
+        # before iteration for safety — see src/utils/yfinance_compat.py.
+        from src.utils.yfinance_compat import normalize_yf_index_to_utc_naive
         hist = ticker.history(period="1d", interval="1m")
+        hist = normalize_yf_index_to_utc_naive(hist)
         
         if hist.empty:
             raise ValueError(f"No data available from Yahoo Finance for {symbol} (ticker: {yf_symbol})")
@@ -893,20 +1058,23 @@ class MarketDataManager:
         }
         yf_interval = interval_map.get(interval, "1d")
         
+        # Pass tz-aware UTC bounds to yfinance to avoid DST ambiguous-hour crashes.
+        # See src/utils/yfinance_compat.py for the full rationale.
+        from src.utils.yfinance_compat import to_tz_aware_utc, normalize_yf_index_to_utc_naive
+        start_utc = to_tz_aware_utc(start)
+        end_utc = to_tz_aware_utc(end)
+
         # Fetch historical data
-        hist = ticker.history(start=start, end=end, interval=yf_interval)
+        hist = ticker.history(start=start_utc, end=end_utc, interval=yf_interval)
         
         if hist.empty:
             raise ValueError(f"No historical data available from Yahoo Finance for {symbol} (ticker: {yf_symbol})")
 
-        # Normalise index to UTC FIRST — before any resampling or iteration.
-        # yfinance returns tz-aware timestamps; when the lookback window crosses a DST
-        # boundary (EU last Sunday of Oct/Mar, US first Sunday of Nov/Mar), the ambiguous
-        # local hour causes pd.Timestamp.to_pydatetime() AND pd.resample() to raise
-        # AmbiguousTimeError. Converting to UTC then stripping tz makes everything
-        # downstream unambiguous.
-        if hasattr(hist.index, 'tz') and hist.index.tz is not None:
-            hist.index = hist.index.tz_convert('UTC').tz_localize(None)
+        # Normalise index to UTC-naive FIRST — before any resampling or iteration.
+        # Belt-and-braces: tz-aware UTC input above doesn't prevent the output
+        # from being tz-aware. Stripping tz here makes every downstream
+        # to_pydatetime() and .resample() call unambiguous.
+        hist = normalize_yf_index_to_utc_naive(hist)
 
         # Synthesize 4H bars from 1H data using proper OHLCV resampling.
         # This is how real trading platforms build higher-timeframe candles:
