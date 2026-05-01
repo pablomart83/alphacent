@@ -771,40 +771,49 @@ class MonitoringService:
             
             for symbol, price in live_prices.items():
                 try:
-                    for interval in ['1h', '1d']:
-                        cache_key = f"{symbol}:{interval}:{'25' if interval == '1h' else '120'}"
-                        cached_data = hist_cache.get(cache_key)
-                        if cached_data and len(cached_data) > 0:
-                            last_bar = cached_data[-1]
-                            last_bar_hour = last_bar.timestamp.replace(minute=0, second=0, microsecond=0) if last_bar.timestamp else None
-                            
-                            if interval == '1h' and last_bar_hour and current_hour > last_bar_hour:
-                                new_bar = MarketData(
-                                    symbol=last_bar.symbol, timestamp=current_hour,
-                                    open=price, high=price, low=price, close=price,
-                                    volume=0, source=last_bar.source,
-                                )
-                                cached_data.append(new_bar)
-                                hist_cache.set(cache_key, cached_data)
-                                try:
-                                    if hasattr(self, '_market_data') and self._market_data:
-                                        self._market_data._save_historical_to_db(symbol, [new_bar], interval)
-                                except Exception:
-                                    pass
-                            else:
-                                updated_bar = MarketData(
-                                    symbol=last_bar.symbol, timestamp=last_bar.timestamp,
-                                    open=last_bar.open, high=max(last_bar.high, price),
-                                    low=min(last_bar.low, price), close=price,
-                                    volume=last_bar.volume, source=last_bar.source,
-                                )
-                                cached_data[-1] = updated_bar
-                                hist_cache.set(cache_key, cached_data)
-                                try:
-                                    if hasattr(self, '_market_data') and self._market_data:
-                                        self._market_data._save_historical_to_db(symbol, [updated_bar], interval)
-                                except Exception:
-                                    pass
+                    # Quick updates only touch 1h bars. 1d bars are only refreshed by the
+                    # full hourly sync, which pulls proper end-of-day data from Yahoo.
+                    # Building an incomplete "today" 1d bar from intraday ticks would
+                    # mislead daily indicators: RSI(14) treats it as a full bar even if
+                    # only 2 hours of data are baked in — no quant would trade on that.
+                    cache_key = f"{symbol}:1h:25"
+                    cached_data = hist_cache.get(cache_key)
+                    if cached_data and len(cached_data) > 0:
+                        last_bar = cached_data[-1]
+                        last_bar_ts = last_bar.timestamp
+                        if hasattr(last_bar_ts, 'tzinfo') and last_bar_ts.tzinfo:
+                            last_bar_ts = last_bar_ts.replace(tzinfo=None)
+                        last_bar_hour = last_bar_ts.replace(minute=0, second=0, microsecond=0)
+
+                        if current_hour > last_bar_hour:
+                            # New hour — append fresh bar
+                            new_bar = MarketData(
+                                symbol=last_bar.symbol, timestamp=current_hour,
+                                open=price, high=price, low=price, close=price,
+                                volume=0, source=last_bar.source,
+                            )
+                            cached_data.append(new_bar)
+                            hist_cache.set(cache_key, cached_data)
+                            try:
+                                if hasattr(self, '_market_data') and self._market_data:
+                                    self._market_data._save_historical_to_db(symbol, [new_bar], "1h")
+                            except Exception:
+                                pass
+                        else:
+                            # Same hour — update OHLC of current bar with tick
+                            updated_bar = MarketData(
+                                symbol=last_bar.symbol, timestamp=last_bar.timestamp,
+                                open=last_bar.open, high=max(last_bar.high, price),
+                                low=min(last_bar.low, price), close=price,
+                                volume=last_bar.volume, source=last_bar.source,
+                            )
+                            cached_data[-1] = updated_bar
+                            hist_cache.set(cache_key, cached_data)
+                            try:
+                                if hasattr(self, '_market_data') and self._market_data:
+                                    self._market_data._save_historical_to_db(symbol, [updated_bar], "1h")
+                            except Exception:
+                                pass
                     updated += 1
                     
                     # Broadcast price tick via WebSocket (fire-and-forget)
