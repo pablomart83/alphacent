@@ -26,7 +26,7 @@
 | 5 | Alpha + polish | [ ] Not started | F06, F16, F17, F18-rest, F20, F24-25 |
 | Deferred | Future sessions | [!] Deferred | F01/F12 Phase 3, F14, F11 full |
 
-**Overall progress:** 9 / 25 findings deployed (awaiting verification)
+**Overall progress:** 9 / 29 findings deployed (awaiting verification). 4 new findings (F26-F29) surfaced during audit of warnings log.
 
 ---
 
@@ -74,20 +74,18 @@ Not yet triggered (batch succeeded fully — 0 misses). Logic in place for parti
 ### F02 Part C — Freshness SLA blocking stale-data signals
 
 **Files changed:**
-- [x] `src/data/market_data_manager.py` — `_FRESHNESS_MAX_AGE_HOURS`, `_get_asset_class_family`, `get_latest_bar_timestamp`, `_subtract_weekend_hours`, `is_data_fresh_for_signal`
+- [x] `src/data/market_data_manager.py` — `_FRESHNESS_MAX_AGE_HOURS`, `_get_asset_class_family`, `get_latest_bar_timestamp`, `_subtract_weekend_hours`, `is_data_fresh_for_signal`, 30s in-process cache for timestamps
 - [x] `src/strategy/strategy_engine.py` — `generate_signals_batch` drops stale (symbol, interval) pairs from `shared_data`
 - [x] `src/core/monitoring_service.py _check_trailing_stops` — skip SL modification on stale data; preserve existing SL
 
-**Status:** [D] Deployed 2026-05-01 10:02 UTC.
+**Status:** [D] Deployed 2026-05-01 10:02 UTC. Hotfixed 10:29 UTC.
 
-**Initial verification:**
-- 196 stale (symbol, interval) pairs correctly blocked at cold-cache post-restart
-- Warnings clear: `[freshness-sla] Skipping {sym} {interval} for signal generation: no cached data for ...`
-- GS 4h (17 days stale) correctly blocked after cache warm-up
+**Initial deploy issue (hotfixed 10:29 UTC):**
+- Initial `get_latest_bar_timestamp` used `Database()` constructor + `db.session_scope()`. `session_scope` doesn't exist on Database (copy-paste error during implementation). AttributeError silently swallowed → returned None → every freshness check reported "no cached data" → trailing stops disabled across the book, ~4000 false-positive warnings.
+- Hotfix: switched to `get_database()` singleton + `db.get_session()` (matching `_get_historical_from_db` pattern), added 30s TTL cache to avoid DB hammering, raise RuntimeError on DB failure instead of swallowing, `is_data_fresh_for_signal` fails open on RuntimeError (logs WARNING but returns True).
+- Post-hotfix verification at 10:30 UTC: 4 freshness-sla warnings total (vs 4000+), all legitimate stale forex 4H bars (USDCHF/USDCAD/AUDUSD aged 18-19h vs 12h limit). Errors.log has only pre-existing FRED warnings.
 
-**Still to verify:**
-- Trailing-stop skip log line for GS on next `_check_trailing_stops` cycle
-- GS SL unchanged over next 24h despite stale data
+**New finding surfaced by hotfix:** Forex 4H bars are consistently 18-19h stale during active London session. The 4H synthesis from 1H is failing to advance for forex pairs. Not a regression — this was happening before Batch 1, just wasn't visible. Belongs in Batch 5 or Batch 2.
 
 ### F09 — 4H stale on open-position symbols
 
@@ -309,6 +307,33 @@ Targets:
 
 **Status:** [ ]
 
+### F26 — Forex 4H bars consistently 18-19h stale (discovered 2026-05-01 post-hotfix)
+
+Surfaced after F02 Part C hotfix when false-positive noise was removed. Legitimate stale data:
+- USDCHF 4h age 18h, USDCAD 4h age 19h, AUDUSD 4h age 19h during active London session
+- 4H synthesis from 1h bars must be failing to advance for forex pairs
+- Root cause likely in `market_data_manager._fetch_historical_from_yahoo_finance` resample path or `_quick_price_update` (which only handles 1h)
+
+**Status:** [ ]
+
+### F27 — Pre-existing OHLC validation warnings on forex (low priority)
+
+177x "Market data for USDJPY has high < open or close" + similar for AUDUSD/GBPUSD. FMP/Yahoo forex data has inconsistent OHLC sometimes. Validator presumably rejects the bad bars — would be nice to confirm and fix at source.
+
+**Status:** [ ]
+
+### F28 — eToro orders circuit breaker flipping open ~515 times
+
+Circuit breaker for `orders` endpoint keeps failing half-open probes and reopening. Either eToro API is genuinely unstable for orders, or our probe logic (using `get_positions` as surrogate test for orders health) is wrong. Worth a P2 investigation.
+
+**Status:** [ ]
+
+### F29 — Same-day entry/exit signal conflicts (~1100 occurrences)
+
+"Detected N days with conflicting entry/exit signals. Prioritizing entries." — DSL is generating contradictory signals on the same day for the same strategy. Suggests a template logic issue. Lower priority but indicates template design problems.
+
+**Status:** [ ]
+
 ---
 
 ## Deferred (future sessions)
@@ -393,5 +418,18 @@ ssh ... 'tail -30 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
 1. Monitor 20:00 UTC daily sync for Batch 1 Part A full verification
 2. Monitor 01:47 UTC tomorrow for DST-boundary-adjacent overnight sync
 3. After 24-48h clean window on Batch 1, start Batch 2 (execution observability)
+
+---
+
+### Session 1 addendum — 2026-05-01 10:29 UTC hotfix
+
+- User noticed log spam from ~4000 freshness-sla warnings + trailing stop updates being skipped
+- Root cause: typo in `get_latest_bar_timestamp` — used `db.session_scope()` which doesn't exist on `Database`; AttributeError silently swallowed → all freshness checks returned None → everything flagged stale
+- Hotfix deployed: switched to `get_database()` + `get_session()` singleton pattern (matching `_get_historical_from_db`); added 30s TTL in-process cache to avoid DB hammering; raise RuntimeError on DB failures rather than swallowing; `is_data_fresh_for_signal` fail-open with WARNING on RuntimeError
+- Post-hotfix verification: 4 warnings vs 4000, all legitimate (stale forex 4H)
+- Discovered new finding F26: forex 4H bars consistently 18-19h stale during London session — real data-pipeline gap that the freshness gate correctly catches
+- Added F27, F28, F29 from warnings log review (OHLC validation, orders circuit breaker, same-day entry/exit conflicts)
+
+**Commit:** pending push
 
 [continue log as work progresses]

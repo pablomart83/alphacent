@@ -1,6 +1,7 @@
 """Market data manager with caching and fallback to Yahoo Finance."""
 
 import logging
+import time as _time_lbts
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -306,6 +307,10 @@ class MarketDataManager:
         self._historical_memory_cache: Dict[str, tuple] = {}  # cache_key -> (data, timestamp)
         self._purged_symbols: set = set()  # Track symbols already purged this session to avoid re-purging
         self._raw_fetch_cache: Dict[str, tuple] = {}  # "{symbol}:{interval}" -> (full_data_list, timestamp) — avoids redundant Yahoo fetches
+        # F02 Part C: cache of latest bar timestamps per (symbol, interval).
+        # Populated by get_latest_bar_timestamp; TTL 30s to avoid hammering DB
+        # on every freshness check during signal generation (100+ checks per cycle).
+        self._latest_ts_cache: Dict[tuple, tuple] = {}  # (symbol, interval) -> (timestamp_or_None, monotonic_at)
         if self._fmp_api_key:
             logger.info(f"Initialized MarketDataManager with cache TTL={cache_ttl}s, FMP API key configured")
         else:
@@ -430,12 +435,31 @@ class MarketDataManager:
         """Return the timestamp of the latest cached bar for (symbol, interval).
 
         Returns None if no cached data exists. Used by freshness SLA check.
+        Cached in-process for 30 seconds — this is called many times per
+        signal-generation cycle for the same (symbol, interval) pair, and
+        hitting the DB each time is wasteful.
+
+        Raises:
+            RuntimeError: If the underlying DB query fails. Callers should
+                decide whether to fail-open (treat as fresh) or fail-closed
+                (treat as stale) based on their risk tolerance.
         """
+        # 30s in-memory cache keyed by (symbol, interval) — shared across threads
+        # within this MarketDataManager instance. The underlying data only changes
+        # every hour (price sync) so a short TTL is fine.
+        cache_key = (symbol, interval)
+        now_mono = _time_lbts.monotonic()
+        entry = self._latest_ts_cache.get(cache_key)
+        if entry is not None and (now_mono - entry[1]) < 30.0:
+            return entry[0]
+
         try:
+            from src.models.database import get_database
             from src.models.orm import HistoricalPriceCacheORM
-            from src.models.database import Database
-            db = Database()
-            with db.session_scope() as session:
+
+            db = get_database()
+            session = db.get_session()
+            try:
                 latest = (
                     session.query(HistoricalPriceCacheORM.date)
                     .filter(
@@ -445,16 +469,27 @@ class MarketDataManager:
                     .order_by(HistoricalPriceCacheORM.date.desc())
                     .first()
                 )
-                if latest is None:
-                    return None
-                ts = latest[0]
-                # Strip tz if present — our DB stores naive UTC
-                if hasattr(ts, 'tzinfo') and ts.tzinfo is not None:
-                    ts = ts.replace(tzinfo=None)
-                return ts
+            finally:
+                session.close()
         except Exception as e:
-            logger.debug(f"get_latest_bar_timestamp failed for {symbol} {interval}: {e}")
-            return None
+            # Bubble up — caller's fail-open/fail-closed decision belongs there.
+            # Previous behaviour (swallow + return None) caused the 2026-05-01 10:02
+            # post-deploy flood where an AttributeError on `db.session_scope()` (typo
+            # in initial implementation) was silently swallowed and every call
+            # returned None → every symbol reported "no cached data" → trailing
+            # stops disabled across the book.
+            raise RuntimeError(
+                f"get_latest_bar_timestamp DB query failed for {symbol} {interval}: {e}"
+            ) from e
+
+        ts = None
+        if latest is not None:
+            ts = latest[0]
+            if hasattr(ts, 'tzinfo') and ts.tzinfo is not None:
+                ts = ts.replace(tzinfo=None)
+
+        self._latest_ts_cache[cache_key] = (ts, now_mono)
+        return ts
 
     def _subtract_weekend_hours(self, latest: datetime, now: datetime) -> timedelta:
         """Compute data age, subtracting weekend gaps when the latest bar is Friday close.
@@ -500,7 +535,19 @@ class MarketDataManager:
         elif as_of.tzinfo is not None:
             as_of = as_of.astimezone(timezone.utc).replace(tzinfo=None)
 
-        latest = self.get_latest_bar_timestamp(symbol, interval)
+        # Fail-open on DB query errors — an exception in the freshness helper
+        # is an operational issue, not a market-data issue. Blocking every
+        # signal because of a bug in our own checker is worse than not having
+        # the check. The warning gets logged so it gets fixed.
+        try:
+            latest = self.get_latest_bar_timestamp(symbol, interval)
+        except RuntimeError as e:
+            logger.warning(
+                f"[freshness-sla] Check failed for {symbol} {interval}: {e} — "
+                f"failing open (treating as fresh) to avoid blocking trading"
+            )
+            return (True, "")
+
         if latest is None:
             return (False, f"no cached data for {symbol} {interval}")
 
