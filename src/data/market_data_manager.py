@@ -665,13 +665,29 @@ class MarketDataManager:
             if db_data:
                 valid_data = [d for d in db_data if self.validate_data(d)]
                 if valid_data:
-                    # Check if DB data is missing recent days — if so, do an incremental fetch
+                    # Check if DB data is missing recent bars — if so, do an incremental fetch.
+                    # For daily bars, use day-granularity gap. For intraday (1h/4h), use
+                    # hour-granularity — otherwise a 4H bar 18 hours stale (0 days)
+                    # never triggers a refresh, which caused forex-4H to go 19h stale
+                    # on 2026-05-01 (finding F26).
                     latest_db_date = valid_data[-1].timestamp
                     latest_db_naive = latest_db_date.replace(tzinfo=None) if latest_db_date.tzinfo else latest_db_date
                     end_naive = end.replace(tzinfo=None) if end.tzinfo else end
-                    gap_days = (end_naive - latest_db_naive).days
-                    
-                    if gap_days > 1:
+
+                    if interval == "1d":
+                        gap_days = (end_naive - latest_db_naive).days
+                        needs_incremental = gap_days > 1
+                        gap_hours = gap_days * 24
+                    else:
+                        # Intraday: use hour-granularity staleness.
+                        # 1h bars: refresh if >3h behind (allows some intraday lag)
+                        # 4h bars: refresh if >6h behind (one bar gap)
+                        gap_hours = (end_naive - latest_db_naive).total_seconds() / 3600
+                        threshold_hours = 3 if interval == "1h" else 6
+                        needs_incremental = gap_hours > threshold_hours
+                        gap_days = int(gap_hours // 24)
+
+                    if needs_incremental:
                         # Skip incremental fetch if the gap is just a weekend/holiday
                         # For stocks/ETFs: no data on Sat/Sun. A gap of 2-3 days ending on
                         # a weekend is normal and doesn't need an API call.
@@ -691,15 +707,22 @@ class MarketDataManager:
                         
                         if is_weekend_gap and not is_always_trading:
                             logger.debug(
-                                f"DB cache for {db_symbol} is {gap_days} days behind "
+                                f"DB cache for {db_symbol} {interval} is {gap_hours:.1f}h behind "
                                 f"(weekend gap, skipping incremental fetch)"
                             )
                         else:
-                            # DB is missing recent trading days — fetch only the gap
-                            gap_start = latest_db_naive + timedelta(days=1)
+                            # DB is missing recent bars — fetch only the gap.
+                            # For intraday, back up 2 bars to ensure overlap and catch any
+                            # newly-closed bar that may have been partial last sync.
+                            if interval == "1d":
+                                gap_start = latest_db_naive + timedelta(days=1)
+                            elif interval == "1h":
+                                gap_start = latest_db_naive - timedelta(hours=2)
+                            else:  # 4h
+                                gap_start = latest_db_naive - timedelta(hours=8)
                             logger.info(
-                                f"DB cache for {db_symbol} is {gap_days} days behind, "
-                                f"fetching incremental update from {gap_start.date()} to {end_naive.date()}"
+                                f"DB cache for {db_symbol} {interval} is {gap_hours:.1f}h behind, "
+                                f"fetching incremental update from {gap_start}"
                             )
                             try:
                                 gap_data = self._fetch_historical_from_yahoo_finance(normalized_symbol, gap_start, end, interval)
@@ -711,10 +734,15 @@ class MarketDataManager:
                                     gap_data = self._fetch_historical_from_fmp(normalized_symbol, gap_start, end, interval)
                                     gap_valid = [d for d in gap_data if self.validate_data(d)]
                                 if gap_valid:
-                                    # Only count bars that are actually newer than what's in DB
-                                    latest_date_only = latest_db_naive.date() if hasattr(latest_db_naive, 'date') and callable(latest_db_naive.date) else latest_db_naive
-                                    truly_new = [d for d in gap_valid 
-                                                 if (d.timestamp.date() if hasattr(d.timestamp, 'date') and callable(d.timestamp.date) else d.timestamp) > latest_date_only]
+                                    # For daily bars, only count bars newer by calendar date
+                                    # (avoids double-counting today's partial bar). For intraday,
+                                    # compare by full timestamp so we capture newly-closed hours.
+                                    if interval == "1d":
+                                        latest_date_only = latest_db_naive.date() if hasattr(latest_db_naive, 'date') and callable(latest_db_naive.date) else latest_db_naive
+                                        truly_new = [d for d in gap_valid 
+                                                     if (d.timestamp.date() if hasattr(d.timestamp, 'date') and callable(d.timestamp.date) else d.timestamp) > latest_date_only]
+                                    else:
+                                        truly_new = [d for d in gap_valid if d.timestamp > latest_db_naive]
                                     if truly_new:
                                         self._save_historical_to_db(db_symbol, truly_new, interval)
                                         valid_data.extend(truly_new)

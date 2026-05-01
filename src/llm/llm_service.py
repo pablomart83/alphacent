@@ -1068,7 +1068,13 @@ Now generate code for the rule above (single line only):"""
                     # Try demo credentials first, fall back to live
                     try:
                         credentials = config.load_credentials(TradingMode.DEMO)
-                    except:
+                    except Exception as _cred_err:
+                        # DEMO credentials not configured — this is expected when
+                        # running live-only. Log at DEBUG and fall back.
+                        logger.debug(
+                            f"DEMO credentials unavailable ({_cred_err}); "
+                            f"falling back to LIVE credentials"
+                        )
                         credentials = config.load_credentials(TradingMode.LIVE)
                     
                     if credentials and credentials.get("public_key") and credentials.get("user_key"):

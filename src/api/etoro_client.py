@@ -314,7 +314,8 @@ class EToroAPIClient:
                     error_data = response.json()
                     error_msg = f"{error_msg} - {error_data.get('message', 'Unknown error')}"
                     logger.error(f"{error_msg}, Response: {error_data}")
-                except:
+                except (ValueError, requests.exceptions.JSONDecodeError):
+                    # Non-JSON error body — fall back to raw text
                     logger.error(f"{error_msg}, Response: {response.text}")
                 raise EToroAPIError(error_msg)
 
@@ -323,9 +324,10 @@ class EToroAPIClient:
                 result = response.json()
                 logger.debug(f"Response data: {result}")
                 return result
-            except:
-                # Some endpoints may return empty responses
-                logger.debug("Empty response")
+            except (ValueError, requests.exceptions.JSONDecodeError):
+                # Some endpoints (e.g., DELETE) return empty bodies with 2xx status.
+                # This is expected; empty dict signals "success, no data".
+                logger.debug("Empty / non-JSON response body — returning {}")
                 return {}
 
         except requests.exceptions.RequestException as e:

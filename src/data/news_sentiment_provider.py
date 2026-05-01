@@ -186,7 +186,8 @@ class NewsSentimentProvider:
                 return int(row[0]) if row and row[0] is not None else 0
             finally:
                 session.close()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"get_article_count DB read failed for {sym}: {e}")
             return 0
 
     def get_coverage_stats(self) -> Dict:
@@ -210,7 +211,8 @@ class NewsSentimentProvider:
                 }
             finally:
                 session.close()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"get_coverage_stats DB read failed: {e}")
             return {"total_cached": 0, "fresh_count": 0, "requests_today": 0, "requests_remaining": 100}
 
     # ── Internal ──────────────────────────────────────────────────────────
@@ -281,7 +283,9 @@ class NewsSentimentProvider:
                 return age_hours >= (ttl_hours or _TTL_NORMAL)
             finally:
                 session.close()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"_needs_refresh DB check failed for {symbol}: {e}")
+            # Fail-safe: prefer to refresh than serve stale on a DB glitch
             return True
 
     def _get_from_db(self, symbol: str) -> Optional[float]:

@@ -18,15 +18,16 @@
 
 | Batch | Focus | Status | Notes |
 |---|---|---|---|
-| 1 | Data integrity foundation | [D] Deployed | F02 A/B/C + F09 shipped 2026-05-01 10:02 UTC |
+| 1 | Data integrity foundation | [D] Deployed | F02 A/B/C + F09 shipped 2026-05-01 10:02 UTC, hotfixed 10:29 UTC |
 | Quick-wins | Low-risk cleanups | [D] Deployed | F13, F15, F19, F21, F22, docs — shipped 2026-05-01 10:19 UTC |
+| Observability + F26 + F20 | Silent-default logging, intraday staleness, FRED retry | [D] Deployed | F18-rest, F26, F20 shipped 2026-05-01 10:44 UTC |
 | 2 | Execution observability | [ ] Not started | F04 + F10 |
 | 3 | Position risk | [ ] Not started | F03, F11, F18-critical |
 | 4 | Signal quality | [ ] Not started | F01/F12 Phase 2, F05, F07, F08 |
-| 5 | Alpha + polish | [ ] Not started | F06, F16, F17, F18-rest, F20, F24-25 |
+| 5 | Alpha + polish | [ ] Not started | F06, F16, F17, F24-25, F27-29 |
 | Deferred | Future sessions | [!] Deferred | F01/F12 Phase 3, F14, F11 full |
 
-**Overall progress:** 9 / 29 findings deployed (awaiting verification). 4 new findings (F26-F29) surfaced during audit of warnings log.
+**Overall progress:** 12 / 29 findings deployed (awaiting verification). 4 new findings (F26-F29) surfaced during audit of warnings log; F26 and F20 now deployed.
 
 ---
 
@@ -285,19 +286,25 @@ Multiply per-class proposal count by WR-driven weight refreshed every N cycles.
 
 **Status:** [ ]
 
-### F18-rest — `logger.exception` on silent defaults
+### F18-rest — `logger.exception` / typed except on silent defaults
 
-Targets:
-- `src/api/etoro_client.py:317, 326`
-- `src/llm/llm_service.py:1071`
-- `src/strategy/market_analyzer.py:776`
-- `src/data/news_sentiment_provider.py:189, 284`
+**Status:** [D] Deployed 2026-05-01 10:44 UTC.
 
-**Status:** [ ]
+Replaced bare `except:` and silent `except Exception: return default` patterns with typed excepts + debug logging so future bugs surface:
+- `src/api/etoro_client.py:317, 326` — bare `except:` on JSON parsing → `(ValueError, requests.exceptions.JSONDecodeError)` with explanatory comment
+- `src/llm/llm_service.py:1071` — DEMO credentials fallback now logs debug with reason
+- `src/strategy/market_analyzer.py:776` — P/E ratio fallback now logs debug with exception detail
+- `src/data/news_sentiment_provider.py:189, 284, fetchone_from_db` — silent DB read fallbacks now log debug with exception
+- `src/strategy/strategy_engine.py:1167` — bare `except: pass` in datetime deserialize → typed `(ValueError, TypeError)` with comment
+- `src/strategy/autonomous_strategy_manager.py:1847` — one-liner bare except in JSON parse → typed `(ValueError, IndexError, TypeError)` with comment
+
+Did NOT touch sizing-critical silent-default paths (equity fetch, market-hours check) — those are Batch 3 F18-critical with explicit behavioural changes.
 
 ### F20 — FRED retry wrapper with exponential backoff
 
-**Status:** [ ]
+**Status:** [D] Deployed 2026-05-01 10:44 UTC.
+
+Wrapped `fred_client.get_series` at init with a retry decorator: 3 attempts (initial + 1s/3s backoff), retries only on transient errors (500 / timeout / connection). Non-transient errors (404, auth) raise immediately. After all retries exhausted, raises the original exception type so caller try/except still fires. Impact: 12 FRED 500s accumulated pre-F20 between 20:34 UTC Apr 29 and 10:30 UTC May 1; zero since 10:44 UTC deploy (verified clean in errors.log).
 
 ### F24 — `proposed` counter: wire or remove
 
@@ -309,12 +316,20 @@ Targets:
 
 ### F26 — Forex 4H bars consistently 18-19h stale (discovered 2026-05-01 post-hotfix)
 
-Surfaced after F02 Part C hotfix when false-positive noise was removed. Legitimate stale data:
-- USDCHF 4h age 18h, USDCAD 4h age 19h, AUDUSD 4h age 19h during active London session
-- 4H synthesis from 1h bars must be failing to advance for forex pairs
-- Root cause likely in `market_data_manager._fetch_historical_from_yahoo_finance` resample path or `_quick_price_update` (which only handles 1h)
+**Status:** [D] Deployed 2026-05-01 10:44 UTC.
 
-**Status:** [ ]
+**Root cause:** `get_historical_data` incremental-fetch gate used day-granularity check (`gap_days > 1`). A 4H bar 18h behind was `gap_days = 0` → no refresh triggered → forex and stock 4H bars went stale for ~19h every day. The freshness SLA (F02 Part C) correctly detected it post-hotfix — surfaced immediately when the silent-default AttributeError bug was fixed.
+
+**Fix:** Switched gate to interval-aware hour-granularity:
+- 1d: gap > 1 day (unchanged behaviour)
+- 1h: gap > 3h → refetch
+- 4h: gap > 6h → refetch
+
+Incremental fetch back-offs 2 bars for 1h / 8h (2 bars) for 4h to ensure overlap with any just-closed bar. Truly-new comparison uses full timestamp for intraday (captures newly-closed bars) and calendar date for 1d (preserves existing behaviour).
+
+**Verification:** Immediately after deploy, 15+ symbols triggered incremental fetch (LEU/XLU/LMT/VRTX/AMZN/EQIX/VRT/SNPS/MRNA/SOXL at 18.7h, FDX/ASML/ARM/PNC/DLR at 17.7h). AUDUSD/USDCAD/USDCHF 4H advanced from 2026-04-30 15:00 to 2026-05-01 08:00 (17h new data). EURUSD/GBPUSD 4H still at 16:00 — they fetched but Yahoo only had data through previous session close.
+
+**Remaining stale 4H:** GS 4h (17 days) is stale because no active 4H GS strategy requests it; refresh is on-demand. When a strategy does request it, freshness SLA will correctly block signals until the refetch completes. This is correct behaviour.
 
 ### F27 — Pre-existing OHLC validation warnings on forex (low priority)
 
@@ -430,6 +445,18 @@ ssh ... 'tail -30 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
 - Discovered new finding F26: forex 4H bars consistently 18-19h stale during London session — real data-pipeline gap that the freshness gate correctly catches
 - Added F27, F28, F29 from warnings log review (OHLC validation, orders circuit breaker, same-day entry/exit conflicts)
 
+### Session 1 continued — 2026-05-01 10:44 UTC: F18-rest + F26 + F20
+
+- **F18-rest**: Replaced 6 bare-except / silent-default patterns across etoro_client / llm_service / market_analyzer / news_sentiment / strategy_engine / autonomous_strategy_manager. Typed excepts + debug logging. Zero behavioural change, better observability.
+- **F26 (fix)**: Incremental-fetch gate in `get_historical_data` switched from day-granularity (`gap_days > 1`) to interval-aware hour-granularity (1h: >3h, 4h: >6h, 1d: >1d). Immediately after deploy, 15+ symbols triggered legitimate incremental fetches that had been stale for 17-19h. Forex 4H (AUDUSD/USDCAD/USDCHF) advanced from 2026-04-30 15:00 to 2026-05-01 08:00.
+- **F20**: FRED retry wrapper (3 attempts, 1s/3s backoff, transient-only). Zero FRED errors in errors.log since deploy.
+- errors.log still at 12 lines from pre-deploy.
+
 **Commit:** pending push
+
+**Next actions:** unchanged
+1. Monitor 20:00 UTC daily sync for Batch 1 + this batch's full verification
+2. Monitor 01:47 UTC tomorrow for DST-boundary overnight sync
+3. After 24-48h clean window, start Batch 2 (execution observability)
 
 [continue log as work progresses]

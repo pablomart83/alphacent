@@ -99,7 +99,12 @@ class MarketStatisticsAnalyzer:
                 try:
                     self.fred_client = Fred(api_key=api_key)
                     self.fred_cache_duration = fred_config.get('cache_duration', 86400)
-                    logger.info("FRED API enabled for macro economic data")
+                    # Wrap get_series with retry+backoff for transient FRED 500s
+                    # (observed spike on 2026-04-29/30 where FRED returned
+                    # "Internal Server Error" 6+ times with no retry, polluting
+                    # errors.log and triggering fallback defaults).
+                    self._wrap_fred_get_series_with_retry()
+                    logger.info("FRED API enabled for macro economic data (with retry wrapper)")
                 except Exception as e:
                     logger.warning(f"Failed to initialize FRED: {e}")
                     self.fred_enabled = False
@@ -108,6 +113,59 @@ class MarketStatisticsAnalyzer:
                 self.fred_enabled = False
         else:
             logger.info("FRED API disabled in configuration")
+
+    def _wrap_fred_get_series_with_retry(self):
+        """Wrap fred_client.get_series with exponential-backoff retry.
+
+        FRED occasionally returns 500 Internal Server Error. The original
+        unwrapped call propagated the error on first failure, forcing every
+        call site to fall back to defaults. With a retry wrapper:
+        - 3 attempts (initial + 2 retries)
+        - Backoff: 1s, 3s
+        - After all attempts fail, raise the last exception so callers'
+          existing exception handlers still fire.
+        - Only errors reach errors.log after all retries exhausted (not
+          every transient glitch).
+        """
+        import functools
+        import time as _time_retry
+
+        original_get_series = self.fred_client.get_series
+
+        @functools.wraps(original_get_series)
+        def get_series_with_retry(*args, **kwargs):
+            last_exc = None
+            for attempt, delay in enumerate([0, 1, 3]):
+                if delay:
+                    _time_retry.sleep(delay)
+                try:
+                    return original_get_series(*args, **kwargs)
+                except Exception as e:
+                    last_exc = e
+                    # Only retry on server errors / transient failures — don't retry
+                    # on "series not found" or auth errors.
+                    err_str = str(e).lower()
+                    is_transient = (
+                        "internal server error" in err_str
+                        or "500" in err_str
+                        or "timeout" in err_str
+                        or "connection" in err_str
+                    )
+                    if not is_transient:
+                        raise
+                    if attempt < 2:
+                        series_id = args[0] if args else kwargs.get('series_id', '?')
+                        logger.debug(
+                            f"FRED get_series({series_id}) transient error "
+                            f"(attempt {attempt + 1}/3): {e} — retrying"
+                        )
+            # All retries exhausted — raise the last exception so caller's
+            # existing try/except still works. Surface the retry context.
+            raise type(last_exc)(
+                f"FRED get_series failed after 3 attempts: {last_exc}"
+            ) from last_exc
+
+        self.fred_client.get_series = get_series_with_retry
     
     def _get_cached(self, key: str, ttl_seconds: int) -> Optional[any]:
         """
@@ -773,9 +831,12 @@ class MarketStatisticsAnalyzer:
             try:
                 pe_series = self.fred_client.get_series('MULTPL/SP500_PE_RATIO_MONTH', observation_start=datetime.now() - timedelta(days=90))
                 sp500_pe_ratio = pe_series.iloc[-1] if not pe_series.empty else 20.0
-            except:
+            except Exception as _pe_err:
+                # FRED series occasionally 500s or returns empty — falling back to
+                # long-run average P/E (20) is safe and well-documented. Log the
+                # specific reason at DEBUG so we can investigate if it persists.
                 sp500_pe_ratio = 20.0
-                logger.debug("S&P 500 P/E ratio not available, using default")
+                logger.debug(f"S&P 500 P/E ratio unavailable ({_pe_err}); using default 20.0")
             
             # --- Expanded FRED macro data for regime conditioning ---
             # Yield curve slope: DGS10 - DGS2. Negative = recession signal.

@@ -1843,8 +1843,11 @@ class AutonomousStrategyManager:
                                            else _es.symbols) if _es.symbols else 'unknown'
                                     if isinstance(_ep, str) and _ep.startswith('['):
                                         import json as _j
-                                        try: _ep = _j.loads(_ep)[0]
-                                        except: pass
+                                        try:
+                                            _ep = _j.loads(_ep)[0]
+                                        except (ValueError, IndexError, TypeError):
+                                            # Malformed symbols JSON — leave as string
+                                            pass
                                     if (_et, _ep) != activation_key:
                                         continue
                                     # Found the existing strategy — check if already superseded

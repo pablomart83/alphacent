@@ -1164,7 +1164,10 @@ class StrategyEngine:
                         if 'time' in col.lower() or 'date' in col.lower():
                             try:
                                 trades[col] = pd.to_datetime(trades[col], utc=True)
-                            except:
+                            except (ValueError, TypeError):
+                                # Column name matched but contents aren't parseable
+                                # as datetime (e.g., string IDs containing "date").
+                                # Leave as-is.
                                 pass
                 else:
                     # Empty trades list - create empty DataFrame
