@@ -62,6 +62,7 @@ class DataSource(str, Enum):
     ETORO = "ETORO"
     YAHOO_FINANCE = "YAHOO_FINANCE"
     FMP = "FMP"
+    BINANCE = "BINANCE"
 
 
 class SystemStateEnum(str, Enum):

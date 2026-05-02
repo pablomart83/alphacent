@@ -1677,8 +1677,10 @@ class StrategyProposer:
 
                     # Per-strategy WF window override:
                     # - long-horizon 1d crypto → 730d (weekly/monthly holds need more data)
-                    # - 1h crypto → 90d/90d (1h cache only goes back ~180d; split it)
-                    # - 4h crypto → 180d/180d (4h cache goes back ~14mo; use the full window)
+                    # - 1h crypto → 180d/180d (Binance extends 1h coverage to years;
+                    #   keeping some headroom but widening vs the prior 90/90 Yahoo cap)
+                    # - 4h crypto → 365d/365d (Binance serves 4h back to 2018, giving
+                    #   cross-regime training the 180/180 window couldn't). Sprint 4 S4.0
                     # - everything else uses yaml-configured train/test
                     _wf_train_days = train_days
                     _wf_test_days = test_days
@@ -1705,21 +1707,26 @@ class StrategyProposer:
                                 f"→ test={_wf_test_days}d train={_wf_train_days}d"
                             )
                         elif _is_cr and _interval_ck == '1h':
-                            # 1h cache horizon is ~180d; split 90/90 for train/test
-                            _wf_test_days = 90
-                            _wf_train_days = 90
-                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
-                            logger.info(
-                                f"WF window tightened for 1h crypto: {strategy.name} "
-                                f"→ test={_wf_test_days}d train={_wf_train_days}d (1h cache limit)"
-                            )
-                        elif _is_cr and _interval_ck == '4h':
-                            # 4h cache goes back ~14mo; use 180/180
+                            # Sprint 4 S4.0: Binance lifts the prior 180d Yahoo 1h cap.
+                            # Use 180/180 to keep the split balanced and within what
+                            # Binance can comfortably serve at 1h granularity.
                             _wf_test_days = 180
                             _wf_train_days = 180
                             _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
                             logger.info(
-                                f"WF window tuned for 4h crypto: {strategy.name} "
+                                f"WF window extended for 1h crypto (Binance): {strategy.name} "
+                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
+                            )
+                        elif _is_cr and _interval_ck == '4h':
+                            # Sprint 4 S4.0: widened from 180/180 to 365/365. Binance
+                            # serves 4h back to 2018 so crypto 4h strategies now get a
+                            # full year of out-of-sample test, enough to span a
+                            # regime transition (range→trend or vice versa).
+                            _wf_test_days = 365
+                            _wf_train_days = 365
+                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
+                            logger.info(
+                                f"WF window extended for 4h crypto (Binance): {strategy.name} "
                                 f"→ test={_wf_test_days}d train={_wf_train_days}d"
                             )
                     except Exception as _wf_ext_err:
@@ -2638,8 +2645,8 @@ class StrategyProposer:
 
                         # Per-strategy WF window override (matches primary WF call above):
                         # - long-horizon 1d crypto → 730d
-                        # - 1h crypto → 90d/90d (1h cache limit)
-                        # - 4h crypto → 180d/180d
+                        # - 1h crypto → 180d/180d (Binance, Sprint 4 S4.0)
+                        # - 4h crypto → 365d/365d (Binance, Sprint 4 S4.0)
                         _wl_train_days = train_days
                         _wl_test_days = test_days
                         _wl_start = start_date
@@ -2659,12 +2666,12 @@ class StrategyProposer:
                                 _wl_train_days = 730
                                 _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
                             elif _sym_wl in _CRYPTO_WL and _interval_wl == '1h':
-                                _wl_test_days = 90
-                                _wl_train_days = 90
-                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
-                            elif _sym_wl in _CRYPTO_WL and _interval_wl == '4h':
                                 _wl_test_days = 180
                                 _wl_train_days = 180
+                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
+                            elif _sym_wl in _CRYPTO_WL and _interval_wl == '4h':
+                                _wl_test_days = 365
+                                _wl_train_days = 365
                                 _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
                         except Exception:
                             pass

@@ -1104,31 +1104,83 @@ class MarketDataManager:
         interval: str = "1d"
     ) -> List[MarketData]:
         """Fetch historical data from Yahoo Finance.
-        
+
+        Sprint 4 S4.0 (2026-05-02): for crypto 1h/4h, try Binance public
+        API first. Yahoo caps 1h crypto data at ~7 months, making 4h
+        data (resampled from 1h) cap at the same depth. Binance serves
+        1h/4h back to 2017 with no auth. The Binance adapter is a no-op
+        for non-crypto symbols and falls back to Yahoo on any error
+        (network, quota, unsupported pair).
+
         Args:
             symbol: Instrument symbol (will be converted to Yahoo Finance ticker format)
             start: Start date/time
             end: End date/time
             interval: Data interval (1m, 5m, 15m, 1h, 1d)
-            
+
         Returns:
             List of market data points
-            
+
         Raises:
             Exception: If fetch fails
         """
+        # Sprint 4 S4.0: try Binance first for crypto 1h/4h.
+        # Binance is the industry reference for crypto historical
+        # candles (deep spot volume since 2018). Only engaged when the
+        # (symbol, interval) combo is explicitly supported — unsupported
+        # combos silently skip straight to Yahoo.
+        if interval in ("1h", "4h"):
+            try:
+                from src.api.binance_ohlc import is_supported as _binance_supported
+                from src.api.binance_ohlc import fetch_klines as _binance_fetch
+                from src.api.binance_ohlc import BinanceAPIError as _BinanceAPIError
+
+                if _binance_supported(symbol, interval):
+                    try:
+                        bars = _binance_fetch(symbol, start, end, interval)
+                        if bars:
+                            logger.info(
+                                f"Binance (primary): {len(bars)} {interval} bars for {symbol} "
+                                f"({bars[0].timestamp.date()} → {bars[-1].timestamp.date()})"
+                            )
+                            return bars
+                        # Empty result from Binance for a supported pair
+                        # is unusual (would mean the whole window has no
+                        # trading activity). Fall through to Yahoo as a
+                        # safety net rather than returning [].
+                        logger.warning(
+                            f"Binance returned 0 bars for {symbol} {interval} "
+                            f"{start.date()}→{end.date()}; falling back to Yahoo"
+                        )
+                    except _BinanceAPIError as be:
+                        # Expected fallback path — network hiccup, quota,
+                        # temporary outage. Logged at INFO not WARNING
+                        # because this is the designed behaviour.
+                        logger.info(
+                            f"Binance unavailable for {symbol} {interval} "
+                            f"({be}); falling back to Yahoo"
+                        )
+            except ImportError:
+                # Binance adapter absent (e.g. stale deploy). Silently
+                # fall through to Yahoo so the primary path keeps working.
+                pass
+
         yf_symbol = to_yahoo_ticker(symbol)
         ensure_yfinance_cache()
         ticker = yf.Ticker(yf_symbol)
         
-        # Map interval format (eToro style to yfinance style)
-        # Yahoo Finance doesn't support 4h — we synthesize from 1h bars below.
+        # Map interval format (eToro style to yfinance style).
+        # Yahoo Finance doesn't support 4h candles natively, so we fetch
+        # 1h and resample below. Note: crypto 4h is now served by Binance
+        # via the early-exit branch above; this 1h→4h synthesis only fires
+        # for non-crypto 4h (equities, commodities, forex, indices) or as
+        # a fallback when Binance is unavailable for crypto 4h.
         interval_map = {
             "1m": "1m",
             "5m": "5m",
             "15m": "15m",
             "1h": "1h",
-            "4h": "1h",  # Fetch 1h, then resample to 4h
+            "4h": "1h",  # Fetch 1h, then resample to 4h (fallback path for crypto)
             "1d": "1d"
         }
         yf_interval = interval_map.get(interval, "1d")
@@ -1155,6 +1207,14 @@ class MarketDataManager:
         # This is how real trading platforms build higher-timeframe candles:
         # Open = first bar's open, High = max of all highs, Low = min of all lows,
         # Close = last bar's close, Volume = sum of all volumes.
+        #
+        # Sprint 4 S4.0 context (2026-05-02): this path now fires only for
+        # non-crypto 4h (equities, commodities, forex, indices) — crypto 4h
+        # is served by Binance via the early-exit branch at the top of this
+        # function. The F10 invariant below (4h window ≤ 1h source window)
+        # remains correct for the Yahoo synthesis path because Yahoo's 1h
+        # data is genuinely capped at ~7 months and synthesising 4h beyond
+        # that would produce phantom bars that vanish on cache clear.
         #
         # Sprint 2 F10 (2026-05-02): CRITICAL constraint — yfinance's 1h data
         # has a ~7-month hard cap (730 days ≈ 210 days max documented, but
