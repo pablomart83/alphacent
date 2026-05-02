@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 
 
 # DSL Grammar Definition using Lark's EBNF syntax
+#
+# Sprint 1 F1 (2026-05-02): extended to support string and symbol-list arguments
+# in indicator calls so cross-asset primitives like LAG_RETURN("BTC", 2, "1h") and
+# RANK_IN_UNIVERSE("SELF", ["BTC","ETH","SOL","AVAX","LINK","DOT"], 14, 3) can be
+# expressed natively in entry/exit rules. These primitives must run identically
+# in backtest and live signal-gen; encoding them as DSL (not runtime metadata
+# gates) is the only way to keep WF honest.
 TRADING_DSL_GRAMMAR = r"""
     ?start: expression
 
@@ -56,14 +63,24 @@ TRADING_DSL_GRAMMAR = r"""
         | "(" arith_expr ")"
 
     indicator: PRICE_FIELD -> price_field
-        | INDICATOR_NAME "(" [NUMBER ("," NUMBER)*] ")" -> indicator_with_params
+        | INDICATOR_NAME "(" [arg ("," arg)*] ")" -> indicator_with_params
         | INDICATOR_NAME -> indicator_no_params
+
+    // arg: individual argument to an indicator call. Can be:
+    //   - NUMBER: 14, 2.0, etc.
+    //   - STRING: "BTC", "1h", etc. (double-quoted, ASCII uppercase/digits/_)
+    //   - SYMBOL_LIST: ["BTC","ETH","SOL"] (array of strings, used by RANK_IN_UNIVERSE)
+    arg: NUMBER      -> arg_number
+        | STRING     -> arg_string
+        | SYMBOL_LIST -> arg_symbol_list
 
     COMPARATOR: ">" | "<" | ">=" | "<=" | "==" | "!="
     CROSSOVER: "CROSSES_ABOVE" | "CROSSES_BELOW"
     PRICE_FIELD.2: /(?:CLOSE|OPEN|HIGH|LOW|VOLUME)(?!_)/
     INDICATOR_NAME.1: /[A-Z][A-Z0-9_]*/
     NUMBER: /[0-9]+\.?[0-9]*/
+    STRING: /"[A-Za-z0-9_]+"/
+    SYMBOL_LIST: /\[\s*"[A-Za-z0-9_]+"(?:\s*,\s*"[A-Za-z0-9_]+")*\s*\]/
 
     %import common.WS
     %ignore WS
@@ -223,7 +240,53 @@ INDICATOR_MAPPING = {
 
     # ADX — Average Directional Index (trend strength)
     'ADX': lambda params: f'ADX_{params[0] if params else 14}',
+
+    # ───── Cross-asset primitives (Sprint 1 F1, 2026-05-02) ─────
+    # These indicators reference external symbols, not just the primary's bars.
+    # The actual Series is pre-computed by strategy_engine._compute_cross_asset_indicators
+    # and injected into the `indicators` dict BEFORE DSL evaluation. The mapping
+    # below produces a deterministic, parseable key so both the compute step
+    # and the DSL-generated eval code agree on the lookup string.
+    #
+    # LAG_RETURN(SYMBOL, BARS, INTERVAL):
+    #   Returns the pct return of SYMBOL over the last BARS bars at INTERVAL.
+    #   Key format: LAG_RETURN__<SYMBOL>__<BARS>__<INTERVAL>
+    #   Example: LAG_RETURN("BTC", 2, "1h") → LAG_RETURN__BTC__2__1h
+    'LAG_RETURN': lambda params: f'LAG_RETURN__{params[0]}__{params[1]}__{params[2] if len(params) > 2 else "1d"}',
+
+    # RANK_IN_UNIVERSE(SELF_OR_SYMBOL, UNIVERSE_LIST, WINDOW_DAYS, TOP_N):
+    #   Returns True when SELF_OR_SYMBOL is in the top TOP_N of UNIVERSE_LIST
+    #   by WINDOW_DAYS-day return, evaluated at each bar.
+    #   "SELF" substitutes the strategy's primary symbol at compute time.
+    #   Key format: RANK_IN_UNIVERSE__<SELF_OR_SYMBOL>__<UNIVERSE_HASH>__<WINDOW>__<TOPN>
+    #   We hash the universe list so keys are stable across orderings but
+    #   distinguish genuinely different universes.
+    'RANK_IN_UNIVERSE': lambda params: _rank_in_universe_key(params),
 }
+
+
+def _rank_in_universe_key(params) -> str:
+    """
+    Build a deterministic key for RANK_IN_UNIVERSE calls.
+
+    params = [self_or_symbol, universe_list, window_days, top_n]
+    universe_list is a list of strings (from DSL SYMBOL_LIST token).
+    We sort it for order-independence and use the first 8 chars of the
+    sorted-joined-hashed string as the universe tag.
+    """
+    import hashlib
+    if len(params) < 4:
+        raise ValueError(
+            f"RANK_IN_UNIVERSE requires 4 args (self_or_symbol, universe, window, top_n), "
+            f"got {len(params)}: {params}"
+        )
+    self_sym = params[0]
+    universe = params[1] if isinstance(params[1], list) else [str(params[1])]
+    window = int(params[2])
+    top_n = int(params[3])
+    uni_sorted = sorted(str(s) for s in universe)
+    uni_tag = hashlib.md5(','.join(uni_sorted).encode()).hexdigest()[:8]
+    return f'RANK_IN_UNIVERSE__{self_sym}__{uni_tag}__{window}__{top_n}'
 
 
 # Price field mapping
@@ -515,29 +578,63 @@ class DSLCodeGenerator:
     def _handle_indicator_with_params(self, node: Tree) -> str:
         """
         Handle indicator with parameters (e.g., RSI(14), BB_LOWER(20, 2)).
-        
+
         Maps DSL indicator name to actual indicator key using INDICATOR_MAPPING.
+
+        Sprint 1 F1: parameters can now be numbers, strings (for cross-asset
+        symbol/interval args), or lists (for RANK_IN_UNIVERSE).
         """
         indicator_name = str(node.children[0])
-        
-        # Extract parameters (keep as integers if they are whole numbers)
+
+        # Extract parameters. Children after the indicator name are arg nodes
+        # wrapping either NUMBER, STRING, or SYMBOL_LIST tokens.
         params = []
         for child in node.children[1:]:
-            if isinstance(child, Token):
-                val = float(child)
-                # Convert to int if it's a whole number
-                params.append(int(val) if val.is_integer() else val)
-        
+            params.append(self._extract_arg_value(child))
+
         # Map indicator name to actual key
         if indicator_name not in INDICATOR_MAPPING:
             raise ValueError(f"Unknown indicator: {indicator_name}")
-        
+
         indicator_key = INDICATOR_MAPPING[indicator_name](params)
-        
+
         # Track required indicator
         self.required_indicators.append(indicator_key)
-        
+
         return f"indicators['{indicator_key}']"
+
+    def _extract_arg_value(self, node):
+        """
+        Extract the Python value from an `arg` AST node.
+
+        arg nodes wrap one of: NUMBER, STRING, or SYMBOL_LIST.
+        Returns int/float for NUMBER, str (without quotes) for STRING,
+        list[str] for SYMBOL_LIST.
+        """
+        # Direct Token (grammar edge-case — numeric-only indicator call
+        # where the old NUMBER path still applies during migration).
+        if isinstance(node, Token):
+            val = float(node)
+            return int(val) if val.is_integer() else val
+
+        if not isinstance(node, Tree):
+            return node
+
+        node_type = node.data
+        if node_type == 'arg_number':
+            tok = node.children[0]
+            val = float(str(tok))
+            return int(val) if val.is_integer() else val
+        if node_type == 'arg_string':
+            # STRING token value is '"BTC"' — strip quotes.
+            raw = str(node.children[0])
+            return raw.strip('"')
+        if node_type == 'arg_symbol_list':
+            # SYMBOL_LIST token value is '["BTC","ETH",...]'. Parse with json.
+            import json
+            raw = str(node.children[0])
+            return json.loads(raw)
+        raise ValueError(f"Unknown arg node type: {node_type}")
     
     def _handle_indicator_no_params(self, node: Tree) -> str:
         """

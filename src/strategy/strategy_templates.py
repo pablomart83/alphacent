@@ -2490,61 +2490,18 @@ class StrategyTemplateLibrary:
             }
         ))
         
-        # ===== PAIRS TRADING (Alpha Edge — Market-Neutral) =====
-        # Trade the spread between two correlated stocks. When the spread widens
-        # beyond 2 standard deviations from its mean, go LONG the underperformer
-        # and SHORT the outperformer. Exit when spread reverts to mean.
-        templates.append(StrategyTemplate(
-            name="Pairs Trading Market Neutral",
-            description="Trade the spread between highly correlated stock pairs. Enter when z-score > 2.0 (LONG underperformer, SHORT outperformer). Exit on mean reversion (z-score → 0) or stop loss (z-score > 3.0).",
-            strategy_type=StrategyType.MEAN_REVERSION,
-            market_regimes=[
-                MarketRegime.TRENDING_UP,
-                MarketRegime.TRENDING_UP_WEAK,
-                MarketRegime.TRENDING_DOWN,
-                MarketRegime.TRENDING_DOWN_WEAK,
-                MarketRegime.RANGING,
-                MarketRegime.RANGING_LOW_VOL,
-                MarketRegime.RANGING_HIGH_VOL,
-            ],
-            entry_conditions=[
-                "PRICE_CHANGE_PCT(60) > 0.0",
-                "CLOSE / SMA(50) > 1.02",
-            ],
-            exit_conditions=[
-                "CLOSE / SMA(50) < 1.0",
-                "PRICE_CHANGE_PCT(30) < -0.03",
-            ],
-            required_indicators=["SMA:50"],
-            default_parameters={
-                "z_entry": 2.0,
-                "z_exit": 0.0,
-                "z_stop": 3.0,
-                "rolling_window": 60,
-                "min_correlation": 0.7,
-                "hold_period_max": 30,
-                "profit_target": 0.05,
-                "stop_loss_pct": 0.04,
-            },
-            expected_trade_frequency="2-4 trades/month",
-            expected_holding_period="5-30 days",
-            risk_reward_ratio=1.5,
-            metadata={
-                "strategy_category": "statistical",
-                "alpha_edge_type": "pairs_trading",
-                "requires_fundamental_data": False,
-                "market_neutral": True,
-                "pair_symbols": [
-                    # Original 8 pairs
-                    ["KO", "PEP"], ["GOOGL", "META"], ["JPM", "GS"], ["XOM", "CVX"],
-                    ["MSFT", "AAPL"], ["V", "MA"], ["HD", "LOW"], ["UNH", "LLY"],
-                    # Expanded 10 pairs
-                    ["GS", "MS"], ["BAC", "WFC"], ["NVDA", "AMD"], ["MCD", "YUM"],
-                    ["PFE", "MRK"], ["T", "VZ"], ["NEE", "DUK"], ["CAT", "DE"],
-                    ["BA", "LMT"], ["AMZN", "SHOP"],
-                ],
-            }
-        ))
+        # ===== PAIRS TRADING — REMOVED 2026-05-02 (Sprint 1 / F7) =====
+        # The previous "Pairs Trading Market Neutral" template was structurally
+        # broken: its DSL conditions were momentum-long signals on a single
+        # symbol (PRICE_CHANGE_PCT > 0 AND CLOSE/SMA(50) > 1.02), not a spread
+        # test on a pair. It passed WF on the dominant symbol and took
+        # unhedged directional bets under a "market neutral" label. Steering
+        # file flagged this as a known structural issue.
+        # A proper pairs-trading template requires cross-asset spread
+        # primitives (z-score of (A/B) against its rolling window). That is
+        # enabled by the F1 DSL primitives added in this sprint, but the
+        # template itself is not rebuilt here — we will revisit as a
+        # follow-up work item once F1 is proven on crypto lead-lag.
 
         # ===== ANALYST REVISION MOMENTUM (Alpha Edge) =====
         templates.append(StrategyTemplate(
@@ -7758,15 +7715,23 @@ class StrategyTemplateLibrary:
         # (Asia-Pacific Financial Markets 2026). Small-cap cryptos exhibit
         # delayed responses to BTC moves. A lag trading strategy using BTC's
         # preceding returns consistently outperformed buy-and-hold.
-        # Implementation: templates are gated at signal time by the
-        # btc_leader metadata flag. The DSL rule is a local technical setup;
-        # the BTC-up gate is applied in strategy_engine.generate_signals.
+        #
+        # Sprint 1 F1 (2026-05-02): the BTC-up gate is now expressed as a
+        # native DSL primitive LAG_RETURN("BTC", N, "<interval>") > threshold
+        # directly in the entry_conditions. This means:
+        #   - Walk-forward and MC-bootstrap see the same edge signal-gen will
+        #     see in live → honest validation.
+        #   - No runtime gate in strategy_engine.generate_signals needs to
+        #     double-check the condition — it's already part of the rule.
+        # Legacy metadata keys (btc_leader, btc_leader_*, leader_symbol) are
+        # kept on templates below for one release cycle to avoid breaking
+        # cache entries keyed on them; they no longer drive any behavior.
         # =====================================================================
 
         # BTC 1H Follower — ride BTC's momentum via alts on the 1H chart
         templates.append(StrategyTemplate(
             name="Crypto BTC Follower 1H",
-            description="Enter altcoin LONG when BTC rallied +1% in last 2 hours AND alt is above EMA(20). Rides the lag-response of alts to BTC moves. Fast exit when BTC rolls over or alt loses EMA.",
+            description="Enter altcoin LONG when BTC rallied +1% in last 2 hours (LAG_RETURN native) AND alt is above EMA(20) with RSI>45. Rides the lag-response of alts to BTC moves. Fast exit when BTC rolls over or alt loses EMA.",
             strategy_type=StrategyType.MOMENTUM,
             market_regimes=[
                 MarketRegime.TRENDING_UP,
@@ -7777,7 +7742,10 @@ class StrategyTemplateLibrary:
                 MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[
-                "CLOSE > EMA(20) AND RSI(14) > 45"
+                # Native cross-asset primitive: BTC's 1h lag return over the
+                # prior 2 bars must exceed +1%. Computed in backtest AND
+                # signal-gen, so WF sees the real edge.
+                'CLOSE > EMA(20) AND RSI(14) > 45 AND LAG_RETURN("BTC", 2, "1h") > 0.01'
             ],
             exit_conditions=[
                 "CLOSE < EMA(20) OR RSI(14) < 40"
@@ -7798,6 +7766,8 @@ class StrategyTemplateLibrary:
                 "skip_param_override": True,
                 "intraday": True,
                 "interval": "1h",
+                # Legacy — kept for one cycle to avoid WF cache invalidation;
+                # no code path reads these anymore (runtime gate removed in F1).
                 "btc_leader": True,
                 "btc_leader_interval": "1h",
                 "btc_leader_bars": 2,
@@ -7809,7 +7779,7 @@ class StrategyTemplateLibrary:
         # BTC 4H Follower — swing-scale lag trade
         templates.append(StrategyTemplate(
             name="Crypto BTC Follower 4H",
-            description="Enter altcoin LONG when BTC rallied +3% in last 8 hours on 4H bars AND alt price > SMA(50). 4H swing version of the BTC lead-lag trade. Small-cap alts (SOL/LINK/AVAX/DOT) show the largest lag-response.",
+            description="Enter altcoin LONG when BTC rallied +3% in last 2 bars on 4H (LAG_RETURN native) AND alt price > SMA(50). 4H swing version of the BTC lead-lag trade. Small-cap alts (SOL/LINK/AVAX/DOT) show the largest lag-response.",
             strategy_type=StrategyType.MOMENTUM,
             market_regimes=[
                 MarketRegime.TRENDING_UP,
@@ -7820,7 +7790,7 @@ class StrategyTemplateLibrary:
                 MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[
-                "CLOSE > SMA(50) AND RSI(14) > 50"
+                'CLOSE > SMA(50) AND RSI(14) > 50 AND LAG_RETURN("BTC", 2, "4h") > 0.03'
             ],
             exit_conditions=[
                 "CLOSE < SMA(50) OR RSI(14) < 40"
@@ -7841,6 +7811,7 @@ class StrategyTemplateLibrary:
                 "skip_param_override": True,
                 "interval_4h": True,
                 "interval": "4h",
+                # Legacy — see BTC Follower 1H comment.
                 "btc_leader": True,
                 "btc_leader_interval": "4h",
                 "btc_leader_bars": 2,
@@ -7852,7 +7823,7 @@ class StrategyTemplateLibrary:
         # BTC Daily Follower — positional lag trade
         templates.append(StrategyTemplate(
             name="Crypto BTC Follower Daily",
-            description="Enter altcoin LONG when BTC printed +5% daily move in last 2 days AND alt is above SMA(50) on daily. Positional lag trade — small-cap alts often catch up 3-7 days after BTC breakouts.",
+            description="Enter altcoin LONG when BTC printed +5% over prior 2 daily bars (LAG_RETURN native) AND alt is above SMA(50) on daily. Positional lag trade — small-cap alts often catch up 3-7 days after BTC breakouts.",
             strategy_type=StrategyType.MOMENTUM,
             market_regimes=[
                 MarketRegime.TRENDING_UP,
@@ -7863,7 +7834,7 @@ class StrategyTemplateLibrary:
                 MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[
-                "CLOSE > SMA(50) AND RSI(14) > 50"
+                'CLOSE > SMA(50) AND RSI(14) > 50 AND LAG_RETURN("BTC", 2, "1d") > 0.05'
             ],
             exit_conditions=[
                 "CLOSE < SMA(20) OR RSI(14) < 40"
@@ -7883,6 +7854,7 @@ class StrategyTemplateLibrary:
                 "crypto_optimized": True,
                 "skip_param_override": True,
                 "interval": "1d",
+                # Legacy — see BTC Follower 1H comment.
                 "btc_leader": True,
                 "btc_leader_interval": "1d",
                 "btc_leader_bars": 2,
@@ -7902,14 +7874,17 @@ class StrategyTemplateLibrary:
         # Research (repo doc lines 237-244): top-N ranking by 14-day return,
         # filtered for volume > 1.5× 20-day MA, hold 5-7 days with vol-scaled
         # sizing. The composite return was ~8.76% excess on non-BTC cryptos.
-        # Implementation: gated at signal-time by cross_sectional_rank flag.
+        #
+        # Sprint 1 F1 (2026-05-02): the rank filter is now a native DSL
+        # primitive RANK_IN_UNIVERSE("SELF", [...], 14, 3) evaluated every
+        # bar in backtest and live. Signal-gen runtime gate removed.
         # =====================================================================
 
         # Crypto Cross-Sectional Momentum (14d) — fires only if the symbol
         # is in the top 3 of the crypto universe by 14-day return
         templates.append(StrategyTemplate(
             name="Crypto Cross-Sectional Momentum",
-            description="Rank 6-coin universe by 14-day return; enter LONG on coins in top-3 with volume > 1.5x 20-day avg. Captures rotation into outperforming alts. Hold 7 days, vol-scale sizing.",
+            description="Rank 6-coin universe by 14-day return (RANK_IN_UNIVERSE native); enter LONG on coins in top-3 with volume > 1.5x 20-day avg. Captures rotation into outperforming alts. Hold 5-10 days, vol-scale sizing.",
             strategy_type=StrategyType.MOMENTUM,
             market_regimes=[
                 MarketRegime.TRENDING_UP,
@@ -7920,8 +7895,10 @@ class StrategyTemplateLibrary:
                 MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[
-                # Symbol-level setup: price above 20d SMA + rising RSI
-                "CLOSE > SMA(20) AND RSI(14) > 55 AND VOLUME > VOLUME_MA(20) * 1.5"
+                # Native: symbol must be in top-3 of universe by 14d return,
+                # PLUS local momentum setup (trend + volume confirm).
+                'CLOSE > SMA(20) AND RSI(14) > 55 AND VOLUME > VOLUME_MA(20) * 1.5 '
+                'AND RANK_IN_UNIVERSE("SELF", ["BTC","ETH","SOL","AVAX","LINK","DOT"], 14, 3) > 0'
             ],
             exit_conditions=[
                 "CLOSE < SMA(20) OR RSI(14) < 45"
@@ -7942,6 +7919,7 @@ class StrategyTemplateLibrary:
                 "crypto_optimized": True,
                 "skip_param_override": True,
                 "interval": "1d",
+                # Legacy — see BTC Follower 1H comment.
                 "cross_sectional_rank": True,
                 "rank_window_days": 14,
                 "rank_top_n": 3,

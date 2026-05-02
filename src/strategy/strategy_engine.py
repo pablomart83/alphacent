@@ -23,6 +23,11 @@ from sqlalchemy.orm import Session
 from src.data.market_data_manager import MarketDataManager
 from src.llm.llm_service import LLMService, StrategyDefinition
 from src.strategy.indicator_library import IndicatorLibrary
+from src.strategy.cross_asset_primitives import (
+    compute_cross_asset_indicators,
+    collect_required_cross_asset_symbols,
+    extract_cross_asset_references,
+)
 from src.models import (
     AlphaSource,
     BacktestResults,
@@ -2766,7 +2771,37 @@ class StrategyEngine:
         close = df["close"]
         high = df["high"]
         low = df["low"]
-        
+
+        # Sprint 1 F1 (2026-05-02): compute cross-asset DSL primitives
+        # (LAG_RETURN, RANK_IN_UNIVERSE) on the already-sliced backtest
+        # window. These are merged into `indicators` so DSL eval sees the
+        # same series signal-gen will see at live time. Empty-noop for
+        # strategies with no cross-asset refs.
+        try:
+            cross_asset = self._compute_cross_asset_for_strategy(
+                strategy=strategy,
+                primary_index=df.index,
+                start=pd.Timestamp(start).to_pydatetime(),
+                end=pd.Timestamp(end).to_pydatetime(),
+            )
+            if cross_asset:
+                indicators.update(cross_asset)
+                logger.info(
+                    f"Cross-asset indicators merged into backtest for {strategy.name}: "
+                    f"keys={sorted(cross_asset.keys())}"
+                )
+        except Exception as _ca_err:
+            # Cross-asset fetch failure must not break the backtest. Any
+            # referenced cross-asset indicator keys will be missing from
+            # `indicators`, and the DSL code generator's availability check
+            # will produce a proper "Missing indicators" error — which
+            # correctly rejects the strategy in WF rather than silently
+            # running a degraded backtest.
+            logger.warning(
+                f"Cross-asset computation failed for {strategy.name}: {_ca_err} — "
+                f"DSL eval will detect missing keys and reject"
+            )
+
         # Generate entry and exit signals
         volume = df["volume"] if "volume" in df.columns else None
         entries, exits = self._parse_strategy_rules(
@@ -3827,7 +3862,91 @@ class StrategyEngine:
         
         return indicators
 
-    
+    def _compute_cross_asset_for_strategy(
+        self,
+        strategy: Strategy,
+        primary_index: pd.DatetimeIndex,
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> Dict[str, pd.Series]:
+        """Compute cross-asset DSL primitives (LAG_RETURN, RANK_IN_UNIVERSE)
+        for a strategy, aligned to its primary symbol's bar index.
+
+        Sprint 1 F1 (2026-05-02). This is the single entry point for
+        cross-asset indicator injection shared by backtest and signal-gen
+        paths. Output keys are the same `LAG_RETURN__*` / `RANK_IN_UNIVERSE__*`
+        keys the DSL code generator emits, so eval'd rules look them up
+        directly from the merged indicators dict.
+
+        Args:
+            strategy: the Strategy whose rules contain (or may contain) the
+                      cross-asset primitives.
+            primary_index: DatetimeIndex of the primary symbol's bars at the
+                           backtest/signal-gen evaluation period.
+            start, end: optional period bounds for leader/universe fetches.
+                        Defaults to primary_index.min()-60d .. max()+1d.
+
+        Returns:
+            Dict of {indicator_key: Series}. Empty if the strategy has no
+            cross-asset references (most non-crypto templates).
+        """
+        conditions: List[str] = []
+        if strategy.rules:
+            conditions.extend(strategy.rules.get("entry_conditions", []) or [])
+            conditions.extend(strategy.rules.get("exit_conditions", []) or [])
+        primary_symbol = strategy.symbols[0] if strategy.symbols else None
+        if primary_symbol is None:
+            return {}
+        # Fast path: skip the fetcher wiring if there are no cross-asset refs.
+        lag_refs, rank_refs = extract_cross_asset_references(conditions)
+        if not lag_refs and not rank_refs:
+            return {}
+
+        logger.info(
+            f"Cross-asset primitives detected for {strategy.name}: "
+            f"LAG_RETURN={len(lag_refs)} RANK_IN_UNIVERSE={len(rank_refs)}"
+        )
+
+        def _fetcher(sym: str, s: datetime, e: datetime, interval: str) -> Optional[pd.DataFrame]:
+            """Adapt market_data.get_historical_data to the
+            (symbol, start, end, interval) → DataFrame interface expected
+            by cross_asset_primitives.
+            """
+            try:
+                data_list = self.market_data.get_historical_data(
+                    symbol=sym, start=s, end=e, interval=interval, prefer_yahoo=True
+                )
+                if not data_list:
+                    return None
+                df = pd.DataFrame([
+                    {
+                        'timestamp': d.timestamp.replace(tzinfo=None)
+                            if hasattr(d.timestamp, 'tzinfo') and d.timestamp.tzinfo
+                            else d.timestamp,
+                        'open': d.open, 'high': d.high, 'low': d.low,
+                        'close': d.close, 'volume': d.volume,
+                    }
+                    for d in data_list
+                ])
+                df.set_index('timestamp', inplace=True)
+                df.index = pd.to_datetime(df.index)
+                if hasattr(df.index, 'tz') and df.index.tz is not None:
+                    df.index = df.index.tz_localize(None)
+                return df
+            except Exception as exc:
+                logger.debug(f"Cross-asset fetcher failed for {sym} {interval}: {exc}")
+                return None
+
+        return compute_cross_asset_indicators(
+            conditions=conditions,
+            primary_symbol=primary_symbol,
+            primary_index=primary_index,
+            data_fetcher=_fetcher,
+            start=start,
+            end=end,
+        )
+
+
     def _parse_strategy_rules(
         self,
         close: pd.Series,
@@ -4262,114 +4381,20 @@ class StrategyEngine:
                 f"will use fundamental signal generation instead of DSL"
             )
 
-        # BTC-leader cross-asset gate (Batch C, C1)
-        # Templates with metadata.btc_leader=True fire only when BTC's recent
-        # return on the template's timeframe exceeds btc_leader_threshold_pct.
-        # btc_leader_direction='short_on_btc_up' inverts the check for
-        # shorts-into-BTC-strength (dominance inversion play).
-        # Skipping signal generation entirely on gate-fail is safe because
-        # all btc_leader templates are crypto_optimized and latency-tolerant.
-        _meta = strategy.metadata if isinstance(strategy.metadata, dict) else {}
-        if _meta.get('btc_leader'):
-            try:
-                _leader_sym = _meta.get('leader_symbol', 'BTC')
-                _leader_interval = _meta.get('btc_leader_interval', _meta.get('interval', '1h'))
-                _leader_bars = int(_meta.get('btc_leader_bars', 2))
-                _leader_threshold = float(_meta.get('btc_leader_threshold_pct', 0.01))
-                _leader_direction = _meta.get('btc_leader_direction', 'long_on_btc_up')
-
-                _btc_end = datetime.now()
-                # Fetch enough bars: (leader_bars + 1) with safety margin
-                if _leader_interval == '1h':
-                    _btc_start = _btc_end - timedelta(hours=_leader_bars * 2 + 6)
-                elif _leader_interval == '4h':
-                    _btc_start = _btc_end - timedelta(hours=_leader_bars * 8 + 24)
-                else:
-                    _btc_start = _btc_end - timedelta(days=_leader_bars * 2 + 3)
-
-                _btc_bars = self.market_data.get_historical_data(
-                    symbol=_leader_sym,
-                    start=_btc_start,
-                    end=_btc_end,
-                    interval=_leader_interval,
-                )
-                if _btc_bars and len(_btc_bars) > _leader_bars:
-                    _btc_now = _btc_bars[-1].close
-                    _btc_prev = _btc_bars[-1 - _leader_bars].close
-                    _btc_ret = (_btc_now - _btc_prev) / _btc_prev if _btc_prev else 0.0
-                    if _leader_direction == 'short_on_btc_up':
-                        _gate_pass = _btc_ret >= _leader_threshold  # BTC up → short alt
-                    else:
-                        _gate_pass = _btc_ret >= _leader_threshold  # BTC up → long alt
-                    if not _gate_pass:
-                        logger.info(
-                            f"BTC-leader gate: {strategy.name} skipped — "
-                            f"BTC {_leader_interval} return over {_leader_bars} bars "
-                            f"= {_btc_ret:+.2%}, need >= {_leader_threshold:+.2%}"
-                        )
-                        return []
-                    logger.info(
-                        f"BTC-leader gate PASS: {strategy.name} — "
-                        f"BTC {_leader_interval}×{_leader_bars} return = {_btc_ret:+.2%}"
-                    )
-                else:
-                    logger.debug(
-                        f"BTC-leader gate: insufficient BTC data for {strategy.name} "
-                        f"(got {len(_btc_bars) if _btc_bars else 0} bars, need {_leader_bars + 1}) — fail-closed, skip"
-                    )
-                    return []
-            except Exception as _btc_err:
-                logger.warning(f"BTC-leader gate failed for {strategy.name}: {_btc_err} — fail-open, proceeding")
-
-        # Cross-sectional ranking gate (Batch C, C2)
-        # Templates with metadata.cross_sectional_rank=True fire only if
-        # strategy's primary symbol is in the top-N of the rank universe
-        # by rank_metric (default: 14-day return).
-        if _meta.get('cross_sectional_rank'):
-            try:
-                _rank_universe = _meta.get('rank_universe', ['BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'DOT'])
-                _rank_window = int(_meta.get('rank_window_days', 14))
-                _rank_top_n = int(_meta.get('rank_top_n', 3))
-                _primary_sym = strategy.symbols[0] if strategy.symbols else None
-
-                if _primary_sym and _primary_sym in _rank_universe:
-                    _rank_end = datetime.now()
-                    _rank_start = _rank_end - timedelta(days=_rank_window + 5)
-                    _returns_by_sym = {}
-                    for _sym in _rank_universe:
-                        try:
-                            _sym_bars = self.market_data.get_historical_data(
-                                symbol=_sym,
-                                start=_rank_start,
-                                end=_rank_end,
-                                interval="1d",
-                            )
-                            if _sym_bars and len(_sym_bars) > _rank_window:
-                                _now = _sym_bars[-1].close
-                                _then = _sym_bars[-1 - _rank_window].close
-                                if _then:
-                                    _returns_by_sym[_sym] = (_now - _then) / _then
-                        except Exception:
-                            pass
-                    if _returns_by_sym:
-                        _ranked = sorted(_returns_by_sym.items(), key=lambda x: x[1], reverse=True)
-                        _top_n_syms = [s for s, _ in _ranked[:_rank_top_n]]
-                        if _primary_sym not in _top_n_syms:
-                            logger.info(
-                                f"Cross-sectional gate: {strategy.name} skipped — "
-                                f"{_primary_sym} not in top-{_rank_top_n} (top: {_top_n_syms}, "
-                                f"{_primary_sym} rank={[s for s, _ in _ranked].index(_primary_sym)+1 if _primary_sym in _returns_by_sym else 'NA'})"
-                            )
-                            return []
-                        logger.info(
-                            f"Cross-sectional gate PASS: {strategy.name} — "
-                            f"{_primary_sym} in top-{_rank_top_n} ({_returns_by_sym[_primary_sym]:+.2%} vs "
-                            f"median {_ranked[len(_ranked)//2][1]:+.2%})"
-                        )
-                    else:
-                        logger.debug(f"Cross-sectional gate: no returns data — fail-open, proceeding")
-            except Exception as _cs_err:
-                logger.warning(f"Cross-sectional gate failed for {strategy.name}: {_cs_err} — fail-open, proceeding")
+        # ───── Cross-asset gates (Sprint 1 F1, 2026-05-02) ─────
+        # The former signal-time-only btc_leader / cross_sectional_rank
+        # runtime gates have been removed. Cross-asset edge is now expressed
+        # as first-class DSL primitives (LAG_RETURN, RANK_IN_UNIVERSE) which
+        # are computed bar-by-bar during both backtest and live signal-gen,
+        # keeping WF honest. See `cross_asset_primitives.py` and the updated
+        # Batch C template DSL rules.
+        #
+        # Legacy metadata keys (btc_leader*, cross_sectional_rank*,
+        # rank_universe, rank_top_n, rank_window_days) are still propagated
+        # through the proposer for backward-compat but no longer cause any
+        # runtime behavior. They will be removed from templates and the
+        # propagation lists in a cleanup pass once the F1 rollout has
+        # landed on all crypto lead-lag templates.
 
         signals = []
         
@@ -10142,6 +10167,27 @@ class StrategyEngine:
         if not indicators:
             logger.warning(f"No indicators calculated for {symbol}, cannot generate signal")
             return None
+
+        # Sprint 1 F1 (2026-05-02): compute cross-asset DSL primitives and
+        # merge into indicators. Uses `signal_rules` (scaled if intraday)
+        # so the DSL keys match what the code generator emits.
+        try:
+            _ca_strategy = calc_strategy  # rules here are the scaled ones
+            cross_asset = self._compute_cross_asset_for_strategy(
+                strategy=_ca_strategy,
+                primary_index=data.index,
+            )
+            if cross_asset:
+                indicators.update(cross_asset)
+                logger.info(
+                    f"Cross-asset indicators merged into signal-gen for "
+                    f"{strategy.name} ({symbol}): keys={sorted(cross_asset.keys())}"
+                )
+        except Exception as _ca_err:
+            logger.warning(
+                f"Cross-asset computation failed at signal-gen for "
+                f"{strategy.name} ({symbol}): {_ca_err} — no signal will fire"
+            )
 
         # Parse strategy rules using DSL (use scaled rules for intraday)
         close = data["close"]

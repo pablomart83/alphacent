@@ -41,10 +41,10 @@ activation_thresholds:
     etf_1h: 0.0002
     forex: 0.0005
     forex_1h: 0.0001
-    crypto: 0.04         # fallback for 21d+ weekly/monthly-hold templates (21W MA, Golden Cross, Weekly Trend Follow)
-    crypto_1d: 0.025     # Added 2026-05-02 — daily swing crypto (3-14d hold): net 2.5%/trade clears 2.96% round-trip + edge
-    crypto_4h: 0.015     # Added 2026-05-02 — 4H crypto (4-24h hold): net 1.5%/trade; frequency makes it compound
-    crypto_1h: 0.005     # Added 2026-05-02 — 1H crypto (1-12h hold): net 0.5%/trade; very high turnover compensates
+    crypto: 0.05         # Sprint 1 F3: raised 0.04 → 0.05 for 21d+ weekly/monthly-hold templates (21W MA, Golden Cross, Weekly Trend Follow). Real round-trip cost on eToro = 2.96%; floor set to cost + 200bps edge.
+    crypto_1d: 0.035     # Sprint 1 F3: raised 0.025 → 0.035 — daily swing crypto (3-14d hold) must clear 2.96% round-trip + 54bps edge. Below this is structurally unprofitable on eToro.
+    crypto_4h: 0.035     # Sprint 1 F3: raised 0.015 → 0.035 — 4H crypto (4-24h hold). Same cost constraint as daily; frequency no longer saves sub-cost returns.
+    crypto_1h: 0.035     # Sprint 1 F3: raised 0.005 → 0.035 — 1H crypto must clear 2.96% round-trip. No retail literature shows 1h crypto clearing this on 1%-per-side venues; intraday crypto is structurally cost-constrained on eToro.
     index: 0.001
     index_1h: 0.0002
     commodity: 0.0015
