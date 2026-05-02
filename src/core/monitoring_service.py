@@ -1048,22 +1048,66 @@ class MonitoringService:
                     need_yahoo_1d.append(symbol)
                 
                 try:
-                    # For the full hourly sync, ALWAYS fetch fresh 1h data from Yahoo
-                    # for crypto and active symbols. The DB cache may have stale bars
-                    # from hours ago — the whole point of this sync is to refresh them.
-                    # Daily bars are fine from DB (they only change once per day).
+                    # Freshness check for 1h to avoid re-fetching the full 2y
+                    # Binance window on every sync (~105k bars / minute = 3GB/day
+                    # wasted). Sprint 4 S4.0.7.
+                    #
+                    # Crypto/forex: stale if latest 1h bar > 1.5h old (one-bar
+                    # gap + buffer). Stocks etc: stale if latest bar > 2h old
+                    # during market hours. Weekend: never stale for stocks.
+                    #
+                    # Query MAX(date) directly from DB — _get_historical_from_db
+                    # enforces its own staleness check that rejects crypto >2h
+                    # old, making us always-stale here. We need the raw ts.
                     start_1h = end - timedelta(days=180)
-                    if is_always_on or is_active:
-                        # Force Yahoo fetch for crypto/forex/active symbols
-                        need_yahoo_1h.append(symbol)
-                    else:
-                        # For inactive non-24/7 symbols, check DB directly (no Yahoo fallback)
-                        db_data_1h = md._get_historical_from_db(symbol, start_1h, end, "1h")
-                        if db_data_1h and len(db_data_1h) > 10:
-                            stats["1h"] += 1
-                            stats["db_cached"] += 1
+                    _latest_1h_ts: Optional[datetime] = None
+                    try:
+                        from src.models.database import get_database as _gd_1h
+                        from sqlalchemy import text as _sa_text_1h
+                        _db_1h = _gd_1h()
+                        _s_1h = _db_1h.get_session()
+                        try:
+                            _ts_row = _s_1h.execute(_sa_text_1h(
+                                "SELECT MAX(date) FROM historical_price_cache "
+                                "WHERE symbol = :s AND interval = '1h'"
+                            ), {"s": symbol}).scalar()
+                            if _ts_row is not None:
+                                _latest_1h_ts = _ts_row
+                                if hasattr(_latest_1h_ts, 'tzinfo') and _latest_1h_ts.tzinfo:
+                                    _latest_1h_ts = _latest_1h_ts.replace(tzinfo=None)
+                        finally:
+                            _s_1h.close()
+                    except Exception:
+                        pass
+
+                    _is_stale_1h = True  # default to fetch if DB empty
+                    _has_any_1h = _latest_1h_ts is not None
+                    if _has_any_1h:
+                        gap_hours = (end - _latest_1h_ts).total_seconds() / 3600
+                        if is_always_on:
+                            _is_stale_1h = gap_hours > 1.5
+                        elif not is_weekend:
+                            _is_stale_1h = gap_hours > 2.0
                         else:
-                            need_yahoo_1h.append(symbol)
+                            _is_stale_1h = False  # weekend, stocks don't trade
+                    if _is_stale_1h and (is_always_on or is_active):
+                        need_yahoo_1h.append(symbol)
+                    elif _has_any_1h:
+                        # Fresh enough — count as cached hit. Promote to
+                        # in-memory only if active (skip heavy DB read
+                        # otherwise).
+                        stats["1h"] += 1
+                        stats["db_cached"] += 1
+                        if is_active:
+                            try:
+                                db_data_1h = md._get_historical_from_db(
+                                    symbol, start_1h, end, "1h"
+                                )
+                                if db_data_1h:
+                                    hist_cache.set(f"{symbol}:1h:25", db_data_1h)
+                                    stats["memory_loaded"] += 1
+                            except Exception:
+                                pass
                 except Exception as e:
                     logger.debug(f"DB cache check failed for {symbol} 1h: {e}")
                     need_yahoo_1h.append(symbol)
@@ -1122,10 +1166,48 @@ class MonitoringService:
                 # cap. 2y of 1h = ~17k bars/symbol, 2y of 1d = 730 bars.
                 # These cover at least one full regime cycle for honest WF.
                 _CRYPTO_BINANCE_WINDOW_DAYS = {"1h": 730, "4h": 730, "1d": 730}
+                # Per-interval "one bar" threshold for incremental fetch. If
+                # DB latest bar is newer than this, we fetch only the gap, not
+                # the full window. S4.0.7.
+                _INCREMENTAL_GAP_THRESHOLD_HOURS = {"1h": 1.5, "4h": 4.5, "1d": 28.0}
                 if _bn_fetch is not None:
                     remaining = []
                     bn_symbols_fetched = 0
                     bn_bars_total = 0
+                    bn_db_cached_count = 0
+                    # Pre-query the latest bar per crypto symbol for this
+                    # interval in one shot. Using _get_historical_from_db here
+                    # would reject crypto >2h stale (that function has its own
+                    # 24/7 staleness rule) — we need to INSPECT the timestamp.
+                    crypto_in_need_list = [
+                        s for s in need_list
+                        if s.upper() in crypto_set and _bn_supported(s, interval)
+                    ]
+                    latest_ts_by_sym: Dict[str, Optional[datetime]] = {}
+                    if crypto_in_need_list:
+                        try:
+                            from src.models.database import get_database as _gd_li
+                            from sqlalchemy import text as _sa_text_li
+                            _db_li = _gd_li()
+                            _s_li = _db_li.get_session()
+                            try:
+                                _rows = _s_li.execute(_sa_text_li(
+                                    "SELECT symbol, MAX(date) FROM historical_price_cache "
+                                    "WHERE interval = :iv AND symbol = ANY(:syms) GROUP BY symbol"
+                                ), {"iv": interval, "syms": crypto_in_need_list}).fetchall()
+                                for _row in _rows:
+                                    _ts = _row[1]
+                                    if _ts and hasattr(_ts, 'tzinfo') and _ts.tzinfo:
+                                        _ts = _ts.replace(tzinfo=None)
+                                    latest_ts_by_sym[_row[0]] = _ts
+                            finally:
+                                _s_li.close()
+                        except Exception as _li_err:
+                            logger.debug(
+                                f"[bg-full-sync] latest-ts lookup failed for "
+                                f"{interval}: {_li_err}"
+                            )
+
                     for sym in need_list:
                         if sym.upper() not in crypto_set:
                             remaining.append(sym)
@@ -1133,11 +1215,30 @@ class MonitoringService:
                         if not _bn_supported(sym, interval):
                             remaining.append(sym)
                             continue
-                        # Crypto-specific wider window for Binance (not limited
-                        # by the Yahoo-aligned start_dt above).
+                        # Crypto-specific wider window for Binance. Default to
+                        # full 2y window; narrow down if DB already has
+                        # recent bars (incremental fetch).
                         bn_start = end - timedelta(
                             days=_CRYPTO_BINANCE_WINDOW_DAYS.get(interval, 180)
                         )
+                        latest_db_ts = latest_ts_by_sym.get(sym)
+                        if latest_db_ts is not None:
+                            gap_h = (end - latest_db_ts).total_seconds() / 3600
+                            _thresh = _INCREMENTAL_GAP_THRESHOLD_HOURS.get(interval, 2.0)
+                            if gap_h < _thresh:
+                                # DB fresh enough — skip fetch entirely
+                                bn_db_cached_count += 1
+                                stats[interval] = stats.get(interval, 0) + 1
+                                stats["db_cached"] = stats.get("db_cached", 0) + 1
+                                _crypto_symbols_handled.add(sym)
+                                continue
+                            # Stale — narrow the fetch to gap only.
+                            # Back up 2 bars of overlap for safety (last bar
+                            # may have been partial).
+                            backup = timedelta(hours=8) if interval == "4h" else (
+                                timedelta(hours=2) if interval == "1h" else timedelta(days=2)
+                            )
+                            bn_start = latest_db_ts - backup
                         try:
                             bars = _bn_fetch(sym, bn_start, end, interval)
                         except _BnErr as be:
@@ -1374,11 +1475,56 @@ class MonitoringService:
             if _bn_fetch is not None:
                 bn_4h_symbols = 0
                 bn_4h_bars = 0
+                bn_4h_db_cached = 0
                 crypto_syms_for_4h = [s for s in crypto_set if _bn_supported(s, "4h")]
-                start_4h = end - timedelta(days=730)
-                for sym in crypto_syms_for_4h:
+                # Query latest 4h bar per symbol in one shot — lighter than
+                # _get_historical_from_db which enforces its own staleness
+                # rejection (returns None for crypto bars >2h old). We want
+                # to INSPECT the latest timestamp, not let the manager decide
+                # it's stale for us.
+                latest_4h_ts_by_sym: Dict[str, Optional[datetime]] = {}
+                try:
+                    from src.models.database import get_database as _gd_4h
+                    from sqlalchemy import text as _sa_text
+                    _db4 = _gd_4h()
+                    _s4 = _db4.get_session()
                     try:
-                        bars = _bn_fetch(sym, start_4h, end, "4h")
+                        rows = _s4.execute(_sa_text(
+                            "SELECT symbol, MAX(date) FROM historical_price_cache "
+                            "WHERE interval = :iv AND symbol = ANY(:syms) GROUP BY symbol"
+                        ), {"iv": "4h", "syms": crypto_syms_for_4h}).fetchall()
+                        for row in rows:
+                            ts = row[1]
+                            if ts and hasattr(ts, 'tzinfo') and ts.tzinfo:
+                                ts = ts.replace(tzinfo=None)
+                            latest_4h_ts_by_sym[row[0]] = ts
+                    finally:
+                        _s4.close()
+                except Exception as _lat_err:
+                    logger.debug(f"[bg-full-sync] 4h latest-ts lookup failed: {_lat_err}")
+
+                for sym in crypto_syms_for_4h:
+                    # Freshness check — do we need to fetch anything? If the
+                    # DB latest 4h bar is within one bar (4h + buffer), skip.
+                    # Otherwise fetch only the gap, not the full 730-day window.
+                    # S4.0.7 (2026-05-02): eliminates ~26k-bar-per-sync redundant
+                    # refetches.
+                    fetch_start = end - timedelta(days=730)  # default full window
+                    latest_ts_4h = latest_4h_ts_by_sym.get(sym)
+                    if latest_ts_4h is not None:
+                        gap_hours = (end - latest_ts_4h).total_seconds() / 3600
+                        if gap_hours < 4.5:
+                            # Less than one bar gap — cache is fresh, skip fetch
+                            bn_4h_db_cached += 1
+                            stats["4h"] = stats.get("4h", 0) + 1
+                            stats["db_cached"] = stats.get("db_cached", 0) + 1
+                            continue
+                        # Stale — fetch only from latest bar onward, not the
+                        # full 730d window. Back up 2 bars (8h) for overlap
+                        # in case the last bar was partial.
+                        fetch_start = latest_ts_4h - timedelta(hours=8)
+                    try:
+                        bars = _bn_fetch(sym, fetch_start, end, "4h")
                     except _BnErr as be:
                         logger.info(
                             f"[bg-full-sync] Binance 4h failed for {sym} ({be})"
@@ -1396,17 +1542,15 @@ class MonitoringService:
                         stats["4h"] = stats.get("4h", 0) + 1
                         bn_4h_symbols += 1
                         bn_4h_bars += len(bars)
-                        if sym in active_symbols:
-                            hist_cache.set(f"{sym}:4h:25", list(bars))
-                            stats["memory_loaded"] = stats.get("memory_loaded", 0) + 1
                     except Exception as e:
                         logger.warning(
                             f"[bg-full-sync] Binance 4h DB save failed for {sym}: {e}"
                         )
-                if bn_4h_symbols:
+                if bn_4h_symbols or bn_4h_db_cached:
                     logger.info(
-                        f"[bg-full-sync] Binance 4h: {bn_4h_symbols} crypto symbols "
-                        f"({bn_4h_bars} bars) for 4h (730d window)"
+                        f"[bg-full-sync] Binance 4h: {bn_4h_symbols} fetched "
+                        f"({bn_4h_bars} bars), {bn_4h_db_cached} DB-cached "
+                        f"(crypto, incremental)"
                     )
 
             elapsed = _time.time() - t0

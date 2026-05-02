@@ -435,6 +435,51 @@ def _run_sync_with_logging(mon) -> None:
 
         from datetime import timedelta
 
+        # Sprint 4 S4.0.7 (2026-05-02): incremental sync. Each sync pre-
+        # queries MAX(date) per (symbol, interval) via raw SQL — NOT via
+        # _get_historical_from_db, because that helper has its own 24/7
+        # staleness rejection for crypto (returns None if latest bar >2h
+        # old). We want to INSPECT the latest timestamp to decide whether
+        # to do a full 2y fetch, a gap-fill fetch, or skip entirely.
+        #
+        # Freshness thresholds chosen for "one bar age + buffer":
+        #   1h  -> 1.5h    (one bar + half a bar of slack)
+        #   4h  -> 4.5h
+        #   1d  -> 28h     (one day + 4h slack for late Yahoo updates)
+        _INCR_GAP_HOURS = {"1h": 1.5, "4h": 4.5, "1d": 28.0}
+
+        def _latest_cache_ts(symbol_disp: str, interval: str) -> Optional[datetime]:
+            """MAX(date) for (symbol, interval) — bypasses staleness helpers."""
+            try:
+                from src.models.database import get_database as _gd
+                from sqlalchemy import text as _sa
+                _db = _gd()
+                _s = _db.get_session()
+                try:
+                    _ts = _s.execute(_sa(
+                        "SELECT MAX(date) FROM historical_price_cache "
+                        "WHERE symbol = :s AND interval = :iv"
+                    ), {"s": symbol_disp, "iv": interval}).scalar()
+                    if _ts is not None and hasattr(_ts, 'tzinfo') and _ts.tzinfo:
+                        _ts = _ts.replace(tzinfo=None)
+                    return _ts
+                finally:
+                    _s.close()
+            except Exception:
+                return None
+
+        # Binance adapter — used for incremental crypto fetches.
+        try:
+            from src.api.binance_ohlc import (
+                fetch_klines as _bn_fetch,
+                is_supported as _bn_supported,
+                BinanceAPIError as _BnErr,
+            )
+        except ImportError:
+            _bn_fetch = None
+            _bn_supported = None
+            _BnErr = Exception
+
         for i, symbol in enumerate(all_symbols):
             sym_upper = symbol.upper()
             is_crypto = sym_upper in crypto_set
@@ -442,21 +487,67 @@ def _run_sync_with_logging(mon) -> None:
             is_always_on = is_crypto or is_forex
             is_active = symbol in active_symbols
 
-            # 1d sync
+            # ---- 1d sync ----------------------------------------------
             should_sync_1d = is_always_on or not is_weekend
             if not should_sync_1d:
                 stats["weekend_skip"] += 1
             else:
                 try:
-                    # Crypto widens to 2y (730d) for Binance-backed deep history.
-                    # Non-crypto stays at 220d (Yahoo's reliable 1d reach).
-                    start_1d = end - timedelta(days=730 if is_crypto else 220)
-                    # Check if DB already has fresh data (avoid counting cache hits as "synced")
-                    db_data = md._get_historical_from_db(symbol, start_1d, end, "1d")
-                    if db_data and len(db_data) > 50:
+                    # Crypto widens to 2y via Binance; others 220d Yahoo reach.
+                    full_window_1d = 730 if is_crypto else 220
+                    start_1d = end - timedelta(days=full_window_1d)
+                    data_1d = None
+
+                    # Freshness check via direct MAX(date) — bypasses the
+                    # staleness rejection in _get_historical_from_db.
+                    latest_ts_1d = _latest_cache_ts(symbol, "1d")
+                    is_fresh_1d = False
+                    if latest_ts_1d is not None:
+                        gap_h_1d = (end - latest_ts_1d).total_seconds() / 3600
+                        if is_always_on:
+                            is_fresh_1d = gap_h_1d < _INCR_GAP_HOURS["1d"]
+                        else:
+                            # Stocks: allow weekend/holiday gap (up to ~72h)
+                            latest_wd = latest_ts_1d.weekday()
+                            today_wd = end.weekday()
+                            weekend_gap = (
+                                (latest_wd == 4 and today_wd in (5, 6, 0) and gap_h_1d <= 76.0)
+                                or (today_wd in (5, 6) and gap_h_1d <= 52.0)
+                            )
+                            is_fresh_1d = gap_h_1d < _INCR_GAP_HOURS["1d"] or weekend_gap
+
+                    if is_fresh_1d:
+                        # Cache is fresh — count as cached hit. Pull from DB
+                        # only if we need to push to in-memory cache.
                         stats["1d_cached"] += 1
-                        data_1d = db_data
+                        if is_active:
+                            data_1d = md._get_historical_from_db(symbol, start_1d, end, "1d")
+                    elif is_crypto and _bn_fetch is not None and _bn_supported(symbol, "1d"):
+                        # Crypto stale — gap-fill via Binance.
+                        fetch_start = start_1d
+                        if latest_ts_1d is not None:
+                            fetch_start = latest_ts_1d - timedelta(days=2)
+                        try:
+                            bars = _bn_fetch(symbol, fetch_start, end, "1d")
+                            if bars:
+                                md._save_historical_to_db(symbol, bars, "1d")
+                                stats["1d_fetched"] += 1
+                                if is_active:
+                                    # Read back full window for cache
+                                    data_1d = md._get_historical_from_db(symbol, start_1d, end, "1d")
+                            else:
+                                stats["1d_skip"] += 1
+                        except _BnErr as be:
+                            # Fall through to Yahoo on Binance failure
+                            if i < 5 or is_crypto:
+                                _capture_log(f"  1d Binance failed {symbol}: {str(be)[:80]}, trying Yahoo")
+                            data_1d = md.get_historical_data(symbol, start_1d, end, interval="1d", prefer_yahoo=True)
+                            if data_1d:
+                                stats["1d_fetched"] += 1
+                            else:
+                                stats["1d_skip"] += 1
                     else:
+                        # Non-crypto or no Binance — standard Yahoo path.
                         data_1d = md.get_historical_data(symbol, start_1d, end, interval="1d", prefer_yahoo=True)
                         if data_1d:
                             stats["1d_fetched"] += 1
@@ -470,59 +561,63 @@ def _run_sync_with_logging(mon) -> None:
                     if i < 5 or is_crypto:
                         _capture_log(f"  1d ERROR {symbol}: {str(e)[:100]}")
 
-            # 1h sync
+            # ---- 1h sync ----------------------------------------------
             should_sync_1h = is_always_on or is_market_hours
             if should_sync_1h:
                 try:
-                    # Crypto widens to 2y (730d) via Binance. Non-crypto 1h
-                    # caps at 180d regardless — Yahoos hard 7-month limit.
-                    start_1h = end - timedelta(days=730 if is_crypto else 180)
-                    # For 1h, check DB freshness (stale if latest bar > 2h old)
-                    # Use display symbol for DB lookup (not eToro wire format).
-                    db_1h = md._get_historical_from_db(symbol, start_1h, end, "1h")
-                    # Check if DB data is fresh — latest bar should be within 2 hours
-                    db_is_fresh = False
-                    if db_1h and len(db_1h) > 20:
-                        latest_bar = db_1h[-1]
-                        latest_ts = latest_bar.timestamp if hasattr(latest_bar, 'timestamp') else getattr(latest_bar, 'date', None)
-                        if latest_ts:
-                            from datetime import timezone
-                            if hasattr(latest_ts, 'tzinfo') and latest_ts.tzinfo:
-                                latest_ts = latest_ts.replace(tzinfo=None)
-                            age_hours = (end - latest_ts).total_seconds() / 3600
-                            db_is_fresh = age_hours < 2.0
-                    
-                    if db_is_fresh:
+                    # Crypto widens to 2y via Binance. Non-crypto caps at
+                    # 180d (Yahoo's 7-month 1h limit).
+                    full_window_1h = 730 if is_crypto else 180
+                    start_1h = end - timedelta(days=full_window_1h)
+                    data_1h = None
+
+                    # Freshness via direct MAX(date). _get_historical_from_db
+                    # rejects crypto 1h bars >2h stale internally, so we can't
+                    # use it here — we need the real timestamp to decide
+                    # fresh/gap/full.
+                    latest_ts_1h = _latest_cache_ts(symbol, "1h")
+                    is_fresh_1h = False
+                    if latest_ts_1h is not None:
+                        gap_h_1h = (end - latest_ts_1h).total_seconds() / 3600
+                        if is_always_on:
+                            is_fresh_1h = gap_h_1h < _INCR_GAP_HOURS["1h"]
+                        elif is_market_hours:
+                            is_fresh_1h = gap_h_1h < 2.0
+                        else:
+                            is_fresh_1h = True  # market closed, not stale
+
+                    if is_fresh_1h:
                         stats["1h_cached"] += 1
-                        data_1h = db_1h
-                    else:
-                        # DB data is stale — clear the DB cache entry so get_historical_data
-                        # doesn't just return the same stale data. This forces a Yahoo fetch.
+                        if is_active:
+                            data_1h = md._get_historical_from_db(symbol, start_1h, end, "1h")
+                    elif is_crypto and _bn_fetch is not None and _bn_supported(symbol, "1h"):
+                        # Crypto stale — incremental gap fetch via Binance.
+                        fetch_start = start_1h
+                        if latest_ts_1h is not None:
+                            fetch_start = latest_ts_1h - timedelta(hours=2)
                         try:
-                            from src.models.database import get_database
-                            _db = get_database()
-                            _sess = _db.get_session()
-                            try:
-                                from src.models.orm import HistoricalPriceCacheORM
-                                _sess.query(HistoricalPriceCacheORM).filter(
-                                    HistoricalPriceCacheORM.symbol == norm_symbol,
-                                    HistoricalPriceCacheORM.interval == "1h"
-                                ).delete()
-                                _sess.commit()
-                            finally:
-                                _sess.close()
-                        except Exception:
-                            pass  # If cleanup fails, get_historical_data will still try Yahoo
-                        
-                        # Also clear in-memory cache for this symbol
-                        for cache_key_pattern in [f"{symbol}:1h:", f"{norm_symbol}:1h:"]:
-                            keys_to_remove = [k for k in list(hist_cache._cache.keys()) if cache_key_pattern in str(k)]
-                            for k in keys_to_remove:
-                                del hist_cache._cache[k]
-                        
+                            bars = _bn_fetch(symbol, fetch_start, end, "1h")
+                            if bars:
+                                md._save_historical_to_db(symbol, bars, "1h")
+                                stats["1h_fetched"] += 1
+                                if is_active:
+                                    data_1h = md._get_historical_from_db(symbol, start_1h, end, "1h")
+                            else:
+                                stats["1h_skip"] += 1
+                        except _BnErr as be:
+                            if i < 5 or is_crypto:
+                                _capture_log(f"  1h Binance failed {symbol}: {str(be)[:80]}, trying Yahoo")
+                            data_1h = md.get_historical_data(symbol, start_1h, end, interval="1h", prefer_yahoo=True)
+                            if data_1h:
+                                stats["1h_fetched"] += 1
+                            else:
+                                stats["1h_skip"] += 1
+                    else:
+                        # Non-crypto stale — fall through to Yahoo. No DB
+                        # deletion (previous code's delete-then-refetch was
+                        # destructive on transient Yahoo hiccups).
                         data_1h = md.get_historical_data(symbol, start_1h, end, interval="1h", prefer_yahoo=True)
                         if data_1h:
-                            md._save_historical_to_db(norm_symbol, data_1h, "1h")
                             stats["1h_fetched"] += 1
                         else:
                             stats["1h_skip"] += 1
@@ -543,12 +638,14 @@ def _run_sync_with_logging(mon) -> None:
                     f"1h: {stats['1h_fetched']} fetched, {stats['1h_cached']} cached, {stats['1h_err']} err"
                 )
 
-        # Sprint 4 S4.0.2 (2026-05-02): crypto 4h pass via Binance.
-        # Mirrors the background sync's dedicated 4h block. The main loop
-        # above covers 1d and 1h but not 4h because non-crypto 4h is
-        # fetched on-demand by 4h strategies. Crypto 4h benefits from a
-        # fresh cache between cycles so WF doesn't stall on a cold fetch.
+        # Sprint 4 S4.0.2 / S4.0.7 (2026-05-02): crypto 4h Binance pass,
+        # incremental. The main loop above covers 1d and 1h but not 4h —
+        # non-crypto 4h is fetched on-demand by 4h strategies. Crypto 4h
+        # benefits from a fresh cache between cycles so WF doesn't stall
+        # on a cold fetch. We MAX(date) gate each symbol to avoid the
+        # ~26k-bar full-refetch that hit us before S4.0.7.
         stats["4h_fetched"] = 0
+        stats["4h_cached"] = 0
         stats["4h_err"] = 0
         try:
             from src.api.binance_ohlc import (
@@ -556,12 +653,23 @@ def _run_sync_with_logging(mon) -> None:
                 is_supported as _bn_supported_4h,
                 BinanceAPIError as _BnErr4h,
             )
-            start_4h = end - timedelta(days=730)
             for sym in sorted(crypto_set):
                 if not _bn_supported_4h(sym, "4h"):
                     continue
+                # Freshness: skip fetch if latest bar < 4.5h old.
+                latest_ts_4h = _latest_cache_ts(sym, "4h")
+                if latest_ts_4h is not None:
+                    gap_h = (end - latest_ts_4h).total_seconds() / 3600
+                    if gap_h < _INCR_GAP_HOURS["4h"]:
+                        stats["4h_cached"] += 1
+                        continue
+                    # Stale — fetch only the gap (+ 8h overlap backup).
+                    fetch_start = latest_ts_4h - timedelta(hours=8)
+                else:
+                    # Cold cache — full 730d window.
+                    fetch_start = end - timedelta(days=730)
                 try:
-                    bars = _bn_fetch_4h(sym, start_4h, end, "4h")
+                    bars = _bn_fetch_4h(sym, fetch_start, end, "4h")
                 except _BnErr4h as be:
                     _capture_log(f"  4h ERROR {sym}: Binance — {str(be)[:100]}")
                     stats["4h_err"] += 1
@@ -576,14 +684,19 @@ def _run_sync_with_logging(mon) -> None:
                     md._save_historical_to_db(sym, bars, "4h")
                     stats["4h_fetched"] += 1
                     if sym in active_symbols:
-                        hist_cache.set(f"{sym}:4h:25", list(bars))
-                        stats["memory"] += 1
+                        # Pull back from DB so in-memory cache has full window
+                        full_4h = md._get_historical_from_db(
+                            sym, end - timedelta(days=730), end, "4h"
+                        )
+                        if full_4h:
+                            hist_cache.set(f"{sym}:4h:25", full_4h)
+                            stats["memory"] += 1
                 except Exception as e:
                     _capture_log(f"  4h SAVE ERROR {sym}: {str(e)[:100]}")
                     stats["4h_err"] += 1
             _capture_log(
-                f"4h crypto: {stats['4h_fetched']} symbols fetched via Binance, "
-                f"{stats['4h_err']} errors"
+                f"4h crypto: {stats['4h_fetched']} fetched via Binance, "
+                f"{stats['4h_cached']} DB-cached, {stats['4h_err']} errors"
             )
         except ImportError:
             _capture_log("4h crypto skipped — Binance adapter unavailable")
@@ -591,11 +704,12 @@ def _run_sync_with_logging(mon) -> None:
         elapsed = _time.time() - t0
         total_1d = stats['1d_fetched'] + stats['1d_cached']
         total_1h = stats['1h_fetched'] + stats['1h_cached']
+        total_4h = stats['4h_fetched'] + stats.get('4h_cached', 0)
         _capture_log(
             f"DONE in {elapsed:.1f}s — "
             f"1d: {stats['1d_fetched']} fetched + {stats['1d_cached']} from DB = {total_1d} | "
             f"1h: {stats['1h_fetched']} fetched + {stats['1h_cached']} from DB = {total_1h} | "
-            f"4h: {stats['4h_fetched']} fetched (crypto only) | "
+            f"4h: {stats['4h_fetched']} fetched + {stats.get('4h_cached', 0)} from DB = {total_4h} | "
             f"{stats['memory']} loaded to memory | "
             f"{stats['weekend_skip']} weekend-skipped | "
             f"{stats['1d_err']+stats['1h_err']+stats['4h_err']} errors"
@@ -618,6 +732,7 @@ def _run_sync_with_logging(mon) -> None:
                 "hourly_errors": stats["1h_err"],
                 "hourly_skipped": stats["1h_skip"],
                 "fourhour_fetched": stats.get("4h_fetched", 0),
+                "fourhour_cached": stats.get("4h_cached", 0),
                 "fourhour_errors": stats.get("4h_err", 0),
                 "weekend_skipped": stats["weekend_skip"],
                 "memory_loaded": stats["memory"],
