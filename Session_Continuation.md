@@ -194,6 +194,82 @@ ORDER BY ABS(COALESCE((s.strategy_metadata->>'wf_test_sharpe')::float, 0)) DESC;
 
 ## Open Items — Priority Order
 
+### Next sprint (2026-05-02 audit findings) — USE THE PROMPT BELOW TO START
+
+Copy this as-is into a new session when you're ready to execute:
+
+```
+Start this session by reading Session_Continuation.md (this file), AUDIT_REPORT_2026-05-02.md, and .kiro/steering/trading-system-context.md — in that order. They contain the full state, audit findings, and permanent rules. Do not skip.
+
+Context in one paragraph: yesterday (May 1) shipped the observability layer + TSL audit + crypto min_trades tier. Today (May 2) discovered the observability layer was silently dropping every write (permission grant missing) — fixed, verified with a cycle producing 402 decision rows across 5 stages. Also raised symbol cap 3% → 5%, fixed MAE/MFE trade_id mismatch, backfilled 175 trade_journal orphans, fixed crypto commission modeling (was 0%, real is 1% per side → backtests overstated returns by ~2%/trade), expanded crypto universe to 6 coins (BTC/ETH/SOL/AVAX/LINK/DOT), added 2 new crypto trend templates, and fixed TZ drift on the UI. See AUDIT_REPORT_2026-05-02.md for the full findings list.
+
+Your mission this session: ship the ordered fix list below. Each item is scoped to minutes of work, deployable independently, verified against ground truth before moving on. Follow the permanent deployment workflow (edit local → getDiagnostics → scp → restart → curl /health → commit + push).
+
+TIER 1 (ship these definitely, ~90 min total):
+
+1. P0-1 RETIREMENT REVIEW FIRST (before any change). The audit found 33 strategies carry pending_retirement=true, some since April 22, yet generated 27+ new entry orders AFTER the flag was set — last zombie signal May 1 10:21 UTC. Filter at trading_scheduler.py:285 exists but isn't preventing this. Don't fix by assumption — first trace:
+   - Read all 5 retirement-flagging paths in monitoring_service.py (_check_strategy_decay, _check_strategy_health, _process_pending_retirements, _close_shorts_in_bull_market) and autonomous_strategy_manager.py (_check_retirement_triggers_in_cycle).
+   - Identify every signal-generation entry point. Not just run_signal_generation_sync — check if anything else calls generate_signals or generate_signals_batch directly.
+   - Check whether `superseded` or variation logic clears the flag.
+   - Check timing: does decay check fire mid-cycle while signal gen is already running?
+   Then propose your fix and implement it. Expected outcome: 33 zombie strategies stop firing new signals; flag either demotes them to BACKTESTED or strictly blocks signal gen; existing positions still close naturally via SL/TP.
+
+2. P0-2 live_trade_count is 0 on all 180 strategies despite 85 open positions and 700+ closed trades. Root cause: order_executor._increment_strategy_live_trade_count only fires on synchronous fills; eToro async fills (all real fills) go through order_monitor.check_submitted_orders which never calls this increment. Move the increment to order_monitor fill handler. Then backfill historical counts from trade_journal: UPDATE strategies SET live_trade_count = (SELECT COUNT(*) FROM trade_journal WHERE strategy_id=strategies.id AND exit_time IS NOT NULL). Verify downstream: retirement_logic.min_live_trades_before_evaluation=5 gate should now fire for strategies with ≥5 closed trades.
+
+3. P0-6 Cycle-error observability gap. When a cycle stage throws (SignalAction NameError today, Tuple NameError at 07:22 UTC), cycle_history.log shows [ERROR] CYCLE but nothing writes to signal_decisions. Add a `cycle_error` stage write in the top-level run_strategy_cycle try/except in autonomous_strategy_manager.py. ~10 lines. Ensures stage failures surface in the Observability funnel.
+
+TIER 2 (ship if time permits, ~60 min):
+
+4. P1-5 Factor-validation gate failures are logged as ERROR but they're just gate rejections. 4 per cycle. Reclassify to INFO in autonomous_strategy_manager._activate_alpha_edge (factor gate path).
+
+5. P1-4 MINIMUM_ORDER_SIZE bypasses penalty mechanisms. risk_manager.calculate_position_size Step 11 bumps any sub-$5K position back to $5K even if drawdown sizing, vol scaling, and loser-pair penalty all fired. Track a penalty_applied flag through the function; if True, return 0 instead of bumping.
+
+6. P1-6 Raise log rotation. src/core/logging_config.py — bump main log backup_count 20 → 100. Current window is ~8h of history, too short for DST/incident forensics.
+
+TIER 3 (nice to have):
+
+7. P1-1 DELETE FROM orders WHERE status='FAILED' AND submitted_at < '2026-04-30' AND order_action='entry'. One-off SQL. Cleans up 800 legacy FAILED rows from the Apr 27-29 DST-crash spike.
+
+8. P1-3 Zero-out bad fill_time_seconds: UPDATE orders SET fill_time_seconds = NULL WHERE fill_time_seconds < 0. Legacy data bug; ~44 rows with negative fill times from pre-today compute-quality work.
+
+9. P1-extra Extend crypto WF test window. For 1d crypto templates with expected_holding_period > 30d (21W MA, Vol-Compression, Weekly Trend Follow, Golden Cross), use 730-day test window instead of 180. Currently long-horizon crypto strategies can't produce enough trades in 180d. Add a lookup in strategy_proposer WF dispatch.
+
+KEEP DEFERRED (already in backlog, don't touch):
+
+- Monday Asia Open session template (needs DSL HOUR() support — 2-3h infra work)
+- Vol-Compression template non-propose debug (filed as P2-1)
+- Overview chart panel rewrite (needs design doc first)
+- trade_id convention unification (P1-2, 90 min — pair with next architectural work)
+
+VERIFICATION QUERIES (run these after each Tier 1 fix):
+
+-- After P0-1 retirement fix:
+SELECT COUNT(*) as active_zombies FROM strategies
+WHERE (strategy_metadata::jsonb->>'pending_retirement')::text='true'
+  AND status IN ('DEMO','LIVE');
+-- Target: should trend to 0 over days (positions close → demote)
+
+-- Check no new signals for flagged strategies post-fix:
+SELECT p.name, COUNT(o.id) FILTER (WHERE o.submitted_at > NOW() - INTERVAL '30 minutes' AND o.order_action='entry') as new_zombie_signals
+FROM strategies p LEFT JOIN orders o ON o.strategy_id = p.id
+WHERE (p.strategy_metadata::jsonb->>'pending_retirement')::text='true'
+GROUP BY p.id, p.name HAVING COUNT(o.id) FILTER (WHERE o.submitted_at > NOW() - INTERVAL '30 minutes' AND o.order_action='entry') > 0;
+-- Target: 0 rows
+
+-- After P0-2 live_trade_count fix + backfill:
+SELECT status, COUNT(*), AVG(live_trade_count)::int as avg, MAX(live_trade_count) FROM strategies GROUP BY status;
+-- Target: DEMO strategies with closed trades should have live_trade_count > 0
+
+-- After P0-6 cycle_error:
+SELECT stage, COUNT(*) FROM signal_decisions WHERE timestamp > NOW() - INTERVAL '2 hours' GROUP BY stage;
+-- Target: stages list includes cycle_error if any stage threw in the window
+
+-- Ambient health (run before starting):
+SELECT 'signal_decisions_last_cycle' as m, COUNT(*)::text FROM signal_decisions WHERE timestamp > NOW() - INTERVAL '30 minutes'
+UNION ALL SELECT 'mae_populated_open', COUNT(*)::text FROM trade_journal WHERE exit_time IS NULL AND max_adverse_excursion IS NOT NULL
+UNION ALL SELECT 'pending_retire_zombies', COUNT(*)::text FROM strategies WHERE (strategy_metadata::jsonb->>'pending_retirement')::text='true';
+```
+
 ### P0 — needs verification post-next-cycle (triggered 08:08 UTC May 2)
 - Confirm `signal_decisions` has rows across all 6 primary stages (proposed, wf_validated, activated, signal_emitted, order_submitted, order_filled). SQL: `SELECT stage, COUNT(*) FROM signal_decisions GROUP BY stage;`
 - Confirm System page Observability funnel populates.
