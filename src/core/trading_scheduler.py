@@ -275,20 +275,22 @@ class TradingScheduler:
                 StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
             ).all()
             
-            # Filter BACKTESTED to only those approved for activation
-            # Exclude strategies marked for pending retirement (let positions close via SL/TP)
-            # Exclude strategies marked as superseded (new better version is now active)
-            active_strategies = [
-                s for s in active_strategies
-                if (
-                    s.status in (StrategyStatus.DEMO, StrategyStatus.LIVE)
-                    and not (isinstance(s.strategy_metadata, dict) and s.strategy_metadata.get('pending_retirement'))
-                    and not (isinstance(s.strategy_metadata, dict) and s.strategy_metadata.get('superseded'))
-                )
-                or (s.status == StrategyStatus.BACKTESTED 
-                    and isinstance(s.strategy_metadata, dict) 
-                    and s.strategy_metadata.get('activation_approved'))
-            ]
+            # Filter:
+            # - DEMO/LIVE are actively trading (produce exit signals + new entries)
+            # - BACKTESTED with activation_approved=True are ready to trade (promoted on first fill)
+            # - Exclude pending_retirement or superseded strategies regardless of status —
+            #   they must not generate new entry signals. Existing positions close via SL/TP.
+            def _is_eligible(s):
+                meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
+                if meta.get('pending_retirement') or meta.get('superseded'):
+                    return False
+                if s.status in (StrategyStatus.DEMO, StrategyStatus.LIVE):
+                    return True
+                if s.status == StrategyStatus.BACKTESTED and meta.get('activation_approved'):
+                    return True
+                return False
+
+            active_strategies = [s for s in active_strategies if _is_eligible(s)]
 
             # If specific strategy IDs provided, filter to only those
             if strategy_ids:

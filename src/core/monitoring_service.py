@@ -3375,10 +3375,11 @@ class MonitoringService:
                             meta['pending_retirement'] = True
                             meta['pending_retirement_reason'] = retirement_reason
                             meta['pending_retirement_at'] = datetime.now().isoformat()
+                            # Stop new signal generation by removing activation approval.
+                            # MUST happen before flag_modified so SQLAlchemy captures the pop.
+                            meta.pop('activation_approved', None)
                             strat_orm.strategy_metadata = meta
                             flag_modified(strat_orm, 'strategy_metadata')
-                            # Stop new signal generation by removing activation approval
-                            meta.pop('activation_approved', None)
                         else:
                             # No open positions — demote to BACKTESTED (not permanently retired)
                             # Strategy gets a TTL window to prove itself again in the next cycle
@@ -4203,6 +4204,14 @@ class MonitoringService:
                     pass
 
                 if not has_positions and not has_pending and not has_recent_fill:
+                    # Skip pending_retirement strategies — they must be handled by
+                    # _process_pending_retirements (which does NOT resurrect
+                    # activation_approved). Resurrecting activation_approved here
+                    # allows zombie strategies to re-enter signal generation via
+                    # the BACKTESTED branch of trading_scheduler's filter.
+                    if isinstance(s.strategy_metadata, dict) and s.strategy_metadata.get('pending_retirement'):
+                        continue
+
                     # SAFETY DOUBLE-CHECK: raw SQL query on a fresh connection to
                     # avoid any ORM caching issues that caused false demotions.
                     try:
