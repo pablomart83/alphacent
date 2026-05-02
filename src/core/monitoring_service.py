@@ -1116,6 +1116,12 @@ class MonitoringService:
                 # Binance-first branch for crypto. Process each supported
                 # symbol, write its bars to DB cache, and remove it from
                 # need_list so the Yahoo batch below doesn't re-fetch.
+                #
+                # Crypto window extends further back than the Yahoo-sized
+                # start_dt because Binance serves years of history with no
+                # cap. 2y of 1h = ~17k bars/symbol, 2y of 1d = 730 bars.
+                # These cover at least one full regime cycle for honest WF.
+                _CRYPTO_BINANCE_WINDOW_DAYS = {"1h": 730, "4h": 730, "1d": 730}
                 if _bn_fetch is not None:
                     remaining = []
                     bn_symbols_fetched = 0
@@ -1127,8 +1133,13 @@ class MonitoringService:
                         if not _bn_supported(sym, interval):
                             remaining.append(sym)
                             continue
+                        # Crypto-specific wider window for Binance (not limited
+                        # by the Yahoo-aligned start_dt above).
+                        bn_start = end - timedelta(
+                            days=_CRYPTO_BINANCE_WINDOW_DAYS.get(interval, 180)
+                        )
                         try:
-                            bars = _bn_fetch(sym, start_dt, end, interval)
+                            bars = _bn_fetch(sym, bn_start, end, interval)
                         except _BnErr as be:
                             logger.info(
                                 f"[bg-full-sync] Binance failed for {sym} {interval} "

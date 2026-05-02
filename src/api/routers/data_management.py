@@ -448,7 +448,9 @@ def _run_sync_with_logging(mon) -> None:
                 stats["weekend_skip"] += 1
             else:
                 try:
-                    start_1d = end - timedelta(days=220)
+                    # Crypto widens to 2y (730d) for Binance-backed deep history.
+                    # Non-crypto stays at 220d (Yahoo's reliable 1d reach).
+                    start_1d = end - timedelta(days=730 if is_crypto else 220)
                     # Check if DB already has fresh data (avoid counting cache hits as "synced")
                     db_data = md._get_historical_from_db(symbol, start_1d, end, "1d")
                     if db_data and len(db_data) > 50:
@@ -472,7 +474,9 @@ def _run_sync_with_logging(mon) -> None:
             should_sync_1h = is_always_on or is_market_hours
             if should_sync_1h:
                 try:
-                    start_1h = end - timedelta(days=180)
+                    # Crypto widens to 2y (730d) via Binance. Non-crypto 1h
+                    # caps at 180d regardless — Yahoos hard 7-month limit.
+                    start_1h = end - timedelta(days=730 if is_crypto else 180)
                     # For 1h, check DB freshness (stale if latest bar > 2h old)
                     # Use display symbol for DB lookup (not eToro wire format).
                     db_1h = md._get_historical_from_db(symbol, start_1h, end, "1h")

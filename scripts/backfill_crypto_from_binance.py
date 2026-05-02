@@ -34,11 +34,13 @@ from src.models.orm import HistoricalPriceCacheORM
 CRYPTO_SYMBOLS = ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOT"]
 
 # (interval, days_back) — matches the new WF windows.
-# 730d for 4h → 2190 bars/year * 2 = ~4380 bars per symbol
-# 365d for 1h → 24*365 = 8760 bars per symbol
+# 730d for 4h → ~4380 bars/symbol (2y covers 2 regime cycles)
+# 730d for 1h → ~17500 bars/symbol (2y; Binance pagination handles it in ~18 requests)
+# 730d for 1d → 730 bars/symbol (weekly/monthly strategies need 2y to fit train+test)
 INTERVAL_WINDOWS = [
     ("4h", 730),
-    ("1h", 365),
+    ("1h", 730),
+    ("1d", 730),
 ]
 
 

@@ -1677,10 +1677,19 @@ class StrategyProposer:
 
                     # Per-strategy WF window override:
                     # - long-horizon 1d crypto → 730d (weekly/monthly holds need more data)
-                    # - 1h crypto → 180d/180d (Binance extends 1h coverage to years;
-                    #   keeping some headroom but widening vs the prior 90/90 Yahoo cap)
-                    # - 4h crypto → 365d/365d (Binance serves 4h back to 2018, giving
-                    #   cross-regime training the 180/180 window couldn't). Sprint 4 S4.0
+                    # - 1h crypto → 365d/365d (Binance, Sprint 4 S4.0.3)
+                    # - 4h crypto → 365d/365d (Binance, Sprint 4 S4.0)
+                    # - non-long-horizon 1d crypto → 365d/365d (Sprint 4 S4.0.4;
+                    #   matches 1h/4h now that Binance has 2y of 1d. Was using
+                    #   yaml default 365/180.)
+                    # - non-crypto 1d → 730d/365d (Sprint 4 S4.0.5; Yahoo has
+                    #   decades of 1d history, so widening from yaml default
+                    #   365/180 gives swing templates 12-24 trades in the test
+                    #   window instead of 6-12, crossing Bailey & López de Prado's
+                    #   threshold for reliable Sharpe estimation. 2y train covers
+                    #   at least one regime pair (e.g. 2023 recovery + 2024 rally).
+                    # - non-crypto 1h / 4h stays at yaml default because Yahoo
+                    #   caps 1h/4h at ~7 months; widening would silently truncate.
                     # - everything else uses yaml-configured train/test
                     _wf_train_days = train_days
                     _wf_test_days = test_days
@@ -1707,11 +1716,15 @@ class StrategyProposer:
                                 f"→ test={_wf_test_days}d train={_wf_train_days}d"
                             )
                         elif _is_cr and _interval_ck == '1h':
-                            # Sprint 4 S4.0: Binance lifts the prior 180d Yahoo 1h cap.
-                            # Use 180/180 to keep the split balanced and within what
-                            # Binance can comfortably serve at 1h granularity.
-                            _wf_test_days = 180
-                            _wf_train_days = 180
+                            # Sprint 4 S4.0.3 (2026-05-02): widened from 180/180
+                            # to 365/365. Binance serves 1h crypto back to 2017+
+                            # (24*365*2=17520 bars per symbol for 2y), so 1y/1y
+                            # gives the test window a full year — covers at least
+                            # one regime transition, which 180d couldn't. 2y total
+                            # window gets 2190 bars/symbol/year which is plenty
+                            # for WF stat significance.
+                            _wf_test_days = 365
+                            _wf_train_days = 365
                             _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
                             logger.info(
                                 f"WF window extended for 1h crypto (Binance): {strategy.name} "
@@ -1727,6 +1740,43 @@ class StrategyProposer:
                             _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
                             logger.info(
                                 f"WF window extended for 4h crypto (Binance): {strategy.name} "
+                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
+                            )
+                        elif _is_cr and _interval_ck == '1d':
+                            # Sprint 4 S4.0.4 (2026-05-02): non-long-horizon crypto
+                            # 1d templates (BTC Follower Daily, Cross-Sectional
+                            # Momentum, Donchian Breakout, OBV Accumulation, BB
+                            # Volume Breakout, 20D MA Variable Cross) previously
+                            # used the yaml default 365/180. With Binance now
+                            # giving us 2y of crypto 1d, symmetric 365/365 gets
+                            # better stat-significance on templates that fire
+                            # 1-3x/month (180d test = ~12 trades, 365d = ~24).
+                            _wf_test_days = 365
+                            _wf_train_days = 365
+                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
+                            logger.info(
+                                f"WF window extended for 1d crypto (Binance): {strategy.name} "
+                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
+                            )
+                        elif (not _is_cr) and _interval_ck == '1d':
+                            # Sprint 4 S4.0.5 (2026-05-02): non-crypto 1d
+                            # (equities, ETFs, forex, indices, commodities).
+                            # Yahoo has decades of 1d data; yaml default 365/180
+                            # is a relic of matching crypto's Yahoo cap. A
+                            # 730 train / 365 test window gives:
+                            #   - 1-2 yr of OOS test: 12-24 trades for typical
+                            #     swing templates (was 6-12 trades)
+                            #   - 2 yr train: covers at least one regime pair
+                            #     (bull/correction/sideways)
+                            # Per Bailey & López de Prado (2014), 20-30 OOS
+                            # trades is the floor for a reliable Sharpe estimate.
+                            # 365d test gets us there on typical swing/trend
+                            # templates; 180d didn't.
+                            _wf_test_days = 365
+                            _wf_train_days = 730
+                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
+                            logger.info(
+                                f"WF window widened for non-crypto 1d: {strategy.name} "
                                 f"→ test={_wf_test_days}d train={_wf_train_days}d"
                             )
                     except Exception as _wf_ext_err:
@@ -2644,9 +2694,10 @@ class StrategyProposer:
                             strategy_engine.market_data._historical_memory_cache.clear()
 
                         # Per-strategy WF window override (matches primary WF call above):
-                        # - long-horizon 1d crypto → 730d
-                        # - 1h crypto → 180d/180d (Binance, Sprint 4 S4.0)
+                        # - long-horizon 1d crypto → 730d/730d
+                        # - 1h crypto → 365d/365d (Binance, Sprint 4 S4.0.3)
                         # - 4h crypto → 365d/365d (Binance, Sprint 4 S4.0)
+                        # - non-long-horizon 1d crypto → 365d/365d (S4.0.4)
                         _wl_train_days = train_days
                         _wl_test_days = test_days
                         _wl_start = start_date
@@ -2666,12 +2717,22 @@ class StrategyProposer:
                                 _wl_train_days = 730
                                 _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
                             elif _sym_wl in _CRYPTO_WL and _interval_wl == '1h':
-                                _wl_test_days = 180
-                                _wl_train_days = 180
+                                _wl_test_days = 365
+                                _wl_train_days = 365
                                 _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
                             elif _sym_wl in _CRYPTO_WL and _interval_wl == '4h':
                                 _wl_test_days = 365
                                 _wl_train_days = 365
+                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
+                            elif _sym_wl in _CRYPTO_WL and _interval_wl == '1d':
+                                # Non-long-horizon crypto 1d — symmetric 365/365
+                                _wl_test_days = 365
+                                _wl_train_days = 365
+                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
+                            elif (_sym_wl not in _CRYPTO_WL) and _interval_wl == '1d':
+                                # Non-crypto 1d — 730 train / 365 test (S4.0.5)
+                                _wl_test_days = 365
+                                _wl_train_days = 730
                                 _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
                         except Exception:
                             pass
