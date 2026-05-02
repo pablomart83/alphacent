@@ -1241,29 +1241,101 @@ async def get_symbol_stats(
         ).group_by(PositionORM.symbol).all()
         pos_count_map = {row[0]: row[1] for row in open_positions}
 
+        # ── Lifetime metrics from trade_journal (ground truth) ───────────────
+        # trade_journal survives strategy deletion, so per-symbol totals are
+        # accurate even for symbols whose originating strategy has been retired.
+        from src.analytics.trade_journal import TradeJournalEntryORM
+        from src.models.orm import StrategyProposalORM
+        from sqlalchemy import case as sa_case
+
+        # Aggregate closed trades per symbol: count, sum of pnl, wins.
+        journal_rows = db.query(
+            TradeJournalEntryORM.symbol,
+            sa_func.count(TradeJournalEntryORM.id).label('trades'),
+            sa_func.coalesce(sa_func.sum(TradeJournalEntryORM.pnl), 0.0).label('pnl_sum'),
+            sa_func.sum(
+                sa_case((TradeJournalEntryORM.pnl > 0, 1), else_=0)
+            ).label('wins'),
+        ).filter(
+            TradeJournalEntryORM.pnl.isnot(None)  # closed trades only
+        ).group_by(TradeJournalEntryORM.symbol).all()
+        journal_map = {
+            row.symbol.upper(): {
+                'trades': int(row.trades or 0),
+                'pnl': float(row.pnl_sum or 0.0),
+                'wins': int(row.wins or 0),
+            }
+            for row in journal_rows
+        }
+
+        # Unrealized P&L from currently-open positions, aggregated per symbol.
+        # Combined with journal pnl_sum for "lifetime realised + unrealised".
+        open_pnl_rows = db.query(
+            PositionORM.symbol,
+            sa_func.coalesce(sa_func.sum(PositionORM.unrealized_pnl), 0.0).label('unrl'),
+        ).filter(PositionORM.closed_at.is_(None)).group_by(PositionORM.symbol).all()
+        open_pnl_map = {row.symbol.upper(): float(row.unrl or 0.0) for row in open_pnl_rows}
+
+        # ── Proposal counts from strategy_proposals table ────────────────────
+        # Source of truth for "how many times was this symbol proposed" that
+        # survives strategy retirement/deletion. Iterate proposal rows and
+        # increment per-symbol counters from the JSON symbols snapshot.
+        proposal_count_map: Dict[str, int] = {}
+        try:
+            proposal_rows = db.query(
+                StrategyProposalORM.symbols, StrategyProposalORM.activated
+            ).filter(StrategyProposalORM.symbols.isnot(None)).all()
+            for syms_json, _activated in proposal_rows:
+                if not syms_json:
+                    continue
+                try:
+                    syms_iter = syms_json if isinstance(syms_json, list) else []
+                except Exception:
+                    syms_iter = []
+                for sym in syms_iter:
+                    if not isinstance(sym, str):
+                        continue
+                    key = sym.upper()
+                    proposal_count_map[key] = proposal_count_map.get(key, 0) + 1
+        except Exception as e:
+            logger.debug(f"Could not aggregate strategy_proposals per symbol: {e}")
+
         # Build response
         symbol_responses = []
         for sym in all_symbols:
             ss = symbol_stats.get(sym, {})
             sharpes = ss.get("sharpes", [])
-            win_rates = ss.get("win_rates", [])
             templates_pnl = ss.get("templates_pnl", {})
 
             best_tpl = max(templates_pnl, key=templates_pnl.get) if templates_pnl else None
             worst_tpl = min(templates_pnl, key=templates_pnl.get) if templates_pnl else None
 
+            # Lifetime metrics sourced from ground-truth tables (survive
+            # strategy retirement/deletion).
+            journal = journal_map.get(sym, {})
+            lifetime_trades = journal.get('trades', 0)
+            lifetime_pnl_realised = journal.get('pnl', 0.0)
+            lifetime_pnl = lifetime_pnl_realised + open_pnl_map.get(sym, 0.0)
+            lifetime_wins = journal.get('wins', 0)
+            lifetime_win_rate = (
+                round(lifetime_wins / lifetime_trades, 3) if lifetime_trades else None
+            )
+
             symbol_responses.append(SymbolStatsResponse(
                 symbol=sym,
                 asset_class=asset_class_map.get(sym, "unknown"),
                 sector=get_symbol_sector(sym),
+                # Current-library counters (live strategies only)
                 active_strategies=ss.get("active", 0),
                 activated_count=ss.get("activated", 0),
-                traded_count=ss.get("traded", 0),
                 usage_count=ss.get("total", 0),
+                # Lifetime counters (survive retirement)
+                proposed_count=proposal_count_map.get(sym, 0),
+                traded_count=lifetime_trades,
                 avg_sharpe=round(sum(sharpes) / len(sharpes), 2) if sharpes else None,
-                avg_win_rate=round(sum(win_rates) / len(win_rates), 3) if win_rates else None,
-                total_pnl=round(ss.get("pnl", 0), 2) if ss.get("pnl") else None,
-                total_trades_live=ss.get("trades", 0),
+                avg_win_rate=lifetime_win_rate,
+                total_pnl=round(lifetime_pnl, 2) if (lifetime_trades or open_pnl_map.get(sym, 0.0)) else None,
+                total_trades_live=lifetime_trades,
                 open_positions=pos_count_map.get(sym, 0),
                 best_template=best_tpl,
                 worst_template=worst_tpl,

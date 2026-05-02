@@ -428,7 +428,15 @@ class StateTransitionHistoryORM(Base):
 
 
 class StrategyProposalORM(Base):
-    """Strategy proposal ORM model."""
+    """Strategy proposal ORM model.
+
+    One row per proposal emitted by the autonomous cycle. Survives strategy
+    retirement/deletion, which is the whole point — the `strategies` table is
+    pruned when strategies cycle out, but proposal history is auditable
+    forever. The `symbols` JSON snapshot is critical for per-symbol analytics
+    (Symbols tab) because strategies.symbols disappears when the strategy is
+    deleted.
+    """
     __tablename__ = "strategy_proposals"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -437,7 +445,11 @@ class StrategyProposalORM(Base):
     market_regime = Column(String, nullable=False)
     backtest_sharpe = Column(Float, nullable=True)
     activated = Column(Integer, nullable=False, default=0)
-    
+    # Snapshot of the strategy's symbols list at proposal time. List[str].
+    symbols = Column(JSON, nullable=True)
+    # Snapshot of the originating template name (free-text, e.g. "RSI Dip Buy").
+    template_name = Column(String, nullable=True)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert ORM model to dictionary."""
         return {
@@ -446,7 +458,9 @@ class StrategyProposalORM(Base):
             "proposed_at": self.proposed_at.isoformat() if self.proposed_at else None,
             "market_regime": self.market_regime,
             "backtest_sharpe": self.backtest_sharpe,
-            "activated": bool(self.activated)
+            "activated": bool(self.activated),
+            "symbols": self.symbols or [],
+            "template_name": self.template_name,
         }
 
 

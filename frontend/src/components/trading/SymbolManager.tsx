@@ -19,6 +19,7 @@ interface SymbolData {
   activated_count: number;
   traded_count: number;
   usage_count: number;
+  proposed_count: number;
   avg_sharpe: number | null;
   avg_win_rate: number | null;
   total_pnl: number | null;
@@ -30,7 +31,7 @@ interface SymbolData {
   last_trade: string | null;
 }
 
-type SortField = 'symbol' | 'active_strategies' | 'activated_count' | 'traded_count' | 'usage_count' | 'avg_sharpe' | 'avg_win_rate' | 'total_pnl' | 'open_positions';
+type SortField = 'symbol' | 'proposed_count' | 'open_positions' | 'traded_count' | 'avg_sharpe' | 'avg_win_rate' | 'total_pnl';
 type SortDir = 'asc' | 'desc';
 
 export const SymbolManager: FC = () => {
@@ -39,7 +40,7 @@ export const SymbolManager: FC = () => {
   const [search, setSearch] = useState('');
   const [assetFilter, setAssetFilter] = useState('all');
   const [sectorFilter, setSectorFilter] = useState('all');
-  const [sortField, setSortField] = useState<SortField>('total_pnl');
+  const [sortField, setSortField] = useState<SortField>('traded_count');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [detailSymbol, setDetailSymbol] = useState<SymbolData | null>(null);
 
@@ -91,14 +92,12 @@ export const SymbolManager: FC = () => {
   function getSortValue(s: SymbolData, field: SortField): any {
     switch (field) {
       case 'symbol': return s.symbol.toLowerCase();
-      case 'active_strategies': return s.active_strategies;
-      case 'activated_count': return s.activated_count;
+      case 'proposed_count': return s.proposed_count;
+      case 'open_positions': return s.open_positions;
       case 'traded_count': return s.traded_count;
-      case 'usage_count': return s.usage_count;
       case 'avg_sharpe': return s.avg_sharpe ?? -999;
       case 'avg_win_rate': return s.avg_win_rate ?? -999;
       case 'total_pnl': return s.total_pnl ?? -999;
-      case 'open_positions': return s.open_positions;
       default: return 0;
     }
   }
@@ -202,17 +201,11 @@ export const SymbolManager: FC = () => {
                   </th>
                   <th className="px-3 py-2.5 text-center">Class</th>
                   <th className="px-3 py-2.5 text-center">Sector</th>
+                  <th className="px-3 py-2.5 text-right cursor-pointer select-none" onClick={() => toggleSort('proposed_count')}>
+                    <span className="flex items-center justify-end gap-1">Proposed <SortIcon field="proposed_count" /></span>
+                  </th>
                   <th className="px-3 py-2.5 text-right cursor-pointer select-none" onClick={() => toggleSort('open_positions')}>
-                    <span className="flex items-center justify-end gap-1">Positions <SortIcon field="open_positions" /></span>
-                  </th>
-                  <th className="px-3 py-2.5 text-right cursor-pointer select-none" onClick={() => toggleSort('active_strategies')}>
-                    <span className="flex items-center justify-end gap-1">Active <SortIcon field="active_strategies" /></span>
-                  </th>
-                  <th className="px-3 py-2.5 text-right cursor-pointer select-none" onClick={() => toggleSort('usage_count')}>
-                    <span className="flex items-center justify-end gap-1">Used <SortIcon field="usage_count" /></span>
-                  </th>
-                  <th className="px-3 py-2.5 text-right cursor-pointer select-none" onClick={() => toggleSort('activated_count')}>
-                    <span className="flex items-center justify-end gap-1">Activated <SortIcon field="activated_count" /></span>
+                    <span className="flex items-center justify-end gap-1">Active <SortIcon field="open_positions" /></span>
                   </th>
                   <th className="px-3 py-2.5 text-right cursor-pointer select-none" onClick={() => toggleSort('traded_count')}>
                     <span className="flex items-center justify-end gap-1">Traded <SortIcon field="traded_count" /></span>
@@ -248,19 +241,13 @@ export const SymbolManager: FC = () => {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right">
+                      <span className={cn("font-mono text-xs", s.proposed_count > 0 ? "text-blue-300" : "text-gray-600")}>
+                        {s.proposed_count}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">
                       <span className={cn("font-mono text-xs font-semibold", s.open_positions > 0 ? "text-accent-green" : "text-gray-600")}>
                         {s.open_positions}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <span className={cn("font-mono text-xs", s.active_strategies > 0 ? "text-blue-400" : "text-gray-600")}>
-                        {s.active_strategies}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right font-mono text-xs text-gray-400">{s.usage_count}</td>
-                    <td className="px-3 py-2 text-right">
-                      <span className={cn("font-mono text-xs", s.activated_count > 0 ? "text-blue-400" : "text-gray-600")}>
-                        {s.activated_count}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right">
@@ -316,16 +303,16 @@ export const SymbolManager: FC = () => {
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-xs text-gray-500 uppercase">Open Positions</div>
+                  <div className="text-xs text-gray-500 uppercase">Active (Open)</div>
                   <div className="font-mono text-lg font-bold text-accent-green">{detailSymbol.open_positions}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-xs text-gray-500 uppercase">Active Strategies</div>
-                  <div className="font-mono text-lg font-bold text-blue-400">{detailSymbol.active_strategies}</div>
+                  <div className="text-xs text-gray-500 uppercase">Proposed</div>
+                  <div className="font-mono text-lg font-bold text-blue-300">{detailSymbol.proposed_count}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-xs text-gray-500 uppercase">Avg Sharpe</div>
-                  <div className="font-mono text-lg font-bold text-gray-200">{detailSymbol.avg_sharpe?.toFixed(2) || '—'}</div>
+                  <div className="text-xs text-gray-500 uppercase">Traded (Lifetime)</div>
+                  <div className="font-mono text-lg font-bold text-accent-green">{detailSymbol.traded_count}</div>
                 </div>
                 <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
                   <div className="text-xs text-gray-500 uppercase">Total P&L</div>
@@ -337,24 +324,10 @@ export const SymbolManager: FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 mt-3">
-                <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-xs text-gray-500 uppercase">Used</div>
-                  <div className="font-mono text-sm font-bold text-gray-400">{detailSymbol.usage_count}</div>
-                </div>
-                <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-xs text-gray-500 uppercase">Activated</div>
-                  <div className="font-mono text-sm font-bold text-blue-400">{detailSymbol.activated_count}</div>
-                </div>
-                <div className="bg-dark-bg rounded p-2.5 border border-dark-border">
-                  <div className="text-xs text-gray-500 uppercase">Traded</div>
-                  <div className="font-mono text-sm font-bold text-accent-green">{detailSymbol.traded_count}</div>
-                </div>
-              </div>
-
               <div className="mt-4 space-y-2 text-xs text-gray-500">
-                <div>Win Rate: <span className="text-gray-300 font-mono">{detailSymbol.avg_win_rate !== null ? formatPercentage(detailSymbol.avg_win_rate * 100) : '—'}</span></div>
-                <div>Live Trades: <span className="text-gray-300 font-mono">{detailSymbol.total_trades_live}</span></div>
+                <div>Avg Sharpe (live strategies): <span className="text-gray-300 font-mono">{detailSymbol.avg_sharpe?.toFixed(2) || '—'}</span></div>
+                <div>Win Rate (lifetime): <span className="text-gray-300 font-mono">{detailSymbol.avg_win_rate !== null ? formatPercentage(detailSymbol.avg_win_rate * 100) : '—'}</span></div>
+                <div>Active Strategies: <span className="text-gray-300 font-mono">{detailSymbol.active_strategies}</span> &nbsp;·&nbsp; Total Strategies Ever: <span className="text-gray-300 font-mono">{detailSymbol.usage_count}</span></div>
                 <div>Best Template: <span className="text-accent-green font-mono">{detailSymbol.best_template || '—'}</span></div>
                 <div>Worst Template: <span className="text-accent-red font-mono">{detailSymbol.worst_template || '—'}</span></div>
               </div>

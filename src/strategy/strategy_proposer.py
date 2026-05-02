@@ -520,6 +520,13 @@ class StrategyProposer:
         
         Called from generate_strategies_from_templates after the proposal batch
         is assembled but before WF validation.
+
+        Writes to two stores:
+        1. `config/.proposal_tracker.json` — per-template counter (existing behaviour).
+        2. `strategy_proposals` table — one row per proposal with a snapshot of
+           the symbols list and template name. Survives strategy retirement so
+           per-symbol analytics (Symbols tab "Proposed" column) stay accurate
+           even after strategies are deleted.
         """
         now = datetime.now().isoformat()
         for strategy in strategies:
@@ -537,10 +544,17 @@ class StrategyProposer:
             self._proposal_tracker[tname]['last_proposed'] = now
         self._save_proposal_tracker()
 
+        # Persist to strategy_proposals table (DB) so per-symbol history
+        # survives strategy deletion. Best-effort — never fail the proposer
+        # because of an analytics write.
+        self._persist_proposals_to_db(strategies)
+
     def track_approvals(self, strategies: list):
         """Record that these strategies passed WF and were approved.
         
-        Called after WF validation filters the proposals.
+        Called after WF validation filters the proposals. Marks the matching
+        `strategy_proposals` rows as activated (activated=1) so the
+        activated-count analytics are accurate.
         """
         now = datetime.now().isoformat()
         for strategy in strategies:
@@ -558,9 +572,87 @@ class StrategyProposer:
             self._proposal_tracker[tname]['last_approved'] = now
         self._save_proposal_tracker()
 
+        # Flip `activated` flag on the matching strategy_proposals rows.
+        self._mark_proposals_activated(strategies)
+
     def get_proposal_counts(self) -> Dict[str, Dict]:
         """Return the proposal tracker for the templates API."""
         return dict(self._proposal_tracker)
+
+    def _persist_proposals_to_db(self, strategies: list) -> None:
+        """Write one row per proposal to strategy_proposals.
+
+        Includes a snapshot of the strategy's symbols list + template_name so
+        per-symbol analytics survive strategy retirement/deletion.
+
+        Best-effort — failures are logged at debug and never propagate.
+        """
+        try:
+            from src.models.database import get_database
+            from src.models.orm import StrategyProposalORM
+            from datetime import datetime as _dt
+
+            db = get_database()
+            session = db.get_session()
+            try:
+                now = _dt.now()
+                # Determine current regime once per batch — proposer uses _last_regime.
+                regime_str = str(getattr(self, '_last_regime', '') or 'unknown')
+
+                for strategy in strategies:
+                    try:
+                        syms = list(strategy.symbols) if getattr(strategy, 'symbols', None) else []
+                        meta = getattr(strategy, 'metadata', {}) or {}
+                        tname = meta.get('template_name') or getattr(strategy, 'name', '') or ''
+                        sharpe = None
+                        if hasattr(strategy, 'backtest_results') and strategy.backtest_results:
+                            sharpe = getattr(strategy.backtest_results, 'sharpe_ratio', None)
+
+                        session.add(StrategyProposalORM(
+                            strategy_id=str(getattr(strategy, 'id', '') or ''),
+                            proposed_at=now,
+                            market_regime=regime_str,
+                            backtest_sharpe=sharpe,
+                            activated=0,
+                            symbols=syms,
+                            template_name=tname,
+                        ))
+                    except Exception as row_err:
+                        logger.debug(
+                            f"Could not serialise proposal {getattr(strategy, 'name', '?')} "
+                            f"for DB tracking: {row_err}"
+                        )
+                session.commit()
+            finally:
+                session.close()
+        except Exception as e:
+            logger.debug(f"_persist_proposals_to_db failed (non-fatal): {e}")
+
+    def _mark_proposals_activated(self, strategies: list) -> None:
+        """Mark strategy_proposals rows for these strategies as activated=1.
+
+        Matches by strategy_id. Best-effort — failures never propagate.
+        """
+        try:
+            from src.models.database import get_database
+            from src.models.orm import StrategyProposalORM
+
+            strategy_ids = [str(s.id) for s in strategies if getattr(s, 'id', None)]
+            if not strategy_ids:
+                return
+
+            db = get_database()
+            session = db.get_session()
+            try:
+                session.query(StrategyProposalORM).filter(
+                    StrategyProposalORM.strategy_id.in_(strategy_ids),
+                    StrategyProposalORM.activated == 0,
+                ).update({"activated": 1}, synchronize_session=False)
+                session.commit()
+            finally:
+                session.close()
+        except Exception as e:
+            logger.debug(f"_mark_proposals_activated failed (non-fatal): {e}")
 
     def _load_market_stats_from_disk(self):
         """Load market stats cache from disk if fresh enough (within TTL)."""
