@@ -1035,6 +1035,7 @@ class AutonomousStrategyManager:
                 run.trades_analyzed = stats.get("trades_analyzed", 0)
                 run.template_adjustments = stats.get("template_adjustments", 0)
                 run.proposals_generated = stats.get("proposals_generated", 0)
+                run.proposals_pre_wf = stats.get("proposals_pre_wf", stats.get("proposals_generated", 0))
                 run.proposals_alpha_edge = extra.get("alpha_edge_count", 0)
                 run.proposals_template = extra.get("template_count", 0)
                 run.symbols_checked = extra.get("symbols_checked", 0)
@@ -1225,7 +1226,11 @@ class AutonomousStrategyManager:
                 filters=getattr(self, '_cycle_filters', None)
             )
 
+            # D4: Track both counters so the cycle_runs row reflects reality.
+            # proposals_generated = post-WF proposals (what goes into backtest)
+            # proposals_pre_wf    = raw proposer output (what the proposer emitted)
             stats["proposals_generated"] = len(proposals)
+            stats["proposals_pre_wf"] = getattr(self.strategy_proposer, '_last_pre_wf_count', len(proposals))
 
             for i, strategy in enumerate(proposals, 1):
                 logger.info(

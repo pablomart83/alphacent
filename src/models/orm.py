@@ -917,6 +917,7 @@ class AutonomousCycleRunORM(Base):
     trades_analyzed = Column(Integer, nullable=False, default=0)
     template_adjustments = Column(Integer, nullable=False, default=0)
     proposals_generated = Column(Integer, nullable=False, default=0)
+    proposals_pre_wf = Column(Integer, nullable=False, default=0)  # Raw proposer output pre-WF (added 2026-05-02 D4)
     proposals_alpha_edge = Column(Integer, nullable=False, default=0)
     proposals_template = Column(Integer, nullable=False, default=0)
     symbols_checked = Column(Integer, nullable=False, default=0)
@@ -955,6 +956,7 @@ class AutonomousCycleRunORM(Base):
             "trades_analyzed": self.trades_analyzed,
             "template_adjustments": self.template_adjustments,
             "proposals_generated": self.proposals_generated,
+            "proposals_pre_wf": self.proposals_pre_wf,
             "proposals_alpha_edge": self.proposals_alpha_edge,
             "proposals_template": self.proposals_template,
             "symbols_checked": self.symbols_checked,

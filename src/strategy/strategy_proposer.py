@@ -82,6 +82,11 @@ class StrategyProposer:
         # Key: (template_name, primary_symbol), Value: (wf_results_tuple, timestamp)
         self._wf_results_cache: Dict[Tuple[str, str], Tuple[tuple, float]] = {}
         self._wf_cache_ttl = 172800  # 2 days (was 7 — give templates another shot sooner as data shifts)
+        # Cache schema version (D3): bumped when crypto-relevant config changes
+        # so cached WF results from an older config are rejected automatically.
+        # Compute from a hash of crypto thresholds in yaml; any change produces
+        # a new version and old cache entries become stale on next access.
+        self._wf_cache_schema_version = self._compute_wf_cache_schema_version()
         # WF failed cache: persisted to disk so failures survive restarts.
         # Without this, every restart re-proposes the same combos, re-runs WF,
         # they fail again, wasting compute and blocking new combos from slots.
@@ -94,6 +99,8 @@ class StrategyProposer:
         self._wf_validated: Dict[Tuple[str, str], Dict] = {}  # (template, symbol) -> {sharpe, trades, timestamp}
         self._wf_validated_ttl_days = 14
         self._load_wf_validated_from_disk()
+        # D3: check schema version and invalidate stale crypto cache entries
+        self._apply_wf_schema_version_check()
         # Fundamental scoring cache: caches quarterly data and insider net purchases
         # for AE symbol scoring. TTL 24h to avoid excessive FMP API calls.
         self._fundamental_scoring_cache: Dict[str, Dict] = {}  # symbol -> {data, timestamp}
@@ -492,6 +499,99 @@ class StrategyProposer:
                 json.dump({'entries': entries, 'updated': datetime.now().isoformat()}, f, indent=2)
         except Exception as e:
             logger.debug(f"Could not save WF validated combos: {e}")
+
+    def _compute_wf_cache_schema_version(self) -> str:
+        """Produce a version string from the crypto-relevant config fields.
+
+        When min_return_per_trade, min_trades_crypto_*, per_asset_class transaction
+        costs, or min_sharpe_crypto change in yaml, the hash changes and cached
+        WF results are treated as stale by _wf_cache_is_valid.
+
+        Returns a short hash string (8 chars) or 'default' on load failure.
+        """
+        try:
+            import hashlib
+            import yaml
+            from pathlib import Path
+            path = Path("config/autonomous_trading.yaml")
+            if not path.exists():
+                return "default"
+            with open(path) as f:
+                cfg = yaml.safe_load(f) or {}
+            # Pick only fields that affect crypto WF outcomes
+            keys = {
+                "min_return_per_trade": cfg.get("activation_thresholds", {}).get("min_return_per_trade", {}),
+                "min_trades_crypto_1d": cfg.get("activation_thresholds", {}).get("min_trades_crypto_1d"),
+                "min_trades_crypto_4h": cfg.get("activation_thresholds", {}).get("min_trades_crypto_4h"),
+                "min_trades_crypto_1h": cfg.get("activation_thresholds", {}).get("min_trades_crypto_1h"),
+                "min_sharpe_crypto": cfg.get("activation_thresholds", {}).get("min_sharpe_crypto"),
+                "min_win_rate_crypto": cfg.get("activation_thresholds", {}).get("min_win_rate_crypto"),
+                "tx_crypto": cfg.get("backtest", {}).get("transaction_costs", {}).get("per_asset_class", {}).get("crypto", {}),
+            }
+            s = str(sorted(keys.items()))
+            return hashlib.md5(s.encode()).hexdigest()[:8]
+        except Exception:
+            return "default"
+
+    def _wf_cache_is_valid(self, cached_version: Optional[str]) -> bool:
+        """Check whether a cached WF result is schema-compatible with current config."""
+        if cached_version is None:
+            # Old cache entries without a version — treat as valid (backward compat);
+            # they will expire via TTL or get overwritten on next WF run.
+            return True
+        return cached_version == self._wf_cache_schema_version
+
+    def _apply_wf_schema_version_check(self) -> None:
+        """On startup, compare current schema version to the persisted version.
+        If they differ, invalidate crypto entries in both in-memory and on-disk
+        WF caches so next cycle retests under new thresholds. Persists the
+        new version so we only do this once per config change.
+        """
+        try:
+            import json
+            from pathlib import Path
+            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+            _CRYPTO = set(DEMO_ALLOWED_CRYPTO)
+            version_path = Path("config/.wf_cache_schema_version")
+            persisted = version_path.read_text().strip() if version_path.exists() else None
+            current = self._wf_cache_schema_version
+            if persisted == current:
+                return  # nothing to do
+            # Version mismatch — clear crypto entries from both caches
+            in_mem_removed = 0
+            for key in list(self._wf_results_cache.keys()):
+                if len(key) >= 2 and key[1].upper() in _CRYPTO:
+                    del self._wf_results_cache[key]
+                    in_mem_removed += 1
+            # Clear persisted crypto entries in .wf_validated_combos.json /
+            # .wf_failed_cache.json (mirror scripts/clear_crypto_wf_cache.py)
+            for cache_file in ["config/.wf_validated_combos.json", "config/.wf_failed_cache.json"]:
+                p = Path(cache_file)
+                if not p.exists():
+                    continue
+                try:
+                    with open(p) as f:
+                        data = json.load(f)
+                    entries = data.get("entries", [])
+                    kept = [e for e in entries if not (
+                        len((e.get("key") or [None, None])) > 1
+                        and (e["key"][1] or "").upper() in _CRYPTO
+                    )]
+                    if len(kept) != len(entries):
+                        data["entries"] = kept
+                        with open(p, "w") as f:
+                            json.dump(data, f, indent=2)
+                except Exception:
+                    pass
+            # Persist new version
+            version_path.parent.mkdir(parents=True, exist_ok=True)
+            version_path.write_text(current)
+            logger.info(
+                f"WF cache schema version changed ({persisted} → {current}): "
+                f"cleared {in_mem_removed} in-memory crypto entries + persisted caches"
+            )
+        except Exception as e:
+            logger.debug(f"WF schema version check failed: {e}")
 
     def _load_wf_failed_from_disk(self):
         """Load WF failed cache from disk, expiring entries older than TTL.
@@ -1575,9 +1675,11 @@ class StrategyProposer:
                     if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
                         strategy_engine.market_data._historical_memory_cache.clear()
 
-                    # Per-strategy WF window override: long-horizon 1d crypto
-                    # templates can't produce enough trades in a 180-day test
-                    # window. Extend to 730d for templates that hold weeks/months.
+                    # Per-strategy WF window override:
+                    # - long-horizon 1d crypto → 730d (weekly/monthly holds need more data)
+                    # - 1h crypto → 90d/90d (1h cache only goes back ~180d; split it)
+                    # - 4h crypto → 180d/180d (4h cache goes back ~14mo; use the full window)
+                    # - everything else uses yaml-configured train/test
                     _wf_train_days = train_days
                     _wf_test_days = test_days
                     _wf_start = start_date
@@ -1600,6 +1702,24 @@ class StrategyProposer:
                             _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
                             logger.info(
                                 f"WF window extended for long-horizon crypto: {strategy.name} "
+                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
+                            )
+                        elif _is_cr and _interval_ck == '1h':
+                            # 1h cache horizon is ~180d; split 90/90 for train/test
+                            _wf_test_days = 90
+                            _wf_train_days = 90
+                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
+                            logger.info(
+                                f"WF window tightened for 1h crypto: {strategy.name} "
+                                f"→ test={_wf_test_days}d train={_wf_train_days}d (1h cache limit)"
+                            )
+                        elif _is_cr and _interval_ck == '4h':
+                            # 4h cache goes back ~14mo; use 180/180
+                            _wf_test_days = 180
+                            _wf_train_days = 180
+                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
+                            logger.info(
+                                f"WF window tuned for 4h crypto: {strategy.name} "
                                 f"→ test={_wf_test_days}d train={_wf_train_days}d"
                             )
                     except Exception as _wf_ext_err:
@@ -2185,7 +2305,10 @@ class StrategyProposer:
                         if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
                             strategy_engine.market_data._historical_memory_cache.clear()
 
-                        # Per-strategy WF window override (matches primary WF call above)
+                        # Per-strategy WF window override (matches primary WF call above):
+                        # - long-horizon 1d crypto → 730d
+                        # - 1h crypto → 90d/90d (1h cache limit)
+                        # - 4h crypto → 180d/180d
                         _wl_train_days = train_days
                         _wl_test_days = test_days
                         _wl_start = start_date
@@ -2203,6 +2326,14 @@ class StrategyProposer:
                             if _sym_wl in _CRYPTO_WL and _interval_wl == '1d' and template_name in _LONG_HORIZON_WL:
                                 _wl_test_days = 730
                                 _wl_train_days = 730
+                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
+                            elif _sym_wl in _CRYPTO_WL and _interval_wl == '1h':
+                                _wl_test_days = 90
+                                _wl_train_days = 90
+                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
+                            elif _sym_wl in _CRYPTO_WL and _interval_wl == '4h':
+                                _wl_test_days = 180
+                                _wl_train_days = 180
                                 _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
                         except Exception:
                             pass
@@ -4162,7 +4293,11 @@ Generate a CORRECTED strategy that addresses all errors:"""
             f"({len(strategies) - alpha_edge_count} DSL + {alpha_edge_count} Alpha Edge, "
             f"target was {adjusted_count})"
         )
-        
+        # D4: expose the pre-WF proposer count on the instance so the cycle
+        # recorder can report "the proposer emitted N combos" vs "N post-WF".
+        # This is what the user expects to see in the cycle_runs row.
+        self._last_pre_wf_count = len(strategies)
+
         return strategies
     
     def _create_parameter_variation(self, template: StrategyTemplate, variation_number: int) -> Dict:
