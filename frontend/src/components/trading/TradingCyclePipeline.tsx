@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { Button } from '../ui/Button';
 import { SectionLabel } from '../ui/SectionLabel';
 import { cn } from '../../lib/utils';
+import { utcToLocal } from '../../lib/date-utils';
 import { wsManager } from '../../services/websocket';
 import { apiClient } from '../../services/api';
 
@@ -532,7 +533,7 @@ const CycleSummaryCard: FC<{ stages: Record<string, StageState> }> = ({ stages }
 const CycleHistoryRow: FC<{ run: CycleRun; selected: boolean; onToggle: () => void }> = ({ run, selected, onToggle }) => {
   const isSuccess = run.status === 'completed';
   const isError = run.status === 'error';
-  const startDate = new Date(run.started_at);
+  const startDate = utcToLocal(run.started_at);
   const timeAgo = getTimeAgo(startDate);
 
   const formatDuration = (seconds: number | null): string => {

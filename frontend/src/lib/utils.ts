@@ -87,7 +87,16 @@ export function formatTimestamp(
 
   let date: Date;
   try {
-    date = dateInput instanceof Date ? dateInput : new Date(dateInput);
+    if (dateInput instanceof Date) {
+      date = dateInput;
+    } else {
+      // Backend emits naive UTC ISO strings (no tz suffix). JS Date() would
+      // parse those as LOCAL time, causing N-hour drift where N = local UTC
+      // offset. Append Z if no timezone indicator present.
+      const str = String(dateInput).trim();
+      const hasTz = str.endsWith('Z') || str.endsWith('z') || /[+-]\d{2}:?\d{2}$/.test(str);
+      date = new Date(hasTz ? str : str + 'Z');
+    }
     if (isNaN(date.getTime())) {
       return String(dateInput);
     }
