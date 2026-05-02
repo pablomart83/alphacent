@@ -2155,6 +2155,38 @@ class StrategyProposer:
                 test_trades = wf['test_results'].total_trades if wf.get('test_results') else 0
                 min_win_rate = thresholds['min_win_rate']
 
+                # Sprint 5 observability (2026-05-02 cycle_1777752044 audit):
+                # Compute edge_ratio for visibility only — does NOT gate any
+                # acceptance decision. Purpose: surface the gross-per-trade vs
+                # cost-per-trade ratio on the Data Page so we can see which
+                # strategies have Sharpe-inflated but economically thin edge,
+                # without changing which strategies validate.
+                #
+                # S3.0b already loosened crypto gates explicitly for DEMO
+                # signal-data collection; layering a strict edge-ratio filter
+                # here would contradict that choice. Instead, persist the
+                # metric and let the Data Page show it.
+                from src.strategy.cost_model import edge_ratio as _edge_ratio_fn
+                _tr = wf.get('test_results')
+                _gross = float(getattr(_tr, 'gross_return', 0.0) or 0.0) if _tr else 0.0
+                if _gross == 0.0 and _tr is not None:
+                    _gross = float(getattr(_tr, 'total_return', 0.0) or 0.0) + float(
+                        getattr(_tr, 'transaction_costs_pct', 0.0) or 0.0
+                    )
+                _primary_sym = s.symbols[0] if s.symbols else ''
+                _strat_interval = (s.metadata or {}).get('interval', '1d')
+                _er, _gpt, _rtc = _edge_ratio_fn(
+                    _gross, test_trades, _primary_sym, _strat_interval
+                )
+                # Informational log when edge is economically thin. No gate
+                # effect — purely for funnel observability.
+                if test_trades > 0 and _er < 1.0:
+                    logger.info(
+                        f"  Edge-ratio thin: {s.name} — gross/trade={_gpt:.3%}, "
+                        f"cost/trade={_rtc:.3%}, edge_ratio={_er:.2f} "
+                        f"(below break-even, not filtered — recorded for Data Page)"
+                    )
+
                 # Strategy-type-aware win rate: trend-following strategies (EMA crossover,
                 # ATR, ADX, MACD momentum) have inherently lower win rates with higher R:R.
                 # A 30% WR with Sharpe 1.5 is a valid trend profile — don't reject it with
@@ -2193,6 +2225,9 @@ class StrategyProposer:
                         "test_win_rate": test_win_rate,
                         "test_trades": test_trades,
                         "min_sharpe": min_sharpe,
+                        "gross_per_trade": _gpt,
+                        "cost_per_trade": _rtc,
+                        "edge_ratio": _er,
                     },
                 }
 
@@ -2210,7 +2245,7 @@ class StrategyProposer:
                                            "score": tes, "reason": "test_dominant"})
                     logger.info(
                         f"  Passed on strong test Sharpe: {s.name} "
-                        f"(train={ts:.2f}, test={tes:.2f}, threshold={min_sharpe})"
+                        f"(train={ts:.2f}, test={tes:.2f}, threshold={min_sharpe}, edge_ratio={_er:.2f})"
                     )
                 # Fallback for excellent OOS performers with negative train Sharpe.
                 # Train period may have had an adverse regime for this strategy type.
@@ -2221,7 +2256,8 @@ class StrategyProposer:
                                            "score": tes, "reason": "excellent_oos"})
                     logger.info(
                         f"  Passed on excellent OOS performance: {s.name} "
-                        f"(train={ts:.2f}, test={tes:.2f}, test_trades={test_trades}, threshold={min_sharpe})"
+                        f"(train={ts:.2f}, test={tes:.2f}, test_trades={test_trades}, "
+                        f"threshold={min_sharpe}, edge_ratio={_er:.2f})"
                     )
                 elif is_short and ts >= -0.3 and tes >= min_sharpe * 2:
                     _decision_rows.append({**_row_base, "stage": "wf_rejected", "decision": "rejected",

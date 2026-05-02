@@ -1134,6 +1134,53 @@ class PortfolioManager:
                 logger.info(f"Strategy {strategy.name} failed activation: {reason}")
                 return False, reason
 
+            # Sprint 5 observability (2026-05-02 cycle_1777752044 audit):
+            # Compute edge_ratio for this strategy's test backtest and persist
+            # it on strategy.strategy_metadata. Does NOT gate activation.
+            #
+            # Why observability-only: Sprint 3 S3.0b already deliberately
+            # loosened crypto activation thresholds for DEMO signal-data
+            # collection (min_return_per_trade_crypto_1d/4h/1h 0.035→0.030).
+            # Adding an edge-ratio filter on top would undo that choice. The
+            # right place to escalate to a gate is a deliberate Sprint 5
+            # decision; here we make the metric visible so the team can see
+            # which strategies carry Sharpe-inflated but economically thin
+            # edge (high Sharpe, gross-per-trade << cost-per-trade).
+            try:
+                from src.strategy.cost_model import edge_ratio as _edge_ratio_fn
+                _gross_act = float(getattr(backtest_results, 'gross_return', 0.0) or 0.0)
+                if _gross_act == 0.0:
+                    _gross_act = float(net_return) + float(
+                        getattr(backtest_results, 'transaction_costs_pct', 0.0) or 0.0
+                    )
+                _er_act, _gpt_act, _rtc_act = _edge_ratio_fn(
+                    _gross_act,
+                    backtest_results.total_trades,
+                    primary_symbol,
+                    (strategy.metadata or {}).get('interval', '1d') if hasattr(strategy, 'metadata') else '1d',
+                    asset_class,
+                )
+                # Persist edge-ratio metrics on the strategy for Data Page /
+                # analytics observability. Non-fatal if the metadata field
+                # is not a dict (legacy rows).
+                try:
+                    if hasattr(strategy, 'strategy_metadata') and isinstance(strategy.strategy_metadata, dict):
+                        strategy.strategy_metadata['edge_ratio'] = round(_er_act, 3)
+                        strategy.strategy_metadata['gross_per_trade'] = round(_gpt_act, 5)
+                        strategy.strategy_metadata['cost_per_trade'] = round(_rtc_act, 5)
+                except Exception:
+                    pass
+                # Informational log only — no activation gate.
+                if backtest_results.total_trades > 0 and _er_act < 1.0:
+                    logger.info(
+                        f"  Edge-ratio thin at activation: {strategy.name} — "
+                        f"gross/trade={_gpt_act:.3%}, cost/trade={_rtc_act:.3%}, "
+                        f"edge_ratio={_er_act:.2f} (below break-even pre-cost, "
+                        f"recorded for observability)"
+                    )
+            except Exception as _er_err:
+                logger.debug(f"Edge-ratio observability failed for {strategy.name}: {_er_err}")
+
             # Minimum return-per-trade check: filters out strategies that churn
             # with tiny edge. A strategy with 10 trades and 0.5% total return
             # has 0.05% per trade — that's noise, not edge.
@@ -1187,7 +1234,7 @@ class PortfolioManager:
 
             logger.info(
                 f"Cost check passed: net={net_return:.2%}, rpt={backtest_results.total_return/max(backtest_results.total_trades,1):.3%}, "
-                f"asset_class={asset_class}, round_trip={round_trip_cost:.4%}"
+                f"asset_class={asset_class}, edge_ratio={locals().get('_er_act', 0.0):.2f}"
             )
         except Exception as e:
             logger.debug(f"Could not check net-of-costs return: {e}")
