@@ -28,6 +28,8 @@ activation_thresholds:
   min_trades_dsl: 8             # Was 15 — too strict; selective 1d strategies fire 6-10x/6mo
   min_trades_dsl_1h: 15          # Was 20 — 1h strategies with 15+ trades in 180d test window is sufficient
   min_trades_dsl_4h: 8          # Was 12 — 4h strategies in 180-day test window: 8 is sufficient
+  min_trades_crypto_1d: 4       # Added 2026-05-02 — weekly/swing crypto templates produce 3-7 trades in 120d (thin liquidity); paired with min_sharpe_crypto=0.5 floor
+  min_trades_crypto_4h: 4       # Added 2026-05-02 — same rationale for 4H crypto templates
   min_trades_commodity: 6       # Was 8 — commodities are inherently lower frequency
   min_return_per_trade:
     stock: 0.0015       # daily: ~7-30 day holds

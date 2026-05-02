@@ -959,18 +959,26 @@ class PortfolioManager:
         
 
         # Check minimum number of trades — interval-aware and asset-class-aware thresholds
-        # 4H strategies and commodities produce fewer trades by nature.
-        # Detect if primary symbol is a commodity
+        # 4H strategies and commodities produce fewer trades by nature. Crypto
+        # weekly/swing templates fire 3-7x in 120d due to thin bar counts — get
+        # their own tier (4) paired with the min_sharpe_crypto floor.
         is_commodity = False
+        is_crypto = False
         try:
-            from src.core.tradeable_instruments import DEMO_ALLOWED_COMMODITIES
+            from src.core.tradeable_instruments import DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_CRYPTO
             if hasattr(strategy, 'symbols') and strategy.symbols:
-                is_commodity = strategy.symbols[0].upper() in set(DEMO_ALLOWED_COMMODITIES)
+                _primary = strategy.symbols[0].upper()
+                is_commodity = _primary in set(DEMO_ALLOWED_COMMODITIES)
+                is_crypto = _primary in set(DEMO_ALLOWED_CRYPTO)
         except ImportError:
             pass
 
         if is_commodity:
             min_trades_required = config_thresholds.get('min_trades_commodity', 2)
+        elif is_crypto and interval == '4h':
+            min_trades_required = config_thresholds.get('min_trades_crypto_4h', 4)
+        elif is_crypto:
+            min_trades_required = config_thresholds.get('min_trades_crypto_1d', 4)
         elif interval in ('4h',):
             min_trades_required = config_thresholds.get('min_trades_dsl_4h', config_thresholds.get('min_trades_4h', 3))
         elif interval in ('1h', '2h'):

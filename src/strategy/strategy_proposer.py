@@ -1614,6 +1614,13 @@ class StrategyProposer:
                         pass
                     if _is_commodity:
                         _min_trades = _at_cfg.get('min_trades_commodity', 8)
+                    elif _is_crypto and _interval == '4h':
+                        # Crypto 4H: thin-sample swing templates. Lower floor
+                        # paired with min_sharpe_crypto=0.5 is the right tier.
+                        _min_trades = _at_cfg.get('min_trades_crypto_4h', 4)
+                    elif _is_crypto:
+                        # Crypto 1D / other: weekly/swing templates fire 3-7x in 120d.
+                        _min_trades = _at_cfg.get('min_trades_crypto_1d', 4)
                     elif _interval == '1h':
                         _min_trades = _at_cfg.get('min_trades_dsl_1h', 20)
                     elif _interval == '4h':
