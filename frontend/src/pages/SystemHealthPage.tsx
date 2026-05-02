@@ -79,9 +79,8 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
   const sideMetrics: CompactMetric[] = useMemo(() => {
     const errorRate = data?.etoro_api?.error_rate_5m;
     const avgResponse = data?.etoro_api?.avg_response_ms;
-    const cacheHit = data?.cache_stats
-      ? ((data.cache_stats.order_cache_hit_rate + data.cache_stats.position_cache_hit_rate + data.cache_stats.historical_cache_hit_rate) / 3)
-      : null;
+    const gatesBlocking = (data?.trading_gates ?? []).filter((g) => g.blocking).length;
+    const openCBs = (data?.circuit_breakers ?? []).filter((cb) => cb.state === 'OPEN' || cb.state === 'open').length;
 
     return [
       {
@@ -103,10 +102,10 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
         color: avgResponse != null ? (avgResponse > 2000 ? '#eab308' : undefined) : undefined,
       },
       {
-        label: 'Cache Hit',
-        value: cacheHit != null ? `${(cacheHit * 100).toFixed(0)}%` : '—',
-        trend: cacheHit != null ? (cacheHit > 0.8 ? 'up' as const : cacheHit > 0.5 ? 'neutral' as const : 'down' as const) : 'neutral' as const,
-        color: cacheHit != null ? (cacheHit > 0.8 ? '#22c55e' : cacheHit > 0.5 ? '#eab308' : '#ef4444') : undefined,
+        label: 'Blockers',
+        value: `${gatesBlocking + openCBs}`,
+        trend: (gatesBlocking + openCBs) === 0 ? 'up' as const : 'neutral' as const,
+        color: (gatesBlocking + openCBs) > 2 ? '#ef4444' : (gatesBlocking + openCBs) > 0 ? '#eab308' : '#22c55e',
       },
     ];
   }, [data]);
@@ -229,7 +228,7 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                 <span className="text-xs text-gray-500 tracking-wide font-medium">Background Threads</span>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                   {['quick_price_update', 'full_price_sync'].map((key) => {
-                    const thread = (data as any)?.[key] ?? (data as any)?.background_threads?.[key];
+                    const thread = data.background_threads?.[key];
                     return (
                       <div key={key} className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
                         <p className="text-xs font-mono mb-1" style={{ color: 'var(--color-text-primary)' }}>
@@ -242,11 +241,11 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                           </div>
                           <div>
                             <p style={{ color: 'var(--color-text-secondary)' }}>Duration</p>
-                            <p className="font-mono" style={{ color: 'var(--color-text-primary)' }}>{thread?.duration_s != null ? `${thread.duration_s}s` : '—'}</p>
+                            <p className="font-mono" style={{ color: 'var(--color-text-primary)' }}>{thread?.duration_s != null ? `${thread.duration_s.toFixed(1)}s` : '—'}</p>
                           </div>
                           <div>
                             <p style={{ color: 'var(--color-text-secondary)' }}>Symbols</p>
-                            <p className="font-mono" style={{ color: 'var(--color-text-primary)' }}>{thread?.symbols_updated ?? thread?.symbols_synced ?? '—'}</p>
+                            <p className="font-mono" style={{ color: 'var(--color-text-primary)' }}>{thread?.symbols_updated ?? '—'}</p>
                           </div>
                         </div>
                       </div>
@@ -255,34 +254,126 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                 </div>
               </div>
 
+              {/* Observability Summary (2026-05-02 TSLA audit follow-up) */}
+              {data.observability && (
+                <div className="rounded-lg border p-3" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-500 tracking-wide font-medium">Observability</span>
+                    <span className="text-[8px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      signal_decisions · MAE · WF drift · opp-cost
+                    </span>
+                  </div>
+
+                  {/* Top metric tiles */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                      <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>MAE-tracked symbols</p>
+                      <p className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                        {data.observability.mae_symbols_tracked ?? 0}
+                      </p>
+                    </div>
+                    <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                      <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>WF ↔ live divergence</p>
+                      <p className="text-xs font-mono" style={{ color: (data.observability.wf_live_divergence_count ?? 0) > 5 ? '#eab308' : 'var(--color-text-primary)' }}>
+                        {data.observability.wf_live_divergence_count ?? 0} strategies
+                      </p>
+                    </div>
+                    <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                      <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>Exec 10m · submitted</p>
+                      <p className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                        {data.observability.exec_summary_10m?.order_submitted ?? 0}
+                      </p>
+                    </div>
+                    <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                      <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>Exec 10m · gates blocked</p>
+                      <p className="text-xs font-mono" style={{ color: (data.observability.exec_summary_10m?.gate_blocked ?? 0) > 0 ? '#eab308' : 'var(--color-text-primary)' }}>
+                        {data.observability.exec_summary_10m?.gate_blocked ?? 0}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Decision funnel */}
+                  {(data.observability.funnel ?? []).length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[8px] mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                        30-day decision funnel
+                      </p>
+                      <div className="grid grid-cols-6 gap-1">
+                        {data.observability.funnel.map((stage) => (
+                          <div key={stage.stage} className="rounded p-1.5 text-center" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                            <p className="text-[8px] truncate" style={{ color: 'var(--color-text-secondary)' }}>{stage.stage.replace('_', ' ')}</p>
+                            <p className="text-xs font-mono font-semibold" style={{ color: 'var(--color-text-primary)' }}>{stage.count}</p>
+                            {stage.drop_from_prev != null && stage.drop_from_prev > 0 && (
+                              <p className="text-[8px]" style={{ color: stage.drop_from_prev > 0.7 ? '#eab308' : 'var(--color-text-secondary)' }}>
+                                -{(stage.drop_from_prev * 100).toFixed(0)}%
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Top opportunity-cost symbols */}
+                  {(data.observability.opportunity_cost_top ?? []).length > 0 && (
+                    <div className="mt-3">
+                      <p className="text-[8px] mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                        Top 5 missed alpha (symbol forward return − captured)
+                      </p>
+                      <div className="space-y-0.5">
+                        {data.observability.opportunity_cost_top.slice(0, 5).map((s) => (
+                          <div key={s.symbol} className="flex items-center justify-between rounded px-2 py-1" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                            <span className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>{s.symbol}</span>
+                            <div className="flex items-center gap-3 text-xs font-mono">
+                              <span style={{ color: 'var(--color-text-secondary)' }}>fwd {s.symbol_fwd_return_pct >= 0 ? '+' : ''}{s.symbol_fwd_return_pct}%</span>
+                              <span style={{ color: 'var(--color-text-secondary)' }}>cap {s.captured_pct >= 0 ? '+' : ''}{s.captured_pct}%</span>
+                              <span style={{ color: s.opportunity_cost_pct > 5 ? '#eab308' : 'var(--color-text-primary)' }}>
+                                {s.opportunity_cost_pct >= 0 ? '+' : ''}{s.opportunity_cost_pct}%
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Cache Statistics */}
               <div className="rounded-lg border p-3" style={{ backgroundColor: 'var(--color-dark-surface)', borderColor: 'var(--color-dark-border)' }}>
-                <span className="text-xs text-gray-500 tracking-wide font-medium">Cache Statistics</span>
+                <span className="text-xs text-gray-500 tracking-wide font-medium">Cache Status</span>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
-                  {[
-                    { label: 'Order Cache', value: data.cache_stats?.order_cache_hit_rate, fmt: (v: number) => `${(v * 100).toFixed(1)}%` },
-                    { label: 'Position Cache', value: data.cache_stats?.position_cache_hit_rate, fmt: (v: number) => `${(v * 100).toFixed(1)}%` },
-                    { label: 'Historical Cache', value: data.cache_stats?.historical_cache_hit_rate, fmt: (v: number) => `${(v * 100).toFixed(1)}%` },
-                    { label: 'FMP Warm', value: null, custom: true },
-                  ].map(({ label, value, fmt, custom }) => (
-                    <div key={label} className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
-                      <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>{label}</p>
-                      {custom ? (
-                        <div>
-                          <p className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>
-                            {data.cache_stats?.fmp_cache_warm_status?.last_warm_time ? formatAge(data.cache_stats.fmp_cache_warm_status.last_warm_time) : '—'}
-                          </p>
-                          <p className="text-[8px] mt-0.5 font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                            API: {data.cache_stats?.fmp_cache_warm_status?.symbols_from_api ?? 0} / Cache: {data.cache_stats?.fmp_cache_warm_status?.symbols_from_cache ?? 0}
-                          </p>
-                        </div>
-                      ) : (
-                        <p className="text-xs font-mono" style={{ color: value != null && value > 0.8 ? '#22c55e' : value != null && value > 0.5 ? '#eab308' : 'var(--color-text-primary)' }}>
-                          {value != null ? fmt!(value) : '—'}
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                  <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>Order Cache</p>
+                    <p className="text-xs font-mono" style={{ color: (data.cache_stats?.order_cache_hit_rate ?? 0) > 0 ? '#22c55e' : 'var(--color-text-secondary)' }}>
+                      {(data.cache_stats?.order_cache_hit_rate ?? 0) > 0 ? 'Warm' : 'Cold'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>Position Cache</p>
+                    <p className="text-xs font-mono" style={{ color: (data.cache_stats?.position_cache_hit_rate ?? 0) > 0 ? '#22c55e' : 'var(--color-text-secondary)' }}>
+                      {(data.cache_stats?.position_cache_hit_rate ?? 0) > 0 ? 'Warm' : 'Cold'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>Historical Cache</p>
+                    <p className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                      {((data.cache_stats?.historical_cache_hit_rate ?? 0) * 100).toFixed(0)}% full
+                    </p>
+                  </div>
+                  <div className="rounded-lg p-2" style={{ backgroundColor: 'var(--color-dark-bg)' }}>
+                    <p className="text-[8px] mb-0.5" style={{ color: 'var(--color-text-secondary)' }}>FMP Warm</p>
+                    <p className="text-xs font-mono" style={{ color: 'var(--color-text-primary)' }}>
+                      {data.cache_stats?.fmp_cache_warm_status?.last_warm_time
+                        ? formatAge(data.cache_stats.fmp_cache_warm_status.last_warm_time)
+                        : 'never'}
+                    </p>
+                    {(data.cache_stats?.fmp_cache_warm_status?.symbols_from_api ?? 0) + (data.cache_stats?.fmp_cache_warm_status?.symbols_from_cache ?? 0) > 0 && (
+                      <p className="text-[8px] mt-0.5 font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                        API: {data.cache_stats?.fmp_cache_warm_status?.symbols_from_api ?? 0} / Cache: {data.cache_stats?.fmp_cache_warm_status?.symbols_from_cache ?? 0}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             </>
@@ -299,6 +390,50 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
         <div className="flex flex-col gap-1 p-1.5 h-full">
           {/* CompactMetricRow: uptime, error rate, response, cache hit */}
           <CompactMetricRow metrics={sideMetrics} />
+
+          {/* Trading Gates — every blocker that can prevent a trade, at a glance */}
+          <div className="border border-[var(--color-dark-border)] rounded-lg p-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-500 tracking-wide font-medium">Trading Gates</span>
+              <span className="text-[8px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {(data?.trading_gates ?? []).filter((g) => g.blocking).length} blocking
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-1.5">
+              {(data?.trading_gates ?? []).length === 0 && (
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>No trading-gate data.</p>
+              )}
+              {(data?.trading_gates ?? []).map((g) => (
+                <div
+                  key={g.name}
+                  className="rounded-lg p-2 border"
+                  style={{
+                    backgroundColor: g.blocking ? 'rgba(234, 179, 8, 0.06)' : 'rgba(34, 197, 94, 0.04)',
+                    borderColor: g.blocking ? 'rgba(234, 179, 8, 0.3)' : 'rgba(34, 197, 94, 0.2)',
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${g.blocking ? 'bg-amber-400 animate-pulse' : 'bg-green-400'}`} />
+                    <span className="text-xs font-mono font-semibold capitalize" style={{ color: 'var(--color-text-primary)' }}>
+                      {g.name.replace(/_/g, ' ')}
+                    </span>
+                    <span className={`ml-auto text-[8px] font-mono px-1.5 py-0.5 rounded ${
+                      g.blocking
+                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        : 'bg-green-500/10 text-green-400 border border-green-500/20'
+                    }`}>
+                      {g.blocking ? 'BLOCKING' : 'CLEAR'}
+                    </span>
+                  </div>
+                  {g.detail && (
+                    <p className="text-[8px] mt-1 font-mono truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                      {g.detail}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Circuit Breaker Cards — prominent, color-coded */}
           <div className="border border-[var(--color-dark-border)] rounded-lg p-3">

@@ -15,6 +15,41 @@ export interface SubTask {
   interval_seconds: number;
 }
 
+export interface BackgroundThread {
+  last_run: string | null;
+  duration_s: number | null;
+  symbols_updated: number | null;
+  errors: number;
+}
+
+export interface TradingGate {
+  name: string;
+  armed: boolean;
+  blocking: boolean;
+  detail: string | null;
+}
+
+export interface DecisionFunnelStage {
+  stage: string;
+  count: number;
+  drop_from_prev: number | null;
+}
+
+export interface ObservabilitySummary {
+  funnel: DecisionFunnelStage[];
+  opportunity_cost_top: Array<{
+    symbol: string;
+    trades: number;
+    lifetime_pnl: number;
+    symbol_fwd_return_pct: number;
+    captured_pct: number;
+    opportunity_cost_pct: number;
+  }>;
+  wf_live_divergence_count: number;
+  mae_symbols_tracked: number;
+  exec_summary_10m: Record<string, number>;
+}
+
 export interface SystemHealthData {
   circuit_breakers: CircuitBreaker[];
   monitoring_service: {
@@ -49,6 +84,10 @@ export interface SystemHealthData {
     description: string;
     severity: 'info' | 'warning' | 'error';
   }>;
+  // New sections (2026-05-02 observability work)
+  background_threads: Record<string, BackgroundThread>;
+  trading_gates: TradingGate[];
+  observability: ObservabilitySummary;
 }
 
 interface SystemHealthState {

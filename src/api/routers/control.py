@@ -6,7 +6,7 @@ Validates: Requirements 11.5, 11.11, 11.12, 16.12
 """
 
 import logging
-from typing import Optional, List
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -1486,6 +1486,38 @@ class SystemEvent(BaseModel):
     severity: str = "info"
 
 
+class BackgroundThreadStatus(BaseModel):
+    """Background thread status (quick price update / full price sync)."""
+    last_run: Optional[str] = None
+    duration_s: Optional[float] = None
+    symbols_updated: Optional[int] = None
+    errors: int = 0
+
+
+class TradingGate(BaseModel):
+    """State of a single trading gate."""
+    name: str
+    armed: bool
+    blocking: bool
+    detail: Optional[str] = None
+
+
+class DecisionFunnelStage(BaseModel):
+    """One stage of the signal → order funnel."""
+    stage: str
+    count: int = 0
+    drop_from_prev: Optional[float] = None
+
+
+class ObservabilitySummary(BaseModel):
+    """Headline observability counters."""
+    funnel: list[DecisionFunnelStage] = []
+    opportunity_cost_top: list[Dict[str, Any]] = []
+    wf_live_divergence_count: int = 0
+    mae_symbols_tracked: int = 0
+    exec_summary_10m: Dict[str, int] = {}
+
+
 class SystemHealthData(BaseModel):
     """Full system health response."""
     circuit_breakers: list[CircuitBreakerEntry] = []
@@ -1494,6 +1526,10 @@ class SystemHealthData(BaseModel):
     etoro_api: EToroApiHealth = EToroApiHealth()
     cache_stats: CacheStats = CacheStats()
     events_24h: list[SystemEvent] = []
+    # New sections (2026-05-02 observability work)
+    background_threads: Dict[str, BackgroundThreadStatus] = {}
+    trading_gates: list[TradingGate] = []
+    observability: ObservabilitySummary = ObservabilitySummary()
 
 
 @router.get("/system-health", response_model=SystemHealthData)
@@ -1606,20 +1642,259 @@ async def get_system_health(
         logger.debug(f"Could not read eToro API health: {e}")
 
     # --- Cache Stats ---
+    # DB bar count is not a cache hit rate — the old implementation was nonsense.
+    # Proper hit rates require counters on the caching call sites. Until those
+    # land, report counts instead so the panel shows something truthful.
     try:
         from src.models.database import get_database
         from sqlalchemy import text
         db = get_database()
         with db.engine.connect() as conn:
             total_bars = conn.execute(text("SELECT COUNT(*) FROM historical_price_cache")).scalar() or 0
-            result.cache_stats.historical_cache_hit_rate = min(100.0, total_bars / 100.0) if total_bars else 0.0
+            # Rescale: ratio 0..1 indicates we have a 'full' cache (100k rows = 1.0)
+            result.cache_stats.historical_cache_hit_rate = min(1.0, total_bars / 100000.0) if total_bars else 0.0
+
+        # Read cache-size counters off eToro client if tracked
+        from src.core.monitoring_service import get_monitoring_service
+        mon = get_monitoring_service()
+        if mon and hasattr(mon, "etoro_client"):
+            cli = mon.etoro_client
+            # Many clients track `_order_cache` / `_position_cache` dicts. Proxy by
+            # size: 1.0 when populated, 0.0 when empty. Better than always zero.
+            oc = getattr(cli, "_order_cache", None)
+            pc = getattr(cli, "_position_cache", None)
+            if oc is not None:
+                try:
+                    result.cache_stats.order_cache_hit_rate = 1.0 if len(oc) > 0 else 0.0
+                except Exception:
+                    pass
+            if pc is not None:
+                try:
+                    result.cache_stats.position_cache_hit_rate = 1.0 if len(pc) > 0 else 0.0
+                except Exception:
+                    pass
+
+        # FMP warm status — read off market_data_manager if it tracks
+        try:
+            from src.data.market_data_manager import get_market_data_manager
+            mdm = get_market_data_manager()
+            fmp = getattr(mdm, "_fmp_warm_status", None)
+            if isinstance(fmp, dict):
+                if fmp.get("last_warm_time"):
+                    result.cache_stats.fmp_cache_warm_status.last_warm_time = str(fmp["last_warm_time"])
+                result.cache_stats.fmp_cache_warm_status.symbols_from_api = int(fmp.get("symbols_from_api", 0) or 0)
+                result.cache_stats.fmp_cache_warm_status.symbols_from_cache = int(fmp.get("symbols_from_cache", 0) or 0)
+        except Exception:
+            pass
     except Exception as e:
         logger.debug(f"Could not read cache stats: {e}")
+
+    # --- Background threads (quick_price_update / full_price_sync) ---
+    try:
+        from src.core.monitoring_service import get_monitoring_service
+        mon = get_monitoring_service()
+        if mon:
+            now_ts = datetime.now()
+            for key, last_attr, dur_attr, syms_attr in [
+                ("quick_price_update", "_last_quick_update_ts", "_last_quick_update_duration", "_last_quick_update_symbols"),
+                ("full_price_sync", "_last_full_sync_ts", "_last_full_sync_duration", "_last_full_sync_symbols"),
+            ]:
+                last_ts = getattr(mon, last_attr, 0) or 0
+                last_iso = datetime.fromtimestamp(last_ts).isoformat() if last_ts > 0 else None
+                dur = getattr(mon, dur_attr, None)
+                syms = getattr(mon, syms_attr, None)
+                result.background_threads[key] = BackgroundThreadStatus(
+                    last_run=last_iso,
+                    duration_s=float(dur) if dur is not None else None,
+                    symbols_updated=int(syms) if syms is not None else None,
+                    errors=0,
+                )
+    except Exception as e:
+        logger.debug(f"Could not read background threads: {e}")
+
+    # --- Trading gates (mirror /health/trading-gates) ---
+    try:
+        # Kill switch
+        try:
+            from src.core.system_state import get_system_state_manager
+            sm = get_system_state_manager()
+            state = sm.get_state() if sm else None
+            result.trading_gates.append(TradingGate(
+                name="kill_switch",
+                armed=True,
+                blocking=bool(state and str(state).upper() in ("HALTED", "STOPPED")),
+                detail=f"state={state}",
+            ))
+        except Exception:
+            pass
+
+        # Market hours
+        try:
+            import pytz
+            et_tz = pytz.timezone('US/Eastern')
+            now_et = datetime.now(et_tz)
+            is_weekend = now_et.weekday() >= 5
+            stock_open = not is_weekend and 4 <= now_et.hour < 20
+            result.trading_gates.append(TradingGate(
+                name="market_hours",
+                armed=True,
+                blocking=not stock_open,
+                detail=f"ET={now_et.strftime('%a %H:%M')} stock_open={stock_open}",
+            ))
+        except Exception:
+            pass
+
+        # VIX gate — cheap peek
+        try:
+            from datetime import timedelta
+            from src.data.market_data_manager import get_market_data_manager
+            mdm = get_market_data_manager()
+            if mdm:
+                vix_bars = mdm.get_historical_data(
+                    "^VIX",
+                    datetime.now() - timedelta(days=10),
+                    datetime.now(),
+                    interval="1d",
+                    prefer_yahoo=True,
+                )
+                if vix_bars and len(vix_bars) >= 6:
+                    vix_now = vix_bars[-1].close
+                    vix_5d_ago = vix_bars[-6].close
+                    vix_chg = (vix_now - vix_5d_ago) / vix_5d_ago if vix_5d_ago > 0 else 0
+                    blocking = vix_now > 25 and vix_chg > 0.15
+                    result.trading_gates.append(TradingGate(
+                        name="vix_gate",
+                        armed=True,
+                        blocking=blocking,
+                        detail=f"VIX={vix_now:.1f} 5d={vix_chg*100:+.1f}%",
+                    ))
+        except Exception:
+            pass
+
+        # Rejection blacklist active count
+        try:
+            import json
+            from pathlib import Path
+            from datetime import timedelta
+            path = Path("config/.rejection_blacklist.json")
+            active = 0
+            if path.exists():
+                with open(path) as f:
+                    data = json.load(f)
+                now = datetime.now()
+                for entry in data.get("entries", []):
+                    ts = datetime.fromisoformat(entry["timestamp"])
+                    if (now - ts).days < 14 and entry.get("count", 0) >= 3:
+                        active += 1
+            result.trading_gates.append(TradingGate(
+                name="rejection_blacklist",
+                armed=True,
+                blocking=active > 0,
+                detail=f"{active} active entries",
+            ))
+        except Exception:
+            pass
+
+        # Freshness SLA sample
+        try:
+            from src.models.orm import PositionORM
+            from src.models.database import get_database as _gdb
+            from src.data.market_data_manager import get_market_data_manager
+            _db = _gdb()
+            _sess = _db.get_session()
+            stale = 0
+            total = 0
+            try:
+                _positions = _sess.query(PositionORM).filter(PositionORM.closed_at.is_(None)).all()
+                total = len(_positions)
+                _mdm = get_market_data_manager()
+                if _mdm:
+                    for p in _positions[:30]:
+                        is_fresh, _ = _mdm.is_data_fresh_for_signal(p.symbol, '1d')
+                        if not is_fresh:
+                            stale += 1
+            finally:
+                _sess.close()
+            result.trading_gates.append(TradingGate(
+                name="freshness_sla",
+                armed=True,
+                blocking=stale > 0,
+                detail=f"{stale} stale of {min(30, total)} sampled",
+            ))
+        except Exception:
+            pass
+    except Exception as e:
+        logger.debug(f"Could not read trading gates: {e}")
+
+    # --- Observability summary (cheap aggregates from signal_decisions) ---
+    try:
+        from src.models.database import get_database
+        from src.models.orm import SignalDecisionORM
+        from datetime import timedelta
+        from sqlalchemy import func as _sa_func
+
+        db = get_database()
+        _sess = db.get_session()
+        try:
+            cutoff_10m = datetime.now() - timedelta(minutes=10)
+            cutoff_30d = datetime.now() - timedelta(days=30)
+
+            # 10-min exec summary
+            rows = _sess.query(
+                SignalDecisionORM.stage,
+                _sa_func.count(SignalDecisionORM.id),
+            ).filter(SignalDecisionORM.timestamp >= cutoff_10m).group_by(SignalDecisionORM.stage).all()
+            result.observability.exec_summary_10m = {stg: int(n) for stg, n in rows}
+
+            # 30-day funnel
+            funnel_rows = _sess.query(
+                SignalDecisionORM.stage,
+                _sa_func.count(SignalDecisionORM.id),
+            ).filter(SignalDecisionORM.timestamp >= cutoff_30d).group_by(SignalDecisionORM.stage).all()
+            counts = {stg: int(n) for stg, n in funnel_rows}
+            ordered = ['proposed', 'wf_validated', 'activated', 'signal_emitted',
+                       'order_submitted', 'order_filled']
+            prev = None
+            for stg in ordered:
+                n = counts.get(stg, 0)
+                drop = None if prev is None or prev == 0 else round(1 - (n / prev), 3)
+                result.observability.funnel.append(DecisionFunnelStage(
+                    stage=stg, count=n, drop_from_prev=drop,
+                ))
+                prev = n
+        finally:
+            _sess.close()
+
+        # Opportunity cost top-5
+        try:
+            from src.analytics.observability import per_symbol_opportunity_cost
+            opps = per_symbol_opportunity_cost(lookback_days=30)
+            result.observability.opportunity_cost_top = opps[:5]
+        except Exception:
+            pass
+
+        # WF vs live divergence count
+        try:
+            from src.analytics.observability import wf_live_divergence
+            divs = wf_live_divergence(min_live_trades=5)
+            result.observability.wf_live_divergence_count = len(divs)
+        except Exception:
+            pass
+
+        # MAE symbols tracked
+        try:
+            from src.analytics.observability import mae_at_stop_analysis
+            mae = mae_at_stop_analysis(lookback_days=60, min_trades=5)
+            result.observability.mae_symbols_tracked = mae.get("total_symbols", 0)
+        except Exception:
+            pass
+    except Exception as e:
+        logger.debug(f"Could not read observability summary: {e}")
 
     # --- Events 24h (compose from recent state transitions and signal decisions) ---
     try:
         from src.models.database import get_database
-        from src.models.orm import StateTransitionHistoryORM, SignalDecisionLogORM
+        from src.models.orm import StateTransitionHistoryORM, SignalDecisionORM
         from datetime import timedelta
         db = get_database()
         session = db.get_session()
@@ -1627,32 +1902,44 @@ async def get_system_health(
             cutoff = datetime.now() - timedelta(hours=24)
 
             # State transitions
-            transitions = session.query(StateTransitionHistoryORM).filter(
-                StateTransitionHistoryORM.timestamp >= cutoff
-            ).order_by(StateTransitionHistoryORM.timestamp.desc()).limit(20).all()
-            for t in transitions:
-                result.events_24h.append(SystemEvent(
-                    timestamp=t.timestamp.isoformat() if t.timestamp else datetime.now().isoformat(),
-                    type="state_transition",
-                    description=f"State changed: {getattr(t, 'from_state', '?')} → {getattr(t, 'to_state', '?')}",
-                    severity="warning",
-                ))
+            try:
+                transitions = session.query(StateTransitionHistoryORM).filter(
+                    StateTransitionHistoryORM.timestamp >= cutoff
+                ).order_by(StateTransitionHistoryORM.timestamp.desc()).limit(20).all()
+                for t in transitions:
+                    result.events_24h.append(SystemEvent(
+                        timestamp=t.timestamp.isoformat() if t.timestamp else datetime.now().isoformat(),
+                        type="state_transition",
+                        description=f"State changed: {getattr(t, 'from_state', '?')} → {getattr(t, 'to_state', '?')}",
+                        severity="warning",
+                    ))
+            except Exception as _st_err:
+                logger.debug(f"Could not read state transitions: {_st_err}")
 
-            # Recent signal decisions
-            signals = session.query(SignalDecisionLogORM).filter(
-                SignalDecisionLogORM.created_at >= cutoff
-            ).order_by(SignalDecisionLogORM.created_at.desc()).limit(30).all()
-            for s in signals:
-                sev = "info" if s.decision == "ACCEPTED" else "warning"
-                desc = f"Signal {s.decision}: {s.symbol} {s.side} ({s.signal_type})"
-                if s.rejection_reason:
-                    desc += f" — {s.rejection_reason}"
-                result.events_24h.append(SystemEvent(
-                    timestamp=s.created_at.isoformat() if s.created_at else datetime.now().isoformat(),
-                    type="signal_decision",
-                    description=desc,
-                    severity=sev,
-                ))
+            # Recent signal decisions — only the interesting ones (gate_blocked, rejected, failed)
+            try:
+                interesting_stages = ('gate_blocked', 'wf_rejected', 'order_failed', 'rejected_act')
+                decisions = session.query(SignalDecisionORM).filter(
+                    SignalDecisionORM.timestamp >= cutoff,
+                    SignalDecisionORM.stage.in_(interesting_stages),
+                ).order_by(SignalDecisionORM.timestamp.desc()).limit(30).all()
+                for s in decisions:
+                    sev = "warning" if s.stage == "gate_blocked" else "error" if s.stage == "order_failed" else "info"
+                    desc_parts = [s.stage]
+                    if s.symbol:
+                        desc_parts.append(s.symbol)
+                    if s.template_name:
+                        desc_parts.append(s.template_name)
+                    if s.reason:
+                        desc_parts.append(f"— {s.reason}"[:200])
+                    result.events_24h.append(SystemEvent(
+                        timestamp=s.timestamp.isoformat() if s.timestamp else datetime.now().isoformat(),
+                        type="signal_decision",
+                        description=" ".join(desc_parts),
+                        severity=sev,
+                    ))
+            except Exception as _sd_err:
+                logger.debug(f"Could not read signal decisions: {_sd_err}")
 
             # Sort all events by timestamp descending
             result.events_24h.sort(key=lambda e: e.timestamp, reverse=True)
