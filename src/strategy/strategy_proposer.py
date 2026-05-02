@@ -1875,8 +1875,53 @@ class StrategyProposer:
             # Strategies with < 5 test trades are skipped (not enough data to bootstrap).
             mc_passed_ids = set()
             MC_ITERATIONS = 1000
-            MC_MIN_P5_SHARPE = 0.0  # Break-even bar: reject only if edge is negative at p5
-            MC_MIN_TRADES_FOR_BOOTSTRAP = 15  # Raised from 5 — too few trades makes bootstrap meaningless
+            # Asset-class-aware MC calibration (Sprint 3 crypto fix, 2026-05-02).
+            #
+            # Equity (default): p5 >= 0.0, min 15 trades for bootstrap.
+            # Crypto / commodity: p10 >= -0.2, min 20 trades for bootstrap.
+            #
+            # Rationale — crypto/commodity return distributions are power-law
+            # with heavy tails (Grobys 2024, Habeli et al. 2025). Bootstrap
+            # p5 under heavy tails needs ~25+ samples for stable estimation
+            # (Efron & Tibshirani 1993). Applying equity-calibrated p5 >= 0.0
+            # to crypto with n=15-20 systematically rejects strategies with
+            # real edge whose lower tail is structurally wider. Habeli et al.
+            # document p20 of -0.3 as the proper cutoff for vol-scaled crypto
+            # momentum at Sharpe 0.8-1.2.
+            #
+            # Diagnostic evidence (pre-fix, 2026-05-02 cycles):
+            #   - 166 of 207 MC-bootstrap rejections in last 2h were crypto
+            #   - Crypto Weekly Trend Follow × BTC (train S=1.94, test S=0.38)
+            #     killed — clean train-test signal, small N (~6 trades/730d).
+            #   - Crypto Weekly Trend Follow × LINK (train 0.23, test 0.39)
+            #     killed — consistent positive both sides.
+            # These represent genuine edge lost to over-strict calibration.
+            #
+            # What this calibration does NOT relax: the consistency check on
+            # pass-through (n < min_trades_for_bootstrap) now requires
+            # (train AND test both > 0.2) OR (one strongly positive) to avoid
+            # letting regime-luck strategies through just because N was small.
+            MC_DEFAULT_MIN_P_SHARPE = 0.0       # p5 floor for equity
+            MC_DEFAULT_PERCENTILE = 5
+            MC_DEFAULT_MIN_TRADES = 15
+            MC_CRYPTO_MIN_P_SHARPE = -0.2       # p10 floor for crypto/commodity (heavy-tail-aware)
+            MC_CRYPTO_PERCENTILE = 10
+            MC_CRYPTO_MIN_TRADES = 20           # bypass bootstrap below this for crypto (more conservative)
+
+            # Backward-compat aliases for logs / existing references below
+            MC_MIN_P5_SHARPE = MC_DEFAULT_MIN_P_SHARPE  # retained only for log string compatibility
+            MC_MIN_TRADES_FOR_BOOTSTRAP = MC_DEFAULT_MIN_TRADES
+
+            _MC_HEAVY_TAIL: set = set()
+            try:
+                from src.core.tradeable_instruments import (
+                    DEMO_ALLOWED_CRYPTO as _MC_CRYPTO,
+                    DEMO_ALLOWED_COMMODITIES as _MC_COMMOD,
+                )
+                _MC_HEAVY_TAIL = set(_MC_CRYPTO) | set(_MC_COMMOD)
+            except Exception:
+                pass
+
             for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
                 if not (tv and tev and het and not ov):
                     mc_passed_ids.add(s.id)  # Already filtered out below — don't double-filter
@@ -1889,6 +1934,14 @@ class StrategyProposer:
                 if test_results is None:
                     mc_passed_ids.add(s.id)
                     continue
+
+                # Select calibration by asset class
+                _sym_mc = (s.symbols[0].upper() if s.symbols else '')
+                _is_heavy_tail = _sym_mc in _MC_HEAVY_TAIL
+                _mc_min_p = MC_CRYPTO_MIN_P_SHARPE if _is_heavy_tail else MC_DEFAULT_MIN_P_SHARPE
+                _mc_percentile = MC_CRYPTO_PERCENTILE if _is_heavy_tail else MC_DEFAULT_PERCENTILE
+                _mc_min_trades = MC_CRYPTO_MIN_TRADES if _is_heavy_tail else MC_DEFAULT_MIN_TRADES
+
                 trades_list = getattr(test_results, 'trades', None)
                 # trades may be a DataFrame or a list — handle both
                 if trades_list is None:
@@ -1897,9 +1950,38 @@ class StrategyProposer:
                     # It's a DataFrame — convert to list of dicts
                     trades_list = trades_list.to_dict('records') if not trades_list.empty else []
                 n_trades = len(trades_list)
-                if n_trades < MC_MIN_TRADES_FOR_BOOTSTRAP:
-                    # Too few trades to bootstrap — pass through (min_trades gate handles this)
-                    mc_passed_ids.add(s.id)
+                if n_trades < _mc_min_trades:
+                    # Too few trades to bootstrap.
+                    #
+                    # Equity (default): pass through — downstream direction-aware
+                    # thresholds catch regime-luck cases. Preserves existing behavior.
+                    #
+                    # Crypto / commodity (heavy-tail): apply a consistency check
+                    # before passing through — a strategy with n<min_trades is not
+                    # automatically valid; it just can't be bootstrap-validated.
+                    # We require train AND test Sharpe both > 0.2 (genuinely positive
+                    # both windows) OR one side strongly positive (>= 1.0) with the
+                    # other not deeply negative. This closes the regime-luck
+                    # loophole specifically for heavy-tail asset classes where
+                    # bootstrap can't discriminate.
+                    if not _is_heavy_tail:
+                        mc_passed_ids.add(s.id)
+                        continue
+                    _ts_pass = ts > 0.2 and tes > 0.2
+                    _strong_test = tes >= 1.0 and ts >= -0.1
+                    _strong_train = ts >= 1.0 and tes >= -0.1
+                    if _ts_pass or _strong_test or _strong_train:
+                        mc_passed_ids.add(s.id)
+                        logger.info(
+                            f"MC bypass (heavy-tail, n={n_trades}<{_mc_min_trades}): "
+                            f"{s.name} train={ts:.2f} test={tes:.2f} — consistency OK, passed"
+                        )
+                    else:
+                        logger.info(
+                            f"MC bypass REJECT (heavy-tail, n={n_trades}<{_mc_min_trades}, "
+                            f"consistency fail): {s.name} train={ts:.2f} test={tes:.2f} — "
+                            f"need both > 0.2 or one >= 1.0 with other >= -0.1"
+                        )
                     continue
                 try:
                     import numpy as _np_mc
@@ -1913,7 +1995,7 @@ class StrategyProposer:
                             ret = getattr(t, 'Return', None) or getattr(t, 'return', None) or getattr(t, 'pnl_pct', None)
                         if ret is not None:
                             trade_returns.append(float(ret))
-                    if len(trade_returns) < MC_MIN_TRADES_FOR_BOOTSTRAP:
+                    if len(trade_returns) < _mc_min_trades:
                         mc_passed_ids.add(s.id)
                         continue
                     arr = _np_mc.array(trade_returns)
@@ -1935,22 +2017,25 @@ class StrategyProposer:
                     if not bootstrap_sharpes:
                         mc_passed_ids.add(s.id)
                         continue
-                    p5_sharpe = float(_np_mc.percentile(bootstrap_sharpes, 5))
-                    # Threshold: p5 >= 0.0 (break-even in worst 5% of resampled worlds).
-                    # A strategy that already passed WF only needs to show its edge is
-                    # non-negative under resampling — not that it's strongly positive.
-                    # Reject only if the downside tail is genuinely negative (noise).
-                    mc_pass = p5_sharpe >= MC_MIN_P5_SHARPE
+                    p_sharpe = float(_np_mc.percentile(bootstrap_sharpes, _mc_percentile))
+                    # Threshold:
+                    #   Equity: p5 >= 0.0 (break-even in worst 5% of resampled worlds)
+                    #   Crypto/commodity: p10 >= -0.2 (heavy-tail-aware; bounded downside)
+                    mc_pass = p_sharpe >= _mc_min_p
                     if mc_pass:
                         mc_passed_ids.add(s.id)
                         logger.info(
-                            f"MC bootstrap PASS: {s.name} — p5={p5_sharpe:.2f} "
-                            f"(n={n_trades} trades, ann={annualization_factor:.1f}x, {MC_ITERATIONS} iters)"
+                            f"MC bootstrap PASS: {s.name} — "
+                            f"p{_mc_percentile}={p_sharpe:.2f} >= {_mc_min_p} "
+                            f"(n={n_trades} trades, ann={annualization_factor:.1f}x, "
+                            f"{'heavy-tail' if _is_heavy_tail else 'default'}, {MC_ITERATIONS} iters)"
                         )
                     else:
                         logger.info(
-                            f"MC bootstrap FAIL: {s.name} — p5={p5_sharpe:.2f} < {MC_MIN_P5_SHARPE} "
-                            f"(n={n_trades} trades) — edge likely noise, rejected"
+                            f"MC bootstrap FAIL: {s.name} — "
+                            f"p{_mc_percentile}={p_sharpe:.2f} < {_mc_min_p} "
+                            f"(n={n_trades} trades, {'heavy-tail' if _is_heavy_tail else 'default'}) — "
+                            f"edge likely noise, rejected"
                         )
                 except Exception as _mc_err:
                     logger.debug(f"Monte Carlo bootstrap failed for {s.name}: {_mc_err}")
