@@ -368,6 +368,15 @@ class MonitoringService:
             except Exception as e:
                 logger.error(f"Error checking trailing stops: {e}")
 
+        # Update MAE/MFE on open trade_journal entries.
+        # Piggybacks on trailing-stop cadence (60s) — prices are already fresh
+        # from the position sync earlier in the cycle. Failure is non-fatal.
+        if now - self._last_trailing_check < 2:
+            try:
+                self._update_trade_excursions()
+            except Exception as e:
+                logger.debug(f"Excursion update failed (non-fatal): {e}")
+
         # Bull market short closure: flag open equity shorts for closure when regime
         # is clearly bullish. Runs every 5 minutes (same as trailing stops).
         # This handles the case where shorts were opened before a regime shift.
@@ -1724,6 +1733,81 @@ class MonitoringService:
             session.rollback()
             return {"updated": 0, "breach_closures": 0, "error": str(e)}
 
+        finally:
+            session.close()
+
+    def _update_trade_excursions(self) -> None:
+        """Update MAE / MFE on open trade_journal rows.
+
+        For each open position, compute:
+          LONG : MFE = max(current_price / entry - 1, stored_mfe)
+                 MAE = min(current_price / entry - 1, stored_mae)  (stored as negative)
+          SHORT: MFE = max(entry / current_price - 1, stored_mfe)
+                 MAE = min(entry / current_price - 1, stored_mae)
+
+        These tell us how far price moved AGAINST us (MAE) and FOR us (MFE)
+        during the position's life — critical for diagnosing entry quality
+        vs. exit quality. Previously these columns were NULL across all rows
+        because nothing updated them.
+
+        Runs every 60s alongside trailing stops. No network calls; uses
+        DB current_price which is refreshed by order_monitor.sync_positions.
+        """
+        from src.models.orm import PositionORM
+        from src.analytics.trade_journal import TradeJournalEntryORM
+
+        session = self.db.get_session()
+        try:
+            open_positions = session.query(PositionORM).filter(
+                PositionORM.closed_at.is_(None)
+            ).all()
+            if not open_positions:
+                return
+
+            updated = 0
+            for pos in open_positions:
+                if not pos.entry_price or pos.entry_price <= 0:
+                    continue
+                if not pos.current_price or pos.current_price <= 0:
+                    continue
+
+                side_str = str(pos.side).upper() if pos.side else 'LONG'
+                is_long = 'LONG' in side_str or 'BUY' in side_str
+
+                if is_long:
+                    excursion = (pos.current_price - pos.entry_price) / pos.entry_price
+                else:
+                    excursion = (pos.entry_price - pos.current_price) / pos.entry_price
+
+                # Match the trade_journal row by trade_id (position.id). One-to-one.
+                entry = session.query(TradeJournalEntryORM).filter_by(
+                    trade_id=str(pos.id), exit_time=None
+                ).first()
+                if entry is None:
+                    continue
+
+                changed = False
+                # MFE: largest favourable excursion (positive number)
+                if entry.max_favorable_excursion is None or excursion > entry.max_favorable_excursion:
+                    entry.max_favorable_excursion = excursion
+                    changed = True
+                # MAE: largest adverse excursion (most negative number)
+                if entry.max_adverse_excursion is None or excursion < entry.max_adverse_excursion:
+                    entry.max_adverse_excursion = excursion
+                    changed = True
+
+                if changed:
+                    updated += 1
+
+            if updated:
+                session.commit()
+                logger.debug(f"Updated MAE/MFE on {updated} trade journal rows")
+        except Exception as e:
+            logger.debug(f"_update_trade_excursions failed: {e}")
+            try:
+                session.rollback()
+            except Exception:
+                pass
         finally:
             session.close()
 

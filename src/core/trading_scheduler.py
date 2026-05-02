@@ -1199,6 +1199,11 @@ class TradingScheduler:
                                 slippage=order.slippage,
                                 fill_time_seconds=order.fill_time_seconds,
                                 order_action='entry',
+                                # Preserve signal metadata (market_regime, conviction_score,
+                                # fundamentals, etc.) so async fill handlers can recover it
+                                # when writing the trade_journal entry. Without this the
+                                # market_regime column ends up NULL on 99.9% of rows.
+                                order_metadata=(signal.metadata if isinstance(getattr(signal, 'metadata', None), dict) else None),
                             )
                             session.add(order_orm)
                             session.commit()

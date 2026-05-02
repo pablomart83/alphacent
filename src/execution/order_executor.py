@@ -145,6 +145,24 @@ class OrderExecutor:
                 # Fail-open on gate-check error
                 logger.debug(f"VIX gate check skipped for {normalized_symbol}: {_vix_err}")
 
+        # Trend-consistency gates (2026-05-01 TSLA audit):
+        # Prevent SHORT entries into downtrend exhaustion / LONG entries into
+        # downtrends where the signal is almost certainly fighting the stock's
+        # higher-timeframe direction. TSLA shorts in April fired at 355/358
+        # after a 15%+ drop — bouncing off double-bottom. Catches that class
+        # of losing setup. Fail-open on data errors.
+        try:
+            gate_reason = self._check_trend_consistency_gate(normalized_symbol, signal.action)
+            if gate_reason:
+                raise OrderExecutionError(
+                    f"Trend-consistency gate blocked {signal.action.value} for "
+                    f"{normalized_symbol}: {gate_reason}. Signal discarded."
+                )
+        except OrderExecutionError:
+            raise
+        except Exception as _tc_err:
+            logger.debug(f"Trend-consistency gate skipped for {normalized_symbol}: {_tc_err}")
+
         try:
             # Validate minimum order size ($2000 for stocks/ETFs/crypto, $1000 for commodities/forex/indices)
             if position_size < 1000.0:
@@ -479,6 +497,115 @@ class OrderExecutor:
             )
 
         self._c1_vix_cache = (now, reason)
+        return reason
+
+    def _check_trend_consistency_gate(self, symbol: str, action: SignalAction) -> Optional[str]:
+        """Block entries that fight the symbol's own higher-timeframe trend.
+
+        Returns a reason string to block, or None to proceed. Fail-open on data errors.
+
+        Motivating case (TSLA, April 2026): 4 SHORT entries fired at 348-358
+        after TSLA dropped 15% from 402 to 343 and was bouncing off the lows.
+        Every one was a losing trade; the cause was SHORT signals firing on
+        late-stage downtrends that were already reversing.
+
+        Gates:
+          - ENTER_SHORT blocked when EITHER:
+              a) stock is above 50-day SMA with positive slope (uptrend), OR
+              b) stock dropped >1 ATR over past 3 days AND is within 3% of
+                 its 20-day low (oversold bounce zone — classic short-squeeze setup)
+          - ENTER_LONG blocked when stock is below 50-day SMA with negative
+            slope (strong downtrend) — don't catch falling knives.
+
+        Exits (EXIT_LONG / EXIT_SHORT) are never blocked.
+        Crypto / forex exempt — these gates are calibrated for equity momentum.
+
+        Uses 1d bars, 55-day lookback. 5-min TTL cache keyed by symbol+action.
+        """
+        import time as _t
+
+        # Only gate entries
+        if action not in (SignalAction.ENTER_LONG, SignalAction.ENTER_SHORT):
+            return None
+
+        _u = (symbol or "").upper()
+        # Crypto / forex exempt
+        if _u in ("BTC", "ETH") or _u.startswith("BTC") or _u.startswith("ETH"):
+            return None
+        if len(_u) == 6 and _u[:3] in ("USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF") \
+                        and _u[3:] in ("USD", "EUR", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF"):
+            return None
+
+        # 5-min TTL cache
+        now = _t.time()
+        cache_key = (_u, action.value)
+        cache = getattr(self, '_trend_gate_cache', {})
+        hit = cache.get(cache_key)
+        if hit and (now - hit[0] < 300):
+            return hit[1]
+
+        from datetime import datetime, timedelta
+        from src.data.market_data_manager import get_market_data_manager
+
+        mdm = get_market_data_manager()
+        if mdm is None:
+            return None
+
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=80)
+        bars = mdm.get_historical_data(symbol=_u, start=start_date, end=end_date, interval="1d")
+        if not bars or len(bars) < 55:
+            return None
+
+        closes = [b.close for b in bars if b.close]
+        highs  = [b.high  for b in bars if b.high]
+        lows   = [b.low   for b in bars if b.low]
+        if len(closes) < 55 or len(highs) < 20 or len(lows) < 20:
+            return None
+
+        price_now = closes[-1]
+        sma50 = sum(closes[-50:]) / 50.0
+        sma50_prev = sum(closes[-51:-1]) / 50.0
+        sma50_slope = (sma50 - sma50_prev) / sma50_prev if sma50_prev > 0 else 0.0
+
+        # ATR(14)
+        tr_list = []
+        for i in range(1, min(15, len(bars))):
+            h = highs[-i]
+            l = lows[-i]
+            c_prev = closes[-i - 1]
+            tr_list.append(max(h - l, abs(h - c_prev), abs(l - c_prev)))
+        atr = sum(tr_list) / len(tr_list) if tr_list else 0.0
+
+        low20 = min(lows[-20:])
+        drop_3d = closes[-1] - closes[-4] if len(closes) >= 4 else 0.0
+
+        reason = None
+
+        if action == SignalAction.ENTER_SHORT:
+            # Uptrend block: price above rising 50d SMA
+            if price_now > sma50 and sma50_slope > 0.001:
+                reason = (
+                    f"SHORT rejected: {_u} above 50d SMA {sma50:.2f} with slope "
+                    f"+{sma50_slope*100:.2f}% (uptrend — short fights higher TF trend)"
+                )
+            # Oversold bounce block: dropped >1 ATR in last 3 days AND within 3% of 20d low
+            elif atr > 0 and drop_3d < -atr and price_now <= low20 * 1.03:
+                reason = (
+                    f"SHORT rejected: {_u} dropped {drop_3d:.2f} (>1 ATR={atr:.2f}) "
+                    f"over 3d and is within 3% of 20d low {low20:.2f} — oversold bounce zone"
+                )
+
+        elif action == SignalAction.ENTER_LONG:
+            # Downtrend block: price below falling 50d SMA
+            if price_now < sma50 and sma50_slope < -0.001:
+                reason = (
+                    f"LONG rejected: {_u} below 50d SMA {sma50:.2f} with slope "
+                    f"{sma50_slope*100:.2f}% (downtrend — don't catch falling knives)"
+                )
+
+        cache[cache_key] = (now, reason)
+        self._trend_gate_cache = cache
         return reason
 
     def _signal_to_order_params(self, action: SignalAction) -> tuple[OrderSide, OrderType]:

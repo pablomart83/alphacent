@@ -4,7 +4,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -922,6 +922,28 @@ class RiskManager:
         # ── Step 10: Available balance cap ───────────────────────────────────
         position_size = min(position_size, available_balance)
 
+        # ── Step 10b: Per-symbol+template loser penalty ─────────────────────
+        # If this (template, symbol) pair has >=3 closed trades in trade_journal
+        # with negative net P&L, halve the size. Prevents repeatedly sizing up
+        # into a combo that has demonstrated it doesn't work. Resets naturally
+        # once a winning trade flips net P&L positive (TSLA audit 2026-05-01).
+        try:
+            _tname = None
+            if signal.metadata and isinstance(signal.metadata, dict):
+                _tname = signal.metadata.get('template_name')
+            if _tname and symbol:
+                pair_stats = self._get_symbol_template_loser_stats(symbol, _tname)
+                if pair_stats and pair_stats.get('trades', 0) >= 3 and pair_stats.get('pnl', 0) < 0:
+                    old_size = position_size
+                    position_size *= 0.5
+                    logger.info(
+                        f"Loser penalty: {symbol} × {_tname} has "
+                        f"{pair_stats['trades']} trades / ${pair_stats['pnl']:.0f} P&L "
+                        f"→ size halved ${old_size:.0f} → ${position_size:.0f}"
+                    )
+        except Exception as _lp_err:
+            logger.debug(f"Loser penalty check failed (non-fatal): {_lp_err}")
+
         # ── Step 11: Minimum floor — applied last ────────────────────────────
         # If all caps reduced the size below $5K but didn't zero it out,
         # bump to minimum. We decided to trade — submit at minimum rather than fail.
@@ -950,6 +972,65 @@ class RiskManager:
             f"strategy_positions={strategy_open_count}/{max_concurrent})"
         )
         return position_size
+
+    # Cached per-cycle loser-stats lookup (reset on TTL expiry).
+    _loser_cache: Dict[Tuple[str, str], Tuple[float, Dict]] = {}
+    _loser_cache_ttl_seconds: float = 120.0
+
+    def _get_symbol_template_loser_stats(self, symbol: str, template_name: str) -> Optional[Dict]:
+        """Return {'trades': n, 'pnl': sum_pnl} for the (symbol, template) pair
+        from trade_journal closed trades. Returns None on any error.
+
+        Cached in-process 2 min to avoid repeated DB hits during a signal burst.
+        """
+        import time as _t
+        key = (symbol.upper(), template_name)
+        now = _t.time()
+        cache = type(self)._loser_cache
+        hit = cache.get(key)
+        if hit and (now - hit[0] < type(self)._loser_cache_ttl_seconds):
+            return hit[1]
+
+        try:
+            from src.models.database import get_database
+            from src.analytics.trade_journal import TradeJournalEntryORM
+            from sqlalchemy import func as _sa_func
+
+            db = get_database()
+            session = db.get_session()
+            try:
+                # trade_metadata->'template_name' in the original log path.
+                # Also fall back to template_name stored on the strategies row via join is
+                # expensive; here we match on symbol only and filter template in Python.
+                rows = (
+                    session.query(TradeJournalEntryORM.pnl, TradeJournalEntryORM.trade_metadata)
+                    .filter(
+                        TradeJournalEntryORM.symbol == symbol.upper(),
+                        TradeJournalEntryORM.pnl.isnot(None),
+                    )
+                    .all()
+                )
+            finally:
+                session.close()
+
+            pnl_sum = 0.0
+            n = 0
+            for pnl_val, meta in rows:
+                if pnl_val is None:
+                    continue
+                tname = None
+                if isinstance(meta, dict):
+                    tname = meta.get('template_name') or meta.get('template')
+                # If no template stored on the trade, don't match — be conservative
+                if tname and str(tname).strip().lower() == template_name.strip().lower():
+                    pnl_sum += float(pnl_val)
+                    n += 1
+
+            result = {'trades': n, 'pnl': pnl_sum}
+            cache[key] = (now, result)
+            return result
+        except Exception:
+            return None
 
 
     def check_position_limits(

@@ -187,6 +187,12 @@ class OrderORM(Base):
     slippage = Column(Float, nullable=True)  # Calculated: filled_price - expected_price
     fill_time_seconds = Column(Float, nullable=True)  # Time from submission to fill
     order_action = Column(String, nullable=True)  # 'entry', 'close', or 'retirement' — distinguishes order purpose
+
+    # Signal-time metadata (market_regime, conviction_score, fundamentals, etc.)
+    # Persisted as JSON so async fill handlers can recover regime at trade-journal write
+    # time. Previously lost when fills came back async — caused 99.9% NULL
+    # market_regime rows in trade_journal.
+    order_metadata = Column(JSON, nullable=True)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert ORM model to dictionary."""

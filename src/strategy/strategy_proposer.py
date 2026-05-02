@@ -66,12 +66,15 @@ class StrategyProposer:
         self._load_blacklist_from_disk()
         # Rejection blacklist: tracks template+symbol combos that are repeatedly
         # rejected at activation. Prevents wasting proposal slots on dead strategies.
-        # Persisted to JSON with per-entry cooldown (30 days) so it survives restarts
-        # but auto-expires to allow re-evaluation.
+        # Persisted to JSON with per-entry cooldown (14 days, was 30) so stale
+        # regime-specific rejections expire fast enough to re-test as markets rotate.
+        # TSLA audit 2026-05-01: 30-day cooldown locked out LONG templates for
+        # 22 days while TSLA rallied +9.6%.
         self._rejection_blacklist: Dict[Tuple[str, str], int] = {}  # (template, symbol) -> consecutive rejections
         self._rejection_blacklist_timestamps: Dict[Tuple[str, str], str] = {}  # ISO timestamps
+        self._rejection_blacklist_regimes: Dict[Tuple[str, str], str] = {}  # Regime at rejection time
         self._rejection_blacklist_threshold = 3  # Blacklist after 3 consecutive rejections
-        self._rejection_blacklist_cooldown_days = 30  # Entries expire after 30 days
+        self._rejection_blacklist_cooldown_days = 14  # Entries expire after 14 days (was 30)
         self._rejection_blacklist_path = "config/.rejection_blacklist.json"
         self._load_rejection_blacklist_from_disk()
         # Walk-forward results cache: avoids re-running expensive WF validation
@@ -163,7 +166,13 @@ class StrategyProposer:
         except Exception as e:
             logger.debug(f"Could not save blacklist to disk: {e}")
     def _load_rejection_blacklist_from_disk(self):
-        """Load rejection blacklist from JSON, expiring stale entries."""
+        """Load rejection blacklist from JSON, expiring stale entries.
+
+        Additionally expires entries early when the regime at rejection time
+        doesn't match the current regime (regime-scoped expiry). A SHORT
+        template rejected during a trending_down phase shouldn't still block
+        LONG re-tests when the market has pivoted to trending_up.
+        """
         import json
         from pathlib import Path
         try:
@@ -173,27 +182,71 @@ class StrategyProposer:
             with open(path, 'r') as f:
                 data = json.load(f)
 
+            # Current regime for scope-check — best-effort from config file.
+            current_regime = None
+            try:
+                import yaml
+                cfg_path = Path("config/autonomous_trading.yaml")
+                if cfg_path.exists():
+                    with open(cfg_path, 'r') as _f:
+                        _cfg = yaml.safe_load(_f) or {}
+                    current_regime = (_cfg.get('market_regime', {}) or {}).get('current')
+            except Exception:
+                current_regime = None
+
             now = datetime.now()
             loaded = 0
             expired = 0
+            regime_expired = 0
             for entry in data.get('entries', []):
                 symbol = entry.get('symbol', 'unknown')
                 key = (entry['template'], symbol)
                 ts = datetime.fromisoformat(entry['timestamp'])
                 age_days = (now - ts).days
-                if age_days < self._rejection_blacklist_cooldown_days:
-                    self._rejection_blacklist[key] = entry['count']
-                    self._rejection_blacklist_timestamps[key] = entry['timestamp']
-                    loaded += 1
-                else:
-                    expired += 1
+                recorded_regime = entry.get('regime')
 
-            if loaded or expired:
-                logger.info(f"Loaded {loaded} rejection blacklist entries from disk ({expired} expired)")
+                if age_days >= self._rejection_blacklist_cooldown_days:
+                    expired += 1
+                    continue
+
+                # Regime-scoped early expiry: if regime has materially shifted
+                # (trending_down → trending_up or vice versa), rejection is
+                # irrelevant to current conditions. Require a minimum age of 3
+                # days to avoid same-day expiry noise.
+                if age_days >= 3 and recorded_regime and current_regime:
+                    if self._regimes_opposed(recorded_regime, current_regime):
+                        regime_expired += 1
+                        continue
+
+                self._rejection_blacklist[key] = entry['count']
+                self._rejection_blacklist_timestamps[key] = entry['timestamp']
+                if recorded_regime:
+                    self._rejection_blacklist_regimes[key] = recorded_regime
+                loaded += 1
+
+            if loaded or expired or regime_expired:
+                logger.info(
+                    f"Loaded {loaded} rejection blacklist entries from disk "
+                    f"({expired} expired by age, {regime_expired} expired by regime shift)"
+                )
         except Exception as e:
             logger.debug(f"Could not load rejection blacklist from disk: {e}")
+
+    @staticmethod
+    def _regimes_opposed(regime_a: str, regime_b: str) -> bool:
+        """True when two regime labels are on opposite sides of the trend axis."""
+        up_tags = ('trending_up', 'strong_uptrend', 'uptrend')
+        dn_tags = ('trending_down', 'strong_downtrend', 'downtrend', 'ranging_high_vol')
+        a = (regime_a or '').lower()
+        b = (regime_b or '').lower()
+        a_up = any(t in a for t in up_tags)
+        a_dn = any(t in a for t in dn_tags)
+        b_up = any(t in b for t in up_tags)
+        b_dn = any(t in b for t in dn_tags)
+        return (a_up and b_dn) or (a_dn and b_up)
+
     def _save_rejection_blacklist_to_disk(self):
-        """Persist rejection blacklist to JSON."""
+        """Persist rejection blacklist to JSON, including recorded regime."""
         import json
         from pathlib import Path
         try:
@@ -202,12 +255,16 @@ class StrategyProposer:
                 ts = self._rejection_blacklist_timestamps.get(
                     (template, symbol), datetime.now().isoformat()
                 )
-                entries.append({
+                regime = self._rejection_blacklist_regimes.get((template, symbol))
+                entry = {
                     'template': template,
                     'symbol': symbol,
                     'count': count,
                     'timestamp': ts,
-                })
+                }
+                if regime:
+                    entry['regime'] = regime
+                entries.append(entry)
 
             path = Path(self._rejection_blacklist_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,10 +273,27 @@ class StrategyProposer:
         except Exception as e:
             logger.debug(f"Could not save rejection blacklist to disk: {e}")
     def record_rejection(self, template_name: str, symbol: str) -> None:
-        """Increment rejection counter for a template+symbol combo. Called by Autonomous_Manager after activation rejection."""
+        """Increment rejection counter for a template+symbol combo. Called by Autonomous_Manager after activation rejection.
+
+        Records the current regime alongside the rejection so the entry can be
+        expired early when regime shifts (see _load_rejection_blacklist_from_disk).
+        """
         key = (template_name, symbol)
         self._rejection_blacklist[key] = self._rejection_blacklist.get(key, 0) + 1
         self._rejection_blacklist_timestamps[key] = datetime.now().isoformat()
+        # Record current regime for regime-scoped expiry
+        try:
+            import yaml
+            from pathlib import Path
+            cfg_path = Path("config/autonomous_trading.yaml")
+            if cfg_path.exists():
+                with open(cfg_path, 'r') as _f:
+                    _cfg = yaml.safe_load(_f) or {}
+                _regime = (_cfg.get('market_regime', {}) or {}).get('current')
+                if _regime:
+                    self._rejection_blacklist_regimes[key] = str(_regime)
+        except Exception:
+            pass
         self._save_rejection_blacklist_to_disk()
         count = self._rejection_blacklist[key]
         if count >= self._rejection_blacklist_threshold:
@@ -233,6 +307,7 @@ class StrategyProposer:
             logger.info(f"Rejection counter reset: {template_name} on {symbol} (was {self._rejection_blacklist[key]})")
             self._rejection_blacklist.pop(key, None)
             self._rejection_blacklist_timestamps.pop(key, None)
+            self._rejection_blacklist_regimes.pop(key, None)
             self._save_rejection_blacklist_to_disk()
     def is_rejection_blacklisted(self, template_name: str, symbol: str) -> bool:
         """Check if a template+symbol combo is rejection-blacklisted (threshold reached and not past cooldown)."""
@@ -1722,13 +1797,30 @@ class StrategyProposer:
                 _stype = self._detect_strategy_type(s) if hasattr(self, '_detect_strategy_type') else 'unknown'
                 if _stype in ('trend_following', 'breakout', 'momentum'):
                     min_win_rate = min(min_win_rate, 0.30)  # floor 30% for trend strategies
-                
+
+                # SHORT-side tightening (2026-05-01 TSLA audit):
+                # SHORT templates systematically overfit to recent down-legs and then
+                # fire into reversals (TSLA 4/4 losers in early April while the stock
+                # was bouncing off a double-bottom). Raising bars for SHORTs:
+                #  - min_sharpe floor +0.3 (train AND test must clear the bar)
+                #  - min test trades 4 (was 3 on the relaxed path) — reject tiny samples
+                # This is a *rejection* amplification, not a rescue path.
+                is_short = direction in ('short', 'SHORT', SignalAction.ENTER_SHORT if hasattr(SignalAction, 'ENTER_SHORT') else None)
+                if isinstance(direction, str) and direction.lower() == 'short':
+                    is_short = True
+                if is_short:
+                    min_sharpe = max(min_sharpe, min_sharpe + 0.3)
+                    short_min_trades = max(4, test_trades if False else 4)
+                else:
+                    short_min_trades = 3
+
                 # Primary path: both train and test above threshold
                 if ts > min_sharpe and tes > min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate:
                     validated_strategies.append((s, wf))
                 # Test-dominant path: test Sharpe is strong, train is non-negative.
                 # The test period is more recent — if it shows edge, the strategy works NOW.
-                elif ts >= -0.1 and tes >= min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate:
+                # SHORTs must also clear a minimum test_trades floor to avoid n=2-3 flukes.
+                elif ts >= -0.1 and tes >= min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate and (not is_short or test_trades >= short_min_trades):
                     validated_strategies.append((s, wf))
                     logger.info(
                         f"  Passed on strong test Sharpe: {s.name} "
@@ -1736,11 +1828,17 @@ class StrategyProposer:
                     )
                 # Fallback for excellent OOS performers with negative train Sharpe.
                 # Train period may have had an adverse regime for this strategy type.
-                elif ts >= -0.3 and tes >= min_sharpe * 2 and test_trades >= 3 and test_return >= min_return and test_win_rate >= min_win_rate:
+                # SHORTs don't get this relaxed path — too much risk of late-cycle overfitting.
+                elif ts >= -0.3 and tes >= min_sharpe * 2 and test_trades >= 3 and test_return >= min_return and test_win_rate >= min_win_rate and not is_short:
                     validated_strategies.append((s, wf))
                     logger.info(
                         f"  Passed on excellent OOS performance: {s.name} "
                         f"(train={ts:.2f}, test={tes:.2f}, test_trades={test_trades}, threshold={min_sharpe})"
+                    )
+                elif is_short and ts >= -0.3 and tes >= min_sharpe * 2:
+                    logger.info(
+                        f"  SHORT rejected on relaxed-OOS path (no rescue for SHORTs): {s.name} "
+                        f"(train={ts:.2f}, test={tes:.2f}) — SHORTs must pass primary or test-dominant paths"
                     )
             
             logger.info(
@@ -5054,6 +5152,19 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 sym_bonus = symbol_scores_fb.get(symbol, 0.0)
                 base_score += max(-15.0, min(15.0, sym_bonus))
 
+                # Directional-rebalance bonus (TSLA audit 2026-05-01):
+                # If this symbol has directional imbalance (≥3 losing trades all on
+                # one side with negative net P&L) and the current template is on the
+                # OPPOSITE side, add a +8 bonus so counter-direction setups get a
+                # chance to re-qualify. Symbols like TSLA that lost 4/4 shorts stop
+                # getting LONG proposals; this nudges them back into contention.
+                try:
+                    imbalance = self._symbol_imbalance_bonus(symbol, template)
+                    if imbalance:
+                        base_score += imbalance
+                except Exception:
+                    pass
+
                 # Small noise to break ties between similar symbols
                 noise = random.uniform(-3, 3)
                 final_score = base_score + noise
@@ -5431,6 +5542,32 @@ Generate a CORRECTED strategy that addresses all errors:"""
                     continue
                 seen.add(symbol)
                 watchlist.append(symbol)
+
+            # Phase 3: Reserve up to 15% of watchlist slots for "neglected symbols" — ones
+            # that haven't been proposed in the last 7 days. Gives beaten-down names a
+            # cycling chance to re-qualify without losing round-robin ties to positively-scored
+            # symbols. TSLA audit 2026-05-01: a symbol with score -14 never wins the
+            # watchlist pick against any positively-scored symbol; reserving a small
+            # fraction of slots for exploration prevents the penalty from being a hard lockout.
+            neglected_slots = max(1, int(watchlist_size * 0.15))  # at least 1 exploration slot
+            if len(watchlist) < watchlist_size:
+                neglected = self._get_neglected_symbols(allowed_classes, _template_is_intraday)
+                for sym in neglected:
+                    if neglected_slots <= 0 or len(watchlist) >= watchlist_size:
+                        break
+                    if sym in seen:
+                        continue
+                    if (tname, sym) in _active_pairs:
+                        continue
+                    bl_key = (tname, sym)
+                    if bl_key in self._zero_trade_blacklist and self._zero_trade_blacklist[bl_key] >= self._zero_trade_blacklist_threshold:
+                        continue
+                    # Skip if rejection-blacklisted for this exact pair
+                    if self.is_rejection_blacklisted(tname, sym):
+                        continue
+                    seen.add(sym)
+                    watchlist.append(sym)
+                    neglected_slots -= 1
             
             watchlists[tname] = watchlist
             scored_count = len(watchlist) - 1 - validated_count
@@ -5440,6 +5577,144 @@ Generate a CORRECTED strategy that addresses all errors:"""
             )
         
         return watchlists
+
+    def _get_neglected_symbols(self, allowed_classes, is_intraday: bool = False) -> List[str]:
+        """Return symbols not proposed in the last 7 days, in exploration-pool order.
+
+        Reads from strategy_proposals (written by track_proposals). Symbols with
+        no proposal rows in the window are returned; the universe is the
+        proposer's trading symbols filtered by allowed_classes. Cached
+        in-process for 5 min to avoid DB hits per template.
+        """
+        import time as _t
+        from datetime import timedelta
+
+        now = _t.time()
+        cache = getattr(self, '_neglected_cache', None)
+        if cache and (now - cache[0] < 300):
+            cached_classes, cached_list = cache[1], cache[2]
+            if cached_classes == set(allowed_classes):
+                return [s for s in cached_list if not (is_intraday and s.upper() in _DAILY_ONLY_SYMBOLS)]
+
+        try:
+            from src.models.database import get_database
+            from src.models.orm import StrategyProposalORM
+
+            db = get_database()
+            session = db.get_session()
+            try:
+                cutoff = datetime.now() - timedelta(days=7)
+                recent_rows = session.query(StrategyProposalORM.symbols).filter(
+                    StrategyProposalORM.proposed_at >= cutoff,
+                    StrategyProposalORM.symbols.isnot(None),
+                ).all()
+            finally:
+                session.close()
+
+            recent_syms = set()
+            for (syms_json,) in recent_rows:
+                if isinstance(syms_json, list):
+                    for s in syms_json:
+                        if isinstance(s, str):
+                            recent_syms.add(s.upper())
+
+            # Universe = configured trading symbols filtered by allowed_classes
+            neglected = []
+            for sym in self._trading_symbols:
+                if sym.upper() in recent_syms:
+                    continue
+                if self._get_asset_class(sym) not in allowed_classes:
+                    continue
+                neglected.append(sym)
+
+            # Cache and return (defer intraday filter to caller so cache is reusable)
+            self._neglected_cache = (now, set(allowed_classes), neglected)
+            return [s for s in neglected if not (is_intraday and s.upper() in _DAILY_ONLY_SYMBOLS)]
+        except Exception as e:
+            logger.debug(f"_get_neglected_symbols failed: {e}")
+            return []
+
+    def _symbol_imbalance_bonus(self, symbol: str, template) -> float:
+        """Return +8 when symbol has all-one-side losing history and template is counter-direction.
+
+        Cached in-process (5 min TTL). The "direction" is derived from the
+        template's metadata direction tag — defaults to 'long'. The per-symbol
+        imbalance map is built once per cycle from trade_journal.
+        """
+        import time as _t
+        now = _t.time()
+        cache = getattr(self, '_imbalance_map_cache', None)
+        if not cache or (now - cache[0] > 300):
+            cache_map = self._compute_symbol_imbalance_map()
+            self._imbalance_map_cache = (now, cache_map)
+        else:
+            cache_map = cache[1]
+
+        entry = cache_map.get(symbol.upper())
+        if not entry:
+            return 0.0
+
+        tmpl_dir = 'long'
+        try:
+            if template.metadata and isinstance(template.metadata, dict):
+                tmpl_dir = (template.metadata.get('direction') or 'long').lower()
+        except Exception:
+            pass
+
+        # entry['only_side'] is 'long' or 'short' — counter-direction wins the bonus
+        if entry.get('only_side') and tmpl_dir != entry['only_side']:
+            return 8.0
+        return 0.0
+
+    def _compute_symbol_imbalance_map(self) -> Dict[str, Dict]:
+        """Build {symbol: {'only_side': 'long'|'short', 'trades': n, 'pnl': float}}.
+
+        Eligibility: >=3 closed trades all on one side with negative net P&L.
+        Returns empty dict on any error.
+        """
+        try:
+            from src.models.database import get_database
+            from src.analytics.trade_journal import TradeJournalEntryORM
+
+            db = get_database()
+            session = db.get_session()
+            try:
+                rows = session.query(
+                    TradeJournalEntryORM.symbol,
+                    TradeJournalEntryORM.side,
+                    TradeJournalEntryORM.pnl,
+                ).filter(TradeJournalEntryORM.pnl.isnot(None)).all()
+            finally:
+                session.close()
+
+            by_sym: Dict[str, Dict] = {}
+            for sym, side, pnl in rows:
+                if not sym:
+                    continue
+                key = sym.upper()
+                d = by_sym.setdefault(key, {'longs': 0, 'shorts': 0, 'pnl': 0.0})
+                side_s = (str(side).upper() if side else 'LONG')
+                if 'LONG' in side_s or 'BUY' in side_s:
+                    d['longs'] += 1
+                else:
+                    d['shorts'] += 1
+                d['pnl'] += float(pnl or 0)
+
+            imbalance: Dict[str, Dict] = {}
+            for sym, stats in by_sym.items():
+                n = stats['longs'] + stats['shorts']
+                if n < 3:
+                    continue
+                if stats['pnl'] >= 0:
+                    continue  # only penalise symbols that are net-losing
+                if stats['longs'] == 0 and stats['shorts'] > 0:
+                    imbalance[sym] = {'only_side': 'short', 'trades': n, 'pnl': stats['pnl']}
+                elif stats['shorts'] == 0 and stats['longs'] > 0:
+                    imbalance[sym] = {'only_side': 'long', 'trades': n, 'pnl': stats['pnl']}
+            return imbalance
+        except Exception as e:
+            logger.debug(f"_compute_symbol_imbalance_map failed: {e}")
+            return {}
 
     def _estimate_signal_frequency(self, params: Dict, template: StrategyTemplate, 
                                    indicator_distributions: Dict) -> float:
@@ -6550,7 +6825,9 @@ Make this strategy distinct and innovative while following all threshold and pai
         self._template_weights = template_weights
 
         # --- Symbol preference scores ---
-        # More aggressive: use P&L-weighted scoring with confidence scaling
+        # More aggressive: use P&L-weighted scoring with confidence scaling.
+        # Recency-weighted: more recent trades carry more weight so a bad week
+        # 3 weeks ago doesn't permanently lock a symbol out (TSLA audit).
         symbol_perf = feedback.get("symbol_performance", {})
         symbol_scores: Dict[str, float] = {}
         if symbol_perf:
@@ -6559,6 +6836,16 @@ Make this strategy distinct and innovative while following all threshold and pai
                 wr = metrics.get("win_rate", 50.0)
                 total_trades = metrics.get("total_trades", 1)
                 total_pnl = metrics.get("total_pnl", 0.0)
+                # Optional recency weight from trade_journal aggregator (see
+                # trade_journal.get_performance_feedback): a decay factor in [0,1]
+                # where 1.0 = all trades recent, 0.3 = all trades stale.
+                # If absent (legacy feedback), treat as 1.0 (no decay).
+                recency = metrics.get("recency_weight", 1.0)
+                try:
+                    recency = float(recency)
+                except (TypeError, ValueError):
+                    recency = 1.0
+                recency = max(0.2, min(1.0, recency))  # Floor at 0.2 to preserve some signal
 
                 # Combined score: win rate deviation + P&L signal
                 score = (wr - 50.0) * 0.5 + avg_ret * 10.0
@@ -6572,6 +6859,10 @@ Make this strategy distinct and innovative while following all threshold and pai
                 # Confidence scaling
                 confidence = min(1.0, total_trades / 15.0)
                 score *= confidence
+
+                # Apply recency decay — stale negative scores shouldn't permanently
+                # lock symbols out once the market has rotated.
+                score *= recency
 
                 # Cap at ±15 (was ±8, more aggressive now)
                 symbol_scores[sym] = max(-15.0, min(15.0, score))

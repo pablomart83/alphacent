@@ -1061,10 +1061,20 @@ class OrderMonitor:
                             else:
                                 logger.warning(f"Could not find eToro position for filled order {order.id} (symbol: {order.symbol})")
                         
-                        # Log to trade journal for analytics tracking
+                        # Log to trade journal for analytics tracking.
+                        # Pull regime/conviction/fundamentals from the persisted order
+                        # metadata so async fills still capture signal-time context.
                         try:
                             from src.analytics.trade_journal import TradeJournal
                             journal = TradeJournal(self.db)
+
+                            _meta = order.order_metadata if isinstance(order.order_metadata, dict) else {}
+                            _regime = _meta.get("market_regime")
+                            _conviction = _meta.get("conviction_score")
+                            _ml_conf = _meta.get("ml_confidence")
+                            _fundamentals = _meta.get("fundamentals")
+                            _sector = _meta.get("sector")
+
                             journal.log_entry(
                                 trade_id=order.id,
                                 strategy_id=order.strategy_id,
@@ -1074,15 +1084,24 @@ class OrderMonitor:
                                 entry_size=order.filled_quantity or order.quantity or 0,
                                 entry_reason=f"Signal filled via eToro (order {order.etoro_order_id})",
                                 entry_order_id=str(order.etoro_order_id) if order.etoro_order_id else None,
+                                market_regime=_regime,
+                                sector=_sector,
+                                fundamentals=_fundamentals,
+                                conviction_score=_conviction,
+                                ml_confidence=_ml_conf,
                                 expected_price=order.expected_price,
                                 order_side=order.side.value if hasattr(order.side, 'value') else str(order.side),
                                 metadata={
                                     "etoro_order_id": order.etoro_order_id,
                                     "fill_time_seconds": order.fill_time_seconds,
                                     "source": "order_monitor",
+                                    **({k: v for k, v in _meta.items() if k not in ("market_regime", "conviction_score", "ml_confidence", "fundamentals", "sector")}),
                                 },
                             )
-                            logger.info(f"Logged trade journal entry for order {order.id} ({order.symbol})")
+                            logger.info(
+                                f"Logged trade journal entry for order {order.id} ({order.symbol}) "
+                                f"regime={_regime or 'unknown'} conviction={_conviction}"
+                            )
                         except Exception as journal_err:
                             logger.warning(f"Could not log to trade journal for order {order.id}: {journal_err}")
                 

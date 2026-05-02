@@ -1414,6 +1414,16 @@ class TradeJournal:
                 }
 
             # --- Symbol performance ---
+            # Compute a recency weight per symbol: exponential decay with 14-day
+            # half-life. Recent trades weight ~1.0, trades 14d old weight 0.5,
+            # trades 28d old weight 0.25. Prevents stale losing streaks from
+            # permanently locking out a symbol that has since turned around
+            # (TSLA audit 2026-05-01). Consumed by strategy_proposer to scale
+            # the symbol penalty.
+            import math as _math_rec
+            _now = datetime.now()
+            _half_life_days = 14.0
+
             symbol_groups: Dict[str, list] = {}
             for trade in trades:
                 symbol_groups.setdefault(trade.symbol, []).append(trade)
@@ -1430,11 +1440,27 @@ class TradeJournal:
                     if any(t.pnl_percent is not None for t in strades)
                     else 0.0
                 )
+
+                # Recency: weighted average of each trade's decay factor.
+                # decay = 0.5 ** (age_days / half_life)
+                recency_sum = 0.0
+                recency_total = 0
+                for t in strades:
+                    exit_t = t.exit_time or t.entry_time
+                    if exit_t is None:
+                        continue
+                    age_days = max(0.0, (_now - exit_t).total_seconds() / 86400.0)
+                    decay = 0.5 ** (age_days / _half_life_days)
+                    recency_sum += decay
+                    recency_total += 1
+                recency_weight = (recency_sum / recency_total) if recency_total else 1.0
+
                 symbol_performance[sym] = {
                     "total_trades": n,
                     "win_rate": (wins / n) * 100,
                     "total_pnl": total_pnl,
                     "avg_return_pct": avg_return,
+                    "recency_weight": recency_weight,
                 }
 
             # --- Regime performance ---
