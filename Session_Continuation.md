@@ -191,6 +191,32 @@ Of those 4 rejects, 2 strategies (the Sharpe rejects) showed genuine but thin ed
 
 **This is explicitly marked as a DEMO-only learning calibration, NOT a proper cost-model fix.** Per steering rule, the revert path is documented inline in the yaml; there is no ambiguity about what "fixing this for live" means.
 
+### Post-S3.0b verification — S3.0b fired correctly but deeper blockers surface
+
+`cycle_1777742566` at 17:22 UTC — 134 pre-WF, 4 wf_validated, **0 activated**. Same 0-activation outcome, but the visible rejection reasons changed — which is the diagnostic we needed:
+
+| Strategy | Pre-S3.0b reject | Post-S3.0b reject |
+| --- | --- | --- |
+| Cross-Sectional Momentum SOL | Return/trade 0.945% < **3.500%** | Return/trade 0.945% < **3.000%** (new floor visible) |
+| Cross-Sectional Momentum LINK | Sharpe 0.46 < **0.5** | **Net return -1.1%** (Sharpe now passes; net-return is the true blocker) |
+| Weekly Trend Follow LINK | Sharpe 0.39 < **0.5** | **Net return -4.2%** on 28 trades |
+| Weekly Trend Follow BTC | Sharpe 0.38 < **0.5** | **WinRate 21% < 25% hard floor** (expectancy $73.64 positive) |
+| Weekly Trend Follow ETH | Sharpe 0.23 < **0.5** | Sharpe 0.23 < **0.3** (still below new floor) |
+
+S3.0b unlocked 3 of 5 Sharpe gates — and all three strategies that passed Sharpe then revealed their **actual problem: negative net return in test window** (Cross-Sectional LINK -1.1%, Weekly Trend LINK -4.2%) or **win rate below the 25% hard floor** (Weekly Trend BTC at 21%).
+
+**Conclusion:** There is no further "gate loosen" that unlocks real crypto activation in this market regime. The system is correctly filtering out strategies that lost money in their test window. The crypto edge the templates are designed to capture (BTC lead-lag, cross-sectional momentum, trend-follow) simply isn't present in the current 90-730d test windows because BTC is ranging_low_vol and has been sideways since mid-March. When the regime shifts, these same strategies will show positive net return and activate.
+
+**What's NOT productive to change:**
+- Net-return-after-costs floor — strategies losing money must reject. Bypass = paper-losing DEMO trades teaching the conviction scorer bad priors.
+- 25% WR hard floor — below 25% win rate, even a positive-expectancy strategy is unreliable to trade.
+- Round-trip cost model — eToro charges are what they are.
+
+**What SHOULD happen in the next investigation:**
+1. Examine **why specific templates produce negative net return** in current window — is it template design (e.g. Weekly Trend Follow BTC enters 28 times but only wins 21% — maybe entry threshold needs regime calibration)? Or is it regime-wrong (template expects trend, regime is range)?
+2. Check whether **the 5 new Sprint 2 crypto templates** (Donchian, Keltner 4H, OBV, 20D MA, BB Volume) are WF'ing at all — if they consistently fail WF in ranging-low-vol, consider adding a **regime-gated proposer** that only proposes trend templates when BTC's ADX > 20.
+3. **Time-based bypass**: the 4 already-activated strategies (BTC Follower Daily ETH/SOL/LINK/AVAX) are armed for BTC's next +5% 2-bar move. That IS live signal data capability — it's just waiting on market action.
+
 ---
 
 ## Session shipped 2026-05-02 late session (Sprint 1 — Cross-asset DSL primitives)
@@ -604,43 +630,59 @@ These are on the radar but don't rank into Sprint 3:
 
 ### Next-session kickoff prompt
 
-Copy this as-is into a new session when you're ready to continue Sprint 3:
+Copy this as-is into a new session to investigate why crypto still isn't activating:
 
 ```
-Start this session by reading, in this exact order: (1) .kiro/steering/trading-system-context.md — pay special attention to the "Proper Solutions Only — No Patches, No Stopgaps" section. Exception for Sprint 3 S3.0b (DEMO crypto gate loosen): it's explicitly marked as a reversible calibration with revert-for-live path documented inline in config/autonomous_trading.yaml header — NOT a stopgap. (2) Session_Continuation.md — current state + Sprint 1/2/3 outcomes. (3) AUDIT_REPORT_2026-05-02.md. Do not skip. Do not summarize them back — just internalize and confirm you've read them.
+Start this session by reading, in this exact order: (1) .kiro/steering/trading-system-context.md — pay special attention to "Think Like a Trader, Not a Software Engineer" (ask: "would a quant at a $100B fund trust this output?") and "Proper Solutions Only — No Patches, No Stopgaps". (2) Session_Continuation.md — current state + Sprint 1/2/3 outcomes, especially the "Post-S3.0b verification" block which documents the exact reject pattern. (3) AUDIT_REPORT_2026-05-02.md. Do not skip. Do not summarize them back — just internalize and confirm you've read them.
 
-Context: Sprint 1 (commit abace94) shipped cross-asset DSL primitives. Sprint 2 (commit c47013c) shipped F2 cross-symbol validation, F2.1 primary-only dedup, F10 4h cache reconciliation, +3 native DSL indicators (OBV, Donchian, Keltner), +5 crypto templates. Sprint 3 has already shipped S3.0 (commit 6e5530f, asset-class-aware MC bootstrap: equity p5≥0.0 / crypto p10≥-0.2 with min 20 trades + consistency bypass) and S3.0b (commit 25c9051, DEMO crypto loosen: min_sharpe_crypto 0.5→0.3, min_return_per_trade.crypto_{1d,4h,1h} 0.035→0.030; revert values in yaml header for live). 4 crypto strategies active (BTC Follower Daily ETH/SOL/LINK/AVAX), armed waiting on BTC +5% 2-bar trigger. Diagnostic at cycle_1777741379: market regime ranging_low_vol produces thin crypto edge; S3.0b unlocks Sharpe 0.3-0.5 strategies on DEMO for live signal-data collection; strategies with genuinely negative test return stay correctly rejected.
+Context: Sprint 1 (commit abace94) + Sprint 2 (c47013c) + S3.0 (6e5530f) + S3.0b (25c9051) all shipped. The stack is architecturally correct: cross-asset DSL primitives fire in backtest+live, F2 cross-validation activates template families, F10 4h cache is honest, 3 new DSL indicators work, 5 new crypto templates are in the library. S3.0 made MC bootstrap asset-class-aware. S3.0b loosened crypto Sharpe floor 0.5→0.3 and RPT floor 3.5%→3.0% for DEMO.
 
-Your mission: Sprint 3 is mid-flight. Continue in two phases.
+BUT 5 consecutive crypto-focused cycles produced 0 new activations. Only 4 crypto strategies active (BTC Follower Daily ETH/SOL/LINK/AVAX) from the 15:44 UTC Sprint 2 cycle — and those are armed waiting on a BTC +5% 2-bar move that hasn't fired.
 
-PHASE 1 — Verification of S3.0 + S3.0b + Sprint 1/2 in live cycles (~30-60 min). User will run crypto-focused cycles. Your job:
-(a) Confirm S3.0b unlocks activations: expect 1-3 new crypto activations on Sharpe 0.3-0.5 strategies that were previously blocked (e.g., Cross-Sectional Momentum LINK at Sharpe 0.46, Weekly Trend Follow LINK at 0.39). Strategies with net return < 0 should still reject — that's correct.
-(b) Watch signal_decisions: `SELECT stage, COUNT(*) FROM signal_decisions WHERE timestamp > NOW() - INTERVAL '30 min' GROUP BY stage`. Funnel should show rejected_act count drop for Sharpe-based rejections.
-(c) If BTC prints a +5% 2-bar move (check with SQL), verify the 4 armed BTC Follower Daily strategies fire signal_emitted → order_submitted → order_filled. That's the full Sprint 1+2 signal→order→fill path proven end-to-end.
-(d) OBV Accumulation Daily on ETH already passed WF via excellent_oos in cycle_1777739783 — watch for it to potentially activate this round.
-(e) Once ≥5 closed crypto trades exist, query /analytics/observability/wf-live-divergence to measure backtest-live gap.
-(f) Spot-check no regression on equity/ETF/forex/commodity/AE — 15:15 UTC scheduled cycle should still produce ~100-200 pre-WF proposals across asset classes.
+Post-S3.0b reject pattern (cycle_1777742566 at 17:22 UTC):
+- Cross-Sectional Momentum LINK: Sharpe 0.46 (PASSES new 0.3 floor), but Net return -1.1% → correct reject
+- Weekly Trend Follow LINK: Sharpe 0.39 (passes), Net return -4.2% on 28 trades → correct reject
+- Weekly Trend Follow BTC: Sharpe 0.38 (passes), WinRate 21% < 25% hard floor, expectancy +$73.64/trade
+- Weekly Trend Follow ETH: Sharpe 0.23 < 0.3 → marginal reject
+- Cross-Sectional SOL: RPT 0.945% < 3.0% → correct reject
 
-Do not proceed to Phase 2 until at least one complete crypto signal→order→fill path has fired, OR the user confirms the market regime is too quiet and says to move on.
+The user's hypothesis — "there must be something we're calculating wrong, using a faulty approach or wrong formula" — is credible and needs investigation before any further gate changes.
 
-PHASE 2 — Remaining Sprint 3 code (S3.1-S3.5, ordered by P&L impact):
+Your mission this session: INVESTIGATE the computation pipeline for crypto backtest → WF → activation. Find the formula/approach bug (if any). Do NOT loosen more gates. Do NOT assume the market regime is the problem until we've proven the math is right.
 
-S3.1 (P0, ~2h) — LONG-side WF bypass tightening. `strategy_proposer.py` test_dominant + excellent_oos paths: add consistency gate `(test_sharpe - train_sharpe) ≤ 1.5` for LONG (mirrors SHORT tightening from Sprint 1). Strategies where test crushes train by >1.5 Sharpe are regime luck. Verify with before/after wf_validated counts and 2-week live-vs-backtest divergence check.
+PHASE 1 — Audit the WF result numbers against ground truth (1-2h, tracing work):
 
-S3.2 (P1, ~30 min) — Triple EMA Alignment DSL bug. `EMA(10) > EMA(10)` tautology from regex param substitution collapse. Fix the substitution in strategy_proposer.customize_template_parameters to handle positional EMA periods correctly. Template should produce >0 WF trades post-fix.
+(1) Pick ONE test case to trace end-to-end: Crypto Weekly Trend Follow × BTC. Known numbers per decision-log: train_sharpe=1.94, test_sharpe=0.38, 28 test trades, WinRate 21%, expectancy +$73.64/trade, net return NEGATIVE. That 21% WR with positive expectancy and test Sharpe 0.38 is internally suspicious — investigate whether:
+    - The Sharpe calculation uses trade-level returns with correct annualization (current code: trades_per_year = (n/180)*252, annualization_factor=sqrt(trades_per_year)). For 28 trades/730d window this gives 9.66 trades/yr → ann factor ~3.1. Is this right for a weekly-rebalance template?
+    - The net return calculation deducts costs correctly. Crypto commission = 1% per side = 2% round-trip. 28 trades × 2% = 56% in raw commission — but template's position-sizing may not apply full-equity per trade (check _run_vectorbt_backtest cost_model application).
+    - Win rate calc is consistent — "21% WR with +$73.64 expectancy" means the winners must be >5x the losers. Check if this is real or an artifact of partial-fill accounting / bar-level slippage.
 
-S3.3 (P1, ~45 min) — MQS persistence. `_save_hourly_equity_snapshot` swallows MQS compute error in bare `except: pass`. Replace with specific exception handler + WARNING log. Verify non-NULL market_quality_score in recent equity_snapshots after next hour.
+(2) Reproduce the calculation manually. Pull raw trade list for Crypto Weekly Trend Follow × BTC from the last cycle (query trade log or re-run WF with debug logging enabled). Compute:
+    - Mean(return) × sqrt(annualization)   vs logged test_sharpe
+    - sum(return_i) − (n × round_trip_cost)   vs logged net_return
+    - count(return>0)/count(*)                vs logged win_rate
+    - If numbers don't match logged values → there's the bug.
 
-S3.4 (P1, ~90 min) — Cross-cycle signal dedup for market-closed deferrals. trading_scheduler needs a 30-min TTL map {(strategy_id, symbol, direction): expires_at}. Market-closed deferral writes; next cycle skips duplicates. Eliminates the 82% FAILED-entry cosmetic bloat.
+(3) Specifically inspect src/strategy/strategy_engine.py _run_vectorbt_backtest cost application:
+    - Is commission applied per bar or per trade? (research: per trade is correct)
+    - Is spread applied to entry + exit prices (correct) or to total return once (wrong)?
+    - Is slippage applied to each trade independently?
+    - For crypto with 1% commission per side + 0.38% spread per side + 0.1% slippage, the round-trip should be 2.96%. Verify this is the cumulative deduction, not double-counted or under-counted.
 
-S3.5 (P2, ~90 min) — trade_id convention unification. Migrate order_monitor.check_submitted_orders to use position.id for log_exit (matches log_entry). Retire the fallback match in log_exit. Prevents new orphan rows.
+(4) Check whether `BacktestResults.total_return` is a **percentage** (e.g. -0.042 for -4.2%) or a **dollar amount** (e.g. -$4200). If the activation gate compares `net_return < 0` and `total_return` is in different units than expected, legitimate winners could be mislabeled. Verify src/strategy/portfolio_manager.py evaluate_for_activation — line where `net_return = backtest_results.total_return` — matches the compute convention in strategy_engine.
 
-Do not ship Sprint 3 remaining work until:
-- Phase 1 verified — complete crypto signal→order→fill path fired at least once (or user override).
-- Each S3.x validated through a post-deploy cycle showing the intended effect.
-- Zero regressions on existing activations / signal generation.
+(5) Check the annualization factor MC bootstrap vs direct Sharpe are using. Direct test_sharpe in backtest vs MC bootstrap p5 Sharpe should differ by bootstrap variance, not by a scaling error.
 
-If any proper fix takes longer than expected, that's fine — we do proper, not fast. S3.0b (DEMO loosen) is the only deliberate non-proper-solution in Sprint 3 and is explicitly marked reversible with revert-for-live values in the yaml. Do not add more stopgaps.
+PHASE 2 — If Phase 1 finds a real bug: fix it with a proper solution (no stopgaps). Run a cycle. Verify crypto activations. Commit.
+
+If Phase 1 confirms the math is right (no bug), that's ALSO a valid outcome — it proves crypto templates genuinely don't have edge in the current test windows, which means the right next step is either:
+    (a) Extend test windows further for specific crypto templates (some already use 730d, consider 1825d for weekly-horizon templates)
+    (b) Add regime-gated proposal (only propose crypto trend templates when BTC ADX > 20)
+    (c) Accept that we wait for BTC regime shift (S3.1-S3.5 continue as planned)
+
+Do NOT add another DEMO loosen. S3.0b is the last acceptable gate relaxation.
+
+If the investigation takes the whole session, that's fine — better to find the right answer than ship another calibration that doesn't fix the underlying issue.
 ```
 
 ### Previous — Sprint 3 kickoff (2026-05-02 evening, first version) — INCREMENTAL PROGRESS, S3.0+S3.0b shipped mid-session
