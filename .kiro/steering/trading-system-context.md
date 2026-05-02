@@ -30,6 +30,35 @@ No minimal fixes. No silent exception swallowing. No hardcoded fallbacks that ma
 
 ---
 
+## Proper Solutions Only — No Patches, No Stopgaps
+
+This is a hard rule. The system is a working trading business and every line of code will run on it for months. We never ship workarounds.
+
+**What "proper" means:**
+- Fix at the root cause, not at the symptom.
+- Solve the whole problem, not the visible slice of it.
+- If a component is structurally wrong (e.g. a gate that only runs at signal-time but needs to be in backtest), fix the architecture — do not layer a bypass.
+- Bake cross-cutting concerns (cross-asset signals, regime-awareness, validation) into the primitives they belong in (DSL, backtest engine, scoring layer) — never as out-of-band runtime gates.
+- Work the problem until the solution is self-consistent: backtest, WF, paper-trade, and live-signal paths all see the same edge the same way.
+
+**Explicitly forbidden:**
+- "Stopgap" or "pragmatic" options that we plan to fix "later" — later does not come. Do not propose them as real options.
+- `validation_mode: shadow` style escape hatches that route around existing gates.
+- `skip_*` metadata flags that bypass validation ("we know this template is good, trust us"). If it's good, prove it through the normal path; if the normal path can't see it, fix the path.
+- Manually-approved lists / hardcoded allow-lists used as permanent workarounds.
+- "Do nothing structural; let the existing filter catch it" — if the filter is the right place, that's a proper solution; if we're relying on a filter to mask a deeper flaw, that's a patch.
+
+**When a proper fix takes 3+ hours and a patch takes 30 minutes, the proper fix is the only option.** Budget for it, ship the right thing, move on. Do not accept a patch and "schedule the proper fix for next session" — next session never arrives and the patch becomes the permanent design.
+
+**When no proper solution exists yet:**
+1. Explicitly say "no proper solution yet — I need to research / design before we ship."
+2. Do not deploy a stopgap in the meantime. The system keeps running without the new feature.
+3. Spend the research/design time first. Ship the proper solution when it's ready.
+
+This rule overrides the "default_to_action" guidance in the identity prompt. For AlphaCent, "ship the right thing slowly" beats "ship something fast."
+
+---
+
 ## Deployment Workflow — Mandatory
 
 **The local workspace is the single source of truth. EC2 is a deployment target, never an editing environment.**

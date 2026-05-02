@@ -15,17 +15,21 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 2, 2026, 12:00 UTC post-Tier-1/2/3)
+## Current System State (May 2, 2026, ~14:00 UTC, end of session)
 
-- **Equity:** ~$475K (unchanged from May 1)
+- **Equity:** ~$475K (unchanged)
 - **Open positions:** 85-90 depending on cycle
-- **Active strategies:** 63 DSL + 1 AE (64 total per latest activation stage)
+- **Active strategies:** 63 DSL + 1 AE (64 total DEMO)
+- **Crypto-native DEMO strategies:** 0 (audit identified; proper fix scheduled, no stopgap shipped)
 - **Directional split:** ~79 LONG / ~6 SHORT
-- **Market regime:** `STRONG UPTREND` (20d +10.83%, 50d +5.49%, ATR/price 1.08%)
+- **Market regime (equity):** `STRONG UPTREND` (20d +10.83%, 50d +5.49%, ATR/price 1.08%)
+- **Market regime (crypto, new detector):** `RANGING_LOW_VOL` (BTC 20d +1.0%, 50d +9.75%, ATR 1.8%)
 - **VIX:** 16.89
+- **Mode:** eToro DEMO (= paper trading; we are already in the validation stage of the deployment pipeline)
+- **Last cycle:** `cycle_1777728444` at 13:27-13:30 UTC, completed healthy. 129 proposals, 4 wf_validated, 0 activations (structural — see next-sprint section).
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
-**Verified healthy:** restart on Tier-3 deploy ~11:55 UTC. errors.log clean except pre-existing DSL parse warning from Triple EMA Alignment (P2 known bug). signal_decisions still populating (397 rows in last 2h pre-restart).
+**Verified healthy:** service running post last restart. errors.log clean except pre-existing Triple EMA Alignment DSL parse warning (P2 known bug). signal_decisions populating. All 7 session deploys successful.
 
 ---
 
@@ -56,6 +60,72 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 - **P1-3** — Negative `fill_time_seconds` rows: none remained post-P1-1 delete (all were on the deleted rows).
 - **P1-extra Crypto long-horizon WF window** (commit `409ad90`) — Long-horizon 1d crypto templates (21W MA, Vol-Compression, Weekly Trend Follow, Golden Cross) hold weeks/months and can't produce enough trades in 180d. Extended `test_days`+`train_days` to 730d for this set when asset_class=crypto AND interval=1d. Applied in both WF call sites (primary + watchlist).
 - **P1-6** — Already landed in commit `8c1b263` in a prior session.
+
+---
+
+## Session shipped 2026-05-02 late afternoon/evening (crypto deep-dive)
+
+Full audit of why crypto never activates. Root cause analysis + 5-batch fix plan + hotfix round. User stopped us at the right point: we're already on eToro DEMO (= paper trading), so the professional pipeline collapses for us to backtest → WF → paper-trade DEMO, and WF-blocking templates with cross-asset runtime edge is the wrong stance.
+
+### Batch A — unblock tier (commit `cb8b852`)
+- `min_return_per_trade`: tiered `crypto_1h: 0.005`, `crypto_4h: 0.015`, `crypto_1d: 0.025`, `crypto: 0.04` fallback
+- `__post_init__` SL/TP floor timeframe-aware for `crypto_optimized`: 1h=1.5%/2%, 4h=2.5%/4%, 1d+=4%/8%
+- Added `min_trades_crypto_1h: 15` in yaml; wired branch in portfolio_manager + proposer
+- `scripts/clear_crypto_wf_cache.py` (crypto-only cache clear)
+
+### Batch B — regime gates (commit `73581d7`)
+- `StrategyTemplate.__post_init__` auto-injects ADX regime gate on `crypto_optimized` templates missing ADX:
+  - Mean-reversion: `AND ADX(14) < 25` (1d/4h) or `< 30` (1h)
+  - Trend/momentum/breakout: `AND ADX(14) > 20` (1d/4h) or `> 15` (1h)
+  - Idempotent; skippable via `metadata.skip_adx_gate = True`
+- `market_analyzer.detect_crypto_regime()`: BTC+ETH with crypto-calibrated thresholds (2× equity)
+- Proposer `_detect_crypto_regime` prefers new detector with fallback
+
+### Batch C — alpha expansion (commit `998f4b9`)
+- 4 new templates (later 3 after Dominance Inversion dropped):
+  - `Crypto BTC Follower 1H` — 2h BTC window, +1% threshold, SL 2%/TP 3.5%
+  - `Crypto BTC Follower 4H` — 8h BTC window, +3% threshold, SL 3%/TP 6%
+  - `Crypto BTC Follower Daily` — 2d BTC window, +5% threshold, SL 5%/TP 12%
+  - `Crypto Cross-Sectional Momentum` — 14d rank universe, top-3 hold 7d
+- **Structural limitation discovered**: signal-time gate in `strategy_engine.generate_signals` reads `metadata.btc_leader` / `metadata.cross_sectional_rank` and skips if condition fails. **But this gate only fires at live signal gen, not during backtest.** WF runs the plain DSL without the cross-asset gate → backtest underestimates edge → templates fail WF. See "Open items — next session" below.
+- Parkinson vol for crypto — already implemented in `risk_manager._parkinson_vol` (verified, no change)
+- Metadata propagation extended for 11 new keys across 3 proposer sites (`btc_leader`, `leader_symbol`, `btc_leader_interval`, `btc_leader_bars`, `btc_leader_threshold_pct`, `btc_leader_direction`, `cross_sectional_rank`, `rank_window_days`, `rank_top_n`, `rank_metric`, `rank_universe`, `skip_adx_gate`)
+
+### Batch D — infrastructure (commit `d5b2e2a`)
+- `scripts/backfill_crypto_1h_cache.py` — **yfinance 1h crypto capped at ~7 months** (210d BTC/ETH, 174d SOL/AVAX/LINK/DOT); documented in script
+- Per-timeframe WF window override extended: 1d long-horizon 730/730 (existed), **1h crypto 90/90**, **4h crypto 180/180**. Applied in primary + watchlist WF.
+- WF cache schema version: `_compute_wf_cache_schema_version()` hashes crypto-relevant config into 8-char tag. `_apply_wf_schema_version_check()` at proposer init clears crypto cache entries when config changes. Persisted to `.wf_cache_schema_version`.
+- `proposals_pre_wf` column on `autonomous_cycle_runs` (DB migrated). Proposer exposes `_last_pre_wf_count`; cycle recorder writes both post-WF and raw pre-WF counts.
+
+### Batch E — pruning + doc sync (commit `4bef714`)
+- E1 DEFERRED: kill-list for persistently-losing templates. Pre-regime-gate backtests are not reliable for kill decisions because Batch B ADX gates materially change trade profiles. Revisit after cycles under new gates.
+- E2: `docs/ALPHACENT_OVERVIEW.md` updated; removed stale "1H crypto templates were removed (90% underperformance)" claim (code had dozens of them).
+- E3: Vol-Compression Momentum `market_regimes` — added `RANGING` (was `RANGING_LOW_VOL` only; BTC at ATR 2.74% classifies as plain RANGING, so template never matched). Now proposes correctly.
+
+### Hotfix round — P-CRYPTO-A/C + Option Y (commit `1e38d2c`)
+
+Cycle 12:31 UTC showed 0 activations with rejects still citing `crypto, 4.000% min`. Ground-truth audit found 3 issues:
+
+- **P-CRYPTO-A**: `portfolio_manager` interval-key lookup only probed `('1h', '4h')` — missed `1d`. The `crypto_1d: 0.025` key I added in Batch A was never read. Expanded to `('1h', '2h', '4h', '1d')`. Reject reason now shows tier source (`crypto_1d, 18 trades` instead of `crypto, 18 trades`).
+- **P-CRYPTO-C**: Batch C templates didn't list `RANGING_LOW_VOL` in `market_regimes`. Detector classifies BTC as ranging_low_vol (ATR 1.8%) — all 5 templates excluded from pool, never proposed. Added `RANGING_LOW_VOL`/`RANGING_HIGH_VOL` to 1H, 4H, Daily + Cross-Sectional.
+- **Dropped** `Crypto BTC Dominance Inversion SHORT`: eToro doesn't permit shorting spot crypto (hard-block in `_score_symbol_for_template`); template couldn't execute.
+- **Option Y** (asset-class isolation): new hard block in `_score_symbol_for_template` — non-`crypto_optimized` templates return 0 score on crypto symbols. AE + market-neutral exempt. Generic equity DSL (RSI Dip Buy, Bollinger Band Bounce, RSI Midrange) produces 0.5-1% gross/trade on crypto; below 2.96% round-trip cost; activation-level gate was catching them but they consumed WF compute. Block at scoring time.
+
+### Post-fix cycle (cycle_1777728444, 13:27 UTC)
+- 129 proposals (127 crypto + 2 XLF AE) — Option Y confirmed working
+- Batch C templates proposing: BTC Follower 4H=5, BTC Follower Daily=5, Cross-Sectional=6, Vol-Compression=1
+- 4 wf_validated → 0 activated. **All 4 Batch C lead-lag/cross-sectional candidates failed at activation with Net return < 0, because WF ran the plain DSL without the cross-asset gate.** Backtest literally cannot see the edge these templates carry.
+- Other rejects were small-sample legitimate (3-trade strategies hitting the Sharpe-exception path) or genuine low-Sharpe (0.23-0.38 < 0.5 min_sharpe_crypto).
+
+### Research-backed conclusion (stopping point)
+
+Session ended here on user's correct insight: **we're already on eToro DEMO = paper trading**, so the professional 7-stage pipeline (backtest → WF → MC → paper-trade → shadow → small-size live → scale-up) collapses for us into backtest → WF → paper-trade-DEMO. Our gate-blocking of templates at WF is unnecessarily strict for a paper-trade environment.
+
+Web research confirmed:
+- nexusfi.com / Apr 2026: "Paper trading proves your execution stack works correctly — profitability is a nice bonus, not the point." Our DEMO IS the paper stage, so WF should be more permissive for templates with known-structural edge.
+- arxiv 2501.07135 (Imperial College + commodity quant shop 2025): The canonical cross-asset lead-lag approach is to **bake the lead-lag metric into the DSL as an indicator** (Lévy area / Dynamic Time Warping), not layer it as a runtime gate. Then backtest sees it natively; WF works honestly.
+- BTA Apr 2026: Top shops cross-validate across same-sector markets — a template should be scored by consistency across ≥4/6 assets in the sector, not single-symbol pass/fail.
+- Grobys 2024 / Habeli 2025 (in repo research doc): Crypto momentum return distribution is power-law; Sharpe of 0.3-0.5 on unscaled crypto is normal even for strategies with real edge. Volatility-scaled sizing recovers to ~1.0+. Our `min_sharpe_crypto: 0.5` is arguably too strict.
 
 ---
 
@@ -224,36 +294,75 @@ ORDER BY ABS(COALESCE((s.strategy_metadata->>'wf_test_sharpe')::float, 0)) DESC;
 
 ## Open Items — Priority Order
 
-### Next sprint (after Tier 1/2/3 shipped 2026-05-02 afternoon) — next session starter
+### Next sprint — crypto activation architecture (proper solution, no stopgaps)
 
-Tier-1/2/3 fixes from AUDIT_REPORT_2026-05-02.md all shipped this session.
-Local commits `5ba602e`, `9a44ed4`, `409ad90` apply the full plan. Git push
-is blocked by Code Defender at the Kiro environment level — commits exist
-locally and need a `git-defender --request-repo` approval to push.
+**Rule in effect:** Proper solutions only. No patches, no shadow-mode bypasses, no "skip_wf" escape hatches. See `.kiro/steering/trading-system-context.md` → "Proper Solutions Only — No Patches, No Stopgaps".
 
-Priority for next session:
-1. Request-repo approval and push commits (blocked by environment, not code).
-2. Verify post-overnight-cycle state:
-   - `active_zombies` trending to 0 as positions close
-   - `live_trade_count` incrementing on new fills (SELECT status, AVG(live_trade_count) FROM strategies GROUP BY status — compare to last-session numbers)
-   - `signal_decisions.stage='cycle_error'` rows if any stage threw
-   - Factor-gate rejections now INFO, not in cycle errors
-   - Penalty-applied trades being skipped if sized sub-$5K
-3. Deferred work (now on deck):
-   - P1-2 trade_id convention unification (90 min — pair with next architectural work)
-   - P2-1 Vol-Compression template non-propose debug
-   - P2-5 Overview chart panel rewrite (needs design doc first)
-   - Monday Asia Open session template (needs DSL HOUR() support — 2-3h infra)
-   - Entry-timing score (needs per-minute post-entry price snapshots)
+**The problem from the 2026-05-02 late session:**
+
+Batch C cross-asset templates (`Crypto BTC Follower 1H/4H/Daily`, `Crypto Cross-Sectional Momentum`) carry real lead-lag / cross-sectional edge per industry research (arxiv 2501.07135, repo HEDGE_FUND_STRATEGY_RESEARCH line 183, Granger-causality studies). But they fail WF with 0 activations because the cross-asset gate only fires at live signal-generation time — the backtest runs the plain DSL without the gate, cannot see the edge, and correctly rejects the weak-looking backtest. This is an architectural flaw, not a tuning problem.
+
+The proper fix (F4 + F6 from the audit) is to make the cross-asset signals first-class primitives:
+
+**Sprint plan — 1 work session, no patches:**
+
+1. **Cross-asset DSL primitives** (in `src/strategy/strategy_engine.py` DSL parser + indicator library):
+   - `LAG_RETURN(symbol, bars, interval)` — percentage return of another symbol over the last N bars. Example: `LAG_RETURN(BTC, 2, 1h) > 0.01`
+   - `LEADER_RETURN(leader_sym, follower_sym, bars)` — convenience wrapper
+   - `RANK_BY_RETURN(symbol, universe_list, window_days, top_n)` — boolean, true if `symbol` is in the top-N of the universe by N-day return
+   - Backtest engine pre-fetches leader/universe symbols via the existing `_shared_data` batch mechanism (already supports multi-symbol fetching)
+   - Rewrite the 4 Batch C templates' DSL to use these primitives directly (remove the `btc_leader` / `cross_sectional_rank` metadata-flag runtime-gates entirely — they become dead code)
+
+2. **Cross-validation scoring layer** (in `strategy_proposer.py` between regime filter and WF):
+   - Before sending a template to WF, score consistency across same-sector symbols.
+   - Crypto lead-lag templates: run the full WF on all 6 coins (BTC/ETH/SOL/AVAX/LINK/DOT) with the new DSL primitives; require ≥4/6 produce positive test return AND positive test Sharpe.
+   - Scoring output feeds a new `cross_validation_score` field on the WF cache entry; activation criteria check it.
+   - This catches "lucky on ETH, loses everywhere else" overfit per BTA cross-validation research.
+
+3. **Reference implementation: Lévy-area / DTW indicator** (arxiv 2501.07135 algorithm):
+   - Add `LEVY_AREA(sym_a, sym_b, window)` as a DSL primitive returning a scalar lead-lag strength for two series. Basis of the "Network Momentum" models that outperform MACD on commodity futures.
+   - Initially optional — only needed if simple `LAG_RETURN` doesn't capture the edge cleanly.
+
+4. **Crypto Sharpe threshold review** (separate concern, same research thread):
+   - `min_sharpe_crypto: 0.5` gate — review against power-law tail evidence (Grobys 2024, Habeli 2025). Crypto returns have heavier tails than equity; raw Sharpe systematically underestimates edge. Research suggests 0.3-0.4 on unscaled crypto backtests is consistent with a real post-vol-scaling Sharpe of ~1.0.
+   - Not a "lower the gate to let more through" patch — a design decision about the right risk-adjusted metric for power-law-tailed distributions. Either lower to 0.3 with documented justification, or replace Sharpe with Sortino / Calmar for crypto (downside-aware). Ship whichever is defensible under the "would a quant at a $100B fund trust this output?" test.
+
+**Work estimate:** One focused session, ~3-4 hours. Non-trivial but bounded. Result: backtest / WF / paper-trade / live-signal paths all see the same edge the same way. Honest math end to end.
+
+**Do not ship until:**
+- At least one of the 4 Batch C templates passes WF with ≥4/6 cross-validation on a clean crypto cycle.
+- Backtest returns for BTC Follower templates on 4H/Daily match rough expectations (positive, Sortino > 0.5, trade count consistent with BTC-rally-day frequency of ~10-20/year).
+- Pre-flight test: manually run BTC Follower Daily on ETH with the new DSL primitive; verify backtest fires signals only on days where BTC was up +5% over prior 2 days.
+
+### Independent next-session items (can be interleaved)
+
+These don't depend on the crypto work and remain on the backlog. Priority order:
+
+1. **P1-2 trade_id convention unification** (90 min) — `log_entry`/`log_exit` agree on trade_id; migrate `order_monitor` to use `position.id`; retire the fallback match logic. The 2026-05-02 session backfilled 175 orphans from this mismatch but the code still produces orphans on every new fill.
+2. **Verify overnight-cycle state of the 2026-05-02 Tier-1/2/3 fixes:**
+   - `active_zombies` should trend to 0 as positions close (`SELECT COUNT(*) FROM strategies WHERE (strategy_metadata::jsonb->>'pending_retirement')::text='true' AND status IN ('DEMO','LIVE')` expected to drop from 19)
+   - `live_trade_count` incrementing on new fills — compare `SELECT status, AVG(live_trade_count) FROM strategies GROUP BY status` to last-session baseline
+   - `signal_decisions.stage='cycle_error'` rows present if any stage threw
+   - Factor-gate rejections now INFO (not in cycle ERROR count)
+   - Penalty-applied trades being skipped if sized sub-$5K (check risk.log for "penalty applied — skipping trade")
+3. **Monday Asia Open session template** (2-3h) — needs `HOUR()` DSL primitive first. Same architectural pattern as the cross-asset primitives above; could be built alongside.
+4. **P2-5 Overview chart panel rewrite** — needs design doc first. Axis alignment issues across 3 separate chart components. Design before coding per the proper-solutions-only rule.
+5. **Entry-timing score** — needs per-minute post-entry price snapshots; requires new capture infra. Design-first.
+
+### Next-session kickoff prompt
 
 Copy this as-is into a new session when you're ready to execute:
 
 ```
-Start this session by reading Session_Continuation.md (this file), AUDIT_REPORT_2026-05-02.md, and .kiro/steering/trading-system-context.md — in that order. They contain the full state, audit findings, and permanent rules.
+Start this session by reading Session_Continuation.md, AUDIT_REPORT_2026-05-02.md, and .kiro/steering/trading-system-context.md — in that order. The steering file now contains an explicit "Proper Solutions Only — No Patches, No Stopgaps" rule that overrides default-to-action. Do not propose pragmatic/stopgap options for AlphaCent work.
 
-Context in one paragraph: previous sessions shipped Tier 1/2/3 fixes from the May 2 audit — retirement black hole (P0-1), live_trade_count async fix + backfill (P0-2), cycle_error stage (P0-6), factor-gate noise reclassification (P1-5), MINIMUM_ORDER_SIZE penalty bypass (P1-4), crypto long-horizon WF window (P1-extra), and legacy row cleanup. All local commits exist; push was blocked by Code Defender.
+Context: previous sessions shipped Tier 1/2/3 audit fixes (retirement black hole, live_trade_count async, cycle_error stage, factor-gate noise, MINIMUM_ORDER_SIZE penalty, legacy cleanup) and 5 batches of crypto improvements (tiered RPT, regime gates, 4 lead-lag templates, 1h WF windows, Option Y asset-class isolation, Vol-Compression fix, schema-version cache invalidator). Post-fix crypto cycle produced 129 proposals, 4 wf_validated, 0 activations. Root cause: cross-asset signal-time gates are invisible to WF — WF can't see the edge that the Batch C lead-lag templates carry.
 
-Your mission: (a) request-repo approval and push the three pending commits (5ba602e, 9a44ed4, 409ad90), (b) verify post-overnight-cycle state with the queries in Session_Continuation.md, (c) pick up deferred work: P1-2 trade_id unification OR P2-1 Vol-Compression debug OR Monday Asia Open.
+Your mission: ship the proper architectural fix described in Session_Continuation.md "Next sprint — crypto activation architecture" section. Summary: add LAG_RETURN / RANK_BY_RETURN / (optionally) LEVY_AREA as DSL primitives so the cross-asset edge is computed bar-by-bar in backtest; add a cross-validation scoring layer before WF; rewrite the Batch C templates' DSL to use the primitives natively; remove the now-dead btc_leader / cross_sectional_rank runtime-gate code from strategy_engine. Do not ship until at least one Batch C template passes a clean WF + cross-validation on ≥4/6 crypto symbols.
+
+Also review min_sharpe_crypto threshold against power-law-tail crypto research (Grobys 2024, Habeli 2025) — decide whether to keep Sharpe or switch to Sortino/Calmar for the crypto activation gate. Ship whichever is defensible under "would a quant at a $100B fund trust this?"
+
+If any proper fix takes longer than expected, that's fine — we do proper, not fast. Do not propose stopgaps.
 ```
 
 ### Previous — next sprint (2026-05-02 audit findings) — ALREADY EXECUTED, kept for context
