@@ -50,7 +50,14 @@ const statusDot = (status: string) => {
 
 const formatAge = (iso: string | null) => {
   if (!iso) return '—';
-  const age = (Date.now() - new Date(iso).getTime()) / 1000;
+  // Backend emits naive UTC ISO strings (no tz suffix). JS Date() parses those
+  // as LOCAL time, causing N-hour drift where N = local UTC offset. If the
+  // string has no timezone info, append 'Z' so it's interpreted as UTC.
+  let parseable = iso;
+  if (iso && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) {
+    parseable = iso + 'Z';
+  }
+  const age = (Date.now() - new Date(parseable).getTime()) / 1000;
   if (age < 0) return 'just now';
   if (age < 60) return `${Math.round(age)}s ago`;
   if (age < 3600) return `${Math.round(age / 60)}m ago`;
@@ -164,7 +171,11 @@ export const SystemHealthPage: FC<SystemHealthPageProps> = ({ onLogout }) => {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                              {new Date(evt.timestamp).toLocaleTimeString()}
+                              {(() => {
+                                const t = evt.timestamp;
+                                const p = t && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(t) ? t + 'Z' : t;
+                                return new Date(p).toLocaleTimeString();
+                              })()}
                             </span>
                             <span className="text-xs font-mono px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--color-dark-bg)', color: 'var(--color-text-secondary)' }}>
                               {evt.type}

@@ -602,6 +602,9 @@ class StrategyProposer:
            the symbols list and template name. Survives strategy retirement so
            per-symbol analytics (Symbols tab "Proposed" column) stay accurate
            even after strategies are deleted.
+        3. `signal_decisions` table — one row per proposal at stage 'proposed'
+           for the graduation-funnel / decision-log analytics. Feeds the
+           System page Observability panel.
         """
         now = datetime.now().isoformat()
         for strategy in strategies:
@@ -623,6 +626,33 @@ class StrategyProposer:
         # survives strategy deletion. Best-effort — never fail the proposer
         # because of an analytics write.
         self._persist_proposals_to_db(strategies)
+
+        # Also write one signal_decisions row per strategy for the
+        # graduation funnel. Stage 'proposed' means "the proposer emitted
+        # this combo" — the next stage it may transition to is wf_validated
+        # or wf_rejected.
+        try:
+            from src.analytics.decision_log import record_batch
+            rows = []
+            for s in strategies:
+                meta = getattr(s, 'metadata', {}) or {}
+                tname = meta.get('template_name') or getattr(s, 'name', '') or ''
+                syms = getattr(s, 'symbols', None) or []
+                primary_sym = syms[0] if syms else None
+                rows.append({
+                    "stage": "proposed",
+                    "decision": "accepted",
+                    "strategy_id": str(getattr(s, 'id', '') or ''),
+                    "template": tname,
+                    "symbol": primary_sym,
+                    "direction": self._detect_strategy_direction(s) if hasattr(self, '_detect_strategy_direction') else None,
+                    "market_regime": str(getattr(self, '_last_regime', '') or 'unknown'),
+                    "reason": "proposer_emitted",
+                    "metadata": {"watchlist_size": len(syms)},
+                })
+            record_batch(rows)
+        except Exception as _dl_err:
+            logger.debug(f"decision_log proposed-stage batch failed: {_dl_err}")
 
     def track_approvals(self, strategies: list):
         """Record that these strategies passed WF and were approved.

@@ -1793,12 +1793,56 @@ class AutonomousStrategyManager:
                         "trades": bt.total_trades if bt else 0,
                         "reason": rejection_reason or "Below activation thresholds",
                     })
+                    # Decision-log write — funnel stage 'rejected_act'
+                    try:
+                        from src.analytics.decision_log import record_decision
+                        _meta = strategy.metadata or {}
+                        record_decision(
+                            stage="rejected_act",
+                            decision="rejected",
+                            strategy_id=str(strategy.id),
+                            template=_meta.get('template_name') or strategy.name,
+                            symbol=(strategy.symbols[0] if strategy.symbols else None),
+                            direction=_meta.get('direction'),
+                            score=(bt.sharpe_ratio if bt else None),
+                            reason=(rejection_reason or "below_activation_thresholds")[:500],
+                            metadata={
+                                "sharpe": bt.sharpe_ratio if bt else None,
+                                "win_rate": bt.win_rate if bt else None,
+                                "trades": bt.total_trades if bt else None,
+                            },
+                        )
+                    except Exception:
+                        pass
                     continue
 
                 logger.info(
                     f"  [{i}/{len(backtested_strategies)}] ✓ {strategy.name} "
                     f"passed activation criteria"
                 )
+
+                # Decision-log write — funnel stage 'activated'
+                try:
+                    from src.analytics.decision_log import record_decision
+                    _meta = strategy.metadata or {}
+                    record_decision(
+                        stage="activated",
+                        decision="accepted",
+                        strategy_id=str(strategy.id),
+                        template=_meta.get('template_name') or strategy.name,
+                        symbol=(strategy.symbols[0] if strategy.symbols else None),
+                        direction=_meta.get('direction'),
+                        market_regime=_meta.get('macro_regime'),
+                        score=(strategy.backtest_results.sharpe_ratio if strategy.backtest_results else None),
+                        reason="passed_activation_criteria",
+                        metadata={
+                            "sharpe": strategy.backtest_results.sharpe_ratio if strategy.backtest_results else None,
+                            "win_rate": strategy.backtest_results.win_rate if strategy.backtest_results else None,
+                            "trades": strategy.backtest_results.total_trades if strategy.backtest_results else None,
+                        },
+                    )
+                except Exception:
+                    pass
 
                 # Dedup: max 1 activation per (template, primary_symbol) per cycle
                 template_name = strategy.metadata.get('template_name', strategy.name) if strategy.metadata else strategy.name

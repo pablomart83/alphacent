@@ -1595,7 +1595,11 @@ async def get_system_health(
                 last_cycle = None
                 task_status = "stale"
                 if ts and ts > 0:
-                    last_cycle = datetime.fromtimestamp(ts).isoformat()
+                    # UTC ISO with 'Z' so the frontend treats it as UTC.
+                    # datetime.fromtimestamp(ts) is local-naive on a UTC host it
+                    # still equals UTC, but we stamp 'Z' to make the timezone
+                    # explicit over the wire.
+                    last_cycle = datetime.utcfromtimestamp(ts).isoformat() + "Z"
                     age = (now - datetime.fromtimestamp(ts)).total_seconds()
                     task_status = "healthy" if age < interval * 3 else "stale"
                 result.monitoring_service.sub_tasks.append(MonitoringSubTask(
@@ -1614,14 +1618,16 @@ async def get_system_health(
         if scheduler:
             last_signal = getattr(scheduler, "_last_signal_check", 0)
             if last_signal and last_signal > 0:
-                result.trading_scheduler.last_signal_time = datetime.fromtimestamp(last_signal).isoformat()
+                result.trading_scheduler.last_signal_time = datetime.utcfromtimestamp(last_signal).isoformat() + "Z"
 
             next_run = getattr(scheduler, "_next_run_time", None)
             if next_run:
                 if isinstance(next_run, (int, float)) and next_run > 0:
-                    result.trading_scheduler.next_expected_run = datetime.fromtimestamp(next_run).isoformat()
+                    result.trading_scheduler.next_expected_run = datetime.utcfromtimestamp(next_run).isoformat() + "Z"
                 elif hasattr(next_run, "isoformat"):
-                    result.trading_scheduler.next_expected_run = next_run.isoformat()
+                    # Assume datetime is already tz-aware or naive-UTC by our convention
+                    _iso = next_run.isoformat()
+                    result.trading_scheduler.next_expected_run = _iso if _iso.endswith("Z") or "+" in _iso else _iso + "Z"
 
             result.trading_scheduler.signals_last_run = getattr(scheduler, "_signals_last_run", 0)
             result.trading_scheduler.orders_last_run = getattr(scheduler, "_orders_last_run", 0)
@@ -1681,7 +1687,11 @@ async def get_system_health(
             fmp = getattr(mdm, "_fmp_warm_status", None)
             if isinstance(fmp, dict):
                 if fmp.get("last_warm_time"):
-                    result.cache_stats.fmp_cache_warm_status.last_warm_time = str(fmp["last_warm_time"])
+                    _fmp_ts = str(fmp["last_warm_time"])
+                    # Ensure tz marker for frontend
+                    if not (_fmp_ts.endswith("Z") or "+" in _fmp_ts):
+                        _fmp_ts = _fmp_ts + "Z"
+                    result.cache_stats.fmp_cache_warm_status.last_warm_time = _fmp_ts
                 result.cache_stats.fmp_cache_warm_status.symbols_from_api = int(fmp.get("symbols_from_api", 0) or 0)
                 result.cache_stats.fmp_cache_warm_status.symbols_from_cache = int(fmp.get("symbols_from_cache", 0) or 0)
         except Exception:
@@ -1698,7 +1708,7 @@ async def get_system_health(
             qts = getattr(mon, "_last_quick_price_update", 0) or 0
             q_result = getattr(mon, "_last_quick_update_result", None) or {}
             result.background_threads["quick_price_update"] = BackgroundThreadStatus(
-                last_run=datetime.fromtimestamp(qts).isoformat() if qts > 0 else None,
+                last_run=datetime.utcfromtimestamp(qts).isoformat() + "Z" if qts > 0 else None,
                 duration_s=float(q_result.get("elapsed_s") or q_result.get("elapsed") or 0) or None,
                 symbols_updated=int(q_result.get("updated", 0)) if q_result else None,
                 errors=int(q_result.get("errors", 0) or 0),
@@ -1707,7 +1717,7 @@ async def get_system_health(
             fts = getattr(mon, "_last_price_sync", 0) or 0
             f_result = getattr(mon, "_last_price_sync_result", None) or {}
             result.background_threads["full_price_sync"] = BackgroundThreadStatus(
-                last_run=datetime.fromtimestamp(fts).isoformat() if fts > 0 else None,
+                last_run=datetime.utcfromtimestamp(fts).isoformat() + "Z" if fts > 0 else None,
                 duration_s=float(f_result.get("elapsed_s") or 0) or None,
                 symbols_updated=int((f_result.get("1d", 0) or 0) + (f_result.get("1h", 0) or 0)) if f_result else None,
                 errors=int(f_result.get("errors", 0) or 0),
@@ -1910,8 +1920,9 @@ async def get_system_health(
                     StateTransitionHistoryORM.timestamp >= cutoff
                 ).order_by(StateTransitionHistoryORM.timestamp.desc()).limit(20).all()
                 for t in transitions:
+                    _ts = t.timestamp.isoformat() + "Z" if t.timestamp else datetime.utcnow().isoformat() + "Z"
                     result.events_24h.append(SystemEvent(
-                        timestamp=t.timestamp.isoformat() if t.timestamp else datetime.now().isoformat(),
+                        timestamp=_ts,
                         type="state_transition",
                         description=f"State changed: {getattr(t, 'from_state', '?')} → {getattr(t, 'to_state', '?')}",
                         severity="warning",
@@ -1935,8 +1946,9 @@ async def get_system_health(
                         desc_parts.append(s.template_name)
                     if s.reason:
                         desc_parts.append(f"— {s.reason}"[:200])
+                    _ts = s.timestamp.isoformat() + "Z" if s.timestamp else datetime.utcnow().isoformat() + "Z"
                     result.events_24h.append(SystemEvent(
-                        timestamp=s.timestamp.isoformat() if s.timestamp else datetime.now().isoformat(),
+                        timestamp=_ts,
                         type="signal_decision",
                         description=" ".join(desc_parts),
                         severity=sev,

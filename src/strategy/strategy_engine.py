@@ -4853,6 +4853,39 @@ class StrategyEngine:
         logger.info(
             f"Strategy {strategy.name}: {len(filtered_signals)} signals generated in {total_time:.2f}s"
         )
+
+        # Decision-log write — funnel stage 'signal_emitted'. One row per signal
+        # that survived conviction/frequency/ML filtering. These are the signals
+        # the executor will actually see.
+        if filtered_signals:
+            try:
+                from src.analytics.decision_log import record_batch
+                _meta_s = getattr(strategy, 'metadata', {}) or {}
+                _tmpl = _meta_s.get('template_name') or strategy.name
+                _direction = _meta_s.get('direction')
+                rows = []
+                for sig in filtered_signals:
+                    sig_meta = getattr(sig, 'metadata', None) or {}
+                    rows.append({
+                        "stage": "signal_emitted",
+                        "decision": "emitted",
+                        "strategy_id": str(getattr(strategy, 'id', '') or ''),
+                        "template": _tmpl,
+                        "symbol": getattr(sig, 'symbol', None),
+                        "direction": _direction or (
+                            'long' if getattr(sig, 'action', None) and 'LONG' in str(sig.action).upper()
+                            else 'short' if getattr(sig, 'action', None) and 'SHORT' in str(sig.action).upper()
+                            else None
+                        ),
+                        "market_regime": sig_meta.get('market_regime'),
+                        "score": sig_meta.get('conviction_score'),
+                        "reason": (getattr(sig, 'reasoning', '') or '')[:300],
+                        "metadata": {"confidence": getattr(sig, 'confidence', None)},
+                    })
+                record_batch(rows)
+            except Exception as _dl_err:
+                logger.debug(f"decision_log signal_emitted batch failed: {_dl_err}")
+
         return filtered_signals
     
     def generate_signals_batch(self, strategies: List[Strategy], include_dynamic: bool = True) -> Dict[str, List[TradingSignal]]:

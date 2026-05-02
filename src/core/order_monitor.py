@@ -1121,6 +1121,29 @@ class OrderMonitor:
                             )
                         except Exception as journal_err:
                             logger.warning(f"Could not log to trade journal for order {order.id}: {journal_err}")
+
+                        # Decision-log — funnel stage 'order_filled'
+                        try:
+                            from src.analytics.decision_log import record_decision
+                            record_decision(
+                                stage="order_filled",
+                                decision="accepted",
+                                strategy_id=order.strategy_id,
+                                template=_meta.get('template_name') if isinstance(_meta, dict) else None,
+                                symbol=order.symbol,
+                                direction='long' if str(order.side).upper() in ('BUY', 'LONG', 'OrderSide.BUY') else 'short',
+                                market_regime=_regime,
+                                score=_conviction,
+                                reason=f"etoro_order={order.etoro_order_id} slippage={order.slippage}",
+                                metadata={
+                                    "fill_price": order.filled_price,
+                                    "expected_price": order.expected_price,
+                                    "slippage": order.slippage,
+                                    "fill_time_seconds": order.fill_time_seconds,
+                                },
+                            )
+                        except Exception:
+                            pass
                 
                 except Exception as e:
                     logger.error(f"Error checking order {order.id}: {e}")
