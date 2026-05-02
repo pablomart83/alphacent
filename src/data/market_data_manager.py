@@ -778,7 +778,9 @@ class MarketDataManager:
                     valid_data.sort(key=lambda d: d.timestamp)
                     if _cacheable:
                         self._save_historical_to_db(db_symbol, valid_data, interval)
-                    self._raw_fetch_cache[f"{normalized_symbol}:{interval}"] = (valid_data, datetime.now())
+                    # Keyed on db_symbol (display form) to match the lookup above.
+                    # S4.0.6 (2026-05-02).
+                    self._raw_fetch_cache[f"{db_symbol}:{interval}"] = (valid_data, datetime.now())
                     logger.info(f"Retrieved {len(valid_data)} valid historical data points from FMP (forex)")
                     result = self._validate_and_return_historical_data(valid_data, db_symbol)
                     if _cacheable:
@@ -793,9 +795,16 @@ class MarketDataManager:
         # Yahoo Finance: primary for all price data
         try:
             # Check raw fetch cache first — if we already fetched this symbol+interval
-            # from Yahoo in this session (possibly for a different date range), slice from
+            # in this session (possibly for a different date range), slice from
             # the cached data instead of making another API call.
-            raw_cache_key = f"{normalized_symbol}:{interval}"
+            #
+            # Key: use db_symbol (display form, e.g. 'BTC') not normalized_symbol
+            # (eToro wire form, e.g. 'BTCUSD'). The rest of the pipeline (DB
+            # cache, in-memory hist_cache) uses display form; keying raw cache
+            # on wire form produced a parallel cache that served stale Yahoo
+            # data when the DB already had fresh Binance data for the same
+            # symbol. Sprint 4 S4.0.6 (2026-05-02).
+            raw_cache_key = f"{db_symbol}:{interval}"
             if raw_cache_key in self._raw_fetch_cache:
                 raw_data, raw_ts = self._raw_fetch_cache[raw_cache_key]
                 cache_age = (datetime.now() - raw_ts).total_seconds()
@@ -818,19 +827,25 @@ class MarketDataManager:
                         )
                         cache_covers_end = (end_naive - latest_cached_ts).days <= 7
                         if cache_covers_end:
-                            logger.info(f"Using raw fetch cache for {normalized_symbol} {interval}: {len(sliced)} bars (from {len(raw_data)} cached)")
-                            result = self._validate_and_return_historical_data(sliced, normalized_symbol)
+                            logger.info(f"Using raw fetch cache for {db_symbol} {interval}: {len(sliced)} bars (from {len(raw_data)} cached)")
+                            result = self._validate_and_return_historical_data(sliced, db_symbol)
                             if _cacheable:
-                                cache_key = f"{normalized_symbol}_{interval}_{start.date()}_{end.date()}"
+                                cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
                                 self._historical_memory_cache[cache_key] = (result, datetime.now())
                             return result
                         else:
                             logger.info(
-                                f"Raw fetch cache for {normalized_symbol} {interval} doesn't cover "
+                                f"Raw fetch cache for {db_symbol} {interval} doesn't cover "
                                 f"requested end {end_naive.date()} (cache ends {latest_cached_ts.date()}), fetching fresh"
                             )
 
-            logger.info(f"Fetching historical data for {normalized_symbol} from Yahoo Finance (primary)")
+            # The wrapper method _fetch_historical_from_yahoo_finance internally
+            # tries Binance first for crypto 1h/4h/1d and falls back to Yahoo.
+            # Log accordingly so operators see the real source. S4.0.6.
+            logger.info(
+                f"Fetching historical data for {db_symbol} {interval} "
+                f"(Binance primary for crypto, Yahoo for the rest)"
+            )
             data_list = self._fetch_historical_from_yahoo_finance(normalized_symbol, start, end, interval)
             valid_data = [d for d in data_list if self.validate_data(d)]
             if len(valid_data) > 0:
@@ -858,7 +873,18 @@ class MarketDataManager:
                         logger.info(f"Merged raw fetch cache for {db_symbol} {interval}: {len(valid_data)} new + {len(existing_data)} existing = {len(merged)} total")
                 else:
                     self._raw_fetch_cache[raw_cache_key] = (valid_data, datetime.now())
-                logger.info(f"Retrieved {len(valid_data)} valid historical data points from Yahoo Finance")
+                # Source comes from the MarketData.source of the first bar —
+                # _fetch_historical_from_yahoo_finance sets DataSource.BINANCE
+                # on Binance fetches and DataSource.YAHOO_FINANCE otherwise.
+                _src_name = (
+                    str(valid_data[0].source.value)
+                    if valid_data and hasattr(valid_data[0].source, 'value')
+                    else 'unknown'
+                )
+                logger.info(
+                    f"Retrieved {len(valid_data)} valid historical data points "
+                    f"from {_src_name} for {db_symbol} {interval}"
+                )
                 result = self._validate_and_return_historical_data(valid_data, db_symbol)
                 if _cacheable:
                     cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
