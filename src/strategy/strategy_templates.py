@@ -129,17 +129,31 @@ class StrategyTemplateLibrary:
         
         self.templates = [t for t in all_templates if t.name not in REMOVE_TEMPLATES]
 
-        # Sprint 4.1: Remove all 1h crypto templates.
-        # Research shows 1H and below underperform 90% of the time for crypto.
-        # Keep: 4H templates (interval_4h=True) and 1D templates (no intraday flag).
-        self.templates = [
-            t for t in self.templates
-            if not (
-                t.metadata.get('crypto_optimized') is True
-                and t.metadata.get('intraday') is True
-                and t.metadata.get('interval') == '1h'
-            )
-        ]
+        # 2026-05-02 update (was "remove all 1h crypto"):
+        # The original Sprint 4.1 filter removed every 1h crypto template on
+        # the belief that "1H and below underperform 90% of the time for
+        # crypto." Concretum's April 2025 research "Catching Crypto Trends"
+        # and their intraday companion paper actually show a Sharpe ~1.6
+        # intraday trend-following benchmark on BTC — the blanket removal was
+        # throwing away real edge.
+        #
+        # Real eToro crypto cost (verified 2026-05-02 against etoro.com/fees):
+        #   1% commission per side + ~0.4% spread + ~0.1% slippage
+        #   = ~2.96% round-trip cost on crypto
+        # We require TP >= 6% (2× round-trip cost) so a winning trade clears
+        # costs with a margin of safety against noise. 1h entry signals that
+        # hold multi-day for 6%+ TP are fine; 1h scalps targeting 2% profit
+        # are deterministically negative EV and must be filtered out.
+        _MIN_CRYPTO_TP = 0.06
+        _filtered: list = []
+        for t in self.templates:
+            if t.metadata.get('crypto_optimized') is True:
+                _tp = float(t.default_parameters.get('take_profit_pct', 0) or 0)
+                if _tp < _MIN_CRYPTO_TP:
+                    # Skip — TP too tight to clear ~3% round-trip fee cleanly.
+                    continue
+            _filtered.append(t)
+        self.templates = _filtered
     
     def _create_templates(self) -> List[StrategyTemplate]:
         """Create all strategy templates."""
@@ -7601,6 +7615,93 @@ class StrategyTemplateLibrary:
                 "requires_fundamental_data": False,
                 "best_symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "V", "MA",
                                  "UNH", "HD", "CAT", "DE", "GS", "JPM", "BAC"],
+            }
+        ))
+
+        # ===== CRYPTO WEEKLY TREND TEMPLATES (added 2026-05-02) =====
+        # Research: Zarattini/Pagani/Barbon "Catching Crypto Trends" (SSRN 5209907, Apr 2025)
+        # shows a rotational top-N momentum portfolio earns Sharpe 1.5+ and 10.8% alpha
+        # vs BTC. Man Group "In Crypto We Trend" (Dec 2024) confirms persistent multi-
+        # week trend factor. These templates capture that long-horizon momentum with
+        # wide SL/TP sized to clear eToro's ~3% round-trip crypto cost.
+
+        # --- Crypto 21-Week MA Trend Follow ---
+        # Institutional-watched level. The 21-week EMA is the canonical long-trend
+        # marker in crypto analysis (weekly bull/bear arbiter). Daily close crossing
+        # above = LONG entry; cross below = exit. Holds weeks. Very cost-efficient.
+        templates.append(StrategyTemplate(
+            name="Crypto 21W MA Trend Follow",
+            description="Enter long when daily close crosses above the 147-day EMA (≈21-week MA). Exit on cross below. Institutional-followed level; holds weeks.",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+            ],
+            entry_conditions=[
+                "CLOSE > EMA(147) AND CLOSE[-1] <= EMA(147)[-1]"
+            ],
+            exit_conditions=[
+                "CLOSE < EMA(147)"
+            ],
+            required_indicators=["EMA:147"],
+            default_parameters={
+                "ema_period": 147,  # 21 weeks × 7 days
+                "stop_loss_pct": 0.08,
+                "take_profit_pct": 0.20,   # Well above 6% floor; crypto cycle-level move
+                "hold_period_max": 180,
+            },
+            expected_trade_frequency="1-3 trades/year per symbol",
+            expected_holding_period="20-90 days",
+            risk_reward_ratio=2.5,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
+            }
+        ))
+
+        # --- Crypto Vol-Targeted 20-Day Momentum ---
+        # Classic momentum-in-low-vol pattern: enter when 20-day return is positive AND
+        # realized vol is compressed (below its own 90-day median). Compressed vol →
+        # incoming expansion → next large move tends to be in the prevailing direction.
+        # Exit on 20-day return going negative OR vol blowing out above upper band.
+        templates.append(StrategyTemplate(
+            name="Crypto Vol-Compression Momentum",
+            description="Long when 20-day return > 3% AND 20-day realized vol is in lower half of 90-day distribution (compressed). Exit on return flip or vol blow-out.",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING_LOW_VOL,
+            ],
+            entry_conditions=[
+                # 20-day return > 3% (positive drift) AND short-term vol compressed vs longer-term
+                "(CLOSE / CLOSE[-20] - 1) > 0.03 AND ATR(20) < ATR(90)"
+            ],
+            exit_conditions=[
+                "(CLOSE / CLOSE[-20] - 1) < 0 OR ATR(20) > ATR(90) * 1.5"
+            ],
+            required_indicators=["ATR:20", "ATR:90"],
+            default_parameters={
+                "lookback_short": 20,
+                "lookback_long": 90,
+                "return_threshold": 0.03,
+                "stop_loss_pct": 0.08,
+                "take_profit_pct": 0.18,
+                "hold_period_max": 60,
+            },
+            expected_trade_frequency="2-5 trades/month per symbol",
+            expected_holding_period="5-30 days",
+            risk_reward_ratio=2.25,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
             }
         ))
 

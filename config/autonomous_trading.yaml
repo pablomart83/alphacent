@@ -186,9 +186,13 @@ backtest:
         slippage_percent: 0.00005
         overnight_financing_pct_per_day: 0.0001  # Forex swap rates vary; 0.01% conservative
       crypto:
-        commission_percent: 0.0
-        spread_percent: 0.0038  # eToro crypto spread ~0.375% per side = 0.75% round-trip
-        slippage_percent: 0.001
+        commission_percent: 0.01   # eToro charges explicit 1% per side since 2025
+        spread_percent: 0.0038     # + ~0.38% per side bid/ask spread on BTC/ETH (wider on altcoins)
+        slippage_percent: 0.001    # + 0.1% per side slippage
+        # Real round-trip cost on crypto: ~2.96% (2% commission + 0.76% spread + 0.2% slippage).
+        # Previous config had commission=0.0 assuming it was baked into spread — stale
+        # since eToro broke out commission as explicit 1% per side. Crypto backtests
+        # with old values overstated returns by ~2% per trade.
         overnight_financing_pct_per_day: 0.0  # Crypto: no overnight fee on eToro
       index:
         commission_percent: 0.0

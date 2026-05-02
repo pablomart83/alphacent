@@ -357,15 +357,21 @@ commodities:
 crypto:
   - { symbol: BTC, etoro_id: 100000, sector: Crypto }
   - { symbol: ETH, etoro_id: 100001, sector: Crypto }
-  # Altcoins disabled — eToro's 1% per-side fee makes high-frequency altcoin
-  # strategies unprofitable. BTC/ETH only until costs improve or we move to
-  # a lower-cost exchange. Re-enable by uncommenting below.
-  # - { symbol: SOL, etoro_id: 100063, sector: Crypto }
+  # 2026-05-02: Re-enabled the four most-liquid majors for rotational
+  # strategies per Zarattini et al. "Catching Crypto Trends" (SSRN 5209907):
+  # a rotational top-N portfolio needs ~5-6 coins minimum to capture the
+  # factor. eToro's 1% commission (2% round-trip) is now modeled correctly
+  # in backtests, and templates that can't clear ~3% total cost are filtered
+  # out at template-load time. These four are majors with tight enough
+  # spreads to support multi-day swing strategies at 6%+ TP.
+  - { symbol: SOL, etoro_id: 100063, sector: Crypto }
+  - { symbol: AVAX, etoro_id: 100085, sector: Crypto }
+  - { symbol: LINK, etoro_id: 100040, sector: Crypto }
+  - { symbol: DOT, etoro_id: 100037, sector: Crypto }
+  # Still disabled — wider spreads, lower liquidity, or crowded narrative
+  # making intraday impractical at our cost level:
   # - { symbol: XRP, etoro_id: 100003, sector: Crypto }
   # - { symbol: ADA, etoro_id: 100017, sector: Crypto }
-  # - { symbol: AVAX, etoro_id: 100085, sector: Crypto }
-  # - { symbol: DOT, etoro_id: 100037, sector: Crypto }
-  # - { symbol: LINK, etoro_id: 100040, sector: Crypto }
   # - { symbol: NEAR, etoro_id: 100337, sector: Crypto }
   # - { symbol: LTC, etoro_id: 100005, sector: Crypto }
   # - { symbol: BCH, etoro_id: 100002, sector: Crypto }
