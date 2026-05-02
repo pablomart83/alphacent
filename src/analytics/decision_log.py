@@ -12,6 +12,14 @@ Design goals:
   scheduled yet, the table grows ~10k rows/cycle × 2 cycles/day = 20k/day =
   600k/month. Acceptable short-term given we're the only DB user.
 
+Observability:
+- On write failure we still don't raise (trading must not break), but we
+  surface the error at WARNING level with a 5-minute cooldown per error
+  signature. Previously every failure was DEBUG, which hid a week-long
+  silent outage caused by a missing GRANT on `signal_decisions` after the
+  table was created as `postgres`. DEBUG meant alphacent_user couldn't
+  INSERT, and because the logger root was INFO, nothing ever surfaced.
+
 Usage:
     from src.analytics.decision_log import record_decision
     record_decision(
@@ -29,10 +37,39 @@ Query:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Per-process cooldown state for surfacing write failures. We never raise from
+# the writer (trading must not break), but we DO want a human-visible warning
+# when writes are silently failing — capped at 5 min per error signature so
+# a persistent fault (e.g. missing GRANT) does not flood logs.
+_FAILURE_COOLDOWN_SECS = 300.0
+_last_failure_log: Dict[str, float] = {}
+
+
+def _log_write_failure(context: str, err: Exception) -> None:
+    """Surface a write failure at WARNING with a per-signature cooldown.
+
+    Signature is (context, exception-class, first 60 chars of message). Tight
+    enough to distinguish "permission denied" from "serialization failure"
+    but loose enough to not spam on row-specific differences.
+    """
+    sig = f"{context}|{type(err).__name__}|{str(err)[:60]}"
+    now = time.monotonic()
+    last = _last_failure_log.get(sig, 0.0)
+    if now - last >= _FAILURE_COOLDOWN_SECS:
+        _last_failure_log[sig] = now
+        logger.warning(
+            f"decision_log {context} failed (non-fatal, next-log-in={_FAILURE_COOLDOWN_SECS:.0f}s): "
+            f"{type(err).__name__}: {err}"
+        )
+    else:
+        # Still keep a DEBUG breadcrumb for full-log forensics.
+        logger.debug(f"decision_log {context} failed (suppressed warning): {err}")
 
 
 def record_decision(
@@ -76,7 +113,7 @@ def record_decision(
         finally:
             session.close()
     except Exception as e:
-        logger.debug(f"decision_log record failed (non-fatal): {e}")
+        _log_write_failure("record_decision", e)
 
 
 def record_batch(rows: Iterable[Dict[str, Any]]) -> None:
@@ -118,7 +155,7 @@ def record_batch(rows: Iterable[Dict[str, Any]]) -> None:
         finally:
             session.close()
     except Exception as e:
-        logger.debug(f"decision_log record_batch failed (non-fatal): {e}")
+        _log_write_failure("record_batch", e)
 
 
 def prune_old(days: int = 30) -> int:
@@ -139,5 +176,5 @@ def prune_old(days: int = 30) -> int:
         finally:
             session.close()
     except Exception as e:
-        logger.debug(f"decision_log prune failed (non-fatal): {e}")
+        _log_write_failure("prune_old", e)
         return 0
