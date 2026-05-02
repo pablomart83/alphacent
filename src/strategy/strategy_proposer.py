@@ -2000,11 +2000,23 @@ class StrategyProposer:
                         continue
                     arr = _np_mc.array(trade_returns)
                     # Bootstrap: resample with replacement, compute Sharpe each iteration.
-                    # Annualization: trade-level returns need sqrt(trades_per_year) scaling.
-                    # Estimate trades_per_year from test window (180 days default).
-                    # This is more accurate than sqrt(n_trades) which conflates sample size
-                    # with annualization and produces artificially wide distributions.
-                    test_window_days = 180  # matches walk_forward.test_days config
+                    # Annualization: trade-level returns need sqrt(trades_per_year)
+                    # scaling. We estimate trades_per_year from the *actual* test
+                    # window on this strategy — not a hardcoded 180d — because
+                    # long-horizon crypto templates (Weekly Trend Follow,
+                    # Golden Cross, 21W MA, Vol-Compression) run with test_days=730
+                    # and the hardcode inflates their annualization by sqrt(730/180)
+                    # ≈ 2x, which in turn skews the p-value tails. Reading the window
+                    # off `test_results.backtest_period` keeps the math self-consistent.
+                    test_window_days = 180  # conservative default if period missing
+                    try:
+                        period = getattr(test_results, 'backtest_period', None)
+                        if period and period[0] and period[1]:
+                            span_days = (period[1] - period[0]).days
+                            if span_days >= 30:
+                                test_window_days = span_days
+                    except Exception:
+                        pass
                     trades_per_year = (n_trades / test_window_days) * 252
                     annualization_factor = _np_mc.sqrt(max(trades_per_year, 1.0))
                     bootstrap_sharpes = []
@@ -2414,19 +2426,45 @@ class StrategyProposer:
             except Exception as e:
                 logger.debug(f"Could not write WF results to cycle log: {e}")
             
-            # Pass 2: If too few passed, add relaxed candidates (Sharpe > 0.1, no direction filter)
+            # Pass 2: If too few passed, add relaxed candidates (Sharpe > 0.1, no direction filter).
+            #
+            # MUST honour the MC bootstrap verdict. Without the `s.id in mc_passed_ids`
+            # check, Pass 2 re-admits strategies the MC filter just rejected as
+            # "edge likely noise". That silently nullifies the MC filter whenever
+            # fewer than 10 strategies cleared the strict paths — exactly the case
+            # that brought us here. Observed 2026-05-02 cycle_1777742566:
+            # Crypto Weekly Trend Follow BTC/LINK/ETH were MC-failed at p10=-2.42 /
+            # -1.20 / -1.75 then reappeared in WF-validated via this branch and
+            # went all the way to activation before being caught on unrelated
+            # per-pair gates. The MC filter is the right place to filter regime-
+            # luck / heavy-tail noise; Pass 2 must respect it.
+            #
+            # We still want Pass 2 to surface honestly-borderline strategies when
+            # the strict paths are too thin — just not strategies that failed MC.
             if len(validated_strategies) < 10:
                 strict_ids = {s.id for s, _ in validated_strategies}
-                relaxed_additions = [
-                    (s, wf) for s, wf, ts, tes, het, ov, tv, tev in all_wf_results
-                    if s.id not in strict_ids and tv and tev and ts > 0.1 and tes > 0.1 and het and not ov
-                ]
+                relaxed_additions = []
+                mc_blocked_count = 0
+                for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
+                    if s.id in strict_ids:
+                        continue
+                    if not (tv and tev and ts > 0.1 and tes > 0.1 and het and not ov):
+                        continue
+                    if s.id not in mc_passed_ids:
+                        mc_blocked_count += 1
+                        continue
+                    relaxed_additions.append((s, wf))
                 
                 if relaxed_additions:
                     validated_strategies.extend(relaxed_additions)
                     logger.info(
                         f"Walk-forward validation (relaxed): added {len(relaxed_additions)} more strategies "
                         f"(total: {len(validated_strategies)})"
+                    )
+                if mc_blocked_count:
+                    logger.info(
+                        f"Walk-forward validation (relaxed): blocked {mc_blocked_count} candidates "
+                        f"already rejected by MC bootstrap"
                     )
             
             # Select diverse strategies from validated candidates
