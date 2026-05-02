@@ -2802,6 +2802,26 @@ class StrategyEngine:
                 f"DSL eval will detect missing keys and reject"
             )
 
+        # Sprint 4 S4.1 (2026-05-02): compute on-chain DSL primitives
+        # (ONCHAIN) alongside cross-asset. Same injection pattern, same
+        # fail-closed semantics. No-op for templates without ONCHAIN(...) refs.
+        try:
+            onchain = self._compute_onchain_for_strategy(
+                strategy=strategy,
+                primary_index=df.index,
+            )
+            if onchain:
+                indicators.update(onchain)
+                logger.info(
+                    f"On-chain indicators merged into backtest for {strategy.name}: "
+                    f"keys={sorted(onchain.keys())}"
+                )
+        except Exception as _oc_err:
+            logger.warning(
+                f"On-chain computation failed for {strategy.name}: {_oc_err} — "
+                f"DSL eval will detect missing keys and reject"
+            )
+
         # Generate entry and exit signals
         volume = df["volume"] if "volume" in df.columns else None
         entries, exits = self._parse_strategy_rules(
@@ -4090,6 +4110,52 @@ class StrategyEngine:
             start=start,
             end=end,
         )
+
+    def _compute_onchain_for_strategy(
+        self,
+        strategy: Strategy,
+        primary_index: pd.DatetimeIndex,
+    ) -> Dict[str, pd.Series]:
+        """Compute on-chain DSL primitives (ONCHAIN) for a strategy.
+
+        Sprint 4 S4.1 (2026-05-02). Parallel entry point to
+        _compute_cross_asset_for_strategy — same injection pattern, same
+        fail-closed semantics. Output keys are the `ONCHAIN__<metric>__<lookback>`
+        strings the DSL code generator emits.
+
+        Separated from the cross-asset method because:
+          - On-chain metrics are global (not per-symbol), no data_fetcher
+            adapter needed.
+          - The module boundary keeps the two concerns independent — an
+            on-chain provider outage doesn't break the cross-asset path.
+
+        Args:
+            strategy: the Strategy whose rules may contain ONCHAIN(...) refs.
+            primary_index: DatetimeIndex of the primary symbol's bars.
+
+        Returns:
+            Dict of {indicator_key: Series}. Empty for templates that
+            don't use ONCHAIN (nearly all templates currently; adoption
+            starts with the new S4.1-introduced templates).
+        """
+        conditions: List[str] = []
+        if strategy.rules:
+            conditions.extend(strategy.rules.get("entry_conditions", []) or [])
+            conditions.extend(strategy.rules.get("exit_conditions", []) or [])
+        if not conditions:
+            return {}
+        try:
+            from src.strategy.onchain_primitives import compute_onchain_indicators
+            return compute_onchain_indicators(
+                conditions=conditions,
+                primary_index=primary_index,
+            )
+        except Exception as e:
+            logger.warning(
+                f"ONCHAIN compute failed for {strategy.name}: {e} — "
+                f"DSL eval will see missing keys and reject the strategy"
+            )
+            return {}
 
 
     def _parse_strategy_rules(
@@ -10332,6 +10398,26 @@ class StrategyEngine:
             logger.warning(
                 f"Cross-asset computation failed at signal-gen for "
                 f"{strategy.name} ({symbol}): {_ca_err} — no signal will fire"
+            )
+
+        # Sprint 4 S4.1 (2026-05-02): compute on-chain DSL primitives.
+        # Parallel to cross-asset, same semantics. No-op for templates
+        # without ONCHAIN(...) references.
+        try:
+            onchain = self._compute_onchain_for_strategy(
+                strategy=calc_strategy,
+                primary_index=data.index,
+            )
+            if onchain:
+                indicators.update(onchain)
+                logger.info(
+                    f"On-chain indicators merged into signal-gen for "
+                    f"{strategy.name} ({symbol}): keys={sorted(onchain.keys())}"
+                )
+        except Exception as _oc_err:
+            logger.warning(
+                f"On-chain computation failed at signal-gen for "
+                f"{strategy.name} ({symbol}): {_oc_err} — no signal will fire"
             )
 
         # Parse strategy rules using DSL (use scaled rules for intraday)

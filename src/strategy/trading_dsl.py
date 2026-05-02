@@ -298,6 +298,22 @@ INDICATOR_MAPPING = {
     #   We hash the universe list so keys are stable across orderings but
     #   distinguish genuinely different universes.
     'RANK_IN_UNIVERSE': lambda params: _rank_in_universe_key(params),
+
+    # ───── On-chain primitives (Sprint 4 S4.1, 2026-05-02) ─────
+    # ONCHAIN(METRIC_NAME, LOOKBACK_DAYS):
+    #   Returns the value of a market-structure metric at each bar.
+    #   METRIC_NAME is a quoted string identifying the metric; see
+    #   src/api/onchain_client.SUPPORTED_METRICS for the registry.
+    #   LOOKBACK_DAYS is informational for the compute step (lets the
+    #   same metric be referenced at multiple lookbacks without refetch);
+    #   the DSL eval sees the aligned value at each bar.
+    #   Key format: ONCHAIN__<metric_lowercase>__<lookback>
+    #   Example: ONCHAIN("btc_dominance", 7) → ONCHAIN__btc_dominance__7
+    #
+    # Pre-computed by strategy_engine._compute_onchain_for_strategy and
+    # merged into `indicators` before DSL eval, same pattern as the
+    # cross-asset primitives above.
+    'ONCHAIN': lambda params: f'ONCHAIN__{str(params[0]).lower()}__{int(params[1])}',
 }
 
 
