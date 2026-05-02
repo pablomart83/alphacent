@@ -156,6 +156,28 @@ Frontend (React/Vite) → Nginx (SSL/443) → Backend (FastAPI/uvicorn)
 - Max SL clamps: stocks/ETFs 9%, crypto 15%, forex 4%
 - When SL widens, position size scales down to preserve dollar risk: `new_size = old_size × old_sl / new_sl`
 
+### Trailing Stop-Loss System — DB-Side Enforcement
+
+eToro's public API does not expose SL-modification for open positions. `etoro_client.update_position_stop_loss` is a no-op stub returning `{"status": "db_only"}`. **Trailing stops are enforced DB-side** — any `except EToroAPIError` around SL updates is dead code.
+
+Pipeline every 60s in `monitoring_service._check_trailing_stops`:
+
+1. **SL recalculation** (breakeven → profit_lock → ATR-aware trail). Gated by market-open AND freshness-SLA (strategy's own timeframe bars). Stale bars keep the existing SL; the ratchet only moves favourably so a preserved SL is always safe.
+2. **Breach enforcement**. Runs for **all** open positions regardless of historical-bar freshness — only needs `current_price` + `stop_loss` (both in DB from the 60s position sync). A Yahoo outage must NOT disable stop enforcement.
+
+Ratchet ladder (stock as example):
+- +3% profit → SL to entry (breakeven)
+- +5% → SL to entry × 1.02 (profit lock)
+- +5% activation → trail SL = current × (1 − effective_distance); `effective_distance = max(fixed_pct, ATR_pct × ATR_MULTIPLIER_BY_ASSET_CLASS[class])`
+- ATR multipliers: stock/etf/commodity 2.0x, crypto/index 1.5x, forex 1.0x (forex previously too wide at 2x)
+- ATR bars use the strategy's **own** interval (`position_intervals` dict passed from monitoring_service). 4H strategies no longer inherit daily ATR.
+
+Per-cycle summary log line emitted at INFO (added 2026-05-01):
+```
+TSL cycle: total=90 recalc_eligible=88 skipped_market=0 skipped_stale=0 breakeven=1 lock=0 trail=3 db_updated=3 breach=0 errors=0
+```
+Never silent-no-op; every cycle produces this line so outages surface in one `tail`.
+
 ### Activation Thresholds
 - `min_sharpe`: **1.0** (was 0.4) | `min_sharpe_crypto`: 0.5 | `min_sharpe_commodity`: 0.5
 - `min_trades_dsl`: 8 (1d) | `min_trades_dsl_4h`: 8 | `min_trades_alpha_edge`: 8 | `min_trades_commodity`: 6 | `min_trades_dsl_1h`: 15
@@ -201,14 +223,70 @@ Alpha Edge templates use the fundamental signal path (not DSL walk-forward). Pro
 - **Dedup is per (template, symbol)**, not per template. A template with active strategies keeps being proposed with different symbols.
 - **Failure modes don't consume slots**: templates that find no eligible symbols or raise during generation do NOT decrement `alpha_edge_count`. Slot-consumption is success-path only.
 
-### Signal-Time Risk Gates (post-2026-05-01)
+### Proposer Feedback Loops (post-2026-05-02 TSLA audit)
 
-Two runtime gates sit between signal generation and execution:
+Performance feedback to the proposer must decay over time or it becomes a permanent lockout. TSLA audit showed the system shorted a name 4×, lost every time, then locked that symbol out for weeks while the stock rallied 16%.
+
+- **Recency-weighted symbol score**: `trade_journal.get_performance_feedback` emits `recency_weight` per symbol — exponential decay with 14-day half-life. `strategy_proposer.apply_performance_feedback` multiplies the symbol penalty by recency (floor 0.2). Trades 14d old weight 0.5×, 28d old 0.25×.
+- **Rejection-blacklist cooldown 14 days** (was 30). Regime-scoped early expiry: entries recorded under `trending_down` expire when current regime is `trending_up` and vice versa (min 3-day age to avoid noise). Regime recorded on every `record_rejection` call.
+- **Neglected-symbol slot reservation** (`_build_watchlists` Phase 3): 15% of each template's watchlist (min 1 slot) reserved for symbols not seen in any proposal in the last 7 days. Prevents round-robin lockout of negatively-scored symbols.
+- **Directional-rebalance bonus** (`_match_templates_to_symbols`): +8 score when symbol has all-one-side losing history (≥3 trades, net-negative P&L) and current template is counter-direction. Surfaces TSLA-like imbalances automatically.
+- **Per-pair sizing penalty** (`risk_manager.calculate_position_size` Step 10b): halves position size when (template, symbol) has ≥3 net-losing trades in trade_journal. Resets when net P&L flips positive.
+- **SHORT-side WF tightening**: min_sharpe +0.3 for shorts on primary path; relaxed-OOS rescue path **removed** for shorts (too much overfit risk); test-dominant path requires ≥4 test trades for shorts.
+
+### Symbol Analytics — Current vs Lifetime
+
+Two orthogonal views on symbol performance:
+
+- **Current view** (from `strategies` table): active_strategies, usage_count. Reflects strategy-library churn; symbols vanish when strategies retire and get deleted.
+- **Lifetime view** (from `trade_journal`): traded_count, win_rate, total_pnl. Survives retirement; ground truth for "has this symbol ever made us money".
+
+`strategy_proposals` table gets a new row per proposal (via `track_proposals`) with snapshot of `symbols` JSON and `template_name`. Lifetime `proposed_count` comes from this table, which survives retirement. Columns: `id, strategy_id, proposed_at, market_regime, backtest_sharpe, activated, symbols, template_name`.
+
+`/strategies/symbols` endpoint combines both views. Symbols tab columns: Proposed, Active (open positions), Traded, Sharpe, Win%, P&L, Best Template.
+
+### Signal-Time Risk Gates (post-2026-05-02)
+
+Three runtime gates sit between signal generation and execution:
 
 - **C1 VIX Signal-Time Gate** (`order_executor.execute_signal`): blocks ENTER_LONG when VIX > 25 AND VIX_5d > +15%. Rationale: post-VIX-spike forward returns are weak (Bilello research). Crypto exempt. Fail-open on data error (log + proceed). 5-min TTL cache. Existing LONG positions continue to exit normally.
 - **C2 Momentum Crash Circuit Breaker** (`conviction_scorer._score_regime_fit`): when SPY_5d < -3% AND VIX_1d > +10%, reduces regime_fit by 10 points for LONG momentum/trend_following/breakout strategies. Floored at 5 (matches existing weak-match floor). Rationale: Byun & Jeon (SSRN 2900073) — momentum crashes during market rebounds. Fail-open.
+- **C3 Trend-Consistency Gate** (`order_executor._check_trend_consistency_gate`, added 2026-05-02 TSLA audit): blocks ENTER_SHORT when stock is above rising 50d SMA (uptrend) OR dropped >1 ATR in 3d AND is within 3% of 20d low (oversold bounce). Symmetric LONG block when stock is below falling 50d SMA. Crypto/forex exempt. 5-min TTL cache per (symbol, action). Catches the TSLA-style losing SHORT setups where signals fire on late-stage downtrends already reversing.
 
-Both gates are armed by default and use live SPY/VIX data via `market_data_manager`. Scope: equity/ETF/index/forex/commodity LONG. Neither blocks exits, stops, or SHORT entries.
+All three gates are armed by default, use live data via `market_data_manager`, scope: equity/ETF/index/commodity entries. Never block exits, stops, or gate-exempt instruments.
+
+### Signal-Decision Audit Log (post-2026-05-02)
+
+Every template × symbol × stage decision per cycle is persisted in `signal_decisions`. One row per (stage, decision) per strategy per cycle. Stages written:
+
+- `proposed` — proposer emits a strategy (track_proposals → decision_log.record_batch)
+- `wf_validated` / `wf_rejected` — walk-forward outcome with train/test Sharpe + reason
+- `activated` / `rejected_act` — autonomous_strategy_manager's activation-criteria pass/fail
+- `signal_emitted` — strategy_engine.generate_signals output (after conviction/frequency/ML filters)
+- `gate_blocked` — VIX / trend-consistency / MQS gate blocked the signal at execute_signal
+- `order_submitted` — successful submit path in order_executor.execute_signal
+- `order_filled` — async fill in order_monitor.check_submitted_orders with slippage + fill_time
+- `order_failed` — reserved for explicit failures (not yet wired — add when needed)
+
+Writer: `src/analytics/decision_log.py` `record_decision` / `record_batch` / `prune_old`. Every call is fire-and-forget and NEVER raises — an analytics bug must not break trading. Retention: 30 days via `prune_old(30)` (manual schedule TBD).
+
+Analytics layer (`src/analytics/observability.py`):
+- `mae_at_stop_analysis` — per-symbol MAE/MFE with pattern detection (entry_bad / trail_tight / exit_late).
+- `wf_live_divergence` — strategies where live Sharpe diverges from WF test Sharpe by ≥1.0.
+- `regime_template_pnl_matrix` — (regime, template, direction) → P&L cells for regime-aware suppression.
+- `template_graduation_funnel` — proposal → fill funnel with per-stage drop-off %.
+- `per_symbol_opportunity_cost` — symbol forward return minus captured % (missed-alpha detector).
+
+Endpoints under `/analytics/observability/*` and `/health/trading-gates`.
+
+### System Page Observability (post-2026-05-02)
+
+The System page surfaces the above via:
+- **Trading Gates** card (side panel): every blocker that can prevent a trade — kill_switch, market_hours, vix_gate, rejection_blacklist, freshness_sla. Green=clear, amber-pulsing=blocking.
+- **Observability** card (main panel): 4 metric tiles + 30-day decision funnel + top-5 missed-alpha symbols.
+- **Background Threads** card: real last_run / duration_s / symbols_updated for quick_price_update and full_price_sync from `_last_quick_update_result` and `_last_price_sync_result` on MonitoringService.
+
+All ISO timestamps emitted from `control.py` include explicit `Z` suffix. Frontend `formatAge` appends `Z` defensively for legacy sources.
 
 ---
 
@@ -240,27 +318,18 @@ The price data pipeline has three layers. Each has distinct responsibilities. Vi
 
 ---
 
-## Known Open Issues (as of May 1, 2026, post-Strategy-Library deploy)
+## Known Open Issues (as of May 2, 2026)
 
-- **Walk-forward bypass paths admit regime-luck** — test-dominant + excellent-OOS paths in `strategy_proposer.py:1638-1651` allow strategies with near-zero train Sharpe and strong test Sharpe to pass. Average test Sharpe 2.70 vs train 0.79 across 173 live strategies. Fix scheduled for Batch 4.
+- **Walk-forward bypass paths admit regime-luck** — test-dominant path in `strategy_proposer.py` allows strategies with ts ≥ -0.1 to pass if test Sharpe clears. SHORT side has been tightened; LONG still loose. Consider a consistency gate `(test_sharpe - train_sharpe) ≤ 1.5` post-Batch-4.
 - **Entry order 82% FAILED rate** — cosmetic: market-closed deferrals written as FAILED then re-fired each cycle. Batch 2 fix pending.
 - **NVDA and AMZN at 7.43% of equity each** — symbol concentration cap not enforced cumulatively across strategies. Batch 3 fix pending.
 - **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false, generates 0 trades. Regex-based param substitution collapses positional literals. Batch 4 fix pending.
 - **MQS persistence** — recent `equity_snapshots` have NULL `market_quality_score` despite code path being present. `_save_hourly_equity_snapshot` wraps MQS computation in `except: pass` hiding the real error. Investigation open.
-- **Sector Rotation + Pairs Trading templates structurally broken** — Sector Rotation `fixed_symbols` covers only 5 of 11 SPDR sectors (XLF/XLK/XLI/XLP/XLY; missing XLE/XLV/XLY/XLP/XLU/XLRE/XLC). Pairs Trading Market Neutral's DSL entry conditions are momentum-long signals, not pairs — z-score params in `default_parameters` never consumed by engine. Both templates get proposed now (post Q1/Q2) but the variants produced are design-incorrect. Dedicated design session needed; don't fix piecemeal.
-- **Regime classification two-tier inconsistency** — `market_analyzer.detect_sub_regime` and proposer regime gate can disagree (observed 2026-05-01: analyzer said RANGING_HIGH_VOL 57% confidence, proposer used `trending_up_strong`). Not a regression from any recent deploy, but worth tracing — it affects which template pool gets used.
-- **Overview chart panel** — 3 separate chart components with misaligned axes; needs multi-pane rewrite (previous attempt failed, design first)
-- **FMP insider endpoint** — 403/404 on current plan; insider_buying uses momentum proxy fallback
-- **1h strategies** — 1 BACKTESTED / 0 DEMO. Emergent from `min_trades_dsl_1h=15` + F07 MC annualization inflation, not an explicit block. Expect to reconsider after Batch 4 (F07 fix) on clean data; only nudge `min_trades_dsl_1h` or add quota if <5 active after 2 weeks observation.
-- **`proposed` counter in UI** — all 0 in DB, counter never written. Fix or remove.
-
-## Current System State (May 1, 2026, post-Strategy-Library deploy)
-
-- **Equity:** ~$475,900
-- **Open positions:** ~87 | ~$409K deployed
-- **Active strategies:** 157+ across DEMO/BACKTESTED (400-strategy autonomous cycle ran at 13:06 UTC producing 392 DSL + 8 AE)
-- **Alpha Edge live types now proposing** (up from 2 template types pre-deploy): Earnings Momentum, Gross Profitability Long, Price Target Upside Long, Earnings Momentum Combo Long, Sector Rotation, Insider Buying, Revenue Acceleration, Multi-Factor Composite Long. 2 new activations confirmed in DB within 30 min of deploy.
-- **Directional split:** ~75 LONG / ~11 SHORT (SHORT equity pipeline unblocked but not yet saturating quota)
-- **Market regime:** `trending_up_strong` per proposer gate (VIX=18.8, 50d=+10.64%) — note analyzer disagreement above
-- **Symbol universe:** 297 (232 stocks, 42 ETFs, 8 forex, 5 indices, 8 commodities, 2 crypto)
-- **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
+- **Sector Rotation + Pairs Trading templates structurally broken** — Sector Rotation `fixed_symbols` covers only 5 of 11 SPDR sectors. Pairs Trading Market Neutral's DSL conditions are momentum-long signals, not pairs. Need design session, don't fix piecemeal.
+- **Regime classification two-tier inconsistency** — `market_analyzer.detect_sub_regime` and proposer regime gate can disagree. Worth tracing; affects which template pool gets used.
+- **Overview chart panel** — 3 separate chart components with misaligned axes; needs multi-pane rewrite.
+- **FMP insider endpoint** — 403/404 on current plan; insider_buying uses momentum proxy fallback.
+- **1h strategies** — ~1 active. Emergent from `min_trades_dsl_1h=15` + MC annualization inflation, not an explicit block. Revisit post-Batch-4.
+- **Cycle-error observability gap** — when a cycle stage throws (e.g. the `SignalAction` NameError on 2026-05-02 08:08 UTC), it only logs `Error proposing strategies:` and continues silently. No `signal_decisions` row written, no alert. Add a `cycle_error` stage write so stage failures are visible in the funnel.
+- **Entry-timing score (#5 from observability ranking)** — deferred; needs per-minute post-entry price snapshots we don't capture yet.
+- **Deploy-validation auto-tracker (#10)** — subsumed by signal_decisions once it's fully populated across a few cycles.
