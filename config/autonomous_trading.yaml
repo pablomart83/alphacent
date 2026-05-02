@@ -30,6 +30,7 @@ activation_thresholds:
   min_trades_dsl_4h: 8          # Was 12 — 4h strategies in 180-day test window: 8 is sufficient
   min_trades_crypto_1d: 4       # Added 2026-05-02 — weekly/swing crypto templates produce 3-7 trades in 120d (thin liquidity); paired with min_sharpe_crypto=0.5 floor
   min_trades_crypto_4h: 4       # Added 2026-05-02 — same rationale for 4H crypto templates
+  min_trades_crypto_1h: 15      # Added 2026-05-02 — 1h crypto needs statistical significance (~100-200 bars-at-signal in 180d)
   min_trades_commodity: 6       # Was 8 — commodities are inherently lower frequency
   min_return_per_trade:
     stock: 0.0015       # daily: ~7-30 day holds
@@ -40,7 +41,10 @@ activation_thresholds:
     etf_1h: 0.0002
     forex: 0.0005
     forex_1h: 0.0001
-    crypto: 0.04
+    crypto: 0.04         # fallback for 21d+ weekly/monthly-hold templates (21W MA, Golden Cross, Weekly Trend Follow)
+    crypto_1d: 0.025     # Added 2026-05-02 — daily swing crypto (3-14d hold): net 2.5%/trade clears 2.96% round-trip + edge
+    crypto_4h: 0.015     # Added 2026-05-02 — 4H crypto (4-24h hold): net 1.5%/trade; frequency makes it compound
+    crypto_1h: 0.005     # Added 2026-05-02 — 1H crypto (1-12h hold): net 0.5%/trade; very high turnover compensates
     index: 0.001
     index_1h: 0.0002
     commodity: 0.0015

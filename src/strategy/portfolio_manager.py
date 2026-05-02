@@ -977,6 +977,8 @@ class PortfolioManager:
             min_trades_required = config_thresholds.get('min_trades_commodity', 2)
         elif is_crypto and interval == '4h':
             min_trades_required = config_thresholds.get('min_trades_crypto_4h', 4)
+        elif is_crypto and interval in ('1h', '2h'):
+            min_trades_required = config_thresholds.get('min_trades_crypto_1h', 15)
         elif is_crypto:
             min_trades_required = config_thresholds.get('min_trades_crypto_1d', 4)
         elif interval in ('4h',):

@@ -66,18 +66,28 @@ class StrategyTemplate:
             else:
                 self.metadata['interval'] = '1d'
         
-        # Enforce minimum SL/TP for crypto to clear eToro's 2% round-trip cost.
-        # Templates should define proper values, but this catches any that slip through.
+        # Enforce minimum SL/TP for crypto to clear eToro's ~3% round-trip cost.
+        # Timeframe-aware: 1H templates hold hours (can't reach 8% TP), 4H hold hours-to-2d,
+        # 1D+ swing templates hold days-to-weeks (can target 8%+). Floor scales with
+        # realistic price range on the template's timeframe so backtests exit naturally.
         if self.metadata.get('crypto_optimized'):
-            if self.default_parameters.get('stop_loss_pct', 1) < 0.04:
-                self.default_parameters['stop_loss_pct'] = 0.04
-            if self.default_parameters.get('take_profit_pct', 1) < 0.08:
-                self.default_parameters['take_profit_pct'] = 0.08
-            # Ensure R:R >= 1.5 after floor adjustments
-            sl = self.default_parameters.get('stop_loss_pct', 0.04)
-            tp = self.default_parameters.get('take_profit_pct', 0.08)
-            if sl > 0 and tp / sl < 1.5:
-                self.default_parameters['take_profit_pct'] = round(sl * 1.5, 4)
+            _interval = self.metadata.get('interval', '1d')
+            if _interval == '1h':
+                _min_sl, _min_tp = 0.015, 0.02   # 1.5% SL, 2.0% TP — realistic for 1-12h holds
+            elif _interval == '4h':
+                _min_sl, _min_tp = 0.025, 0.04   # 2.5% SL, 4.0% TP — realistic for 4-48h holds
+            else:
+                _min_sl, _min_tp = 0.04, 0.08    # 4.0% SL, 8.0% TP — 1D+ swing / weekly trend
+            if self.default_parameters.get('stop_loss_pct', 1) < _min_sl:
+                self.default_parameters['stop_loss_pct'] = _min_sl
+            if self.default_parameters.get('take_profit_pct', 1) < _min_tp:
+                self.default_parameters['take_profit_pct'] = _min_tp
+            # Ensure R:R >= 1.3 after floor adjustments (lower ratio for 1H where tight targets win)
+            sl = self.default_parameters.get('stop_loss_pct', _min_sl)
+            tp = self.default_parameters.get('take_profit_pct', _min_tp)
+            _min_rr = 1.3 if _interval == '1h' else 1.5
+            if sl > 0 and tp / sl < _min_rr:
+                self.default_parameters['take_profit_pct'] = round(sl * _min_rr, 4)
         
         # Enforce minimum SL/TP for non-crypto 1d stock templates.
         if not self.metadata.get('crypto_optimized'):
