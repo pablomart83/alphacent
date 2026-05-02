@@ -1429,6 +1429,133 @@ class MarketStatisticsAnalyzer:
             logger.error(f"Error detecting sub-regime: {e}")
             return MarketRegime.RANGING, 0.0, "POOR", {}
 
+    def detect_crypto_regime(self, symbols: List[str] = None) -> tuple:
+        """
+        Detect crypto-specific sub-regime using BTC and ETH (NOT SPY).
+
+        Crypto decouples from equity regularly. Equity-regime filtering
+        misroutes crypto templates: a ranging SPY week can coincide with a
+        trending BTC week, and vice versa. This gives crypto its own
+        regime signal.
+
+        Uses the same sub-regime taxonomy as detect_sub_regime but with
+        crypto-appropriate thresholds:
+        - BTC moves 5-10% per week normally. Equity thresholds (20d > 5%
+          for strong uptrend) would flag every week as trending.
+        - Crypto volatility floor is ~3% daily ATR/price; what's "high vol"
+          for crypto is 5%+.
+
+        Args:
+            symbols: crypto symbols to analyze (defaults to BTC, ETH)
+
+        Returns:
+            Tuple of (sub_regime, confidence, data_quality, metrics_dict)
+        """
+        from src.strategy.strategy_templates import MarketRegime
+
+        if symbols is None:
+            symbols = ["BTC", "ETH"]
+
+        logger.info(f"Detecting crypto regime using symbols: {symbols}")
+
+        try:
+            import yaml
+            from pathlib import Path
+            config_path = Path("config/autonomous_trading.yaml")
+            analysis_period_days = 180  # Crypto moves fast — shorter window than equity
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    cfg = yaml.safe_load(f)
+                    analysis_period_days = cfg.get('backtest', {}).get('crypto_regime_days', 180)
+
+            changes_20d = []
+            changes_50d = []
+            atr_ratios = []
+            data_days = []
+
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=analysis_period_days)
+
+            for symbol in symbols:
+                try:
+                    historical_data = self.market_data.get_historical_data(
+                        symbol=symbol,
+                        start=start_date,
+                        end=end_date,
+                        interval="1d",
+                        prefer_yahoo=True,
+                    )
+                    days = len(historical_data)
+                    data_days.append(days)
+                    if days < 30:
+                        continue
+                    df = pd.DataFrame([{
+                        'close': d.close, 'high': d.high, 'low': d.low
+                    } for d in historical_data])
+                    current = df['close'].iloc[-1]
+                    if days >= 20:
+                        changes_20d.append((current - df['close'].iloc[-20]) / df['close'].iloc[-20])
+                    if days >= 50:
+                        changes_50d.append((current - df['close'].iloc[-50]) / df['close'].iloc[-50])
+                    # ATR/price — use true range 14-day
+                    tr = (df[['high', 'low']].diff().abs().max(axis=1)).tail(14)
+                    atr_ratios.append(tr.mean() / current if current > 0 else 0)
+                except Exception as e:
+                    logger.debug(f"Could not fetch {symbol} for crypto regime: {e}")
+
+            if not changes_20d:
+                return MarketRegime.RANGING, 0.0, "POOR", {}
+
+            avg_20d = sum(changes_20d) / len(changes_20d)
+            avg_50d = sum(changes_50d) / len(changes_50d) if changes_50d else 0.0
+            avg_atr = sum(atr_ratios) / len(atr_ratios) if atr_ratios else 0.03
+
+            # Crypto-calibrated thresholds (roughly 2× equity thresholds)
+            # A strong crypto uptrend is 20d >= +10%, weak is +3 to +10%.
+            if avg_20d >= 0.10 and avg_50d >= 0.15:
+                regime = MarketRegime.TRENDING_UP_STRONG
+                conf = 0.85
+            elif avg_20d >= 0.03 and avg_50d >= 0.05:
+                regime = MarketRegime.TRENDING_UP_WEAK
+                conf = 0.70
+            elif avg_20d <= -0.10 and avg_50d <= -0.15:
+                regime = MarketRegime.TRENDING_DOWN_STRONG
+                conf = 0.85
+            elif avg_20d <= -0.03 and avg_50d <= -0.05:
+                regime = MarketRegime.TRENDING_DOWN_WEAK
+                conf = 0.70
+            elif avg_atr >= 0.05:
+                regime = MarketRegime.RANGING_HIGH_VOL
+                conf = 0.65
+            elif avg_atr <= 0.025:
+                regime = MarketRegime.RANGING_LOW_VOL
+                conf = 0.65
+            else:
+                regime = MarketRegime.RANGING
+                conf = 0.60
+
+            quality = "EXCELLENT" if min(data_days, default=0) >= 150 else \
+                      "GOOD" if min(data_days, default=0) >= 90 else \
+                      "FAIR" if min(data_days, default=0) >= 45 else "POOR"
+
+            metrics = {
+                "avg_20d_pct": round(avg_20d * 100, 2),
+                "avg_50d_pct": round(avg_50d * 100, 2),
+                "avg_atr_pct": round(avg_atr * 100, 3),
+                "symbols_analyzed": len(changes_20d),
+                "data_days_min": min(data_days) if data_days else 0,
+                "regime": regime.value if hasattr(regime, 'value') else str(regime),
+            }
+            logger.info(
+                f"Crypto regime: {regime.value if hasattr(regime, 'value') else regime} "
+                f"(20d={avg_20d:+.1%}, 50d={avg_50d:+.1%}, ATR/price={avg_atr:.1%}, conf={conf:.2f})"
+            )
+            return regime, conf, quality, metrics
+
+        except Exception as e:
+            logger.error(f"Error detecting crypto regime: {e}", exc_info=True)
+            return MarketRegime.RANGING, 0.0, "POOR", {}
+
     def detect_pullback_state(self, symbols: List[str] = None) -> Dict:
         """
         Detect whether the market is in a short-term pullback within the current regime.

@@ -6608,14 +6608,28 @@ Make this strategy distinct and innovative while following all threshold and pai
         return templates.get(regime, [])
 
     def _detect_crypto_regime(self) -> 'MarketRegime':
-        """Detect market regime using BTC/ETH as benchmarks (independent of equity regime)."""
+        """Detect market regime using BTC/ETH with crypto-calibrated thresholds.
+
+        Uses market_analyzer.detect_crypto_regime (B3 from Batch B) which
+        applies 2× equity thresholds — crypto moves 5-10% per week normally,
+        so equity-calibrated thresholds would flag every week as trending.
+        """
         try:
             from src.strategy.strategy_templates import MarketRegime as MR
-            sub_regime, confidence, _, metrics = self.market_analyzer.detect_sub_regime(symbols=['BTC', 'ETH'])
+            # Prefer the crypto-specific detector if available (B3); fall back
+            # to the generic one seeded with BTC/ETH for compatibility.
+            if hasattr(self.market_analyzer, 'detect_crypto_regime'):
+                sub_regime, confidence, _, metrics = self.market_analyzer.detect_crypto_regime(
+                    symbols=['BTC', 'ETH']
+                )
+            else:
+                sub_regime, confidence, _, metrics = self.market_analyzer.detect_sub_regime(
+                    symbols=['BTC', 'ETH']
+                )
             logger.info(
                 f"Crypto regime: {sub_regime.value} (confidence: {confidence:.2f}, "
-                f"20d={metrics.get('avg_change_20d', 0):.2%}, "
-                f"50d={metrics.get('avg_change_50d', 0):.2%})"
+                f"20d={metrics.get('avg_20d_pct', metrics.get('avg_change_20d', 0)):.2f}%, "
+                f"50d={metrics.get('avg_50d_pct', metrics.get('avg_change_50d', 0)):.2f}%)"
             )
             return sub_regime
         except Exception as e:

@@ -113,6 +113,42 @@ class StrategyTemplate:
         if 'position_size_atr_multiplier' not in self.default_parameters:
             self.default_parameters['position_size_atr_multiplier'] = 1.0
 
+        # Crypto regime gate (B1 + B2 from Batch B):
+        # Research consensus (Barroso/Santa-Clara 2015, mbrenndoerfer, repo research doc)
+        # says mean-reversion must be gated by ADX<25 (ranging regime) and
+        # trend/momentum/breakout must be gated by ADX>20 (trending regime).
+        # Injected automatically for crypto_optimized templates that don't already
+        # have an ADX filter in entry_conditions. Intraday (1h) uses slightly
+        # tighter thresholds (ADX<30 for MR, ADX>15 for trend) because intraday
+        # ADX runs hotter.
+        if self.metadata.get('crypto_optimized') and not self.metadata.get('skip_adx_gate'):
+            _has_adx = any('ADX' in c for c in self.entry_conditions) if self.entry_conditions else False
+            if not _has_adx and self.entry_conditions:
+                _interval = self.metadata.get('interval', '1d')
+                _is_mr = self.strategy_type == StrategyType.MEAN_REVERSION
+                _is_trend = self.strategy_type in (
+                    StrategyType.TREND_FOLLOWING,
+                    StrategyType.MOMENTUM,
+                    StrategyType.BREAKOUT,
+                )
+                if _is_mr:
+                    _adx_gate = 'ADX(14) < 30' if _interval == '1h' else 'ADX(14) < 25'
+                elif _is_trend:
+                    _adx_gate = 'ADX(14) > 15' if _interval == '1h' else 'ADX(14) > 20'
+                else:
+                    _adx_gate = None  # VOLATILITY, etc — no blanket gate
+
+                if _adx_gate:
+                    # Append to the first (primary) entry condition so the signal
+                    # only fires when both the setup AND the regime agree.
+                    self.entry_conditions[0] = f"{self.entry_conditions[0]} AND {_adx_gate}"
+                    # Ensure ADX is in required_indicators
+                    if self.required_indicators is None:
+                        self.required_indicators = []
+                    if 'ADX' not in self.required_indicators:
+                        self.required_indicators = list(self.required_indicators) + ['ADX']
+                    self.metadata['adx_gate_injected'] = _adx_gate
+
 
 class StrategyTemplateLibrary:
     """Library of proven strategy templates for different market regimes."""
