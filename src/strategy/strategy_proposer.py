@@ -1575,12 +1575,42 @@ class StrategyProposer:
                     if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
                         strategy_engine.market_data._historical_memory_cache.clear()
 
+                    # Per-strategy WF window override: long-horizon 1d crypto
+                    # templates can't produce enough trades in a 180-day test
+                    # window. Extend to 730d for templates that hold weeks/months.
+                    _wf_train_days = train_days
+                    _wf_test_days = test_days
+                    _wf_start = start_date
+                    _wf_end = end_date
+                    try:
+                        _tname = (strategy.metadata or {}).get('template_name', '')
+                        _interval_ck = (strategy.metadata or {}).get('interval', '1d')
+                        _sym_ck = strategy.symbols[0].upper() if strategy.symbols else ''
+                        from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO as _CRYPTO
+                        _is_cr = _sym_ck in _CRYPTO
+                        _LONG_HORIZON = {
+                            'Crypto 21W MA Trend Follow',
+                            'Crypto Vol-Compression Momentum',
+                            'Crypto Weekly Trend Follow',
+                            'Crypto Golden Cross',
+                        }
+                        if _is_cr and _interval_ck == '1d' and _tname in _LONG_HORIZON:
+                            _wf_test_days = 730
+                            _wf_train_days = 730
+                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
+                            logger.info(
+                                f"WF window extended for long-horizon crypto: {strategy.name} "
+                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
+                            )
+                    except Exception as _wf_ext_err:
+                        logger.debug(f"WF window extension check failed: {_wf_ext_err}")
+
                     wf_results = strategy_engine.walk_forward_validate(
                         strategy=strategy,
-                        start=start_date,
-                        end=end_date,
-                        train_days=train_days,
-                        test_days=test_days
+                        start=_wf_start,
+                        end=_wf_end,
+                        train_days=_wf_train_days,
+                        test_days=_wf_test_days
                     )
                     
                     train_sharpe = wf_results['train_sharpe']
@@ -2151,12 +2181,34 @@ class StrategyProposer:
                         if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
                             strategy_engine.market_data._historical_memory_cache.clear()
 
+                        # Per-strategy WF window override (matches primary WF call above)
+                        _wl_train_days = train_days
+                        _wl_test_days = test_days
+                        _wl_start = start_date
+                        _wl_end = end_date
+                        try:
+                            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO as _CRYPTO_WL
+                            _sym_wl = sym.upper() if sym else ''
+                            _interval_wl = (strategy.metadata or {}).get('interval', '1d')
+                            _LONG_HORIZON_WL = {
+                                'Crypto 21W MA Trend Follow',
+                                'Crypto Vol-Compression Momentum',
+                                'Crypto Weekly Trend Follow',
+                                'Crypto Golden Cross',
+                            }
+                            if _sym_wl in _CRYPTO_WL and _interval_wl == '1d' and template_name in _LONG_HORIZON_WL:
+                                _wl_test_days = 730
+                                _wl_train_days = 730
+                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
+                        except Exception:
+                            pass
+
                         wf_result = strategy_engine.walk_forward_validate(
                             strategy=temp_strategy,
-                            start=start_date,
-                            end=end_date,
-                            train_days=train_days,
-                            test_days=test_days
+                            start=_wl_start,
+                            end=_wl_end,
+                            train_days=_wl_train_days,
+                            test_days=_wl_test_days
                         )
 
                         ts = wf_result['train_sharpe']

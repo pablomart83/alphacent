@@ -675,6 +675,11 @@ class RiskManager:
             )
             return 0.0
 
+        # Track whether any risk-reducing penalty fired. When True, the
+        # Step 11 minimum-floor bump is suppressed and we return 0 instead.
+        # Bumping a penalty-reduced size back to $5K defeats the penalty.
+        penalty_applied = False
+
         # ── Step 1: Base risk per trade ──────────────────────────────────────
         # 0.6% of equity = ~$2,800 at current $470K equity.
         # If this trade hits its stop loss, we lose ~$2,800 (0.6% of equity).
@@ -715,6 +720,8 @@ class RiskManager:
             )
             if realized_vol and realized_vol > 0:
                 vol_scalar = max(VOL_SCALE_MIN, min(VOL_SCALE_MAX, TARGET_VOL / realized_vol))
+                if vol_scalar < 1.0:
+                    penalty_applied = True
                 logger.debug(
                     f"Vol-scaling {symbol}: realized={realized_vol:.1%}, "
                     f"target={TARGET_VOL:.0%}, scalar={vol_scalar:.2f}x ({asset_class})"
@@ -723,6 +730,8 @@ class RiskManager:
             v = signal.metadata['volatility']
             if v and v > 0:
                 vol_scalar = max(VOL_SCALE_MIN, min(VOL_SCALE_MAX, TARGET_VOL / v))
+                if vol_scalar < 1.0:
+                    penalty_applied = True
                 logger.debug(f"Vol-scaling (legacy) {symbol}: vol={v:.4f} → {vol_scalar:.2f}x")
 
         risk_pct *= vol_scalar
@@ -909,12 +918,14 @@ class RiskManager:
                         _drawdown = (_peak - equity) / _peak if _peak > 0 else 0.0
                         if _drawdown > 0.10:
                             position_size *= dd_thresh10
+                            penalty_applied = True
                             logger.info(
                                 f"Drawdown sizing: {_drawdown:.1%} from 30d peak "
                                 f"— 75% reduction (×{dd_thresh10})"
                             )
                         elif _drawdown > 0.05:
                             position_size *= dd_thresh5
+                            penalty_applied = True
                             logger.info(
                                 f"Drawdown sizing: {_drawdown:.1%} from 30d peak "
                                 f"— 50% reduction (×{dd_thresh5})"
@@ -939,6 +950,7 @@ class RiskManager:
                 if pair_stats and pair_stats.get('trades', 0) >= 3 and pair_stats.get('pnl', 0) < 0:
                     old_size = position_size
                     position_size *= 0.5
+                    penalty_applied = True
                     logger.info(
                         f"Loser penalty: {symbol} × {_tname} has "
                         f"{pair_stats['trades']} trades / ${pair_stats['pnl']:.0f} P&L "
@@ -948,13 +960,20 @@ class RiskManager:
             logger.debug(f"Loser penalty check failed (non-fatal): {_lp_err}")
 
         # ── Step 11: Minimum floor — applied last ────────────────────────────
-        # If all caps reduced the size below $5K but didn't zero it out,
-        # bump to minimum. We decided to trade — submit at minimum rather than fail.
-        # Only return 0 if we genuinely can't afford the minimum.
-        # (MINIMUM_ORDER_SIZE already defined at top of function — no redefinition needed)
+        # If caps reduced the size below $5K but no penalty fired, bump to minimum.
+        # If ANY risk-reducing penalty (drawdown sizing, vol scale <1.0, loser
+        # penalty) fired, DO NOT bump — bumping would defeat the penalty. Return
+        # 0 instead so the trade is skipped.
         if position_size <= 0:
             return 0.0
         if position_size < MINIMUM_ORDER_SIZE:
+            if penalty_applied:
+                logger.info(
+                    f"Size ${position_size:.0f} below minimum ${MINIMUM_ORDER_SIZE:.0f} "
+                    f"for {symbol} AND penalty applied — skipping trade "
+                    f"(penalty mechanisms would be defeated by floor bump)"
+                )
+                return 0.0
             if available_balance >= MINIMUM_ORDER_SIZE:
                 logger.info(
                     f"Size ${position_size:.0f} below minimum ${MINIMUM_ORDER_SIZE:.0f} "

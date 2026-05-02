@@ -1483,17 +1483,15 @@ class AutonomousStrategyManager:
                             if in_right_quintile is False:
                                 primary_rank = gate3.get('primary_rank', 'N/A')
                                 factor_name = gate3.get('factor', 'unknown')
-                                logger.warning(
-                                    f"      Factor validation gate3 FAILED: {strategy.name} — "
+                                logger.info(
+                                    f"      Factor gate rejection: {strategy.name} — "
                                     f"primary symbol not in right quintile "
                                     f"(factor={factor_name}, rank={primary_rank})"
                                 )
                                 strategy.status = StrategyStatus.INVALID
-                                stats["errors"].append({
-                                    "step": "factor_validation",
-                                    "strategy": strategy.name,
-                                    "message": f"gate3 failed: primary symbol rank={primary_rank} not in right quintile for {factor_name}"
-                                })
+                                # Factor-gate rejections are normal filtering outcomes,
+                                # not cycle errors. Don't append to stats['errors'] (which
+                                # surfaces them in the cycle ERROR count).
                                 continue
 
                             # Use the factor validation's synthetic results instead
@@ -1510,16 +1508,13 @@ class AutonomousStrategyManager:
                                 f"WR={backtest_results.win_rate:.0%}"
                             )
                         else:
-                            logger.warning(
-                                f"      Factor validation FAILED (score={factor_result['factor_score']:.0f}) — "
-                                f"strategy rejected"
+                            logger.info(
+                                f"      Factor gate rejection: {strategy.name} "
+                                f"(score={factor_result['factor_score']:.0f} below threshold)"
                             )
                             strategy.status = StrategyStatus.INVALID
-                            stats["errors"].append({
-                                "step": "factor_validation",
-                                "strategy": strategy.name,
-                                "message": f"Factor score {factor_result['factor_score']:.0f} below threshold"
-                            })
+                            # Factor-gate rejections are normal filtering outcomes,
+                            # not cycle errors. Don't append to stats['errors'].
                             continue
                     
                     # Cache Alpha Edge backtest result in the proposer's WF cache
