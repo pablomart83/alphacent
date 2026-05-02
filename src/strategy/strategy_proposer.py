@@ -1855,9 +1855,10 @@ class StrategyProposer:
                 #  - min_sharpe floor +0.3 (train AND test must clear the bar)
                 #  - min test trades 4 (was 3 on the relaxed path) — reject tiny samples
                 # This is a *rejection* amplification, not a rescue path.
-                is_short = direction in ('short', 'SHORT', SignalAction.ENTER_SHORT if hasattr(SignalAction, 'ENTER_SHORT') else None)
-                if isinstance(direction, str) and direction.lower() == 'short':
-                    is_short = True
+                #
+                # direction comes from _detect_strategy_direction — canonical values
+                # are 'LONG' and 'SHORT' (uppercase strings). Check defensively.
+                is_short = isinstance(direction, str) and direction.lower() == 'short'
                 if is_short:
                     min_sharpe = max(min_sharpe, min_sharpe + 0.3)
                     short_min_trades = max(4, test_trades if False else 4)
