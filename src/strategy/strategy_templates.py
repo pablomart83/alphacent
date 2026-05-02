@@ -7773,6 +7773,7 @@ class StrategyTemplateLibrary:
                 MarketRegime.TRENDING_UP_WEAK,
                 MarketRegime.TRENDING_UP_STRONG,
                 MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
                 MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[
@@ -7815,6 +7816,8 @@ class StrategyTemplateLibrary:
                 MarketRegime.TRENDING_UP_WEAK,
                 MarketRegime.TRENDING_UP_STRONG,
                 MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[
                 "CLOSE > SMA(50) AND RSI(14) > 50"
@@ -7855,6 +7858,9 @@ class StrategyTemplateLibrary:
                 MarketRegime.TRENDING_UP,
                 MarketRegime.TRENDING_UP_WEAK,
                 MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[
                 "CLOSE > SMA(50) AND RSI(14) > 50"
@@ -7885,48 +7891,11 @@ class StrategyTemplateLibrary:
             }
         ))
 
-        # BTC Dominance Inversion (short-alt when BTC rising hard) —
-        # Alts typically bleed during strong BTC-only rallies (capital flows into BTC).
-        # This template shorts small-cap alts when BTC is pushing higher.
-        templates.append(StrategyTemplate(
-            name="Crypto BTC Dominance Inversion SHORT",
-            description="SHORT small-cap alt when BTC rallied +5% in last 3 days AND alt is below SMA(20). Money flowing into BTC alpha-bleeds alts; capitalize on the rotation.",
-            strategy_type=StrategyType.MOMENTUM,
-            market_regimes=[
-                MarketRegime.TRENDING_UP,
-                MarketRegime.TRENDING_UP_WEAK,
-                MarketRegime.TRENDING_UP_STRONG,
-            ],
-            entry_conditions=[
-                "CLOSE < SMA(20) AND RSI(14) < 50"
-            ],
-            exit_conditions=[
-                "CLOSE > SMA(20) OR RSI(14) > 60"
-            ],
-            required_indicators=["SMA", "RSI"],
-            default_parameters={
-                "stop_loss_pct": 0.04,
-                "take_profit_pct": 0.08,
-                "btc_lead_bars": 3,
-                "btc_lead_threshold_pct": 0.05,
-            },
-            expected_trade_frequency="1-2 trades/week",
-            expected_holding_period="1-5 days",
-            risk_reward_ratio=2.0,
-            metadata={
-                "direction": "short",
-                "crypto_optimized": True,
-                "skip_param_override": True,
-                "interval": "1d",
-                "btc_leader": True,
-                "btc_leader_interval": "1d",
-                "btc_leader_bars": 3,
-                "btc_leader_threshold_pct": 0.05,
-                "leader_symbol": "BTC",
-                "btc_leader_direction": "short_on_btc_up",  # invert the "BTC up → long" logic
-                "skip_adx_gate": True,  # this template fights trend by design, no ADX gate
-            }
-        ))
+        # BTC Dominance Inversion (SHORT) — DISABLED 2026-05-02:
+        # eToro does not allow shorting spot crypto (see NO_SHORT_ASSET_CLASSES
+        # hard-block in strategy_proposer._score_symbol_for_template). A SHORT
+        # crypto template cannot execute. Dropping the template rather than
+        # leaving it as a permanently-blocked skeleton.
 
         # =====================================================================
         # Cross-sectional Crypto Momentum (C2 from Batch C)
@@ -7947,6 +7916,7 @@ class StrategyTemplateLibrary:
                 MarketRegime.TRENDING_UP_WEAK,
                 MarketRegime.TRENDING_UP_STRONG,
                 MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
                 MarketRegime.RANGING_HIGH_VOL,
             ],
             entry_conditions=[

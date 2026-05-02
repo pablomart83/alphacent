@@ -4588,6 +4588,25 @@ Generate a CORRECTED strategy that addresses all errors:"""
             if asset_class != 'crypto':
                 return 0.0
 
+        # HARD BLOCK (Option Y, 2026-05-02): Non-crypto-optimized templates
+        # MUST NOT run on crypto symbols. Generic equity templates use
+        # DSL exit conditions (RSI<40, CLOSE<SMA20) that fire on minor
+        # price moves, producing 0.5-1% per-trade gross — not enough to
+        # cover crypto's 2.96% round-trip cost. Observed in cycle
+        # 1777725080: 8 ETH strategies wf_validated, all killed at
+        # activation with Return/trade 0.0-1.0% or Net return < 0.
+        # Alpha Edge templates are exempted (they have their own asset routing).
+        # Pairs Trading market-neutral templates are exempted (multi-leg logic).
+        template_is_crypto_optimized = (template.metadata or {}).get('crypto_optimized', False)
+        template_is_alpha_edge = (template.metadata or {}).get('strategy_category') == 'alpha_edge'
+        template_is_market_neutral = (template.metadata or {}).get('market_neutral', False)
+        if (not template_is_crypto_optimized
+                and not template_is_alpha_edge
+                and not template_is_market_neutral):
+            _asset_class = self._get_asset_class(symbol)
+            if _asset_class == 'crypto':
+                return 0.0
+
         # HARD BLOCK: SHORT templates on crypto — eToro doesn't allow shorting.
         # Commodities ARE shortable on eToro (they're CFDs), so only block crypto.
         # These combos always produce 0 trades and waste WF compute. Block at scoring

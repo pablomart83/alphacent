@@ -1083,8 +1083,10 @@ class PortfolioManager:
             # Minimum return-per-trade check: filters out strategies that churn
             # with tiny edge. A strategy with 10 trades and 0.5% total return
             # has 0.05% per trade — that's noise, not edge.
-            # Interval-aware: 1h/4h strategies have shorter holds and smaller per-trade
-            # returns by design — use interval-specific thresholds when available.
+            # Interval-aware: 1h/4h/1d strategies have different hold periods and
+            # per-trade return expectations — use interval-specific thresholds.
+            # For crypto: crypto_1h=0.5%, crypto_4h=1.5%, crypto_1d=2.5%,
+            # crypto=4% fallback for weekly/21d+ templates.
             min_rpt_config = config_thresholds.get('min_return_per_trade', {})
             if isinstance(min_rpt_config, dict):
                 _strat_interval = ''
@@ -1092,19 +1094,22 @@ class PortfolioManager:
                     _strat_interval = strategy.metadata.get('interval', '')
                 if not _strat_interval and hasattr(strategy, 'rules') and isinstance(strategy.rules, dict):
                     _strat_interval = strategy.rules.get('interval', '')
-                interval_key = f"{asset_class}_{_strat_interval}" if _strat_interval in ('1h', '4h') else None
+                # Probe interval-specific key first; fall back to bare asset_class
+                interval_key = f"{asset_class}_{_strat_interval}" if _strat_interval in ('1h', '2h', '4h', '1d') else None
                 min_return_per_trade = (
                     min_rpt_config.get(interval_key, min_rpt_config.get(asset_class, 0.002))
                     if interval_key else min_rpt_config.get(asset_class, 0.002)
                 )
+                _rpt_source = interval_key if (interval_key and interval_key in min_rpt_config) else asset_class
             else:
                 min_return_per_trade = 0.002
+                _rpt_source = 'default'
             if backtest_results.total_trades > 0:
                 return_per_trade = backtest_results.total_return / backtest_results.total_trades
                 if return_per_trade < min_return_per_trade:
                     reason = (
                         f"Return/trade {return_per_trade:.3%} < {min_return_per_trade:.3%} min "
-                        f"({asset_class}, {backtest_results.total_trades} trades, "
+                        f"({_rpt_source}, {backtest_results.total_trades} trades, "
                         f"gross {backtest_results.total_return:.1%})"
                     )
                     logger.info(f"Strategy {strategy.name} failed activation: {reason}")
