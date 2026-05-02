@@ -7723,6 +7723,7 @@ class StrategyTemplateLibrary:
                 MarketRegime.TRENDING_UP_WEAK,
                 MarketRegime.TRENDING_UP_STRONG,
                 MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.RANGING,          # added 2026-05-02 E3 — vol-compression setup works in any ranging regime, not just LOW_VOL
             ],
             entry_conditions=[
                 # 20-day return > 3% (positive drift) AND short-term vol compressed vs longer-term
