@@ -3564,6 +3564,50 @@ class StrategyEngine:
                     indicator_list.append("Rolling Low")
                     referenced_indicators.add("Rolling Low")
 
+            # Check for OBV references (Sprint 2 crypto alpha, 2026-05-02)
+            if "OBV" in condition:
+                # OBV (cumulative) — no period
+                if "OBV" not in indicator_list:
+                    indicator_list.append("OBV")
+                    referenced_indicators.add("OBV")
+                # OBV_MA(N) — with period
+                import re as _re_obvma
+                for match in _re_obvma.finditer(r'OBV_MA\((\d+)\)', condition):
+                    period = int(match.group(1))
+                    spec = f"OBV MA:{period}"
+                    if spec not in indicator_list:
+                        indicator_list.append(spec)
+                        referenced_indicators.add(spec)
+
+            # Check for Donchian Channel references (Sprint 2, 2026-05-02)
+            # Turtle-style 20-bar breakout thresholds. Period-aware detection.
+            if "DONCHIAN_UPPER" in condition or "DONCHIAN_LOWER" in condition:
+                import re as _re_donch
+                for match in _re_donch.finditer(r'DONCHIAN_(UPPER|LOWER)\((\d+)\)', condition):
+                    side = match.group(1)
+                    period = int(match.group(2))
+                    spec = f"Donchian {side.capitalize()}:{period}"
+                    if spec not in indicator_list:
+                        indicator_list.append(spec)
+                        referenced_indicators.add(spec)
+
+            # Check for Keltner Channel references (Sprint 2, 2026-05-02)
+            # Args: (ema_period, atr_period, mult). Add one entry per unique config.
+            if "KELTNER_" in condition:
+                import re as _re_kelt
+                for match in _re_kelt.finditer(
+                    r'KELTNER_(UPPER|MIDDLE|LOWER)\((\d+)\s*,\s*(\d+)\s*,\s*([0-9.]+)\)',
+                    condition,
+                ):
+                    side = match.group(1).capitalize()
+                    ema_p = int(match.group(2))
+                    atr_p = int(match.group(3))
+                    mult = float(match.group(4))
+                    spec = f"Keltner:{ema_p},{atr_p},{mult}"
+                    if spec not in indicator_list:
+                        indicator_list.append(spec)
+                        referenced_indicators.add(spec)
+
             # Check for PRICE_CHANGE_PCT references — auto-add with correct period
             if "PRICE_CHANGE_PCT" in condition:
                 import re as _re_pcp
@@ -3692,6 +3736,32 @@ class StrategyEngine:
                 "method": "ADX",
                 "params": {"period": 14},
                 "keys": ["ADX_14"]
+            },
+            # ───── Sprint 2 crypto-alpha indicators (2026-05-02) ─────
+            "OBV": {
+                "method": "OBV",
+                "params": {},
+                "keys": ["OBV"]
+            },
+            "OBV MA": {
+                "method": "OBV_MA",
+                "params": {"period": 20},
+                "keys": ["OBV_MA_20"]
+            },
+            "Donchian Upper": {
+                "method": "DONCHIAN_UPPER",
+                "params": {"period": 20},
+                "keys": ["DONCHIAN_UPPER_20"]
+            },
+            "Donchian Lower": {
+                "method": "DONCHIAN_LOWER",
+                "params": {"period": 20},
+                "keys": ["DONCHIAN_LOWER_20"]
+            },
+            "Keltner": {
+                "method": "KELTNER",
+                "params": {"ema_period": 20, "atr_period": 14, "mult": 2.0},
+                "keys": ["KELTNER_UPPER_20_14_2.0", "KELTNER_MIDDLE_20_14_2.0", "KELTNER_LOWER_20_14_2.0"]
             }
         }
 
@@ -3702,12 +3772,23 @@ class StrategyEngine:
                 logger.info(f"")
                 logger.info(f"Processing indicator: '{indicator_spec}'")
                 
-                # Check if indicator has period specification (e.g., "SMA:20", "SMA:50")
+                # Check if indicator has period specification (e.g., "SMA:20", "SMA:50").
+                # Sprint 2 (2026-05-02): Keltner uses a compound spec with 3 args,
+                # encoded as "Keltner:ema,atr,mult" (e.g. "Keltner:20,14,2.0"). Detect
+                # and parse accordingly so the single-period int() path isn't broken.
+                compound_args = None
                 if ":" in indicator_spec:
                     base_name, period_str = indicator_spec.split(":", 1)
-                    period = int(period_str)
-                    indicator_name = base_name
-                    custom_period = True
+                    if "," in period_str:
+                        # Compound spec — store raw; we'll parse per-indicator below.
+                        compound_args = [p.strip() for p in period_str.split(",")]
+                        indicator_name = base_name
+                        custom_period = True
+                        period = None
+                    else:
+                        period = int(period_str)
+                        indicator_name = base_name
+                        custom_period = True
                 else:
                     indicator_name = indicator_spec
                     custom_period = False
@@ -3741,12 +3822,41 @@ class StrategyEngine:
                     elif indicator_name == "Bollinger Bands":
                         params["period"] = period
                         expected_keys = [f"Upper_Band_{period}", f"Middle_Band_{period}", f"Lower_Band_{period}"]
+                    elif indicator_name == "OBV MA":
+                        params["period"] = period
+                        expected_keys = [f"OBV_MA_{period}"]
+                    elif indicator_name in ("Donchian Upper", "Donchian Lower"):
+                        params["period"] = period
+                        side = "UPPER" if "Upper" in indicator_name else "LOWER"
+                        expected_keys = [f"DONCHIAN_{side}_{period}"]
                     else:
                         params["period"] = period
                         # Update expected keys with custom period
                         if indicator_name in ["RSI", "SMA", "EMA", "ATR", "Volume MA", "ADX"]:
                             expected_keys = [f"{method_name}_{period}"]
                     logger.info(f"  Using custom period: {period}")
+                elif custom_period and compound_args is not None:
+                    # Compound-args indicator (e.g. Keltner:20,14,2.0)
+                    if indicator_name == "Keltner" and len(compound_args) >= 3:
+                        ema_p = int(compound_args[0])
+                        atr_p = int(compound_args[1])
+                        mult = float(compound_args[2])
+                        params["ema_period"] = ema_p
+                        params["atr_period"] = atr_p
+                        params["mult"] = mult
+                        expected_keys = [
+                            f"KELTNER_UPPER_{ema_p}_{atr_p}_{mult}",
+                            f"KELTNER_MIDDLE_{ema_p}_{atr_p}_{mult}",
+                            f"KELTNER_LOWER_{ema_p}_{atr_p}_{mult}",
+                        ]
+                        logger.info(
+                            f"  Using custom Keltner args: ema={ema_p}, atr={atr_p}, mult={mult}"
+                        )
+                    else:
+                        logger.warning(
+                            f"  Compound spec '{indicator_spec}' not recognised — "
+                            f"falling back to defaults"
+                        )
 
                 logger.info(f"  Method: {method_name}")
                 logger.info(f"  Parameters: {params}")
@@ -3806,6 +3916,24 @@ class StrategyEngine:
                         indicators["Resistance"] = result['resistance']
                         # COMPREHENSIVE LOGGING: Log the keys returned
                         returned_keys = ["Support", "Resistance"]
+                        logger.info(f"  ✓ Calculated successfully")
+                        logger.info(f"  Keys returned: {returned_keys}")
+
+                    elif indicator_name == "Keltner":
+                        # Keltner Channels: publish with ema/atr/mult-tagged keys
+                        # so distinct configs (e.g., Keltner(20,14,2) vs Keltner(10,10,1.5))
+                        # don't collide. Keys match the DSL code-generator output.
+                        ema_p = params.get("ema_period", 20)
+                        atr_p = params.get("atr_period", 14)
+                        mult = float(params.get("mult", 2.0))
+                        indicators[f"KELTNER_UPPER_{ema_p}_{atr_p}_{mult}"] = result['upper']
+                        indicators[f"KELTNER_MIDDLE_{ema_p}_{atr_p}_{mult}"] = result['middle']
+                        indicators[f"KELTNER_LOWER_{ema_p}_{atr_p}_{mult}"] = result['lower']
+                        returned_keys = [
+                            f"KELTNER_UPPER_{ema_p}_{atr_p}_{mult}",
+                            f"KELTNER_MIDDLE_{ema_p}_{atr_p}_{mult}",
+                            f"KELTNER_LOWER_{ema_p}_{atr_p}_{mult}",
+                        ]
                         logger.info(f"  ✓ Calculated successfully")
                         logger.info(f"  Keys returned: {returned_keys}")
 

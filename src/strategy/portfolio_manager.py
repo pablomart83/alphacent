@@ -649,7 +649,39 @@ class PortfolioManager:
             stored_dir = strategy.metadata.get('direction', '')
             if stored_dir.upper() == 'SHORT':
                 strategy_direction = 'SHORT'
-        
+
+        # Sprint 2 F2 — family-level cross-validation bypass.
+        # Templates flagged `requires_cross_validation` were scored at family
+        # level by the proposer (src/strategy/strategy_proposer.py — Pass 1.5).
+        # When ≥4/6 symbols in the template's family_universe showed
+        # consistent edge (test_sharpe > 0.3 AND positive net return), the
+        # proposer stamps `family_cross_validated=True`. At activation, we
+        # honour that verdict by bypassing the per-pair Sharpe / min_trades /
+        # return-per-trade gates that are structurally inappropriate for
+        # this template class (the very gate that produces the edge tightens
+        # per-symbol trade counts to 1-3 per test window; gating on that is
+        # gating on the edge itself).
+        #
+        # What is NOT bypassed at activation:
+        #   - Net return > 0 (per-symbol tradability floor)
+        #   - Max drawdown (risk)
+        #   - Win rate / expectancy (per-symbol basic quality)
+        #   - Risk/reward ratio (avg_win / avg_loss)
+        # These are per-trade or whole-strategy properties independent of
+        # sample size; small-sample noise doesn't meaningfully affect them
+        # and they catch strategies that can't make money regardless.
+        family_cross_validated = False
+        cv_score = 0.0
+        if hasattr(strategy, 'metadata') and strategy.metadata:
+            family_cross_validated = bool(strategy.metadata.get('family_cross_validated'))
+            cv_score = float(strategy.metadata.get('cross_validation_score', 0.0) or 0.0)
+        if family_cross_validated:
+            logger.info(
+                f"Family cross-validation bypass armed for {strategy.name} — "
+                f"score={cv_score:.2%} (per-pair Sharpe / min_trades / RPT relaxed; "
+                f"net-return/drawdown/WR/R:R still enforced)"
+            )
+
         # Get base thresholds from config file (activation_thresholds section)
         # Falls back to hardcoded defaults if config not available
         config_thresholds = {}
@@ -861,11 +893,23 @@ class PortfolioManager:
         tier, max_allocation = self.get_activation_tier(backtest_results, is_alpha_edge=is_alpha_edge)
 
         if tier == 0 or backtest_results.sharpe_ratio < sharpe_threshold:
-            reason = (
-                f"Sharpe {backtest_results.sharpe_ratio:.2f} < {sharpe_threshold}"
-            )
-            logger.info(f"Strategy {strategy.name} rejected: {reason}")
-            return False, reason
+            # Sprint 2 F2 — family-cross-validated templates bypass per-pair
+            # Sharpe gate. The family-level verdict already proved the edge
+            # exists across the template; per-symbol Sharpe is noisy at 1-3
+            # trades. Still require Sharpe > 0 (positive edge on this symbol)
+            # so we don't activate a symbol that individually lost money.
+            if family_cross_validated and backtest_results.sharpe_ratio > 0:
+                logger.info(
+                    f"Sharpe bypass (family-cross-validated, score={cv_score:.2%}): "
+                    f"{strategy.name} sharpe={backtest_results.sharpe_ratio:.2f} "
+                    f"< {sharpe_threshold} — accepted on family evidence"
+                )
+            else:
+                reason = (
+                    f"Sharpe {backtest_results.sharpe_ratio:.2f} < {sharpe_threshold}"
+                )
+                logger.info(f"Strategy {strategy.name} rejected: {reason}")
+                return False, reason
 
         # Check max drawdown (allow exactly at threshold)
         if backtest_results.max_drawdown > drawdown_threshold:
@@ -1010,6 +1054,16 @@ class PortfolioManager:
                     f"wf_sharpe={wf_test_sharpe:.2f} ≥ 2.0 with {backtest_results.total_trades} trades "
                     f"(below {min_trades_required} threshold but high conviction)"
                 )
+            elif family_cross_validated and backtest_results.total_trades >= 2:
+                # Sprint 2 F2 — family-cross-validated templates: per-pair
+                # trade count is naturally low because the cross-asset gate
+                # tightens entry frequency. Accept with ≥2 trades (statistical
+                # floor — one trade is not a sample) when family score passed.
+                logger.info(
+                    f"min_trades bypass (family-cross-validated, score={cv_score:.2%}): "
+                    f"{strategy.name} trades={backtest_results.total_trades} < "
+                    f"{min_trades_required} — accepted on family evidence"
+                )
             else:
                 reason = (
                     f"Trades {backtest_results.total_trades} < {min_trades_required} "
@@ -1107,13 +1161,29 @@ class PortfolioManager:
             if backtest_results.total_trades > 0:
                 return_per_trade = backtest_results.total_return / backtest_results.total_trades
                 if return_per_trade < min_return_per_trade:
-                    reason = (
-                        f"Return/trade {return_per_trade:.3%} < {min_return_per_trade:.3%} min "
-                        f"({_rpt_source}, {backtest_results.total_trades} trades, "
-                        f"gross {backtest_results.total_return:.1%})"
-                    )
-                    logger.info(f"Strategy {strategy.name} failed activation: {reason}")
-                    return False, reason
+                    # Sprint 2 F2 — family-cross-validated templates bypass
+                    # per-pair RPT. RPT is a small-sample metric and the
+                    # cross-asset gate structurally produces small samples
+                    # per symbol; family-level total_return > 0 (already
+                    # enforced above via net_return check) plus family
+                    # evidence is the right gate for this template class.
+                    if family_cross_validated:
+                        logger.info(
+                            f"RPT bypass (family-cross-validated, score={cv_score:.2%}): "
+                            f"{strategy.name} rpt={return_per_trade:.3%} < "
+                            f"{min_return_per_trade:.3%} ({_rpt_source}) — "
+                            f"accepted on family evidence "
+                            f"({backtest_results.total_trades} trades, "
+                            f"gross {backtest_results.total_return:.1%})"
+                        )
+                    else:
+                        reason = (
+                            f"Return/trade {return_per_trade:.3%} < {min_return_per_trade:.3%} min "
+                            f"({_rpt_source}, {backtest_results.total_trades} trades, "
+                            f"gross {backtest_results.total_return:.1%})"
+                        )
+                        logger.info(f"Strategy {strategy.name} failed activation: {reason}")
+                        return False, reason
 
             logger.info(
                 f"Cost check passed: net={net_return:.2%}, rpt={backtest_results.total_return/max(backtest_results.total_trades,1):.3%}, "

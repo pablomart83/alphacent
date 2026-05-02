@@ -1865,6 +1865,8 @@ class AutonomousStrategyManager:
                                 "sharpe": bt.sharpe_ratio if bt else None,
                                 "win_rate": bt.win_rate if bt else None,
                                 "trades": bt.total_trades if bt else None,
+                                "family_cross_validated": bool(_meta.get('family_cross_validated', False)),
+                                "cross_validation_score": _meta.get('cross_validation_score'),
                             },
                         )
                     except Exception:
@@ -1889,11 +1891,17 @@ class AutonomousStrategyManager:
                         direction=_meta.get('direction'),
                         market_regime=_meta.get('macro_regime'),
                         score=(strategy.backtest_results.sharpe_ratio if strategy.backtest_results else None),
-                        reason="passed_activation_criteria",
+                        reason=(
+                            "family_cross_validated"
+                            if _meta.get('family_cross_validated')
+                            else "passed_activation_criteria"
+                        ),
                         metadata={
                             "sharpe": strategy.backtest_results.sharpe_ratio if strategy.backtest_results else None,
                             "win_rate": strategy.backtest_results.win_rate if strategy.backtest_results else None,
                             "trades": strategy.backtest_results.total_trades if strategy.backtest_results else None,
+                            "family_cross_validated": bool(_meta.get('family_cross_validated', False)),
+                            "cross_validation_score": _meta.get('cross_validation_score'),
                         },
                     )
                 except Exception:

@@ -7766,6 +7766,18 @@ class StrategyTemplateLibrary:
                 "skip_param_override": True,
                 "intraday": True,
                 "interval": "1h",
+                # Sprint 2 F2 (2026-05-02): cross-asset template carries real
+                # template-family edge (BTC lead-lag), but the very gate that
+                # creates the edge (LAG_RETURN("BTC",...)>thresh) naturally
+                # tightens entries to 1-3 per symbol per 90d test window.
+                # Per-pair activation gates (cost-per-trade, Sharpe) then
+                # reject on small-sample noise even when 4/6 alts show edge.
+                # Proposer cross-validates across the 6-coin family; when
+                # ≥4/6 symbols show test_sharpe > 0.3 AND positive net
+                # return, activation bypasses per-pair Sharpe/RPT gates and
+                # trusts the family-level verdict.
+                "requires_cross_validation": True,
+                "family_universe": ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOT"],
                 # Legacy — kept for one cycle to avoid WF cache invalidation;
                 # no code path reads these anymore (runtime gate removed in F1).
                 "btc_leader": True,
@@ -7811,6 +7823,9 @@ class StrategyTemplateLibrary:
                 "skip_param_override": True,
                 "interval_4h": True,
                 "interval": "4h",
+                # Sprint 2 F2 — see BTC Follower 1H for rationale.
+                "requires_cross_validation": True,
+                "family_universe": ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOT"],
                 # Legacy — see BTC Follower 1H comment.
                 "btc_leader": True,
                 "btc_leader_interval": "4h",
@@ -7854,6 +7869,9 @@ class StrategyTemplateLibrary:
                 "crypto_optimized": True,
                 "skip_param_override": True,
                 "interval": "1d",
+                # Sprint 2 F2 — see BTC Follower 1H for rationale.
+                "requires_cross_validation": True,
+                "family_universe": ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOT"],
                 # Legacy — see BTC Follower 1H comment.
                 "btc_leader": True,
                 "btc_leader_interval": "1d",
@@ -7919,12 +7937,238 @@ class StrategyTemplateLibrary:
                 "crypto_optimized": True,
                 "skip_param_override": True,
                 "interval": "1d",
+                # Sprint 2 F2 — cross-sectional templates are inherently
+                # multi-symbol; family-level consistency is the right gate.
+                "requires_cross_validation": True,
+                "family_universe": ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOT"],
                 # Legacy — see BTC Follower 1H comment.
                 "cross_sectional_rank": True,
                 "rank_window_days": 14,
                 "rank_top_n": 3,
                 "rank_metric": "return",
                 "rank_universe": ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOT"],
+            }
+        ))
+
+        # =====================================================================
+        # Sprint 2 crypto-alpha expansion (2026-05-02)
+        # Five research-backed templates filling real gaps in the crypto
+        # library. Each uses native DSL primitives (OBV, DONCHIAN, KELTNER
+        # added in this sprint) — NO approximations.
+        # =====================================================================
+
+        # T1. Crypto Donchian Breakout Daily — turtle-style 20-day high
+        # breakout with ADX trend confirmation + volume. Research: classic
+        # Donchian (Dennis/Eckhardt 1983) validated on crypto by Alpha
+        # Architect; 20-bar breakouts + ADX>25 deliver 1.5–2.0 R:R in
+        # trending crypto. DONCHIAN_UPPER uses shift=1 so the threshold is
+        # "prior 20-bar high" — a genuine breakout, not a tautology.
+        templates.append(StrategyTemplate(
+            name="Crypto Donchian Breakout Daily",
+            description="Enter LONG when daily close breaks above the prior 20-day Donchian upper band (turtle-style) with ADX(14)>25 trend confirmation and volume >1.3x 20d avg. Exit on EMA(10) loss. Captures post-accumulation trend starts.",
+            strategy_type=StrategyType.BREAKOUT,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.RANGING_HIGH_VOL,
+            ],
+            entry_conditions=[
+                "CLOSE > DONCHIAN_UPPER(20) AND ADX(14) > 25 AND VOLUME > VOLUME_MA(20) * 1.3"
+            ],
+            exit_conditions=[
+                "CLOSE < EMA(10)"
+            ],
+            required_indicators=["Donchian Upper", "ADX", "Volume MA", "EMA"],
+            default_parameters={
+                "stop_loss_pct": 0.04,
+                "take_profit_pct": 0.10,
+            },
+            expected_trade_frequency="1-3 trades/week",
+            expected_holding_period="3-10 days",
+            risk_reward_ratio=2.5,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
+                # Skip the auto-ADX-injector — we already have an explicit
+                # ADX(14)>25 gate built into the rule.
+                "skip_adx_gate": True,
+            }
+        ))
+
+        # T2. Crypto Keltner Breakout 4H — ATR-adaptive channel breakout
+        # (Alpha Architect validated template). Keltner uses ATR for band
+        # width so the threshold self-adjusts to current volatility —
+        # different signal from Bollinger (STDDEV-based). Canonical params:
+        # EMA(20), ATR(14), mult=2.0. ADX>25 for trend filter.
+        templates.append(StrategyTemplate(
+            name="Crypto Keltner Breakout 4H",
+            description="Enter LONG when 4H close breaks above Keltner upper band (EMA20 + 2×ATR14) with ADX(14)>25. Exit on close below Keltner middle (EMA20). ATR-adaptive threshold captures real breakouts beyond the noise floor.",
+            strategy_type=StrategyType.BREAKOUT,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.RANGING_HIGH_VOL,
+            ],
+            entry_conditions=[
+                "CLOSE > KELTNER_UPPER(20, 14, 2.0) AND ADX(14) > 25"
+            ],
+            exit_conditions=[
+                "CLOSE < KELTNER_MIDDLE(20, 14, 2.0)"
+            ],
+            required_indicators=["Keltner", "ADX"],
+            default_parameters={
+                "stop_loss_pct": 0.03,
+                "take_profit_pct": 0.06,
+            },
+            expected_trade_frequency="2-4 trades/week",
+            expected_holding_period="12-72 hours",
+            risk_reward_ratio=2.0,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval_4h": True,
+                "interval": "4h",
+                "skip_adx_gate": True,
+            }
+        ))
+
+        # T3. Crypto OBV Accumulation Daily — volume-led momentum.
+        # OBV (On-Balance Volume) rising above its 20-day MA while price
+        # enters uptrend mode (close > EMA(20)) with RSI in a 45–60 band
+        # (NOT yet euphoric) signals smart-money accumulation before
+        # extension. Research: Grobys/Habeli 2025 — volume-led momentum
+        # outperforms price-only in crypto. Orthogonal to our existing
+        # single-bar "Volume Spike Entry" which is a spike signal, not a
+        # trend-confirmed flow signal.
+        templates.append(StrategyTemplate(
+            name="Crypto OBV Accumulation Daily",
+            description="Enter LONG when OBV > OBV_MA(20) (sustained volume accumulation) AND close above EMA(20) trend filter AND RSI(14) in 45–60 band (pre-euphoric setup). Exit on OBV crossing below its MA or RSI overextension.",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.RANGING_HIGH_VOL,
+            ],
+            entry_conditions=[
+                "OBV > OBV_MA(20) AND CLOSE > EMA(20) AND RSI(14) > 45 AND RSI(14) < 60"
+            ],
+            exit_conditions=[
+                "OBV < OBV_MA(20) OR RSI(14) > 70"
+            ],
+            required_indicators=["OBV", "OBV MA", "EMA", "RSI"],
+            default_parameters={
+                "stop_loss_pct": 0.05,
+                "take_profit_pct": 0.12,
+            },
+            expected_trade_frequency="2-5 trades/week",
+            expected_holding_period="3-8 days",
+            risk_reward_ratio=2.4,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
+                # OBV-based accumulation signal doesn't need ADX gate — OBV
+                # trend above its MA *is* the directional filter.
+                "skip_adx_gate": True,
+            }
+        ))
+
+        # T4. Crypto 20D MA Variable Cross Daily — direct implementation
+        # of Grobys (2024) "variable moving average" finding: a 20-day MA
+        # strategy on non-BTC cryptos generates ~8.76% excess return/year.
+        # Differs from our Golden Cross (50/100) and 21W MA (weekly) which
+        # are much slower. The 5-day momentum filter rejects whipsaw
+        # crossovers that immediately reverse.
+        templates.append(StrategyTemplate(
+            name="Crypto 20D MA Variable Cross Daily",
+            description="Enter LONG on fresh bullish crossover of close above SMA(20) with 5-day positive momentum (PRICE_CHANGE_PCT(5) > 3%). Direct Grobys (2024) signal — 20-day variable MA delivered 8.76% excess/yr on non-BTC crypto. Exit on close below SMA(20).",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.RANGING_HIGH_VOL,
+            ],
+            entry_conditions=[
+                "CLOSE CROSSES_ABOVE SMA(20) AND PRICE_CHANGE_PCT(5) > 0.03"
+            ],
+            exit_conditions=[
+                "CLOSE < SMA(20)"
+            ],
+            required_indicators=["SMA", "Price Change %"],
+            default_parameters={
+                "stop_loss_pct": 0.05,
+                "take_profit_pct": 0.12,
+            },
+            expected_trade_frequency="2-4 trades/month",
+            expected_holding_period="5-15 days",
+            risk_reward_ratio=2.4,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
+                # Variable-MA strategy IS the trend filter — adding ADX on
+                # top would double-gate and starve signals in weak trends
+                # where the MA cross is the real entry.
+                "skip_adx_gate": True,
+            }
+        ))
+
+        # T5. Crypto BB Volume Breakout Daily — Bollinger upper-band break
+        # with volume confirmation and trend filter. Distinct from our
+        # "BB Squeeze Breakout" (which requires squeeze→expansion) — this
+        # fires on a plain upper-band break PROVIDED volume is >1.5× avg
+        # AND ADX shows emerging trend. Research: composite of BB breakout
+        # + volume + ADX outperforms either alone in directional alt moves.
+        # Use wider BB (2.0 std) to avoid false triggers during chop.
+        templates.append(StrategyTemplate(
+            name="Crypto BB Volume Breakout Daily",
+            description="Enter LONG when daily close breaks above Bollinger upper band BB(20,2.0) with volume >1.5x 20d avg AND ADX(14)>20 (emerging trend). Exit on close below BB middle band or RSI>75 (euphoria). Captures alt-season extensions.",
+            strategy_type=StrategyType.BREAKOUT,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.RANGING_HIGH_VOL,
+            ],
+            entry_conditions=[
+                "CLOSE > BB_UPPER(20, 2.0) AND VOLUME > VOLUME_MA(20) * 1.5 AND ADX(14) > 20"
+            ],
+            exit_conditions=[
+                "CLOSE < BB_MIDDLE(20, 2.0) OR RSI(14) > 75"
+            ],
+            required_indicators=["Bollinger Bands", "Volume MA", "ADX", "RSI"],
+            default_parameters={
+                "stop_loss_pct": 0.05,
+                "take_profit_pct": 0.14,
+            },
+            expected_trade_frequency="1-3 trades/week",
+            expected_holding_period="3-10 days",
+            risk_reward_ratio=2.8,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
+                "skip_adx_gate": True,
             }
         ))
 

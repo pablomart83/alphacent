@@ -1155,8 +1155,32 @@ class MarketDataManager:
         # This is how real trading platforms build higher-timeframe candles:
         # Open = first bar's open, High = max of all highs, Low = min of all lows,
         # Close = last bar's close, Volume = sum of all volumes.
+        #
+        # Sprint 2 F10 (2026-05-02): CRITICAL constraint — yfinance's 1h data
+        # has a ~7-month hard cap (730 days ≈ 210 days max documented, but
+        # empirically ~174-210d depending on symbol and exchange). The 4H
+        # resample is a DERIVED view: it can ONLY cover the same calendar
+        # window as the source 1h data. If the DB cache contains 4h bars
+        # dated before the earliest available 1h bar, those rows are phantom
+        # (synthesized from an older 1h snapshot that is no longer
+        # reproducible via fresh fetches). This phantom depth disappears on
+        # the next cache clear and is invisible to the schema-version
+        # invalidator.
+        #
+        # Enforce the invariant here: the output 4h window cannot be wider
+        # than the input 1h window. If a 4h bar's start is before the
+        # earliest 1h bar we just fetched, drop it. This keeps the 4h cache
+        # HONEST — it mirrors the 1h source window, nothing more.
         if interval == "4h" and yf_interval == "1h":
-            logger.info(f"Synthesizing 4H bars from {len(hist)} 1H bars for {symbol}")
+            if hist.empty:
+                logger.warning(f"Yahoo 1H fetch for {symbol} returned empty; cannot synthesize 4H bars")
+                return []
+            source_first = hist.index.min()
+            source_last = hist.index.max()
+            logger.info(
+                f"Synthesizing 4H bars from {len(hist)} 1H bars for {symbol} "
+                f"(source window {source_first} → {source_last})"
+            )
             hist_4h = hist.resample('4h').agg({
                 'Open': 'first',
                 'High': 'max',
@@ -1164,6 +1188,19 @@ class MarketDataManager:
                 'Close': 'last',
                 'Volume': 'sum'
             }).dropna(subset=['Open', 'Close'])
+            # Trim any resampled 4H bar whose window-start falls outside the
+            # source 1h range. resample('4h') creates bins on fixed 4h boundaries
+            # starting from the index's base date, which can emit bins
+            # technically before the earliest 1h bar (empty after dropna in
+            # practice, but the explicit trim is the invariant statement).
+            before_trim = len(hist_4h)
+            hist_4h = hist_4h[(hist_4h.index >= source_first) & (hist_4h.index <= source_last)]
+            trimmed = before_trim - len(hist_4h)
+            if trimmed > 0:
+                logger.info(
+                    f"4H invariant trim: dropped {trimmed} resampled bars outside "
+                    f"1H source window for {symbol}"
+                )
             logger.info(f"Synthesized {len(hist_4h)} 4H bars from {len(hist)} 1H bars for {symbol}")
             hist = hist_4h
 

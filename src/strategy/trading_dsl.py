@@ -241,6 +241,43 @@ INDICATOR_MAPPING = {
     # ADX — Average Directional Index (trend strength)
     'ADX': lambda params: f'ADX_{params[0] if params else 14}',
 
+    # ───── On-Balance Volume (Sprint 2 crypto alpha, 2026-05-02) ─────
+    # OBV is cumulative — no period argument. OBV_MA wraps it with a
+    # rolling mean for use as a signal line.
+    'OBV': lambda params: 'OBV',
+    'OBV_MA': lambda params: f'OBV_MA_{params[0] if params else 20}',
+
+    # ───── Donchian Channels (Sprint 2, 2026-05-02) ─────
+    # Turtle-style breakout thresholds. Unlike HIGH_N / LOW_N, Donchian
+    # applies shift=1 so the threshold excludes the current bar —
+    # `close > DONCHIAN_UPPER(20)` is "today closed above the prior
+    # 20-bar high" rather than the tautological "today's high is the
+    # 20-bar high". Use DONCHIAN for entry breakouts, HIGH_N for range
+    # checks (support/resistance) that should include the current bar.
+    'DONCHIAN_UPPER': lambda params: f'DONCHIAN_UPPER_{params[0] if params else 20}',
+    'DONCHIAN_LOWER': lambda params: f'DONCHIAN_LOWER_{params[0] if params else 20}',
+
+    # ───── Keltner Channels (Sprint 2, 2026-05-02) ─────
+    # EMA-centered, ATR-scaled channel. Reacts to true trading range
+    # rather than close-price dispersion (unlike Bollinger). Canonical
+    # params: EMA(20), ATR(14), mult=2.0.
+    # Args: (ema_period, atr_period, mult). Defaults: (20, 14, 2.0).
+    'KELTNER_UPPER': lambda params: (
+        f"KELTNER_UPPER_{params[0] if params else 20}_"
+        f"{params[1] if len(params) > 1 else 14}_"
+        f"{float(params[2]) if len(params) > 2 else 2.0}"
+    ),
+    'KELTNER_MIDDLE': lambda params: (
+        f"KELTNER_MIDDLE_{params[0] if params else 20}_"
+        f"{params[1] if len(params) > 1 else 14}_"
+        f"{float(params[2]) if len(params) > 2 else 2.0}"
+    ),
+    'KELTNER_LOWER': lambda params: (
+        f"KELTNER_LOWER_{params[0] if params else 20}_"
+        f"{params[1] if len(params) > 1 else 14}_"
+        f"{float(params[2]) if len(params) > 2 else 2.0}"
+    ),
+
     # ───── Cross-asset primitives (Sprint 1 F1, 2026-05-02) ─────
     # These indicators reference external symbols, not just the primary's bars.
     # The actual Series is pre-computed by strategy_engine._compute_cross_asset_indicators

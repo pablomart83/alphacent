@@ -126,6 +126,23 @@ class IndicatorLibrary:
             # Return HIGH_20 / LOW_20 (not HIGH_N_20) to match DSL expectations
             prefix = indicator_upper.replace('_N', '')
             return f"{prefix}_{period}"
+        elif indicator_upper == 'OBV':
+            # OBV is cumulative — no period. Return bare key.
+            return 'OBV'
+        elif indicator_upper == 'OBV_MA':
+            period = params.get('period', 20)
+            return f"OBV_MA_{period}"
+        elif indicator_upper in ['DONCHIAN_UPPER', 'DONCHIAN_LOWER']:
+            period = params.get('period', 20)
+            return f"{indicator_upper}_{period}"
+        elif indicator_upper == 'KELTNER':
+            # Multi-output indicator; keys will be KELTNER_UPPER_{ema}_{atr}_{mult},
+            # _MIDDLE_, _LOWER_. Return the "family" prefix; the caller handles the
+            # dict-return pattern (same as BBANDS / MACD).
+            ema_p = params.get('ema_period', 20)
+            atr_p = params.get('atr_period', 14)
+            mult = params.get('mult', 2.0)
+            return f"KELTNER_{ema_p}_{atr_p}_{float(mult)}"
         elif indicator_upper == 'MACD':
             fast = params.get('fast_period', 12)
             slow = params.get('slow_period', 26)
@@ -176,6 +193,12 @@ class IndicatorLibrary:
             'LOW_N': self._calculate_rolling_low,
             'ADX': self._calculate_adx,
             'VWAP': self._calculate_vwap,
+            # Added 2026-05-02 Sprint 2 crypto-alpha templates — no approximations
+            'OBV': self._calculate_obv,
+            'OBV_MA': self._calculate_obv_ma,
+            'DONCHIAN_UPPER': self._calculate_donchian_upper,
+            'DONCHIAN_LOWER': self._calculate_donchian_lower,
+            'KELTNER': self._calculate_keltner,
         }
         
         if indicator_name.upper() not in indicator_map:
@@ -204,7 +227,8 @@ class IndicatorLibrary:
         """Return list of available indicators."""
         return [
             'SMA', 'STDDEV', 'EMA', 'RSI', 'MACD', 'BBANDS', 'ATR',
-            'VOLUME_MA', 'PRICE_CHANGE_PCT', 'SUPPORT_RESISTANCE', 'STOCH', 'ADX', 'VWAP'
+            'VOLUME_MA', 'PRICE_CHANGE_PCT', 'SUPPORT_RESISTANCE', 'STOCH', 'ADX', 'VWAP',
+            'OBV', 'OBV_MA', 'DONCHIAN_UPPER', 'DONCHIAN_LOWER', 'KELTNER',
         ]
     
     def get_indicator_info(self, name: str) -> Dict[str, Any]:
@@ -633,3 +657,132 @@ class IndicatorLibrary:
         
         return vwap
 
+
+    def _calculate_obv(self, data: pd.DataFrame, period: int = 0) -> pd.Series:
+        """
+        Calculate On-Balance Volume (OBV).
+
+        OBV is a cumulative indicator: on each bar, add the volume if close
+        went up relative to the previous bar, subtract it if close went down,
+        unchanged if close was flat.
+
+            OBV_t = OBV_{t-1} + sign(close_t - close_{t-1}) × volume_t
+
+        `period` is ignored (OBV is cumulative and has no window). Included
+        for signature consistency with the indicator library dispatcher.
+
+        Args:
+            data: OHLCV DataFrame. Must have 'close' and 'volume'.
+            period: Ignored. Accepted for dispatcher compatibility.
+
+        Returns:
+            Cumulative OBV values as pd.Series aligned to data.index.
+        """
+        close_diff = data['close'].diff()
+        signed_vol = np.where(
+            close_diff > 0, data['volume'],
+            np.where(close_diff < 0, -data['volume'], 0.0)
+        )
+        obv = pd.Series(signed_vol, index=data.index).cumsum()
+        return obv
+
+    def _calculate_obv_ma(self, data: pd.DataFrame, period: int = 20) -> pd.Series:
+        """
+        Calculate the moving average of OBV.
+
+        Used as a signal line — rising OBV > OBV_MA indicates accumulation;
+        falling OBV < OBV_MA indicates distribution. OBV divergence vs price
+        is expressed in the DSL as `OBV > OBV_MA(20) AND CLOSE < LOW_N(20)`
+        (price new low, OBV not).
+
+        Args:
+            data: OHLCV DataFrame.
+            period: Rolling window length (bars). Default 20.
+
+        Returns:
+            OBV rolling mean as pd.Series.
+        """
+        obv = self._calculate_obv(data)
+        return obv.rolling(window=period).mean()
+
+    def _calculate_donchian_upper(self, data: pd.DataFrame, period: int = 20) -> pd.Series:
+        """
+        Calculate Donchian Channel upper band.
+
+        Canonical turtle-style definition: the highest HIGH over the prior N
+        bars EXCLUDING the current bar (shift=1). This is the breakout
+        threshold: a close above `DONCHIAN_UPPER(20)` means the current bar
+        printed a higher high than any of the previous 20 bars.
+
+        Difference from `HIGH_N(20)`: `HIGH_N` includes the current bar
+        (no shift), so `close > HIGH_N(20)` is tautological once the high
+        of the current bar reaches close. Donchian with shift=1 is the
+        correct math for trend-breakout signals.
+
+        Args:
+            data: OHLCV DataFrame. Needs 'high'.
+            period: Lookback bars. Default 20 (Donchian's original).
+
+        Returns:
+            pd.Series of the rolling max of HIGH over the prior N bars.
+        """
+        return data['high'].rolling(window=period).max().shift(1)
+
+    def _calculate_donchian_lower(self, data: pd.DataFrame, period: int = 20) -> pd.Series:
+        """
+        Calculate Donchian Channel lower band.
+
+        Mirror of `_calculate_donchian_upper`. Lowest LOW over the prior N
+        bars excluding the current bar.
+
+        Args:
+            data: OHLCV DataFrame. Needs 'low'.
+            period: Lookback bars. Default 20.
+
+        Returns:
+            pd.Series of the rolling min of LOW over the prior N bars.
+        """
+        return data['low'].rolling(window=period).min().shift(1)
+
+    def _calculate_keltner(
+        self,
+        data: pd.DataFrame,
+        ema_period: int = 20,
+        atr_period: int = 14,
+        mult: float = 2.0,
+    ) -> Dict[str, pd.Series]:
+        """
+        Calculate Keltner Channels.
+
+            KELTNER_MID    = EMA(close, ema_period)
+            KELTNER_UPPER  = KELTNER_MID + mult × ATR(atr_period)
+            KELTNER_LOWER  = KELTNER_MID - mult × ATR(atr_period)
+
+        Keltner channels are conceptually similar to Bollinger Bands but use
+        ATR (average true range) for width instead of standard deviation.
+        This makes the channel adapt to the real trading range of the
+        instrument rather than to close-price dispersion alone — catches
+        real breakouts and squeezes in instruments with gappy bars (crypto
+        overnight, commodities over weekend) more accurately than BB.
+
+        Canonical parameters (Alpha Architect backtest): EMA(20), ATR(14),
+        mult=2.0.
+
+        Args:
+            data: OHLCV DataFrame.
+            ema_period: Moving-average period for the midline.
+            atr_period: ATR period for band width.
+            mult: ATR multiplier for band distance.
+
+        Returns:
+            Dict with keys 'upper', 'middle', 'lower', each a pd.Series.
+        """
+        middle = data['close'].ewm(span=ema_period, adjust=False).mean()
+        atr = self._calculate_atr(data, period=atr_period)
+        upper = middle + mult * atr
+        lower = middle - mult * atr
+        return {
+            'upper': upper,
+            'middle': middle,
+            'lower': lower,
+        }

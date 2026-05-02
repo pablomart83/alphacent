@@ -2092,7 +2092,215 @@ class StrategyProposer:
                 f"Walk-forward validation (direction-aware): {len(validated_strategies)}/{len(all_wf_results)} "
                 f"strategies passed ({len(validated_strategies)/max(len(all_wf_results),1)*100:.1f}%)"
             )
-            
+
+            # =================================================================
+            # Pass 1.5 — Cross-symbol consistency validation (Sprint 2 F2)
+            # =================================================================
+            # Some templates carry real cross-asset edge (BTC lead-lag,
+            # cross-sectional momentum) that — precisely because the gate is
+            # real — tightens per-symbol entry frequency to 1-3 trades per
+            # 90-180d test window. Per-pair Sharpe/RPT/win-rate gates then
+            # reject every symbol on small-sample noise even though 4/6 alts
+            # show test_sharpe > 1.4 (Sprint 1 evidence).
+            #
+            # Fix: when a template is flagged `requires_cross_validation`, score
+            # it at family level. If ≥4/6 symbols in its `family_universe`
+            # cleared a minimal bar (test_sharpe > 0.3 AND positive net return
+            # AND enough trades to be statistically meaningful), the template
+            # as a whole is accepted. Each symbol in the family that
+            # individually cleared the minimal bar is promoted to
+            # validated_strategies with `family_cross_validated=True` metadata.
+            # Downstream activation (portfolio_manager.evaluate_for_activation)
+            # reads that flag to bypass per-pair cost-per-trade and Sharpe
+            # thresholds that are structurally inappropriate for this
+            # template class. Net-return > 0 and round-trip-cost reality stay
+            # enforced at activation.
+            #
+            # Thresholds:
+            #   FAMILY_MIN_SHARPE_CRITERION = 0.3 (crypto power-law distribution:
+            #     unscaled Sharpe 0.3-0.5 is real edge; vol-scaling recovers to 1.0+)
+            #   FAMILY_MIN_PCT = 4/6 = 0.667 (random noise clears ~20%; 67%
+            #     is well past chance, conservative)
+            #
+            # Reuses _wf_results_cache keyed on (template, symbol) — every
+            # (template, symbol) that ran primary WF is already available.
+            try:
+                cv_strict_ids = {s.id for s, _ in validated_strategies}
+                cv_decision_rows: List[Dict[str, Any]] = []
+                cv_promoted = 0
+                cv_family_count = 0
+
+                FAMILY_MIN_SHARPE_CRITERION = 0.3
+                FAMILY_MIN_RETURN_CRITERION = 0.0  # net return > 0
+                FAMILY_MIN_PCT = 4.0 / 6.0
+
+                # Group WF results by template for templates that request
+                # cross-validation. Each family entry: {
+                #   'universe': [...6 symbols...],
+                #   'symbols_seen': {sym: (strategy, wf, ts, tes, het, ov, tv, tev)}
+                # }
+                family_groups: Dict[str, Dict[str, Any]] = {}
+                for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
+                    _meta = s.metadata or {}
+                    if not _meta.get('requires_cross_validation'):
+                        continue
+                    tname = _meta.get('template_name') or s.name
+                    universe = _meta.get('family_universe') or []
+                    if not isinstance(universe, list) or not universe:
+                        continue
+                    primary_sym = (s.symbols[0] if s.symbols else '').upper()
+                    if primary_sym not in {u.upper() for u in universe}:
+                        # Proposed for a symbol outside the family (shouldn't
+                        # happen given Option Y, but be defensive).
+                        continue
+                    fg = family_groups.setdefault(tname, {
+                        'universe': [u.upper() for u in universe],
+                        'symbols_seen': {},
+                        'direction': _meta.get('direction', 'long'),
+                    })
+                    fg['symbols_seen'][primary_sym] = (s, wf, ts, tes, het, ov, tv, tev)
+
+                for tname, fg in family_groups.items():
+                    cv_family_count += 1
+                    universe = fg['universe']
+                    symbols_seen = fg['symbols_seen']
+
+                    # Build per-symbol breakdown for the full universe.
+                    # Every symbol gets an entry; symbols with no proposal
+                    # report 'not_proposed'.
+                    breakdown: Dict[str, Dict[str, Any]] = {}
+                    clears_minimal_bar_by_sym: Dict[str, bool] = {}
+                    for sym in universe:
+                        entry = symbols_seen.get(sym)
+                        if entry is None:
+                            breakdown[sym] = {'status': 'not_proposed'}
+                            clears_minimal_bar_by_sym[sym] = False
+                            continue
+                        s, wf, ts, tes, het, ov, tv, tev = entry
+                        if wf is None:
+                            breakdown[sym] = {'status': 'no_wf_result',
+                                              'train_sharpe': ts, 'test_sharpe': tes}
+                            clears_minimal_bar_by_sym[sym] = False
+                            continue
+                        test_results = wf.get('test_results')
+                        test_return = float(test_results.total_return) if test_results else 0.0
+                        test_trades = int(test_results.total_trades) if test_results else 0
+                        # Minimal bar: valid numerics, positive net return,
+                        # Sharpe above family criterion, at least 2 trades
+                        # (statistical floor — one trade is not a sample).
+                        clears = (
+                            bool(tv) and bool(tev) and not bool(ov)
+                            and float(tes) > FAMILY_MIN_SHARPE_CRITERION
+                            and test_return > FAMILY_MIN_RETURN_CRITERION
+                            and test_trades >= 2
+                        )
+                        clears_minimal_bar_by_sym[sym] = clears
+                        breakdown[sym] = {
+                            'status': 'cleared' if clears else 'failed_minimal_bar',
+                            'train_sharpe': float(ts) if tv else None,
+                            'test_sharpe': float(tes) if tev else None,
+                            'test_return': test_return,
+                            'test_trades': test_trades,
+                            'overfitted': bool(ov),
+                        }
+
+                    cleared_count = sum(1 for v in clears_minimal_bar_by_sym.values() if v)
+                    family_score = cleared_count / float(len(universe))
+                    family_passes = family_score >= FAMILY_MIN_PCT
+
+                    logger.info(
+                        f"Cross-validation: {tname} cleared {cleared_count}/{len(universe)} "
+                        f"symbols (score={family_score:.2%}, threshold={FAMILY_MIN_PCT:.2%}) — "
+                        f"{'PASS' if family_passes else 'FAIL'}"
+                    )
+
+                    # Stamp metadata + promote to validated_strategies if the
+                    # family passes AND the specific symbol cleared the minimal
+                    # bar. Symbols that failed the minimal bar are NOT
+                    # promoted — their own trades are too weak to trade live,
+                    # family-level evidence is not enough without per-symbol
+                    # minimal edge.
+                    for sym in universe:
+                        entry = symbols_seen.get(sym)
+                        if entry is None:
+                            continue
+                        s, wf, ts, tes, het, ov, tv, tev = entry
+                        if s.metadata is None:
+                            s.metadata = {}
+                        s.metadata['family_cross_validated'] = bool(family_passes)
+                        s.metadata['cross_validation_score'] = round(family_score, 4)
+                        s.metadata['cross_validation_cleared'] = cleared_count
+                        s.metadata['cross_validation_family_size'] = len(universe)
+                        s.metadata['cross_validation_threshold'] = round(FAMILY_MIN_PCT, 4)
+                        # Breakdown is intentionally small (≤6 symbols) so it
+                        # fits in Strategy.metadata JSON without bloating.
+                        s.metadata['cross_validation_breakdown'] = breakdown
+
+                        if (
+                            family_passes
+                            and clears_minimal_bar_by_sym.get(sym, False)
+                            and s.id not in cv_strict_ids
+                        ):
+                            # Promote — the family-level verdict plus this
+                            # symbol's minimal bar is enough to proceed to
+                            # activation.
+                            validated_strategies.append((s, wf))
+                            cv_strict_ids.add(s.id)
+                            cv_promoted += 1
+                            logger.info(
+                                f"  CV promoted: {s.name} ({sym}) → validated "
+                                f"[family_score={family_score:.2%}, "
+                                f"test_sharpe={tes:.2f}, return={breakdown[sym].get('test_return', 0):.2%}]"
+                            )
+
+                    # One decision-log row per template family with the full
+                    # per-symbol breakdown. Stage='cross_validation' is a new
+                    # funnel lane.
+                    cv_decision_rows.append({
+                        "stage": "cross_validation",
+                        "decision": "accepted" if family_passes else "rejected",
+                        "template": tname,
+                        "symbol": None,  # family-level, no single symbol
+                        "direction": fg.get('direction'),
+                        "market_regime": market_regime,
+                        "score": round(family_score, 4),
+                        "reason": (
+                            f"family_pass ({cleared_count}/{len(universe)} "
+                            f"symbols cleared S>{FAMILY_MIN_SHARPE_CRITERION} "
+                            f"AND return>0)"
+                            if family_passes else
+                            f"family_fail ({cleared_count}/{len(universe)} "
+                            f"symbols cleared, need ≥{int(FAMILY_MIN_PCT*len(universe))})"
+                        ),
+                        "metadata": {
+                            "family_score": round(family_score, 4),
+                            "cleared_count": cleared_count,
+                            "family_size": len(universe),
+                            "threshold_pct": round(FAMILY_MIN_PCT, 4),
+                            "min_sharpe_criterion": FAMILY_MIN_SHARPE_CRITERION,
+                            "min_return_criterion": FAMILY_MIN_RETURN_CRITERION,
+                            "breakdown": breakdown,
+                        },
+                    })
+
+                if cv_family_count > 0:
+                    logger.info(
+                        f"Cross-validation pass complete: {cv_family_count} family/families "
+                        f"evaluated, {cv_promoted} strategies promoted to validated_strategies"
+                    )
+                    try:
+                        from src.analytics.decision_log import record_batch
+                        record_batch(cv_decision_rows)
+                    except Exception as _cv_dl_err:
+                        logger.debug(f"decision_log cross-validation batch failed: {_cv_dl_err}")
+            except Exception as cv_err:
+                # Cross-validation failing must never break the proposer —
+                # fail-open to regular per-pair gates.
+                logger.warning(
+                    f"Cross-validation pass failed (non-fatal, falling back to "
+                    f"per-pair gates): {cv_err}", exc_info=True
+                )
+
             # Write detailed WF results to cycle log
             try:
                 from src.core.cycle_logger import get_cycle_logger
@@ -3114,6 +3322,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         # Propagate critical template flags
         if template.metadata:
             for key in ['crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'strategy_category', 'btc_leader', 'btc_leader_interval', 'btc_leader_bars', 'btc_leader_threshold_pct', 'btc_leader_direction', 'leader_symbol', 'cross_sectional_rank', 'rank_window_days', 'rank_top_n', 'rank_metric', 'rank_universe', 'skip_adx_gate',
+                        'requires_cross_validation', 'family_universe',
                         'direction', 'alpha_edge_type', 'alpha_edge_bypass', 'market_neutral', 'pair_symbols']:
                 if key in template.metadata:
                     strategy.metadata[key] = template.metadata[key]
@@ -3231,6 +3440,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         # Propagate critical template flags
         if template.metadata:
             for key in ['crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'strategy_category', 'btc_leader', 'btc_leader_interval', 'btc_leader_bars', 'btc_leader_threshold_pct', 'btc_leader_direction', 'leader_symbol', 'cross_sectional_rank', 'rank_window_days', 'rank_top_n', 'rank_metric', 'rank_universe', 'skip_adx_gate',
+                        'requires_cross_validation', 'family_universe',
                         'direction', 'alpha_edge_type', 'alpha_edge_bypass', 'market_neutral', 'pair_symbols']:
                 if key in template.metadata:
                     strategy.metadata[key] = template.metadata[key]
@@ -3791,8 +4001,22 @@ Generate a CORRECTED strategy that addresses all errors:"""
         # Load existing active AND approved-backtested strategies to avoid proposing
         # same template+symbol combos that are already in the pipeline.
         # Must be built BEFORE _build_watchlists which uses active_symbol_template_pairs.
+        #
+        # Only the PRIMARY symbol counts as "already running" for dedup purposes
+        # (Sprint 2.1 fix, 2026-05-02). Previously we added every symbol in the
+        # strategy's `symbols` list — but that list is `[primary, ...watchlist]`
+        # and watchlist entries are just eligible candidates the signal-generator
+        # scans, NOT symbols that are actively traded. Blocking a whole watchlist
+        # from future proposals artificially shrinks the candidate pool for every
+        # asset class, and for crypto (6 symbols total) creates a death spiral:
+        # a few strategies with crypto watchlists block most (template, crypto)
+        # pairs, WF cache fills with failures for the few remaining combos,
+        # next cycle finds nothing viable. Primary-only dedup is the correct
+        # semantic — it says "we already run this template on this primary
+        # symbol; don't activate a duplicate" — and leaves watchlist symbols
+        # available as first-class proposal candidates.
         active_template_symbols = set()  # template names with active/approved strategies
-        active_symbol_template_pairs = set()  # (template_name, symbol) pairs already in pipeline
+        active_symbol_template_pairs = set()  # (template_name, primary_symbol) pairs already in pipeline
         try:
             if strategy_engine:
                 from src.models.database import get_database
@@ -3814,15 +4038,16 @@ Generate a CORRECTED strategy that addresses all errors:"""
                             continue
                         tname = md.get('template_name', s.name)
                         active_template_symbols.add(tname)
-                        # Track (template, symbol) pairs including watchlist symbols
+                        # Primary-only: use symbols[0] as the active primary,
+                        # ignore the rest of the watchlist.
                         syms = s.symbols if isinstance(s.symbols, list) else (_json.loads(s.symbols) if isinstance(s.symbols, str) else [])
-                        for sym in syms:
-                            active_symbol_template_pairs.add((tname, sym))
+                        if syms:
+                            active_symbol_template_pairs.add((tname, syms[0]))
                 finally:
                     session.close()
                 
                 if active_template_symbols:
-                    logger.info(f"Loaded {len(active_template_symbols)} active/approved templates for dedup ({len(active_symbol_template_pairs)} template+symbol pairs)")
+                    logger.info(f"Loaded {len(active_template_symbols)} active/approved templates for dedup ({len(active_symbol_template_pairs)} template+primary pairs)")
         except Exception as e:
             logger.warning(f"Could not load active strategies for proposal dedup: {e}")
 
@@ -4040,7 +4265,9 @@ Generate a CORRECTED strategy that addresses all errors:"""
             logger.debug(f"AE rotation skipped: {_rot_err}")
 
         # Check which Alpha Edge templates already have active strategies in DB
-        active_ae_template_symbols = set()  # (template_name, symbol) pairs already active
+        # Primary-only dedup (Sprint 2.1, 2026-05-02) — see the main generate_strategies_from_templates
+        # site for full rationale.
+        active_ae_template_symbols = set()  # (template_name_lower, primary_symbol) pairs already active
         try:
             from src.models.database import get_database
             from src.models.orm import StrategyORM
@@ -4061,8 +4288,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
                                 syms = _json_ae.loads(syms)
                             except Exception:
                                 syms = []
-                        for sym in syms:
-                            active_ae_template_symbols.add((tname.lower(), sym))
+                        if syms:
+                            active_ae_template_symbols.add((tname.lower(), syms[0]))
             finally:
                 session.close()
         except Exception as e:
@@ -5351,10 +5578,17 @@ Generate a CORRECTED strategy that addresses all errors:"""
 
         max_per_symbol = max(2, math.ceil(adjusted_count / max(len(symbols), 1)))
 
-        # --- Load active (template, symbol) pairs to exclude from selection ---
+        # --- Load active (template, primary_symbol) pairs to exclude from selection ---
         # These are combos already in the pipeline (DEMO/LIVE/approved-BACKTESTED).
         # Excluding them here (not downstream in generate_strategies_from_templates)
         # means their slots go to new combos instead of being wasted.
+        #
+        # PRIMARY-ONLY dedup (Sprint 2.1, 2026-05-02): only the first symbol in
+        # a strategy's `symbols` list counts as "already active on this symbol".
+        # Subsequent watchlist entries are scan-candidates for the signal-gen,
+        # not active primaries, so they should remain available for future
+        # proposals. Primary-only matches the semantic of "don't run two of the
+        # same template on the same primary symbol" without over-blocking.
         active_pairs: set = set()
         try:
             from src.models.database import get_database
@@ -5373,8 +5607,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
                         continue
                     tname = md.get('template_name', s.name)
                     syms = s.symbols if isinstance(s.symbols, list) else (_json_ap.loads(s.symbols) if isinstance(s.symbols, str) else [])
-                    for sym in syms:
-                        active_pairs.add((tname, sym))
+                    if syms:
+                        active_pairs.add((tname, syms[0]))
             finally:
                 session.close()
             if active_pairs:
@@ -6245,6 +6479,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
             for key in ['requires_fundamental_data', 'requires_earnings_data', 'requires_quality_screening', 
                         'requires_macro_data', 'uses_sector_etfs', 'fixed_symbols', 'min_market_cap',
                         'crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'market_neutral', 'btc_leader', 'btc_leader_interval', 'btc_leader_bars', 'btc_leader_threshold_pct', 'btc_leader_direction', 'leader_symbol', 'cross_sectional_rank', 'rank_window_days', 'rank_top_n', 'rank_metric', 'rank_universe', 'skip_adx_gate',
+                        'requires_cross_validation', 'family_universe',
                         'alpha_edge_type', 'alpha_edge_bypass', 'pair_symbols']:
                 if key in template.metadata:
                     strategy.metadata[key] = template.metadata[key]

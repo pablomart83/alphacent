@@ -15,21 +15,142 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 2, 2026, ~15:15 UTC, end of Sprint 1)
+## Current System State (May 2, 2026, ~15:50 UTC, end of Sprint 2)
 
 - **Equity:** ~$475K (unchanged)
-- **Open positions:** 84 depending on cycle
-- **Active strategies:** 63 DSL + 1 AE (64 total DEMO)
-- **Crypto-native DEMO strategies:** 0 (Sprint 1 F1 unblocks; activations expected post-Sprint-2 F2)
-- **Directional split:** ~79 LONG / ~6 SHORT
+- **Open positions:** 84
+- **Active strategies:** 63 DEMO + 4 newly BACKTESTED/approved (Sprint 2 activations) = **67 trading strategies**
+- **Crypto-native DEMO strategies:** 4 (all BTC Follower Daily: ETH / SOL / LINK / AVAX) — Sprint 2 F2 unblocked activation
+- **Directional split:** ~79 LONG / ~6 SHORT (unchanged)
 - **Market regime (equity):** `STRONG UPTREND` (20d +10.83%, 50d +5.49%, ATR/price 1.08%)
 - **Market regime (crypto, new detector):** `RANGING_LOW_VOL` (BTC 20d +1.0%, 50d +9.75%, ATR 1.8%)
 - **VIX:** 16.89
-- **Mode:** eToro DEMO (= paper trading; locked-in for foreseeable future per 2026-05-02 strategic decision)
-- **Last cycle:** `cycle_1777734531` at 15:08 UTC, completed healthy. 123 proposals, 5 wf_validated, 0 activations. Sprint 1 F1 working — native DSL cross-asset primitives now visible in backtest. See "Sprint 1 — Cross-asset DSL primitives" section below.
+- **Mode:** eToro DEMO
+- **Last cycle:** `cycle_1777736694` at 15:44 UTC, completed healthy in 212s. 14 proposals, 5 wf_validated, **4 activated via F2 family-cross-validated path**. See "Sprint 2" section below.
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
-**Verified healthy:** service running post Sprint 1 restart. errors.log clean except pre-existing Triple EMA Alignment and `CLOSE[-20]` DSL parse warnings (unrelated P2 known bugs). signal_decisions populating across all stages. Sprint 1 deploy successful.
+**Verified healthy:** service running post Sprint 2 restart. errors.log clean except pre-existing `CLOSE[-20]` DSL parse warnings on unrelated Batch C templates (P2 known). signal_decisions populating across 6 stages including new `cross_validation`. Sprint 2 deploy successful.
+
+**Sprint 2 also shipped:**
+- **F2.1 primary-only dedup** — proposer was treating every watchlist symbol as "active" → 342 dedup pairs shrinking the scoring pool. Fixed: only `symbols[0]` counts. Pool drops to 157 pairs.
+- **+3 DSL indicators** — OBV, Donchian, Keltner (real math, not approximations)
+- **+5 crypto templates** — 81 total, covering previously missing edge categories
+
+**BTC Follower Daily armed but waiting on trigger:** The 4 newly-activated strategies correctly generated 0 entry signals post-activation. Entry gate is `LAG_RETURN("BTC", 2, "1d") > 0.05` — BTC's current 2-bar return is only +2.79%. Gate fires ~2x/month historically (last trigger: 2026-03-16 at +5.12%, 24 triggers in the last 12 months). Strategies will auto-fire on next qualifying BTC move.
+
+---
+
+## Session shipped 2026-05-02 evening (Sprint 2 — Cross-symbol validation + 4h cache reconciliation)
+
+Two architecturally-proper fixes that cleanly resolve the Sprint 1 gap (template family has edge, per-pair activation kills it) and the phantom-cache-depth issue surfaced during Batch C work.
+
+### F2 — Cross-symbol consistency validation (the core)
+
+**The problem:** Sprint 1 F1 made cross-asset edge first-class (LAG_RETURN / RANK_IN_UNIVERSE as DSL primitives). Post-deploy WF showed the architectural fix worked — BTC Follower Daily flipped from negative test Sharpe to 1.4-3.36 on 4/5 alts. But per-pair activation then rejected every strategy on small-sample cost-per-trade / Sharpe because the very gate that creates the edge (BTC-leader filter) naturally tightens entries to 1-3 trades per 90-180d test window. Gating small-sample metrics on a template whose edge requires that small sample is a design contradiction.
+
+**The fix:** Template-level verdict replaces per-pair gates for templates flagged `requires_cross_validation: True`.
+
+- **Proposer — new Pass 1.5 "Cross-symbol consistency validation"** (`strategy_proposer.py` after the direction-aware WF threshold pass, before watchlist WF):
+  - Groups `all_wf_results` by template for templates with `requires_cross_validation=True`
+  - For each family: counts how many symbols in `family_universe` cleared the minimal per-symbol bar (test_sharpe > 0.3 AND test_return > 0 AND ≥2 test trades AND not overfitted AND valid numerics)
+  - `cross_validation_score = cleared / len(universe)`. Threshold: ≥4/6 = 0.667
+  - When family passes: promotes every symbol that individually cleared the minimal bar into `validated_strategies` (symbols that failed their own minimal bar are NOT promoted — family evidence needs per-symbol viability)
+  - Stamps `family_cross_validated=True`, `cross_validation_score`, `cross_validation_breakdown` (full 6-symbol JSON) onto `strategy.metadata`
+  - Writes one `signal_decisions` row per family with `stage='cross_validation'` and the full per-symbol breakdown in `decision_metadata`
+  - Fail-open on exception so a CV bug can't break the proposer
+
+- **Activation** (`portfolio_manager.evaluate_for_activation`): when `family_cross_validated=True`, three per-pair gates are bypassed:
+  - **Sharpe gate** — family evidence replaces per-symbol Sharpe minimum. Still requires Sharpe > 0 so we don't activate a symbol that lost money in its own test window.
+  - **min_trades gate** — accept ≥2 trades (statistical floor) instead of the interval-specific floor. Per-symbol trade count is structurally low for cross-asset templates.
+  - **Return-per-trade gate** — RPT is a small-sample metric; family-level total-return still enforced via net_return > 0 check.
+  - What is NOT bypassed: net return > 0 (tradability floor), max drawdown (risk), win-rate / expectancy (per-symbol quality), R:R ratio.
+
+- **Templates updated** — 4 Batch C templates flagged with `requires_cross_validation: True` and `family_universe: [BTC, ETH, SOL, AVAX, LINK, DOT]`:
+  - Crypto BTC Follower 1H / 4H / Daily
+  - Crypto Cross-Sectional Momentum
+
+- **Decision-log integration** — `activated` and `rejected_act` decision rows now include `family_cross_validated` and `cross_validation_score` in their metadata; `reason="family_cross_validated"` distinguishes F2-path activations from normal path in the funnel.
+
+**Cycle evidence (`cycle_1777736694` at 15:44 UTC):**
+
+- 123 proposals → 5 wf_validated → **3 cross_validation** (1 PASS, 2 FAIL) → **4 activated**, all via F2 path
+- BTC Follower Daily: 4/6 cleared (score 0.667) — PASS. Per-symbol:
+  | Symbol | Status | Test Sharpe | Test Return | Test Trades |
+  | --- | --- | --- | --- | --- |
+  | ETH | cleared | 3.36 | 3.91% | 2 |
+  | SOL | cleared | 2.04 | 2.25% | 2 |
+  | LINK | cleared | 1.65 | 1.42% | 2 |
+  | AVAX | cleared | 1.41 | 1.26% | 2 |
+  | BTC | failed_minimal_bar | -0.51 | -1.55% | 3 (overfitted self-ref) |
+  | DOT | not_proposed | — | — | — |
+- BTC Follower 4H: 0/6 cleared — correctly FAILED (confirms Sprint 1 finding — 4H BTC lead-lag isn't real edge in current window)
+- Cross-Sectional Momentum: 1/6 cleared (SOL passed WF at S=2.12) — FAILED family gate, per-pair RPT gate then correctly rejected SOL for gross return 2.8% over 3 trades
+- All 4 activated BTC Follower Daily strategies correctly generated 0 signals post-activation (BTC's current 2-bar return is +2.79%, below the +5% template trigger). Gate fires ~2x/month historically; strategies armed and waiting.
+- **Zero regressions** — Sector Rotation XLF, Crypto Weekly Trend Follow on BTC/ETH/LINK all evaluated through the normal per-pair path and were correctly rejected on Sharpe. No new errors in errors.log.
+
+### F10 — Reconcile stale 4h crypto cache against 1h source window
+
+**The problem:** yfinance's 1h data has a hard ~7-month cap. The DB 4h cache was synthesised from an older 1h snapshot and contained 15 months of bars for BTC/ETH and 13 months for SOL/AVAX/LINK/DOT — but the current 1h reach was only 7 months. Any cache clear or schema-version invalidation would silently drop that phantom 4h depth. The 4h cache was effectively lying about its reach.
+
+**The fix:**
+
+- `market_data_manager._fetch_historical_from_yahoo_finance` — new invariant in the 4h resample block: drop any resampled 4h bar whose window-start is outside the source 1h index range. Logs the trim count. Output 4h window can no longer exceed input 1h window. Documented the 7-month yfinance 1h cap in the function comments.
+- `scripts/reconcile_crypto_4h_cache.py` — NEW one-off reconciliation script. For each of BTC/ETH/SOL/AVAX/LINK/DOT, finds the earliest 1h bar and deletes 4h rows older than (first_1h - 1 day). Uses `text()` for SQLAlchemy parameterized SQL.
+
+**Cache state before → after:**
+
+| Symbol | 1H first date | 4H first (before) | 4H first (after) | Bars deleted |
+| --- | --- | --- | --- | --- |
+| BTC | 2025-10-03 | 2025-02-02 | 2025-10-02 | 1452 |
+| ETH | 2025-10-03 | 2025-02-02 | 2025-10-02 | 1452 |
+| SOL | 2025-11-03 | 2025-03-30 | 2025-11-02 | 1303 |
+| AVAX | 2025-11-03 | 2025-03-30 | 2025-11-02 | 1303 |
+| LINK | 2025-11-03 | 2025-03-30 | 2025-11-02 | 1303 |
+| DOT | 2025-11-03 | 2025-03-30 | 2025-11-02 | 1303 |
+
+**Total: 8116 phantom bars removed.** 4h cache now honestly mirrors 1h source within 1-day margin (resample can emit a legal 4h bin one day before the first full 1h bar). Bar ratios consistent — BTC/ETH 4h=1243, 1h=5045 → 1243×4=4972 ≈ 5045 (gaps account for weekends/missing hours).
+
+**Sprint 2 success criteria — all met:**
+- ✅ Clean cycle activates ≥2 crypto templates via F2 (score ≥ 0.67): **4 activated**, all at score 0.667
+- ✅ signal_decisions shows `cross_validation` stage rows with per-symbol breakdowns: **3 rows**, breakdowns match WF outcomes
+- ✅ BTC Follower Daily activates on ≥1 alt via cross-validation: **4 alts activated** (ETH, SOL, LINK, AVAX)
+- ✅ 4h crypto cache depth ≈ 1h cache depth: within 1-day margin for all 6 coins
+- ✅ Zero regressions: non-crypto paths evaluated normally, no new errors
+
+### F2.1 — Primary-only dedup in proposer (diagnosed mid-session)
+
+Running 3 crypto-focused cycles back-to-back after F2 shipped produced only 18 proposals each (vs 121 in the first post-deploy cycle). Investigation found the proposer was populating `active_symbol_template_pairs` with **every symbol in each strategy's `symbols` list** — i.e. primary + full watchlist. That expanded dedup set (342 pairs) collided with the WF cache's failure-based suppression in `_score_symbol_for_template`: the first cycle WF'd 121 crypto pairs, most failed (expected — most don't trade well), and the next cycle found those same pairs cached as failed → scored zero → pool collapsed. 185 of 342 pairs were watchlist-only blocks (symbols that appear in a strategy's scan-list but have no active primary).
+
+**Fix:** Only `symbols[0]` (the primary) goes into `active_pairs` for dedup purposes. Watchlist entries are scan-candidates, not active primaries, and should remain available for future proposals. Fixed at all 3 population sites:
+- `_match_templates_to_symbols` (the scoring-time exclusion)
+- `generate_strategies_from_templates` (the later in-loop dupe check)
+- Alpha Edge `active_ae_template_symbols` population
+
+After F2.1, dedup set drops from 342 → 157 pairs (55% reduction). Watchlist symbols are no longer artificially starved of their own primary-level proposal slots.
+
+### Sprint 2 crypto-alpha expansion (+3 indicators, +5 templates)
+
+Audit of the 76-template crypto library against hedge-fund research identified 5 real gaps. Fixed at the primitive layer rather than approximated.
+
+**New DSL primitives** (`src/strategy/indicator_library.py` + `trading_dsl.py` + `strategy_engine.py`):
+- `OBV` — On-Balance Volume (cumulative signed volume)
+- `OBV_MA(n)` — moving average of OBV (signal line)
+- `DONCHIAN_UPPER(n)` / `DONCHIAN_LOWER(n)` — prior-N-bar high/low with `shift=1` (genuine breakout thresholds; distinct from `HIGH_N`/`LOW_N` which include the current bar)
+- `KELTNER_UPPER(ema, atr, mult)` / `KELTNER_MIDDLE(...)` / `KELTNER_LOWER(...)` — ATR-scaled channel (reacts to true trading range vs STDDEV-based Bollinger)
+
+Wired end-to-end: auto-detection in condition scanning; compound-arg spec parsing (`"Keltner:20,14,2.0"`); dict-result dispatch for Keltner; distinct cache keys per parameter set (so `Keltner(20,14,2.0)` and `Keltner(10,10,1.5)` don't collide). DSL smoke-test verified all 7 new conditions parse and codegen matching indicator keys.
+
+**New templates** (all crypto_optimized, `skip_adx_gate: True` where the template has its own trend filter):
+
+| # | Template | Type | Interval | Entry | Edge source |
+| --- | --- | --- | --- | --- | --- |
+| T1 | Crypto Donchian Breakout Daily | BREAKOUT | 1d | `CLOSE > DONCHIAN_UPPER(20) AND ADX(14) > 25 AND VOLUME > VOLUME_MA(20) * 1.3` | Turtle-style, Dennis/Eckhardt + Alpha Architect crypto |
+| T2 | Crypto Keltner Breakout 4H | BREAKOUT | 4h | `CLOSE > KELTNER_UPPER(20, 14, 2.0) AND ADX(14) > 25` | Alpha Architect Keltner template |
+| T3 | Crypto OBV Accumulation Daily | MOMENTUM | 1d | `OBV > OBV_MA(20) AND CLOSE > EMA(20) AND RSI(14) ∈ [45,60]` | Grobys/Habeli 2025 volume-led momentum |
+| T4 | Crypto 20D MA Variable Cross Daily | TREND | 1d | `CLOSE CROSSES_ABOVE SMA(20) AND PRICE_CHANGE_PCT(5) > 0.03` | Grobys (2024) — 8.76% excess on non-BTC crypto |
+| T5 | Crypto BB Volume Breakout Daily | BREAKOUT | 1d | `CLOSE > BB_UPPER(20, 2.0) AND VOLUME > VOLUME_MA(20) * 1.5 AND ADX(14) > 20` | BB+volume+ADX composite (alt-season extensions) |
+
+Crypto template count: 76 → **81**. All 5 use only native DSL primitives — no approximations, no metadata runtime gates. Each template exits on a concrete DSL condition (not just SL/TP). Research-backed per the HEDGE_FUND_STRATEGY_RESEARCH_2025_2026.md doc.
 
 ---
 
