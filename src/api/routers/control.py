@@ -1694,21 +1694,24 @@ async def get_system_health(
         from src.core.monitoring_service import get_monitoring_service
         mon = get_monitoring_service()
         if mon:
-            now_ts = datetime.now()
-            for key, last_attr, dur_attr, syms_attr in [
-                ("quick_price_update", "_last_quick_update_ts", "_last_quick_update_duration", "_last_quick_update_symbols"),
-                ("full_price_sync", "_last_full_sync_ts", "_last_full_sync_duration", "_last_full_sync_symbols"),
-            ]:
-                last_ts = getattr(mon, last_attr, 0) or 0
-                last_iso = datetime.fromtimestamp(last_ts).isoformat() if last_ts > 0 else None
-                dur = getattr(mon, dur_attr, None)
-                syms = getattr(mon, syms_attr, None)
-                result.background_threads[key] = BackgroundThreadStatus(
-                    last_run=last_iso,
-                    duration_s=float(dur) if dur is not None else None,
-                    symbols_updated=int(syms) if syms is not None else None,
-                    errors=0,
-                )
+            # Quick price update — real attribute names
+            qts = getattr(mon, "_last_quick_price_update", 0) or 0
+            q_result = getattr(mon, "_last_quick_update_result", None) or {}
+            result.background_threads["quick_price_update"] = BackgroundThreadStatus(
+                last_run=datetime.fromtimestamp(qts).isoformat() if qts > 0 else None,
+                duration_s=float(q_result.get("elapsed_s") or q_result.get("elapsed") or 0) or None,
+                symbols_updated=int(q_result.get("updated", 0)) if q_result else None,
+                errors=int(q_result.get("errors", 0) or 0),
+            )
+            # Full price sync — real attribute names
+            fts = getattr(mon, "_last_price_sync", 0) or 0
+            f_result = getattr(mon, "_last_price_sync_result", None) or {}
+            result.background_threads["full_price_sync"] = BackgroundThreadStatus(
+                last_run=datetime.fromtimestamp(fts).isoformat() if fts > 0 else None,
+                duration_s=float(f_result.get("elapsed_s") or 0) or None,
+                symbols_updated=int((f_result.get("1d", 0) or 0) + (f_result.get("1h", 0) or 0)) if f_result else None,
+                errors=int(f_result.get("errors", 0) or 0),
+            )
     except Exception as e:
         logger.debug(f"Could not read background threads: {e}")
 

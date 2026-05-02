@@ -144,6 +144,7 @@ class MonitoringService:
         self._price_sync_retry_interval = 300  # 5 minutes — retry after skip
         self._price_sync_completed = False  # Flag for manual sync status polling (Data Management page)
         self._background_sync_completed = False  # Flag for trading scheduler — only set by automatic background sync
+        self._last_price_sync_result: Optional[dict] = None  # Populated by _sync_price_data; surfaced on System page
         
         # 10-minute quick price update: fetches latest eToro quotes for active
         # strategy symbols and runs lightweight signal check
@@ -1262,7 +1263,21 @@ class MonitoringService:
                 f"{stats['yahoo_batch']} from Yahoo batch, {stats['memory_loaded']} loaded to memory, "
                 f"{stats['errors']} errors, {len(active_symbols)} active strategy symbols)"
             )
-            
+
+            # Persist result for the System page (background_threads section).
+            # Consumer: src/api/routers/control.py get_system_health.
+            self._last_price_sync_result = {
+                "1d": stats.get("1d", 0),
+                "1h": stats.get("1h", 0),
+                "db_cached": stats.get("db_cached", 0),
+                "yahoo_batch": stats.get("yahoo_batch", 0),
+                "memory_loaded": stats.get("memory_loaded", 0),
+                "errors": stats.get("errors", 0),
+                "active_symbols": len(active_symbols),
+                "elapsed_s": round(elapsed, 1),
+                "timestamp": datetime.now().isoformat(),
+            }
+
             # Signal to trading scheduler that fresh data is ready
             # Only the background automatic sync sets this flag — manual syncs don't
             self._background_sync_completed = True
