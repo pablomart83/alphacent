@@ -2982,7 +2982,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         
         # Propagate critical template flags
         if template.metadata:
-            for key in ['crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'strategy_category',
+            for key in ['crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'strategy_category', 'btc_leader', 'btc_leader_interval', 'btc_leader_bars', 'btc_leader_threshold_pct', 'btc_leader_direction', 'leader_symbol', 'cross_sectional_rank', 'rank_window_days', 'rank_top_n', 'rank_metric', 'rank_universe', 'skip_adx_gate',
                         'direction', 'alpha_edge_type', 'alpha_edge_bypass', 'market_neutral', 'pair_symbols']:
                 if key in template.metadata:
                     strategy.metadata[key] = template.metadata[key]
@@ -3099,7 +3099,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         
         # Propagate critical template flags
         if template.metadata:
-            for key in ['crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'strategy_category',
+            for key in ['crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'strategy_category', 'btc_leader', 'btc_leader_interval', 'btc_leader_bars', 'btc_leader_threshold_pct', 'btc_leader_direction', 'leader_symbol', 'cross_sectional_rank', 'rank_window_days', 'rank_top_n', 'rank_metric', 'rank_universe', 'skip_adx_gate',
                         'direction', 'alpha_edge_type', 'alpha_edge_bypass', 'market_neutral', 'pair_symbols']:
                 if key in template.metadata:
                     strategy.metadata[key] = template.metadata[key]
@@ -6090,7 +6090,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         if template.metadata:
             for key in ['requires_fundamental_data', 'requires_earnings_data', 'requires_quality_screening', 
                         'requires_macro_data', 'uses_sector_etfs', 'fixed_symbols', 'min_market_cap',
-                        'crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'market_neutral',
+                        'crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'market_neutral', 'btc_leader', 'btc_leader_interval', 'btc_leader_bars', 'btc_leader_threshold_pct', 'btc_leader_direction', 'leader_symbol', 'cross_sectional_rank', 'rank_window_days', 'rank_top_n', 'rank_metric', 'rank_universe', 'skip_adx_gate',
                         'alpha_edge_type', 'alpha_edge_bypass', 'pair_symbols']:
                 if key in template.metadata:
                     strategy.metadata[key] = template.metadata[key]

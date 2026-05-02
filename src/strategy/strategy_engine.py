@@ -4261,7 +4261,116 @@ class StrategyEngine:
                 f"Strategy {strategy.name} is Alpha Edge ({template_type}) — "
                 f"will use fundamental signal generation instead of DSL"
             )
-        
+
+        # BTC-leader cross-asset gate (Batch C, C1)
+        # Templates with metadata.btc_leader=True fire only when BTC's recent
+        # return on the template's timeframe exceeds btc_leader_threshold_pct.
+        # btc_leader_direction='short_on_btc_up' inverts the check for
+        # shorts-into-BTC-strength (dominance inversion play).
+        # Skipping signal generation entirely on gate-fail is safe because
+        # all btc_leader templates are crypto_optimized and latency-tolerant.
+        _meta = strategy.metadata if isinstance(strategy.metadata, dict) else {}
+        if _meta.get('btc_leader'):
+            try:
+                _leader_sym = _meta.get('leader_symbol', 'BTC')
+                _leader_interval = _meta.get('btc_leader_interval', _meta.get('interval', '1h'))
+                _leader_bars = int(_meta.get('btc_leader_bars', 2))
+                _leader_threshold = float(_meta.get('btc_leader_threshold_pct', 0.01))
+                _leader_direction = _meta.get('btc_leader_direction', 'long_on_btc_up')
+
+                _btc_end = datetime.now()
+                # Fetch enough bars: (leader_bars + 1) with safety margin
+                if _leader_interval == '1h':
+                    _btc_start = _btc_end - timedelta(hours=_leader_bars * 2 + 6)
+                elif _leader_interval == '4h':
+                    _btc_start = _btc_end - timedelta(hours=_leader_bars * 8 + 24)
+                else:
+                    _btc_start = _btc_end - timedelta(days=_leader_bars * 2 + 3)
+
+                _btc_bars = self.market_data.get_historical_data(
+                    symbol=_leader_sym,
+                    start=_btc_start,
+                    end=_btc_end,
+                    interval=_leader_interval,
+                )
+                if _btc_bars and len(_btc_bars) > _leader_bars:
+                    _btc_now = _btc_bars[-1].close
+                    _btc_prev = _btc_bars[-1 - _leader_bars].close
+                    _btc_ret = (_btc_now - _btc_prev) / _btc_prev if _btc_prev else 0.0
+                    if _leader_direction == 'short_on_btc_up':
+                        _gate_pass = _btc_ret >= _leader_threshold  # BTC up → short alt
+                    else:
+                        _gate_pass = _btc_ret >= _leader_threshold  # BTC up → long alt
+                    if not _gate_pass:
+                        logger.info(
+                            f"BTC-leader gate: {strategy.name} skipped — "
+                            f"BTC {_leader_interval} return over {_leader_bars} bars "
+                            f"= {_btc_ret:+.2%}, need >= {_leader_threshold:+.2%}"
+                        )
+                        return []
+                    logger.info(
+                        f"BTC-leader gate PASS: {strategy.name} — "
+                        f"BTC {_leader_interval}×{_leader_bars} return = {_btc_ret:+.2%}"
+                    )
+                else:
+                    logger.debug(
+                        f"BTC-leader gate: insufficient BTC data for {strategy.name} "
+                        f"(got {len(_btc_bars) if _btc_bars else 0} bars, need {_leader_bars + 1}) — fail-closed, skip"
+                    )
+                    return []
+            except Exception as _btc_err:
+                logger.warning(f"BTC-leader gate failed for {strategy.name}: {_btc_err} — fail-open, proceeding")
+
+        # Cross-sectional ranking gate (Batch C, C2)
+        # Templates with metadata.cross_sectional_rank=True fire only if
+        # strategy's primary symbol is in the top-N of the rank universe
+        # by rank_metric (default: 14-day return).
+        if _meta.get('cross_sectional_rank'):
+            try:
+                _rank_universe = _meta.get('rank_universe', ['BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'DOT'])
+                _rank_window = int(_meta.get('rank_window_days', 14))
+                _rank_top_n = int(_meta.get('rank_top_n', 3))
+                _primary_sym = strategy.symbols[0] if strategy.symbols else None
+
+                if _primary_sym and _primary_sym in _rank_universe:
+                    _rank_end = datetime.now()
+                    _rank_start = _rank_end - timedelta(days=_rank_window + 5)
+                    _returns_by_sym = {}
+                    for _sym in _rank_universe:
+                        try:
+                            _sym_bars = self.market_data.get_historical_data(
+                                symbol=_sym,
+                                start=_rank_start,
+                                end=_rank_end,
+                                interval="1d",
+                            )
+                            if _sym_bars and len(_sym_bars) > _rank_window:
+                                _now = _sym_bars[-1].close
+                                _then = _sym_bars[-1 - _rank_window].close
+                                if _then:
+                                    _returns_by_sym[_sym] = (_now - _then) / _then
+                        except Exception:
+                            pass
+                    if _returns_by_sym:
+                        _ranked = sorted(_returns_by_sym.items(), key=lambda x: x[1], reverse=True)
+                        _top_n_syms = [s for s, _ in _ranked[:_rank_top_n]]
+                        if _primary_sym not in _top_n_syms:
+                            logger.info(
+                                f"Cross-sectional gate: {strategy.name} skipped — "
+                                f"{_primary_sym} not in top-{_rank_top_n} (top: {_top_n_syms}, "
+                                f"{_primary_sym} rank={[s for s, _ in _ranked].index(_primary_sym)+1 if _primary_sym in _returns_by_sym else 'NA'})"
+                            )
+                            return []
+                        logger.info(
+                            f"Cross-sectional gate PASS: {strategy.name} — "
+                            f"{_primary_sym} in top-{_rank_top_n} ({_returns_by_sym[_primary_sym]:+.2%} vs "
+                            f"median {_ranked[len(_ranked)//2][1]:+.2%})"
+                        )
+                    else:
+                        logger.debug(f"Cross-sectional gate: no returns data — fail-open, proceeding")
+            except Exception as _cs_err:
+                logger.warning(f"Cross-sectional gate failed for {strategy.name}: {_cs_err} — fail-open, proceeding")
+
         signals = []
         
         # Load signal generation config (separate from backtest config)

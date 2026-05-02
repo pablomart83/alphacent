@@ -7751,6 +7751,234 @@ class StrategyTemplateLibrary:
             }
         ))
 
+        # =====================================================================
+        # BTC → Altcoin Lead-Lag Templates (C1 from Batch C)
+        # Research: unidirectional Granger causality from BTC to altcoins
+        # (Asia-Pacific Financial Markets 2026). Small-cap cryptos exhibit
+        # delayed responses to BTC moves. A lag trading strategy using BTC's
+        # preceding returns consistently outperformed buy-and-hold.
+        # Implementation: templates are gated at signal time by the
+        # btc_leader metadata flag. The DSL rule is a local technical setup;
+        # the BTC-up gate is applied in strategy_engine.generate_signals.
+        # =====================================================================
+
+        # BTC 1H Follower — ride BTC's momentum via alts on the 1H chart
+        templates.append(StrategyTemplate(
+            name="Crypto BTC Follower 1H",
+            description="Enter altcoin LONG when BTC rallied +1% in last 2 hours AND alt is above EMA(20). Rides the lag-response of alts to BTC moves. Fast exit when BTC rolls over or alt loses EMA.",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_HIGH_VOL,
+            ],
+            entry_conditions=[
+                "CLOSE > EMA(20) AND RSI(14) > 45"
+            ],
+            exit_conditions=[
+                "CLOSE < EMA(20) OR RSI(14) < 40"
+            ],
+            required_indicators=["EMA", "RSI"],
+            default_parameters={
+                "stop_loss_pct": 0.02,
+                "take_profit_pct": 0.035,
+                "btc_lead_bars": 2,
+                "btc_lead_threshold_pct": 0.01,
+            },
+            expected_trade_frequency="3-6 trades/week",
+            expected_holding_period="2-12 hours",
+            risk_reward_ratio=1.75,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "intraday": True,
+                "interval": "1h",
+                "btc_leader": True,
+                "btc_leader_interval": "1h",
+                "btc_leader_bars": 2,
+                "btc_leader_threshold_pct": 0.01,
+                "leader_symbol": "BTC",
+            }
+        ))
+
+        # BTC 4H Follower — swing-scale lag trade
+        templates.append(StrategyTemplate(
+            name="Crypto BTC Follower 4H",
+            description="Enter altcoin LONG when BTC rallied +3% in last 8 hours on 4H bars AND alt price > SMA(50). 4H swing version of the BTC lead-lag trade. Small-cap alts (SOL/LINK/AVAX/DOT) show the largest lag-response.",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+            ],
+            entry_conditions=[
+                "CLOSE > SMA(50) AND RSI(14) > 50"
+            ],
+            exit_conditions=[
+                "CLOSE < SMA(50) OR RSI(14) < 40"
+            ],
+            required_indicators=["SMA", "RSI"],
+            default_parameters={
+                "stop_loss_pct": 0.03,
+                "take_profit_pct": 0.06,
+                "btc_lead_bars": 2,
+                "btc_lead_threshold_pct": 0.03,
+            },
+            expected_trade_frequency="2-4 trades/week",
+            expected_holding_period="8-48 hours",
+            risk_reward_ratio=2.0,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval_4h": True,
+                "interval": "4h",
+                "btc_leader": True,
+                "btc_leader_interval": "4h",
+                "btc_leader_bars": 2,
+                "btc_leader_threshold_pct": 0.03,
+                "leader_symbol": "BTC",
+            }
+        ))
+
+        # BTC Daily Follower — positional lag trade
+        templates.append(StrategyTemplate(
+            name="Crypto BTC Follower Daily",
+            description="Enter altcoin LONG when BTC printed +5% daily move in last 2 days AND alt is above SMA(50) on daily. Positional lag trade — small-cap alts often catch up 3-7 days after BTC breakouts.",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+            ],
+            entry_conditions=[
+                "CLOSE > SMA(50) AND RSI(14) > 50"
+            ],
+            exit_conditions=[
+                "CLOSE < SMA(20) OR RSI(14) < 40"
+            ],
+            required_indicators=["SMA", "RSI"],
+            default_parameters={
+                "stop_loss_pct": 0.05,
+                "take_profit_pct": 0.12,
+                "btc_lead_bars": 2,
+                "btc_lead_threshold_pct": 0.05,
+            },
+            expected_trade_frequency="1-3 trades/week",
+            expected_holding_period="3-14 days",
+            risk_reward_ratio=2.4,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
+                "btc_leader": True,
+                "btc_leader_interval": "1d",
+                "btc_leader_bars": 2,
+                "btc_leader_threshold_pct": 0.05,
+                "leader_symbol": "BTC",
+            }
+        ))
+
+        # BTC Dominance Inversion (short-alt when BTC rising hard) —
+        # Alts typically bleed during strong BTC-only rallies (capital flows into BTC).
+        # This template shorts small-cap alts when BTC is pushing higher.
+        templates.append(StrategyTemplate(
+            name="Crypto BTC Dominance Inversion SHORT",
+            description="SHORT small-cap alt when BTC rallied +5% in last 3 days AND alt is below SMA(20). Money flowing into BTC alpha-bleeds alts; capitalize on the rotation.",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+            ],
+            entry_conditions=[
+                "CLOSE < SMA(20) AND RSI(14) < 50"
+            ],
+            exit_conditions=[
+                "CLOSE > SMA(20) OR RSI(14) > 60"
+            ],
+            required_indicators=["SMA", "RSI"],
+            default_parameters={
+                "stop_loss_pct": 0.04,
+                "take_profit_pct": 0.08,
+                "btc_lead_bars": 3,
+                "btc_lead_threshold_pct": 0.05,
+            },
+            expected_trade_frequency="1-2 trades/week",
+            expected_holding_period="1-5 days",
+            risk_reward_ratio=2.0,
+            metadata={
+                "direction": "short",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
+                "btc_leader": True,
+                "btc_leader_interval": "1d",
+                "btc_leader_bars": 3,
+                "btc_leader_threshold_pct": 0.05,
+                "leader_symbol": "BTC",
+                "btc_leader_direction": "short_on_btc_up",  # invert the "BTC up → long" logic
+                "skip_adx_gate": True,  # this template fights trend by design, no ADX gate
+            }
+        ))
+
+        # =====================================================================
+        # Cross-sectional Crypto Momentum (C2 from Batch C)
+        # Research (repo doc lines 237-244): top-N ranking by 14-day return,
+        # filtered for volume > 1.5× 20-day MA, hold 5-7 days with vol-scaled
+        # sizing. The composite return was ~8.76% excess on non-BTC cryptos.
+        # Implementation: gated at signal-time by cross_sectional_rank flag.
+        # =====================================================================
+
+        # Crypto Cross-Sectional Momentum (14d) — fires only if the symbol
+        # is in the top 3 of the crypto universe by 14-day return
+        templates.append(StrategyTemplate(
+            name="Crypto Cross-Sectional Momentum",
+            description="Rank 6-coin universe by 14-day return; enter LONG on coins in top-3 with volume > 1.5x 20-day avg. Captures rotation into outperforming alts. Hold 7 days, vol-scale sizing.",
+            strategy_type=StrategyType.MOMENTUM,
+            market_regimes=[
+                MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.RANGING,
+                MarketRegime.RANGING_HIGH_VOL,
+            ],
+            entry_conditions=[
+                # Symbol-level setup: price above 20d SMA + rising RSI
+                "CLOSE > SMA(20) AND RSI(14) > 55 AND VOLUME > VOLUME_MA(20) * 1.5"
+            ],
+            exit_conditions=[
+                "CLOSE < SMA(20) OR RSI(14) < 45"
+            ],
+            required_indicators=["SMA", "RSI", "Volume MA"],
+            default_parameters={
+                "stop_loss_pct": 0.06,
+                "take_profit_pct": 0.14,
+                "rank_window_days": 14,
+                "rank_top_n": 3,
+                "hold_days": 7,
+            },
+            expected_trade_frequency="1-3 trades/week",
+            expected_holding_period="5-10 days",
+            risk_reward_ratio=2.3,
+            metadata={
+                "direction": "long",
+                "crypto_optimized": True,
+                "skip_param_override": True,
+                "interval": "1d",
+                "cross_sectional_rank": True,
+                "rank_window_days": 14,
+                "rank_top_n": 3,
+                "rank_metric": "return",
+                "rank_universe": ["BTC", "ETH", "SOL", "AVAX", "LINK", "DOT"],
+            }
+        ))
+
         return templates
     
     def get_all_templates(self) -> List[StrategyTemplate]:
