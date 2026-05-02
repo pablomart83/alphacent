@@ -16,9 +16,35 @@ autonomous_schedule:
   hour: 15
   minute: 15
 activation_thresholds:
+  # ─────────────────────────────────────────────────────────────────────
+  # DEMO LEARNING CALIBRATION (2026-05-02, Sprint 3 S3.0b)
+  #
+  # Current posture: loosened crypto gates to generate more live signal
+  # data on eToro DEMO. On DEMO we pay no real money; the goal is data
+  # collection — more live trades produce more MAE/MFE, live-vs-backtest
+  # divergence, and entry-timing feedback.
+  #
+  # This is NOT a "proper" cost calibration. Each live-crypto trade now
+  # has only ~40bps of expected edge over round-trip cost vs 54bps before.
+  # On a live account with real money, expect capital erosion — revert
+  # BEFORE going live.
+  #
+  # Revert-to-live values (restore when moving to real capital):
+  #   min_sharpe_crypto:        0.5   (currently 0.3)
+  #   min_return_per_trade.crypto_1d:  0.035  (currently 0.030)
+  #   min_return_per_trade.crypto_4h:  0.035  (currently 0.030)
+  #   min_return_per_trade.crypto_1h:  0.035  (currently 0.030)
+  #
+  # Diagnostic basis: cycle_1777741379 (2026-05-02 17:02) had 4 wf_validated
+  # crypto strategies, ALL rejected at activation. 2 on Sharpe (0.39, 0.46),
+  # 2 on net return < 0 (which stays rejected — correct), 1 on RPT 0.945%
+  # (gross 2.8% on 3 trades — below 3.5% floor). The Sharpe rejections are
+  # the DEMO-learning targets — those strategies show edge but not enough
+  # to clear a live-profitability bar. DEMO exposure produces useful data.
+  # ─────────────────────────────────────────────────────────────────────
   min_sharpe: 1.0               # Raised from 0.4 — live data shows Sharpe 0.4-1.0 strategies have <30% live win rate
-  min_sharpe_crypto: 0.5        # Raised from 0.1 — crypto WF data was corrupted (P0 fix); conservative floor
-  min_sharpe_commodity: 0.5     # Raised from 0.3
+  min_sharpe_crypto: 0.3        # DEMO loosen from 0.5 (2026-05-02) — see header for revert value
+  min_sharpe_commodity: 0.5     # Was 0.3
   max_drawdown: 0.25
   min_win_rate: 0.45
   min_win_rate_crypto: 0.3
@@ -41,10 +67,10 @@ activation_thresholds:
     etf_1h: 0.0002
     forex: 0.0005
     forex_1h: 0.0001
-    crypto: 0.05         # Sprint 1 F3: raised 0.04 → 0.05 for 21d+ weekly/monthly-hold templates (21W MA, Golden Cross, Weekly Trend Follow). Real round-trip cost on eToro = 2.96%; floor set to cost + 200bps edge.
-    crypto_1d: 0.035     # Sprint 1 F3: raised 0.025 → 0.035 — daily swing crypto (3-14d hold) must clear 2.96% round-trip + 54bps edge. Below this is structurally unprofitable on eToro.
-    crypto_4h: 0.035     # Sprint 1 F3: raised 0.015 → 0.035 — 4H crypto (4-24h hold). Same cost constraint as daily; frequency no longer saves sub-cost returns.
-    crypto_1h: 0.035     # Sprint 1 F3: raised 0.005 → 0.035 — 1H crypto must clear 2.96% round-trip. No retail literature shows 1h crypto clearing this on 1%-per-side venues; intraday crypto is structurally cost-constrained on eToro.
+    crypto: 0.05         # Sprint 1 F3: 0.04→0.05 for 21d+ weekly/monthly-hold templates. Real round-trip cost on eToro = 2.96%.
+    crypto_1d: 0.030     # DEMO loosen from 0.035 (2026-05-02) — 40bps edge over round-trip cost; was 54bps. See header for revert.
+    crypto_4h: 0.030     # DEMO loosen from 0.035 (2026-05-02) — same rationale.
+    crypto_1h: 0.030     # DEMO loosen from 0.035 (2026-05-02) — same rationale.
     index: 0.001
     index_1h: 0.0002
     commodity: 0.0015
