@@ -1794,10 +1794,24 @@ class MonitoringService:
                 else:
                     excursion = (pos.entry_price - pos.current_price) / pos.entry_price
 
-                # Match the trade_journal row by trade_id (position.id). One-to-one.
+                # Match the trade_journal row for this open position.
+                # Convention is inconsistent across call sites: order_monitor
+                # logs entries with trade_id=order.id (UUID), while
+                # order_executor / monitoring_service / account fallbacks use
+                # trade_id=position.id (eToro numeric ID). Try both.
                 entry = session.query(TradeJournalEntryORM).filter_by(
                     trade_id=str(pos.id), exit_time=None
                 ).first()
+                if entry is None and pos.strategy_id and pos.symbol:
+                    # Fallback: by symbol + strategy + still-open. Trade journal
+                    # doesn't keep two concurrent open rows for the same
+                    # (strategy, symbol) because the upstream symbol
+                    # concentration cap prevents it — so this match is safe.
+                    entry = session.query(TradeJournalEntryORM).filter_by(
+                        strategy_id=pos.strategy_id,
+                        symbol=pos.symbol,
+                        exit_time=None,
+                    ).order_by(TradeJournalEntryORM.entry_time.desc()).first()
                 if entry is None:
                     continue
 
