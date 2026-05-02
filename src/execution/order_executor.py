@@ -135,6 +135,8 @@ class OrderExecutor:
             try:
                 vix_gate_reason = self._check_vix_entry_gate(normalized_symbol)
                 if vix_gate_reason:
+                    self._log_decision(signal, normalized_symbol, stage="gate_blocked",
+                                       decision="blocked", reason=f"vix_gate: {vix_gate_reason}")
                     raise OrderExecutionError(
                         f"VIX gate blocked LONG entry for {normalized_symbol}: "
                         f"{vix_gate_reason}. Signal discarded."
@@ -154,6 +156,8 @@ class OrderExecutor:
         try:
             gate_reason = self._check_trend_consistency_gate(normalized_symbol, signal.action)
             if gate_reason:
+                self._log_decision(signal, normalized_symbol, stage="gate_blocked",
+                                   decision="blocked", reason=f"trend_consistency: {gate_reason}")
                 raise OrderExecutionError(
                     f"Trend-consistency gate blocked {signal.action.value} for "
                     f"{normalized_symbol}: {gate_reason}. Signal discarded."
@@ -423,6 +427,10 @@ class OrderExecutor:
                 if order.stop_price or order.take_profit_price:
                     logger.info(f"Order {order.id} submitted with SL={order.stop_price}, TP={order.take_profit_price}")
 
+            # Decision-log write — successful submission path
+            self._log_decision(signal, normalized_symbol, stage="order_submitted",
+                               decision="accepted", reason=f"order_id={order.id}")
+
             return order
 
         except Exception as e:
@@ -432,6 +440,28 @@ class OrderExecutor:
             else:
                 logger.error(f"Failed to execute signal: {e}")
             raise OrderExecutionError(f"Failed to execute signal: {e}")
+
+    def _log_decision(self, signal, symbol: str, *, stage: str, decision: str,
+                      reason: Optional[str] = None, score: Optional[float] = None) -> None:
+        """Fire-and-forget decision-log write. Never raises."""
+        try:
+            from src.analytics.decision_log import record_decision
+            meta = signal.metadata if hasattr(signal, 'metadata') and isinstance(signal.metadata, dict) else {}
+            record_decision(
+                stage=stage,
+                decision=decision,
+                template=meta.get('template_name'),
+                symbol=symbol,
+                direction='long' if signal.action == SignalAction.ENTER_LONG else ('short' if signal.action == SignalAction.ENTER_SHORT else 'exit'),
+                strategy_id=getattr(signal, 'strategy_id', None),
+                cycle_id=meta.get('cycle_id'),
+                market_regime=meta.get('market_regime'),
+                score=score if score is not None else meta.get('conviction_score'),
+                reason=reason,
+                metadata={k: v for k, v in meta.items() if k in ('conviction_score', 'wf_test_sharpe', 'template_name')},
+            )
+        except Exception:
+            pass
 
     def _check_vix_entry_gate(self, symbol: str) -> Optional[str]:
         """Block LONG entries during VIX spike windows.

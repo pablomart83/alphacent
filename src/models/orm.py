@@ -1081,3 +1081,60 @@ class UserORM(Base):
             "last_login": self.last_login.isoformat() if self.last_login else None,
             "created_by": self.created_by,
         }
+
+
+class SignalDecisionORM(Base):
+    """Audit log of every template × symbol × direction decision per cycle.
+
+    One row per evaluated (template, symbol, action) triplet per autonomous
+    or signal cycle. Captures the full decision path so "why didn't we trade X"
+    becomes a single SQL query instead of a multi-log-file investigation.
+
+    Stages:
+      proposed       — proposer generated the combo
+      wf_validated   — passed walk-forward
+      wf_rejected    — failed walk-forward (with reason)
+      mc_validated   — passed Monte Carlo bootstrap
+      mc_rejected    — failed MC
+      activated      — proposer selected for activation
+      rejected_act   — failed activation criteria
+      signal_emitted — strategy_engine produced a signal
+      gate_blocked   — order_executor gate (VIX, trend-consistency, etc.) blocked
+      order_submitted— order sent to eToro
+      order_filled   — fill confirmed
+      order_failed   — order rejected / errored
+
+    Kept for 30 days (retention policy enforced by a cleanup job).
+    """
+    __tablename__ = "signal_decisions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    cycle_id = Column(String, nullable=True, index=True)
+    strategy_id = Column(String, nullable=True, index=True)
+    template_name = Column(String, nullable=True, index=True)
+    symbol = Column(String, nullable=True, index=True)
+    direction = Column(String, nullable=True)  # 'long' | 'short'
+    market_regime = Column(String, nullable=True)
+    stage = Column(String, nullable=False, index=True)  # see docstring
+    decision = Column(String, nullable=False)  # 'accepted' | 'rejected' | 'emitted' | 'blocked'
+    reason = Column(String, nullable=True)  # human-readable short reason
+    score = Column(Float, nullable=True)
+    decision_metadata = Column(JSON, nullable=True)  # Free-form (sharpe, conviction, gate_name, etc.)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "cycle_id": self.cycle_id,
+            "strategy_id": self.strategy_id,
+            "template_name": self.template_name,
+            "symbol": self.symbol,
+            "direction": self.direction,
+            "market_regime": self.market_regime,
+            "stage": self.stage,
+            "decision": self.decision,
+            "reason": self.reason,
+            "score": self.score,
+            "metadata": self.decision_metadata,
+        }

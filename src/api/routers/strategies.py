@@ -3705,3 +3705,81 @@ async def get_walk_forward_analytics(
             detail=f"Failed to fetch walk-forward analytics: {str(e)}",
         )
 
+
+
+
+@router.get("/risk-attribution")
+async def get_risk_attribution(
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Per-position risk attribution for portfolio fire-drill inspection.
+
+    For every open position returns:
+      - dollar_risk: invested_amount × distance_from_price_to_SL%
+      - heat_pct_of_equity: dollar_risk / equity × 100
+      - pnl_contribution_pct: unrealized_pnl / equity × 100
+      - drawdown_contribution: max(0, -unrealized_pnl / invested_amount)
+
+    Sorted by dollar_risk descending so the biggest-risk positions are first.
+    """
+    from src.models.orm import PositionORM
+    # Equity from account_info (latest row). Used for heat / pnl-pct calcs.
+    equity = 0.0
+    try:
+        from src.models.orm import AccountInfoORM
+        row = db.query(AccountInfoORM).order_by(AccountInfoORM.updated_at.desc()).first()
+        if row and row.equity:
+            equity = float(row.equity)
+    except Exception:
+        equity = 0.0
+
+    positions = db.query(PositionORM).filter(PositionORM.closed_at.is_(None)).all()
+
+    rows = []
+    total_dollar_risk = 0.0
+    for p in positions:
+        invested = float(p.invested_amount or (p.quantity * p.entry_price if p.quantity and p.entry_price else 0))
+        side_str = str(p.side).upper() if p.side else 'LONG'
+        is_long = 'LONG' in side_str
+        cur = float(p.current_price or 0)
+        entry = float(p.entry_price or 0)
+        sl = float(p.stop_loss) if p.stop_loss else None
+
+        if sl and cur > 0:
+            if is_long:
+                sl_distance_pct = max(0.0, (cur - sl) / cur) if cur > sl else 0.0
+            else:
+                sl_distance_pct = max(0.0, (sl - cur) / cur) if sl > cur else 0.0
+        else:
+            sl_distance_pct = None
+
+        dollar_risk = invested * sl_distance_pct if (sl_distance_pct is not None and invested) else None
+        if dollar_risk is not None:
+            total_dollar_risk += dollar_risk
+
+        unr = float(p.unrealized_pnl or 0)
+        rows.append({
+            "position_id": p.id,
+            "symbol": p.symbol,
+            "side": side_str,
+            "strategy_id": p.strategy_id,
+            "invested": round(invested, 2),
+            "current_price": round(cur, 4),
+            "stop_loss": round(sl, 4) if sl else None,
+            "sl_distance_pct": round(sl_distance_pct * 100, 2) if sl_distance_pct is not None else None,
+            "dollar_risk": round(dollar_risk, 2) if dollar_risk is not None else None,
+            "heat_pct_of_equity": round(dollar_risk / equity * 100, 2) if dollar_risk and equity else None,
+            "unrealized_pnl": round(unr, 2),
+            "pnl_contribution_pct": round(unr / equity * 100, 3) if equity else None,
+            "drawdown_contribution_pct": round(max(0.0, -unr / invested * 100), 2) if invested else None,
+        })
+
+    rows.sort(key=lambda r: -(r["dollar_risk"] or 0))
+    return {
+        "equity": round(equity, 2),
+        "total_positions": len(rows),
+        "total_dollar_risk": round(total_dollar_risk, 2),
+        "total_heat_pct": round(total_dollar_risk / equity * 100, 2) if equity else None,
+        "positions": rows,
+    }

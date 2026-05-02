@@ -1774,12 +1774,32 @@ class StrategyProposer:
             # Train Sharpe matters for confirming the strategy isn't random, but
             # a weak train period doesn't invalidate strong OOS performance.
             validated_strategies = []
+            _decision_rows = []  # Batched writes to signal_decisions (analytics)
             for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
                 if s.id not in mc_passed_ids:
+                    _decision_rows.append({
+                        "stage": "wf_rejected", "decision": "rejected",
+                        "strategy_id": s.id, "template": (s.metadata or {}).get('template_name') or s.name,
+                        "symbol": (s.symbols[0] if s.symbols else None),
+                        "direction": self._detect_strategy_direction(s),
+                        "market_regime": market_regime,
+                        "score": tes, "reason": "mc_bootstrap_filtered",
+                        "metadata": {"train_sharpe": ts, "test_sharpe": tes},
+                    })
                     continue  # Filtered by Monte Carlo bootstrap
                 if wf is None:
                     continue  # Loaded from 4-tuple disk cache — no wf_results dict
                 if not (tv and tev and het and not ov):
+                    _decision_rows.append({
+                        "stage": "wf_rejected", "decision": "rejected",
+                        "strategy_id": s.id, "template": (s.metadata or {}).get('template_name') or s.name,
+                        "symbol": (s.symbols[0] if s.symbols else None),
+                        "direction": self._detect_strategy_direction(s),
+                        "market_regime": market_regime,
+                        "score": tes,
+                        "reason": f"tv={tv} tev={tev} het={het} overfitted={ov}",
+                        "metadata": {"train_sharpe": ts, "test_sharpe": tes},
+                    })
                     continue
                 direction = self._detect_strategy_direction(s)
                 thresholds = self._get_direction_aware_thresholds(direction, market_regime)
@@ -1814,14 +1834,34 @@ class StrategyProposer:
                 else:
                     short_min_trades = 3
 
+                _row_base = {
+                    "strategy_id": s.id,
+                    "template": (s.metadata or {}).get('template_name') or s.name,
+                    "symbol": (s.symbols[0] if s.symbols else None),
+                    "direction": direction,
+                    "market_regime": market_regime,
+                    "metadata": {
+                        "train_sharpe": ts,
+                        "test_sharpe": tes,
+                        "test_return": test_return,
+                        "test_win_rate": test_win_rate,
+                        "test_trades": test_trades,
+                        "min_sharpe": min_sharpe,
+                    },
+                }
+
                 # Primary path: both train and test above threshold
                 if ts > min_sharpe and tes > min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate:
                     validated_strategies.append((s, wf))
+                    _decision_rows.append({**_row_base, "stage": "wf_validated", "decision": "accepted",
+                                           "score": tes, "reason": "primary_path"})
                 # Test-dominant path: test Sharpe is strong, train is non-negative.
                 # The test period is more recent — if it shows edge, the strategy works NOW.
                 # SHORTs must also clear a minimum test_trades floor to avoid n=2-3 flukes.
                 elif ts >= -0.1 and tes >= min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate and (not is_short or test_trades >= short_min_trades):
                     validated_strategies.append((s, wf))
+                    _decision_rows.append({**_row_base, "stage": "wf_validated", "decision": "accepted",
+                                           "score": tes, "reason": "test_dominant"})
                     logger.info(
                         f"  Passed on strong test Sharpe: {s.name} "
                         f"(train={ts:.2f}, test={tes:.2f}, threshold={min_sharpe})"
@@ -1831,15 +1871,30 @@ class StrategyProposer:
                 # SHORTs don't get this relaxed path — too much risk of late-cycle overfitting.
                 elif ts >= -0.3 and tes >= min_sharpe * 2 and test_trades >= 3 and test_return >= min_return and test_win_rate >= min_win_rate and not is_short:
                     validated_strategies.append((s, wf))
+                    _decision_rows.append({**_row_base, "stage": "wf_validated", "decision": "accepted",
+                                           "score": tes, "reason": "excellent_oos"})
                     logger.info(
                         f"  Passed on excellent OOS performance: {s.name} "
                         f"(train={ts:.2f}, test={tes:.2f}, test_trades={test_trades}, threshold={min_sharpe})"
                     )
                 elif is_short and ts >= -0.3 and tes >= min_sharpe * 2:
+                    _decision_rows.append({**_row_base, "stage": "wf_rejected", "decision": "rejected",
+                                           "score": tes, "reason": "short_no_relaxed_path"})
                     logger.info(
                         f"  SHORT rejected on relaxed-OOS path (no rescue for SHORTs): {s.name} "
                         f"(train={ts:.2f}, test={tes:.2f}) — SHORTs must pass primary or test-dominant paths"
                     )
+                else:
+                    _decision_rows.append({**_row_base, "stage": "wf_rejected", "decision": "rejected",
+                                           "score": tes,
+                                           "reason": f"below_thresholds (train={ts:.2f} test={tes:.2f} ret={test_return:.2%} wr={test_win_rate:.2%})"})
+
+            # Batch-write all WF decisions (non-fatal on error)
+            try:
+                from src.analytics.decision_log import record_batch
+                record_batch(_decision_rows)
+            except Exception as _dl_err:
+                logger.debug(f"decision_log WF batch failed: {_dl_err}")
             
             logger.info(
                 f"Walk-forward validation (direction-aware): {len(validated_strategies)}/{len(all_wf_results)} "

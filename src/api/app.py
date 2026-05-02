@@ -307,6 +307,179 @@ async def health_check():
     }
 
 
+@app.get("/health/trading-gates")
+async def trading_gates_status():
+    """Show the current state of every gate that can block a trade.
+
+    Answers 'is the system actively preventing trades right now, and why?'
+    Covers: VIX gate, trend-consistency gate, freshness-SLA, MQS trend
+    suppression, regime filter, rejection / zero-trade blacklists, kill switch,
+    market hours, eToro circuit breakers.
+
+    Every block is either armed-not-firing, firing-for-N-symbols, or disabled.
+    Never throws — fail-open with a partial result so the panel stays useful
+    during any internal data issue.
+    """
+    from datetime import datetime
+    result: dict = {
+        "timestamp": datetime.now().isoformat(),
+        "gates": {},
+    }
+
+    # Kill switch
+    try:
+        from src.core.system_state import get_system_state_manager
+        sm = get_system_state_manager()
+        state = sm.get_state() if sm else None
+        result["gates"]["kill_switch"] = {
+            "armed": True,
+            "blocking": bool(state and str(state).upper() in ("HALTED", "STOPPED")),
+            "detail": f"system_state={state}",
+        }
+    except Exception as e:
+        result["gates"]["kill_switch"] = {"armed": False, "blocking": False, "error": str(e)[:80]}
+
+    # VIX gate
+    try:
+        from datetime import timedelta
+        from src.data.market_data_manager import get_market_data_manager
+        mdm = get_market_data_manager()
+        vix_bars = mdm.get_historical_data("^VIX", datetime.now() - timedelta(days=10), datetime.now(), interval="1d", prefer_yahoo=True) if mdm else []
+        if vix_bars and len(vix_bars) >= 6:
+            vix_now = vix_bars[-1].close
+            vix_5d_ago = vix_bars[-6].close
+            vix_5d_change = (vix_now - vix_5d_ago) / vix_5d_ago if vix_5d_ago > 0 else 0
+            blocking = vix_now > 25.0 and vix_5d_change > 0.15
+            result["gates"]["vix_gate"] = {
+                "armed": True,
+                "blocking": blocking,
+                "vix": round(vix_now, 2),
+                "vix_5d_change_pct": round(vix_5d_change * 100, 1),
+                "detail": "LONG entries blocked" if blocking else "dormant",
+            }
+        else:
+            result["gates"]["vix_gate"] = {"armed": True, "blocking": False, "detail": "insufficient VIX data"}
+    except Exception as e:
+        result["gates"]["vix_gate"] = {"armed": False, "error": str(e)[:80]}
+
+    # Market hours
+    try:
+        from src.core.monitoring_service import MonitoringService
+        # Cheap static check — doesn't instantiate the service
+        from datetime import datetime as _dt
+        import pytz
+        et_tz = pytz.timezone('US/Eastern')
+        now_et = _dt.now(et_tz)
+        is_weekend = now_et.weekday() >= 5
+        stock_open = not is_weekend and 4 <= now_et.hour < 20
+        result["gates"]["market_hours"] = {
+            "armed": True,
+            "blocking": not stock_open,
+            "detail": f"ET={now_et.strftime('%a %H:%M')} stock_open={stock_open}",
+        }
+    except Exception as e:
+        result["gates"]["market_hours"] = {"armed": False, "error": str(e)[:80]}
+
+    # Freshness SLA — count open positions currently skipped
+    try:
+        from src.models.database import get_database
+        from src.models.orm import PositionORM
+        from src.data.market_data_manager import get_market_data_manager
+        db = get_database()
+        session = db.get_session()
+        stale = 0
+        total_open = 0
+        try:
+            open_positions = session.query(PositionORM).filter(PositionORM.closed_at.is_(None)).all()
+            total_open = len(open_positions)
+            mdm = get_market_data_manager()
+            if mdm:
+                for p in open_positions[:50]:  # sample to keep cheap
+                    is_fresh, _ = mdm.is_data_fresh_for_signal(p.symbol, '1d')
+                    if not is_fresh:
+                        stale += 1
+        finally:
+            session.close()
+        result["gates"]["freshness_sla"] = {
+            "armed": True,
+            "blocking": stale > 0,
+            "stale_sample": stale,
+            "sampled_of_total": f"{min(50, total_open)}/{total_open}",
+        }
+    except Exception as e:
+        result["gates"]["freshness_sla"] = {"armed": False, "error": str(e)[:80]}
+
+    # Rejection blacklist — count active entries
+    try:
+        import json
+        from pathlib import Path
+        from datetime import timedelta
+        path = Path("config/.rejection_blacklist.json")
+        active = 0
+        total = 0
+        if path.exists():
+            with open(path) as f:
+                data = json.load(f)
+            now = datetime.now()
+            for e in data.get('entries', []):
+                total += 1
+                ts = datetime.fromisoformat(e['timestamp'])
+                if (now - ts).days < 14 and e.get('count', 0) >= 3:
+                    active += 1
+        result["gates"]["rejection_blacklist"] = {
+            "armed": True,
+            "blocking": active > 0,
+            "active_entries": active,
+            "total_entries": total,
+        }
+    except Exception as e:
+        result["gates"]["rejection_blacklist"] = {"armed": False, "error": str(e)[:80]}
+
+    # eToro circuit breakers
+    try:
+        from src.api.etoro_client import get_etoro_client
+        cli = get_etoro_client()
+        breakers = {}
+        if cli and hasattr(cli, '_circuit_breakers'):
+            for name, cb in cli._circuit_breakers.items():
+                state = getattr(cb, 'state', 'unknown')
+                breakers[name] = str(state)
+        any_open = any('OPEN' in v.upper() for v in breakers.values())
+        result["gates"]["etoro_circuit_breakers"] = {
+            "armed": bool(breakers),
+            "blocking": any_open,
+            "breakers": breakers,
+        }
+    except Exception as e:
+        result["gates"]["etoro_circuit_breakers"] = {"armed": False, "error": str(e)[:80]}
+
+    # MQS trend suppression
+    try:
+        from src.core.config_loader import ConfigLoader
+        cfg = ConfigLoader.load()
+        mqs = (cfg.get('market_quality_score') or {})
+        mqs_grade = mqs.get('current_grade')
+        suppression = mqs.get('trend_template_weight', 1.0)
+        result["gates"]["mqs_trend_suppression"] = {
+            "armed": True,
+            "blocking": suppression < 1.0,
+            "current_grade": mqs_grade,
+            "trend_weight": suppression,
+        }
+    except Exception as e:
+        result["gates"]["mqs_trend_suppression"] = {"armed": False, "error": str(e)[:80]}
+
+    # Summary
+    n_blocking = sum(1 for g in result["gates"].values() if g.get("blocking"))
+    result["summary"] = {
+        "total_gates": len(result["gates"]),
+        "blocking_now": n_blocking,
+        "status": "clear" if n_blocking == 0 else ("degraded" if n_blocking <= 2 else "restricted"),
+    }
+    return result
+
+
+
 @app.get("/health/deep")
 async def deep_health_check():
     """

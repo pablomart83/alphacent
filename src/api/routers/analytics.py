@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -4172,3 +4172,113 @@ async def get_stress_tests(
     except Exception as e:
         logger.error(f"Stress tests failed: {e}", exc_info=True)
         return StressTestResponse(message=str(e))
+
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Observability endpoints (2026-05-02 audit follow-up)
+# ──────────────────────────────────────────────────────────────────────────
+
+@router.get("/observability/mae-at-stop")
+async def observability_mae_at_stop(
+    lookback_days: int = Query(60, ge=7, le=180),
+    min_trades: int = Query(5, ge=2, le=20),
+    username: str = Depends(get_current_user),
+):
+    """Per-symbol MAE/MFE analysis with pattern detection.
+
+    Distinguishes entry-quality problems from exit/trail problems.
+    """
+    from src.analytics.observability import mae_at_stop_analysis
+    return mae_at_stop_analysis(lookback_days=lookback_days, min_trades=min_trades)
+
+
+@router.get("/observability/wf-live-divergence")
+async def observability_wf_live_divergence(
+    min_live_trades: int = Query(5, ge=3, le=50),
+    username: str = Depends(get_current_user),
+):
+    """Strategies where live Sharpe diverges from WF test Sharpe by ≥1.0.
+
+    Surfaces broken WF methodology and regime-invalidated strategies.
+    """
+    from src.analytics.observability import wf_live_divergence
+    return {"alerts": wf_live_divergence(min_live_trades=min_live_trades)}
+
+
+@router.get("/observability/regime-template-matrix")
+async def observability_regime_template_matrix(
+    lookback_days: int = Query(90, ge=14, le=365),
+    username: str = Depends(get_current_user),
+):
+    """(regime × template × direction) → P&L matrix."""
+    from src.analytics.observability import regime_template_pnl_matrix
+    return regime_template_pnl_matrix(lookback_days=lookback_days)
+
+
+@router.get("/observability/graduation-funnel")
+async def observability_graduation_funnel(
+    lookback_days: int = Query(30, ge=1, le=90),
+    username: str = Depends(get_current_user),
+):
+    """Proposal → activation → fill funnel with per-stage drop-off."""
+    from src.analytics.observability import template_graduation_funnel
+    return template_graduation_funnel(lookback_days=lookback_days)
+
+
+@router.get("/observability/opportunity-cost")
+async def observability_opportunity_cost(
+    lookback_days: int = Query(30, ge=7, le=180),
+    username: str = Depends(get_current_user),
+):
+    """Forward return of symbol minus captured P&L. Positive = missed alpha."""
+    from src.analytics.observability import per_symbol_opportunity_cost
+    return {"symbols": per_symbol_opportunity_cost(lookback_days=lookback_days)}
+
+
+@router.get("/observability/signal-decisions/{symbol}")
+async def observability_symbol_decisions(
+    symbol: str,
+    lookback_days: int = Query(14, ge=1, le=90),
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """All signal_decisions rows for a given symbol — the 'why didn't we trade X' view."""
+    from src.models.orm import SignalDecisionORM
+    from datetime import datetime, timedelta
+    cutoff = datetime.now() - timedelta(days=lookback_days)
+    rows = db.query(SignalDecisionORM).filter(
+        SignalDecisionORM.symbol == symbol.upper(),
+        SignalDecisionORM.timestamp >= cutoff,
+    ).order_by(SignalDecisionORM.timestamp.desc()).limit(500).all()
+    return {
+        "symbol": symbol.upper(),
+        "lookback_days": lookback_days,
+        "decisions": [r.to_dict() for r in rows],
+    }
+
+
+@router.get("/observability/exec-summary")
+async def observability_exec_summary(
+    minutes: int = Query(60, ge=5, le=1440),
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """Rolling-window exec summary: proposed, gate_blocked, orders submitted/filled/failed.
+
+    Mirrors the TSL cycle summary but for the signal → order pipeline.
+    """
+    from src.models.orm import SignalDecisionORM
+    from datetime import datetime, timedelta
+    from sqlalchemy import func as sa_func
+    cutoff = datetime.now() - timedelta(minutes=minutes)
+    rows = db.query(
+        SignalDecisionORM.stage,
+        sa_func.count(SignalDecisionORM.id).label('n'),
+    ).filter(SignalDecisionORM.timestamp >= cutoff).group_by(SignalDecisionORM.stage).all()
+    counts = {r.stage: int(r.n) for r in rows}
+    return {
+        "window_minutes": minutes,
+        "since": cutoff.isoformat(),
+        "stage_counts": counts,
+    }

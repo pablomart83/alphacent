@@ -1061,6 +1061,23 @@ class OrderMonitor:
                             else:
                                 logger.warning(f"Could not find eToro position for filled order {order.id} (symbol: {order.symbol})")
                         
+                        # Compute execution-quality metrics (F04 Part 3) BEFORE log_entry
+                        # so they go into trade_journal and are persisted on OrderORM.
+                        try:
+                            if order.filled_price and order.expected_price and order.expected_price > 0:
+                                # Slippage: positive = adverse (paid more than expected for buy,
+                                # received less for sell). Stored as % of expected price.
+                                raw_slip = (order.filled_price - order.expected_price) / order.expected_price
+                                if hasattr(order.side, 'value') and str(order.side.value).upper() in ('SELL', 'SHORT'):
+                                    raw_slip = -raw_slip  # invert for sells
+                                order.slippage = raw_slip
+                            if order.filled_at and order.submitted_at:
+                                delta = (order.filled_at - order.submitted_at).total_seconds()
+                                if delta >= 0:
+                                    order.fill_time_seconds = delta
+                        except Exception as _eq_err:
+                            logger.debug(f"Exec-quality metric compute failed: {_eq_err}")
+
                         # Log to trade journal for analytics tracking.
                         # Pull regime/conviction/fundamentals from the persisted order
                         # metadata so async fills still capture signal-time context.

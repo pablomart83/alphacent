@@ -1479,6 +1479,37 @@ class TradingScheduler:
             result["signals_rejected"] = signals_rejected
             result["orders_submitted"] = orders_executed
 
+            # Exec-cycle summary line (2026-05-02 observability work).
+            # Pulls recent decision-log aggregates so all gate-block / submit
+            # counts are visible in one grep-able line, matching TSL cycle summaries.
+            try:
+                from src.models.database import get_database
+                from src.models.orm import SignalDecisionORM
+                from datetime import datetime as _dt, timedelta as _td
+                from sqlalchemy import func as _sa_func
+                _cutoff = _dt.now() - _td(minutes=10)
+                _sess = get_database().get_session()
+                try:
+                    _rows = _sess.query(
+                        SignalDecisionORM.stage,
+                        _sa_func.count(SignalDecisionORM.id),
+                    ).filter(SignalDecisionORM.timestamp >= _cutoff).group_by(SignalDecisionORM.stage).all()
+                    _counts = {stg: int(n) for stg, n in _rows}
+                finally:
+                    _sess.close()
+                logger.info(
+                    "Exec cycle: "
+                    f"proposed={_counts.get('proposed', 0)} "
+                    f"wf_validated={_counts.get('wf_validated', 0)} "
+                    f"wf_rejected={_counts.get('wf_rejected', 0)} "
+                    f"gate_blocked={_counts.get('gate_blocked', 0)} "
+                    f"order_submitted={_counts.get('order_submitted', 0)} "
+                    f"orders_executed_this_run={orders_executed} "
+                    f"rejected_this_run={signals_rejected}"
+                )
+            except Exception as _exec_err:
+                logger.debug(f"Exec cycle summary failed (non-fatal): {_exec_err}")
+
             logger.info("Signal generation cycle complete")
 
             # === BACKTESTED TTL: expire strategies that haven't traded ===
