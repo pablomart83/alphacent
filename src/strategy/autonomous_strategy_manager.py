@@ -1709,6 +1709,59 @@ class AutonomousStrategyManager:
                         f"WinRate={backtest_results.win_rate:.2%}, "
                         f"Trades={backtest_results.total_trades}"
                     )
+
+                    # Sprint 5 F2 (2026-05-02): run a second 730d ex-post
+                    # sanity backtest on WF-validated strategies. The WF
+                    # test window is typically 90-365d (regime-recent). The
+                    # activation log claims "(730 days)" but the code
+                    # historically short-circuited to WF-test results only.
+                    # A strategy that passed a lucky 6-month test window
+                    # could reach activation despite being broken over 2y.
+                    #
+                    # Per arxiv 2602.10785 (Ślepaczuk 2026) "double
+                    # out-of-sample" pattern + López de Prado (2014)
+                    # Deflated Sharpe principle: a second independent
+                    # validation window catches regime-luck.
+                    #
+                    # Design: compute, stamp on metadata, let
+                    # portfolio_manager.evaluate_for_activation read it
+                    # and apply a *lenient* veto (expost_sharpe >= -0.5).
+                    # NOT a primary gate — we don't require positive
+                    # 2-year Sharpe (crypto regimes don't last 2 years).
+                    # The veto only catches strategies that were negative
+                    # in both the prior regime AND the current one.
+                    try:
+                        _expost_start = end_date - timedelta(days=730)
+                        _expost_results = self.strategy_engine.backtest_strategy(
+                            strategy=current_strategy,
+                            start=_expost_start,
+                            end=end_date,
+                        )
+                        _expost_meta = {
+                            "expost_730d_sharpe": round(float(_expost_results.sharpe_ratio), 3),
+                            "expost_730d_return": round(float(_expost_results.total_return), 4),
+                            "expost_730d_trades": int(_expost_results.total_trades),
+                            "expost_730d_drawdown": round(float(_expost_results.max_drawdown), 4),
+                            "expost_730d_win_rate": round(float(_expost_results.win_rate), 3),
+                        }
+                        if current_strategy.metadata is None:
+                            current_strategy.metadata = {}
+                        current_strategy.metadata.update(_expost_meta)
+                        logger.info(
+                            f"      Ex-post 730d sanity: "
+                            f"Sharpe={_expost_results.sharpe_ratio:.2f}, "
+                            f"Return={_expost_results.total_return:.2%}, "
+                            f"Trades={_expost_results.total_trades}, "
+                            f"DD={_expost_results.max_drawdown:.2%}"
+                        )
+                    except Exception as _expost_err:
+                        # Sanity-check failure must not block activation —
+                        # WF already passed. Log and skip the extra gate.
+                        logger.warning(
+                            f"      Ex-post 730d sanity failed for "
+                            f"{current_strategy.name}: {_expost_err} — "
+                            f"activation proceeds on WF results only"
+                        )
                 else:
                     # Run full backtest (only for strategies without walk-forward results)
                     backtest_results = self.strategy_engine.backtest_strategy(

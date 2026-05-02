@@ -696,6 +696,46 @@ class PortfolioManager:
         except Exception:
             pass
 
+        # Sprint 5 F2 (2026-05-02): ex-post 730d sanity veto.
+        # The WF test window is regime-recent (90-365d). A strategy that
+        # passed a single favourable quarter can reach activation despite
+        # being broken over the prior 18 months. `autonomous_strategy_manager`
+        # now runs a second 730d backtest on WF-validated strategies and
+        # stamps the results on strategy.metadata (expost_730d_*).
+        #
+        # This veto is LENIENT by design. We do NOT require positive 730d
+        # Sharpe (crypto regimes don't last 2 years — a mean-reversion
+        # strategy might be negative through a 2-year bull). We only reject
+        # the "broken in both regimes" case: Sharpe < -0.5 over 730d means
+        # the strategy lost money in current regime AND was negative in
+        # the prior regime — not a single-regime tradeoff, just a bad strategy.
+        #
+        # Threshold calibration (-0.5):
+        #   Sharpe -0.5 on 730d crypto ≈ ~15% annualised loss at typical
+        #   crypto vol. Anything better than that could still be a one-
+        #   regime strategy; we let WF be the primary gate on that.
+        #
+        # Fail-open if metadata missing (e.g. 730d backtest errored — that
+        # failure is logged upstream; don't double-punish the strategy).
+        if hasattr(strategy, 'metadata') and strategy.metadata:
+            _expost_sharpe = strategy.metadata.get('expost_730d_sharpe')
+            _expost_trades = strategy.metadata.get('expost_730d_trades')
+            _expost_return = strategy.metadata.get('expost_730d_return')
+            if (_expost_sharpe is not None
+                    and _expost_trades is not None
+                    and int(_expost_trades) >= 10):  # need stat-meaningful sample
+                _EXPOST_SHARPE_FLOOR = -0.5
+                if float(_expost_sharpe) < _EXPOST_SHARPE_FLOOR:
+                    reason = (
+                        f"Ex-post 730d Sharpe {float(_expost_sharpe):.2f} < "
+                        f"{_EXPOST_SHARPE_FLOOR:.1f} floor "
+                        f"(return={float(_expost_return or 0):.1%}, "
+                        f"{int(_expost_trades)} trades over 2y) — "
+                        f"strategy was loss-making in both current AND prior regimes"
+                    )
+                    logger.info(f"Strategy {strategy.name} failed activation: {reason}")
+                    return False, reason
+
         if is_alpha_edge:
             # Alpha Edge uses the config thresholds but with relaxed floors
             # (fundamental strategies behave differently from DSL technical strategies)

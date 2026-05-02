@@ -1555,38 +1555,58 @@ class StrategyEngine:
             is_4h_template = strat_interval == '4h'
         
         # For intraday templates, use appropriate windows based on interval.
-        # Yahoo provides ~730 days of 1h data — use enough for statistical significance.
-        # Professional quant standard: 200+ bars train, 100+ bars test minimum.
+        # Sprint 5 F1 (2026-05-02): caps are interval-aware AND data-source-aware.
+        # Crypto 1h/4h come from Binance (~2y depth, no auth, 24/7). Stocks /
+        # ETFs / forex 1h come from Yahoo which caps 1h at ~7 months. Before
+        # Sprint 4 this function capped crypto at 180/90 (1h) and 240/120 (4h)
+        # because Yahoo was the only source; that cap is now a silent downgrade
+        # of the Sprint 4 WF-widening (the proposer passes 365/365 but we used
+        # to clobber it here).
+        #
+        # Policy after F1:
+        #   crypto 1h/4h  — accept whatever the proposer requested, no cap
+        #                   (Binance serves 2y = ~17k 1h bars / ~4.4k 4h bars)
+        #   non-crypto 1h — cap at 180/90 (Yahoo 7-month limit still applies)
+        #   non-crypto 4h — cap at 240/120 (resampled from 1h, same limit)
         backtest_interval = "1d"
-        if is_intraday_template:
-            backtest_interval = "1h"
-            # 1h: 180 days train (~4,320 bars crypto 24/7), 90 days test (~2,160 bars)
-            # Wider window captures multiple market regimes (bull + crash + recovery)
-            # instead of being stuck entirely in one regime. Yahoo provides ~730 days
-            # of 1h data, so 270 total days is well within limits.
-            # Previous: 90d train + 45d test = 135d (test was entirely in crash period)
-            train_days = min(train_days, 180)
-            test_days = min(test_days, 90)
-            # Override start to be within Yahoo's 1h data range (~730 days available)
-            start = end - timedelta(days=train_days + test_days)
-            logger.info(
-                f"Intraday template: using 1h bars with walk-forward window "
-                f"(train={train_days}d, test={test_days}d, start={start.date()})"
-            )
-        elif is_4h_template:
-            backtest_interval = "4h"
-            # 4H: 240 days train (~1,440 bars crypto), 120 days test (~720 bars)
-            # Synthesized from 1h data, so same 730-day Yahoo limit applies.
-            # 360 total days is within limits. Wider window gives 4-month test period
-            # covering multiple market phases.
-            # Previous: 120d train + 60d test = 180d
-            train_days = min(train_days, 240)
-            test_days = min(test_days, 120)
-            start = end - timedelta(days=train_days + test_days)
-            logger.info(
-                f"4H template: using 4h bars with walk-forward window "
-                f"(train={train_days}d, test={test_days}d, start={start.date()})"
-            )
+        if is_intraday_template or is_4h_template:
+            # Decide data source from primary symbol asset class.
+            _primary_crypto = False
+            try:
+                from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO as _WF_CR
+                _primary = strategy.symbols[0].upper() if getattr(strategy, 'symbols', None) else ''
+                _primary_crypto = _primary in set(_WF_CR)
+            except Exception:
+                _primary_crypto = False
+
+            if is_intraday_template:
+                backtest_interval = "1h"
+                if not _primary_crypto:
+                    # Yahoo's 1h data has a hard ~7-month cap. Keep the
+                    # historical window to stay within what the data source
+                    # can serve.
+                    train_days = min(train_days, 180)
+                    test_days = min(test_days, 90)
+                # Whether capped (Yahoo) or pass-through (Binance), anchor
+                # start so train + test fit exactly in the requested window.
+                start = end - timedelta(days=train_days + test_days)
+                _src = "Binance" if _primary_crypto else "Yahoo"
+                logger.info(
+                    f"Intraday template: using 1h bars with walk-forward window "
+                    f"(train={train_days}d, test={test_days}d, start={start.date()}, source={_src})"
+                )
+            else:  # is_4h_template
+                backtest_interval = "4h"
+                if not _primary_crypto:
+                    # Non-crypto 4h is resampled from Yahoo 1h — same 180d source cap.
+                    train_days = min(train_days, 240)
+                    test_days = min(test_days, 120)
+                start = end - timedelta(days=train_days + test_days)
+                _src = "Binance" if _primary_crypto else "Yahoo(resampled)"
+                logger.info(
+                    f"4H template: using 4h bars with walk-forward window "
+                    f"(train={train_days}d, test={test_days}d, start={start.date()}, source={_src})"
+                )
 
         # Calculate split date
         total_days = (end - start).days
