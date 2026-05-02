@@ -498,56 +498,112 @@ ORDER BY ABS(COALESCE((s.strategy_metadata->>'wf_test_sharpe')::float, 0)) DESC;
 
 ## Open Items — Priority Order
 
-### Next sprint (Sprint 2) — Cross-symbol validation + 4h data reconciliation
+### Next sprint (Sprint 3) — Verification + WF tightening + quality fixes
 
-**Rule in effect:** Proper solutions only. No patches, no shadow-mode bypasses, no "skip_wf" escape hatches. See `.kiro/steering/trading-system-context.md` → "Proper Solutions Only — No Patches, No Stopgaps".
+**Rule in effect:** Proper solutions only. See `.kiro/steering/trading-system-context.md` → "Proper Solutions Only — No Patches, No Stopgaps".
 
-**Sprint 1 landed** the cross-asset DSL primitives (F1), cost-aware min_return_per_trade floor (F3), and removal of broken Pairs Trading template (F7). Post-deploy cycle proved the architectural hypothesis — BTC Follower Daily test_sharpe flipped from negative to > 1.4 on 4 of 5 alts once WF could see the LAG_RETURN primitive natively. But per-pair activation still rejects on small-sample (1-3 test trades). Sprint 2 addresses that.
+**Context after Sprint 2:** Cross-asset DSL primitives (Sprint 1), cost floors (Sprint 1), cross-symbol consistency validation (Sprint 2 F2), primary-only dedup (Sprint 2 F2.1), 4h cache honesty (Sprint 2 F10), 5 new crypto templates, 3 new DSL indicators. 4 crypto strategies activated (BTC Follower Daily ETH/SOL/LINK/AVAX) but armed-and-waiting on a BTC +5% 2-day trigger that hasn't happened since 2026-03-16. Two post-commit cycles (16:36 + 16:40 UTC) confirmed F2.1 restored proposal volume (134 pre-WF vs 18 pre-fix) and F2 cross-validation stage populating with breakdowns.
 
-**Sprint 2 — F2 + F10:**
+**Sprint 3 is split into two phases:**
 
-1. **F2 — Cross-symbol consistency validation** (~2-3 hours):
-   - For templates flagged `requires_cross_validation: True` in metadata, the proposer runs WF on all 6 crypto symbols (BTC/ETH/SOL/AVAX/LINK/DOT) instead of just the primary.
-   - Computes `cross_validation_score = (count of symbols with test_sharpe > 0.3 AND positive net return) / 6`.
-   - Activation gate: when a template has `requires_cross_validation=True` AND `cross_validation_score ≥ 4/6 = 0.67`, the per-pair cost-per-trade and Sharpe checks are replaced by the family-level verdict. (Net return > 0 and round-trip cost reality are still enforced.)
-   - Cache reuse: leverage `_wf_results_cache` keyed on `(template, symbol)`; running on all 6 is additive, not redundant.
-   - Decision-log stage: write a new `cross_validation` row per template with the 6-symbol breakdown so the funnel shows exactly why a family was accepted.
-   - Flag the 4 Batch C templates with `requires_cross_validation: True`.
+#### Phase 1 — Verify Sprint 1+2 in live over 2-3 crypto-focused cycles (~30 min)
 
-2. **F10 — Reconcile stale 4h crypto cache** (~1 hour):
-   - Current state: BTC 4h cache has 2695 bars from 2025-02 (15 months) synthesized from an older 1h snapshot that is no longer reproducible; current 1h cache only extends to 2025-10 (7 months per yfinance cap).
-   - Problem: if `clear_crypto_wf_cache.py` or the schema-version invalidator ever clears 4h, re-fetching via current 1h yields only 7 months. The 4h "depth" is ephemeral and can't survive a cache rebuild.
-   - Fix: delete 4h bars older than (latest 1h - 1 day). Add a guard in `_fetch_historical_from_yahoo_finance` that refuses to return 4h bars outside the 1h source window. Document the constraint in code comments.
-   - This makes the 4h cache HONESTLY reflect the 7-month yfinance 1h cap rather than having a phantom 15-month history.
+Before any new code, prove Sprint 1+2 work end-to-end on crypto activations → signals → orders:
 
-**Success criterion for Sprint 2:**
-- After deploy, a clean cycle must produce **at least 2 crypto activations** where activation was based on F2 family-level evidence (`cross_validation_score ≥ 0.67`).
-- Decision-log funnel shows `cross_validation` stage entries with per-symbol breakdowns matching the WF test outcomes.
-- `signal_decisions.stage='cross_validation'` rows present with symbol-level detail in `decision_metadata`.
-- 4h crypto cache depth reported by `SELECT MAX(date)-MIN(date) FROM historical_price_cache WHERE interval='4h'` is approximately equal to the 1h cache depth (within 1 day).
-- Zero regressions: equity/ETF/forex/commodity/AE activation paths unchanged.
+1. **Activation via F2**: confirm new BTC Follower Daily / Cross-Sectional activations come through the cross-validation path (verify with `signal_decisions.reason='family_cross_validated'`).
+2. **Signal emission**: once BTC prints a +5% 2-day move (historically ~2x/month; last trigger 2026-03-16), the 4 activated BTC Follower Daily strategies should emit `signal_emitted` stages and have `ENTER_LONG` orders submitted. Currently armed-and-waiting.
+3. **5 new crypto templates**: each (Donchian, Keltner 4H, OBV, 20D MA, BB Volume) should show at least one WF run per cycle. OBV Accumulation Daily already passed WF via excellent_oos path on ETH in cycle_1777739783 — template is live and functional.
+4. **Trades execute & close**: any filled crypto order flows through `signal_emitted → order_submitted → order_filled`. MAE/MFE populated. `trade_journal.market_regime` non-NULL.
+5. **Nothing regressed on equity/ETF/forex/commodity/AE**: Sector Rotation still evaluating, equity activations continue at daily scheduled cycles (15:15 UTC), AE proposer still rotates templates.
 
-**Do not ship until:**
-- BTC Follower Daily activates on at least one alt via cross-validation path.
-- The 4h→1h cache depth equality is verified.
-- Manual WF check on the 3 best candidates (SOL, LINK, AVAX from Sprint 1 evidence) confirms family-level Sharpe ≥ 1.0 after the new gate.
+Don't proceed to Phase 2 until at least one complete crypto signal→order path has fired (may require waiting for a BTC +5% trigger or for the 5 new templates to activate on their own edge).
 
-### Independent next-session items (can be interleaved)
+#### Phase 2 — Sprint 3 code (ordered by P&L impact)
 
-These don't depend on the crypto work and remain on the backlog. Priority order:
+**S3.1 — WF bypass path tightening for LONG** (~2h) — **priority P0**
+- The `test_dominant` and `excellent_oos` paths in `strategy_proposer.py` (lines ~2020-2070) let strategies through with `ts >= -0.1 AND tes >= min_sharpe` or `ts >= -0.3 AND tes >= min_sharpe*2`. Means a strategy with train_sharpe -0.1 and test_sharpe 0.5 passes — that's regime luck, not edge.
+- **SHORT side was tightened in Sprint 1** (SHORT-specific bypass removed; primary path needs min_sharpe+0.3). LONG still loose.
+- **Fix:** Add a consistency gate `(test_sharpe - train_sharpe) <= 1.5` on both test-dominant and excellent-oos paths for LONG (matches SHORT rigor). A strategy where test crushes train by >1.5 Sharpe is almost certainly overfit to the specific test window.
+- **Verification:** Run before/after diff on cycle wf_validated counts; expect 15-25% reduction in wf_validated on LONG but higher-quality survivors. Check live-performance divergence (`/analytics/observability/wf-live-divergence`) drops 2+ weeks later.
 
-1. **P1-2 trade_id convention unification** (90 min) — `log_entry`/`log_exit` agree on trade_id; migrate `order_monitor` to use `position.id`; retire the fallback match logic. The 2026-05-02 session backfilled 175 orphans from this mismatch but the code still produces orphans on every new fill.
-2. **Verify overnight-cycle state of the 2026-05-02 Tier-1/2/3 fixes:**
-   - `active_zombies` should trend to 0 as positions close (`SELECT COUNT(*) FROM strategies WHERE (strategy_metadata::jsonb->>'pending_retirement')::text='true' AND status IN ('DEMO','LIVE')` expected to drop from 19)
-   - `live_trade_count` incrementing on new fills — compare `SELECT status, AVG(live_trade_count) FROM strategies GROUP BY status` to last-session baseline
-   - `signal_decisions.stage='cycle_error'` rows present if any stage threw
-   - Factor-gate rejections now INFO (not in cycle ERROR count)
-   - Penalty-applied trades being skipped if sized sub-$5K (check risk.log for "penalty applied — skipping trade")
-3. **Monday Asia Open session template** (2-3h) — needs `HOUR()` DSL primitive first. Same architectural pattern as the cross-asset primitives above; could be built alongside.
-4. **P2-5 Overview chart panel rewrite** — needs design doc first. Axis alignment issues across 3 separate chart components. Design before coding per the proper-solutions-only rule.
-5. **Entry-timing score** — needs per-minute post-entry price snapshots; requires new capture infra. Design-first.
+**S3.2 — Triple EMA Alignment DSL bug** (~30 min) — **priority P1**
+- `EMA(10) > EMA(10)` always evaluates to False → template generates 0 trades on every WF → permanently blacklisted.
+- Regex-based parameter substitution collapses the three positional literals in `EMA(fast) > EMA(mid) > EMA(slow)`.
+- **Fix:** Audit the param substitution regex in `strategy_proposer.customize_template_parameters`; add explicit handling for templates whose `default_parameters` contain positional EMA periods. The correct substitution for `Triple EMA Alignment` should produce e.g. `EMA(10) > EMA(20) AND EMA(20) > EMA(50)`.
+- **Verification:** Template should generate >0 WF trades on at least one symbol.
+
+**S3.3 — Market Quality Score persistence** (~45 min) — **priority P1**
+- Recent `equity_snapshots.market_quality_score` rows are NULL despite the compute code being present. `_save_hourly_equity_snapshot` wraps MQS compute in a bare `except: pass` that swallows the real error.
+- **Fix:** Replace the bare except with specific exception handling + WARNING log; capture the actual error signature. Likely one of: missing SPY data, missing VIX, MQS computer not initialized, DB column-type mismatch.
+- **Verification:** `SELECT COUNT(*) FROM equity_snapshots WHERE market_quality_score IS NOT NULL AND date > NOW() - INTERVAL '1 day'` should return >0 after next hour.
+
+**S3.4 — Cross-cycle signal dedup for market-closed deferrals** (~90 min) — **priority P1**
+- Entry-order 82% FAILED rate cosmetic: when US market is closed (premarket/overnight/weekend), signal generation fires, order submission defers, DB writes as FAILED, next cycle re-fires the same signal. 9 cycles × 11 signals = 99 DB rows for 11 intended signals.
+- **Fix:** Cross-cycle dedup map in trading_scheduler: `{(strategy_id, symbol, direction): expires_at}` with 30-min TTL. When market-closed deferral issued, write to map. Next cycle skips if present.
+- **Alternative:** skip signal generation for stock/ETF strategies when US market is closed AND no extended-hours candidate. Matches existing crypto-24/7 filter inversely.
+- **Verification:** Overnight cycle produces 0 FAILED-entry duplicates for the same (strategy, symbol, direction) inside 30 min.
+
+**S3.5 — trade_id convention unification** (~90 min) — **priority P2**
+- `log_entry` uses `position.id`; `log_exit` uses order UUID. Mismatch produces orphan rows in `trade_journal` that only show up on backfill. Backfilled 175 in the 2026-05-02 session; the underlying bug still produces new orphans on every fill.
+- **Fix:** Migrate `order_monitor.check_submitted_orders` to use `position.id` for `log_exit` (available via the order's `position_id` column on OrderORM). Retire the fallback match logic in `log_exit`.
+- **Verification:** After 1 week, count orphan rows — should stay at zero rather than growing.
+
+**Do not ship Sprint 3 until:**
+- Phase 1 verification complete (crypto signal→order path proven on at least one fill).
+- Each S3.x change validated through a post-deploy cycle showing the intended effect.
+- Zero regressions on existing active strategies.
+
+### Independent backlog (deferred to Sprint 4+)
+
+These are on the radar but don't rank into Sprint 3:
+
+- **Sector Rotation + Pairs Trading template rewrites** — both are structurally broken. Need design docs. Sector Rotation `fixed_symbols` covers only 5 of 11 SPDR sectors; Pairs conditions are momentum-long, not pairs spreads. Design-first before coding.
+- **Monday Asia Open template** — needs `HOUR()` DSL primitive. Same architectural pattern as Sprint 1's cross-asset primitives. Could be 2-3h work when scheduled.
+- **Overview chart panel rewrite** — 3 chart components with misaligned axes; needs multi-pane redesign doc first.
+- **Entry-timing score** — needs per-minute post-entry price snapshots we don't capture yet. Design-first.
+- **F01/F12 Phase 3 — Calibrate min_sharpe from live data** — triggers 2-4 weeks of clean runs post-S3.1 so we have enough live-vs-backtest data to calibrate honestly.
+- **FMP insider endpoint** — 403/404 on current plan; insider_buying uses momentum proxy. Resolves when plan upgrades or another vendor added.
 
 ### Next-session kickoff prompt
+
+Copy this as-is into a new session when you're ready to execute Sprint 3:
+
+```
+Start this session by reading, in this exact order: (1) .kiro/steering/trading-system-context.md — pay special attention to the "Proper Solutions Only — No Patches, No Stopgaps" section. That rule is non-negotiable and overrides the default-to-action guidance. (2) Session_Continuation.md — current state + Sprint 1/2 outcomes + Sprint 3 plan. (3) AUDIT_REPORT_2026-05-02.md. Do not skip. Do not summarize them back — just internalize and confirm you've read them.
+
+Context: Sprint 1 (commit abace94) shipped cross-asset DSL primitives (LAG_RETURN/RANK_IN_UNIVERSE as first-class indicators in backtest AND signal-gen), cost floors (crypto RPT floor 3.5%), removed broken Pairs template. Sprint 2 (commit c47013c) shipped F2 (cross-symbol consistency validation — templates flagged requires_cross_validation bypass per-pair gates when ≥4/6 family symbols clear minimal bar), F2.1 (primary-only dedup in proposer, fixed 342→157 pair over-block), F10 (4h cache reconciliation — 8116 phantom bars removed; invariant guard in _fetch_historical_from_yahoo_finance), +3 native DSL indicators (OBV, Donchian, Keltner), +5 new crypto templates (Donchian Breakout Daily, Keltner Breakout 4H, OBV Accumulation Daily, 20D MA Variable Cross Daily, BB Volume Breakout Daily). 4 crypto strategies activated via F2 family path (BTC Follower Daily on ETH/SOL/LINK/AVAX) — armed and waiting on BTC +5% 2-bar trigger (last fired 2026-03-16). Two post-deploy cycles confirmed F2.1 restored proposal volume (134 pre-WF) and F2 cross_validation stage populates with 6-symbol breakdowns.
+
+Your mission — split into two phases:
+
+PHASE 1 — Verification (~30 min, before any new code). User will run 2-3 more crypto-focused cycles. Your job:
+(a) Watch signal_decisions: confirm F2 cross_validation stage rows continue to appear with per-symbol breakdowns; confirm any new crypto activations carry reason='family_cross_validated'.
+(b) Check that the 5 new crypto templates (Donchian Breakout Daily, Keltner Breakout 4H, OBV Accumulation Daily, 20D MA Variable Cross Daily, BB Volume Breakout Daily) each get proposed + WF'd. OBV Accumulation Daily on ETH already passed WF via excellent_oos in cycle_1777739783 — it works.
+(c) When BTC prints a +5% 2-bar move (check `SELECT date, close, (close-LAG(close,2) OVER (ORDER BY date))/LAG(close,2) OVER (ORDER BY date) FROM historical_price_cache WHERE symbol='BTC' AND interval='1d' ORDER BY date DESC LIMIT 5`), verify that the 4 activated BTC Follower Daily strategies emit signal_emitted stages → order_submitted → (eventually) order_filled. This is the full signal→order path for the Sprint 1+2 work.
+(d) Spot-check no regressions on equity/ETF/forex/commodity/AE paths — the 15:15 UTC scheduled cycle should still produce ~100-200 pre-WF proposals across all asset classes, not just crypto.
+
+Do not proceed to Phase 2 until at least one complete crypto signal→order path has fired, OR the user explicitly says to move on.
+
+PHASE 2 — Sprint 3 code (ordered by P&L impact, execute top-down):
+
+S3.1 (P0, ~2h) — LONG-side WF bypass tightening. `strategy_proposer.py` lines ~2020-2070. Add consistency gate `(test_sharpe - train_sharpe) ≤ 1.5` on test_dominant AND excellent_oos paths for LONG (mirrors the SHORT tightening from Sprint 1). Strategies where test crushes train by >1.5 Sharpe are regime luck. Verify with before/after wf_validated counts and 2-week live-vs-backtest divergence check.
+
+S3.2 (P1, ~30 min) — Triple EMA Alignment DSL bug. `EMA(10) > EMA(10)` tautology from regex param substitution collapse. Fix the substitution in strategy_proposer.customize_template_parameters to handle positional EMA periods correctly. Template should produce >0 WF trades post-fix.
+
+S3.3 (P1, ~45 min) — MQS persistence. `_save_hourly_equity_snapshot` swallows MQS compute error in bare `except: pass`. Replace with specific exception handler + WARNING log capturing the error signature. Verify non-NULL market_quality_score in recent equity_snapshots after next hour.
+
+S3.4 (P1, ~90 min) — Cross-cycle signal dedup for market-closed deferrals. trading_scheduler needs a 30-min TTL map {(strategy_id, symbol, direction): expires_at}. Market-closed deferral writes to the map; next cycle skips duplicates. Eliminates the 82% FAILED-entry cosmetic bloat. Alternative: skip signal gen for stock/ETF when US market closed AND no extended-hours support.
+
+S3.5 (P2, ~90 min) — trade_id convention unification. Migrate order_monitor.check_submitted_orders to use position.id for log_exit (matches log_entry). Retire the fallback match in log_exit. Should prevent new orphan rows.
+
+Do not ship Sprint 3 until:
+- Phase 1 verified — complete crypto signal→order path fired at least once.
+- Each S3.x validated through a post-deploy cycle showing the intended effect.
+- Zero regressions on existing activations / signal generation.
+
+If any proper fix takes longer than expected, that's fine — we do proper, not fast. Do not propose stopgaps.
+```
+
+### Previous — Sprint 2 kickoff prompt (2026-05-02 evening) — ALREADY EXECUTED, kept for context
 
 Copy this as-is into a new session when you're ready to execute Sprint 2:
 
