@@ -4220,6 +4220,12 @@ class StrategyTemplateLibrary:
         ))
         
         # Crypto Volume Spike Entry — massive volume = institutional interest
+        #
+        # DSL FIX 2026-05-02: entry was `VOLUME > VOLUME_MA(20) * 2.0 AND CLOSE > SMA(20)`
+        # (state) which fires on every high-volume bar in an uptrend. Test windows produced
+        # 76-81 trades (vs advertised 2-5/month = ~12-30 expected). Switch to event-style
+        # entry — VOLUME crossing above 2x VMA captures the *first* spike, then the SMA
+        # filter gates direction. Exit stays state-based.
         templates.append(StrategyTemplate(
             name="Crypto Volume Spike Entry",
             description="Buy on 2x volume spike with price above SMA(20) — institutional accumulation signal",
@@ -4229,7 +4235,7 @@ class StrategyTemplateLibrary:
                 MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
             ],
             entry_conditions=[
-                "VOLUME > VOLUME_MA(20) * 2.0 AND CLOSE > SMA(20)"
+                "VOLUME CROSSES_ABOVE VOLUME_MA(20) * 2.0 AND CLOSE > SMA(20)"
             ],
             exit_conditions=[
                 "CLOSE < SMA(20) OR RSI(14) > 75"
@@ -4533,6 +4539,13 @@ class StrategyTemplateLibrary:
         # ===== CRYPTO MULTI-REGIME TEMPLATES =====
         
         # Crypto EMA Ribbon — works across regimes by following EMA alignment
+        #
+        # DSL FIX 2026-05-02: entry was three parallel state conditions (`EMA(8) > EMA(13)
+        # AND EMA(13) > EMA(21) AND RSI > 40`) which fires every bar in an uptrend once
+        # the alignment forms. 42-43 trades per 6-month window vs advertised 2-5/month =
+        # ~12-30. Switch to event-style: capture the moment the ribbon *aligns* via
+        # EMA(8) CROSSES_ABOVE EMA(13) while EMA(13) > EMA(21) already holds. Exit stays
+        # state-based on the fast-EMA breakdown (ribbon loses alignment).
         templates.append(StrategyTemplate(
             name="Crypto EMA Ribbon",
             description="Buy when EMA(8) > EMA(13) > EMA(21) alignment forms — trend confirmation across regimes",
@@ -4542,9 +4555,7 @@ class StrategyTemplateLibrary:
                 MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL,
             ],
             entry_conditions=[
-                "EMA(8) > EMA(13)",
-                "EMA(13) > EMA(21)",
-                "RSI(14) > 40"
+                "EMA(8) CROSSES_ABOVE EMA(13) AND EMA(13) > EMA(21) AND RSI(14) > 40"
             ],
             exit_conditions=[
                 "EMA(8) < EMA(13) OR RSI(14) > 75"
@@ -5411,8 +5422,13 @@ class StrategyTemplateLibrary:
             description="Buy when price breaks above BB middle band while bandwidth is expanding (upper-lower > ATR*3). Volatility expansion = directional move starting.",
             strategy_type=StrategyType.BREAKOUT,
             market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_WEAK],
+            # DSL FIX 2026-05-02: was `CLOSE > BB_MIDDLE AND (expansion) AND RSI>50` (state)
+            # which fired every hour price held above the middle band. 86-92 trades per
+            # ~180 days vs advertised 3-6/month = ~18-36 expected. Use `CROSSES_ABOVE` on
+            # the middle-band break to capture only the initial break-out bar; the
+            # bandwidth+RSI filters remain state-checks gating the same bar.
             entry_conditions=[
-                "CLOSE > BB_MIDDLE(20, 2) AND (BB_UPPER(20, 2) - BB_LOWER(20, 2)) > ATR(14) * 3 AND RSI(14) > 50"
+                "CLOSE CROSSES_ABOVE BB_MIDDLE(20, 2) AND (BB_UPPER(20, 2) - BB_LOWER(20, 2)) > ATR(14) * 3 AND RSI(14) > 50"
             ],
             exit_conditions=[
                 "CLOSE < BB_MIDDLE(20, 2) OR RSI(14) < 40"
@@ -7429,16 +7445,21 @@ class StrategyTemplateLibrary:
             metadata={"direction": "long", "crypto_optimized": True, "skip_param_override": True, "low_frequency": True}
         ))
 
-        # Crypto Weekly SMA Trend — buy when weekly close above SMA(10) weekly
-        # Uses daily SMA(50) as proxy for weekly SMA(10). Very slow, very patient.
-        # Catches the big 3-6 month crypto rallies.
+        # Crypto Weekly SMA Trend — buy on cross above SMA(50), hold until cross below
+        # DSL FIX 2026-05-02: entry was `CLOSE > SMA(50) AND ...` (state condition) which
+        # re-enters every time price dips below and recovers. Test windows produced 28
+        # trades when the template advertised 1-2/year with WR crashing to 21%. Switching
+        # to `CROSSES_ABOVE` makes the DSL match the documented design — one entry per
+        # trend cycle — and the confirmation filters (ADX, RSI) apply at the crossover
+        # bar only. Exit stays state-based (`CLOSE < SMA(50)`) which is correct for
+        # trend-follow: you want to exit the moment the structural support breaks.
         templates.append(StrategyTemplate(
             name="Crypto Weekly Trend Follow",
             description="Buy when price crosses above SMA(50) with ADX > 20 confirming trend. Hold until SMA(50) breakdown. Quarterly frequency.",
             strategy_type=StrategyType.TREND_FOLLOWING,
             market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL],
             entry_conditions=[
-                "CLOSE > SMA(50) AND ADX(14) > 20 AND RSI(14) > 45 AND RSI(14) < 70"
+                "CLOSE CROSSES_ABOVE SMA(50) AND ADX(14) > 20 AND RSI(14) > 45 AND RSI(14) < 70"
             ],
             exit_conditions=[
                 "CLOSE < SMA(50) OR ADX(14) < 15"
@@ -7462,13 +7483,20 @@ class StrategyTemplateLibrary:
         # When BTC/ETH drops 30%+ from recent high and RSI < 30 on daily,
         # it's historically been a strong accumulation zone.
         # Expects 1-2 trades/year with 20-50% upside.
+        #
+        # DSL FIX 2026-05-02: entry was `CLOSE < SMA(50) * 0.75 AND RSI < 30` (state)
+        # which re-fires every day price stays below the threshold — turning "1 trade/year"
+        # into many trades across a multi-month drawdown. Use `CROSSES_BELOW` to capture
+        # the moment the symbol first enters deep-dip territory, then require RSI<30 as
+        # a concurrent filter. Exit stays state-based (return to SMA or RSI recovery) —
+        # we want to ride the mean reversion back up without re-entering on each wiggle.
         templates.append(StrategyTemplate(
             name="Crypto Deep Dip Accumulation",
             description="Buy when price drops 25%+ below SMA(50) with daily RSI < 30. Extreme oversold accumulation. Hold for recovery.",
             strategy_type=StrategyType.MEAN_REVERSION,
             market_regimes=[MarketRegime.TRENDING_DOWN, MarketRegime.TRENDING_DOWN_STRONG, MarketRegime.TRENDING_DOWN_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING_HIGH_VOL],
             entry_conditions=[
-                "CLOSE < SMA(50) * 0.75 AND RSI(14) < 30"
+                "CLOSE CROSSES_BELOW SMA(50) * 0.75 AND RSI(14) < 30"
             ],
             exit_conditions=[
                 "CLOSE > SMA(50) OR RSI(14) > 65"
@@ -7492,6 +7520,12 @@ class StrategyTemplateLibrary:
         # Crypto Golden Cross — buy on SMA(50) crossing above SMA(200)
         # The classic institutional signal. Fires maybe once per cycle.
         # Historically captures the bulk of crypto bull runs.
+        #
+        # DSL FIX 2026-05-02: exit was `CLOSE < SMA(200)` (state) which fires on any
+        # dip below the 200-day MA even if the Golden Cross structure is intact.
+        # A true Golden Cross strategy exits on the Death Cross (SMA(50) crossing
+        # below SMA(200)) — the structural inverse of the entry. This prevents
+        # re-entry whipsaw when price briefly undercuts the 200MA in a bull market.
         templates.append(StrategyTemplate(
             name="Crypto Golden Cross",
             description="Buy on SMA(50) crossing above SMA(200) — classic bull market signal. Exit on death cross.",
@@ -7501,7 +7535,7 @@ class StrategyTemplateLibrary:
                 "SMA(50) CROSSES_ABOVE SMA(200) AND CLOSE > SMA(50)"
             ],
             exit_conditions=[
-                "CLOSE < SMA(200)"
+                "SMA(50) CROSSES_BELOW SMA(200)"
             ],
             required_indicators=["SMA:50", "SMA:200"],
             default_parameters={
@@ -7642,11 +7676,16 @@ class StrategyTemplateLibrary:
                 MarketRegime.TRENDING_UP_STRONG,
                 MarketRegime.RANGING,
             ],
+            # DSL FIX 2026-05-02: was `CLOSE > EMA(147) AND CLOSE[-1] <= EMA(147)[-1]`
+            # but the DSL grammar does not support the bracket-lag `[-N]` syntax — the
+            # parser throws "No terminal matches '[' in the current parser context" and
+            # the template gets skipped entirely (visible in errors.log for months).
+            # `CROSSES_ABOVE` encodes exactly the same semantics natively.
             entry_conditions=[
-                "CLOSE > EMA(147) AND CLOSE[-1] <= EMA(147)[-1]"
+                "CLOSE CROSSES_ABOVE EMA(147)"
             ],
             exit_conditions=[
-                "CLOSE < EMA(147)"
+                "CLOSE CROSSES_BELOW EMA(147)"
             ],
             required_indicators=["EMA:147"],
             default_parameters={
@@ -7682,14 +7721,17 @@ class StrategyTemplateLibrary:
                 MarketRegime.RANGING_LOW_VOL,
                 MarketRegime.RANGING,          # added 2026-05-02 E3 — vol-compression setup works in any ranging regime, not just LOW_VOL
             ],
+            # DSL FIX 2026-05-02: was `(CLOSE / CLOSE[-20] - 1) > 0.03 AND ATR(20) < ATR(90)`
+            # but the `CLOSE[-N]` bracket-lag syntax doesn't exist in the DSL grammar (parse
+            # error, template skipped). PRICE_CHANGE_PCT(N) is the native primitive for
+            # N-bar percentage return and returns a value scaled ×100 (so 3% threshold → 3.0).
             entry_conditions=[
-                # 20-day return > 3% (positive drift) AND short-term vol compressed vs longer-term
-                "(CLOSE / CLOSE[-20] - 1) > 0.03 AND ATR(20) < ATR(90)"
+                "PRICE_CHANGE_PCT(20) > 3.0 AND ATR(20) < ATR(90)"
             ],
             exit_conditions=[
-                "(CLOSE / CLOSE[-20] - 1) < 0 OR ATR(20) > ATR(90) * 1.5"
+                "PRICE_CHANGE_PCT(20) < 0 OR ATR(20) > ATR(90) * 1.5"
             ],
-            required_indicators=["ATR:20", "ATR:90"],
+            required_indicators=["ATR:20", "ATR:90", "Price Change %:20"],
             default_parameters={
                 "lookback_short": 20,
                 "lookback_long": 90,

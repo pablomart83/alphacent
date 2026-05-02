@@ -45,8 +45,7 @@ TRADING_DSL_GRAMMAR = r"""
         | and_expr "AND" comparison -> and_op
 
     ?comparison: arith_expr COMPARATOR arith_expr -> compare
-        | indicator CROSSOVER indicator -> crossover
-        | indicator CROSSOVER NUMBER -> crossover_number
+        | arith_expr CROSSOVER arith_expr -> crossover
         | "(" expression ")"
 
     ?arith_expr: term
@@ -455,8 +454,6 @@ class DSLCodeGenerator:
             return self._handle_compare(node)
         elif node_type == 'crossover':
             return self._handle_crossover(node)
-        elif node_type == 'crossover_number':
-            return self._handle_crossover_number(node)
         elif node_type == 'add':
             return self._handle_add(node)
         elif node_type == 'subtract':
@@ -568,47 +565,43 @@ class DSLCodeGenerator:
         """
         Handle crossover operation (CROSSES_ABOVE, CROSSES_BELOW).
         
-        CROSSES_ABOVE: indicator1 > indicator2 AND indicator1.shift(1) <= indicator2.shift(1)
-        CROSSES_BELOW: indicator1 < indicator2 AND indicator1.shift(1) >= indicator2.shift(1)
+        CROSSES_ABOVE: expr1 > expr2 AND expr1.shift(1) <= expr2.shift(1)
+        CROSSES_BELOW: expr1 < expr2 AND expr1.shift(1) >= expr2.shift(1)
+
+        Each side may be an arbitrary arith_expr (e.g. `VOLUME_MA(20) * 2.0`
+        or `SMA(50) * 0.75` or a bare `30` constant), not just a bare
+        indicator. The LHS is always wrapped as a pd.Series so `.shift(1)`
+        is valid. The RHS is only wrapped if it contains an indicators[...]
+        reference; pure scalars (bare numbers like `30`) stay as scalars
+        because `scalar.shift(1)` is invalid — instead we use the literal
+        scalar directly on both sides of the inequality.
         """
-        indicator1 = self._visit_node(node.children[0])
+        lhs = self._visit_node(node.children[0])
         crossover_type = str(node.children[1])
-        indicator2 = self._visit_node(node.children[2])
-        
-        # Wrap indicators in pd.Series for safety — prevents crashes when
-        # indicator cache returns numpy arrays instead of pandas Series.
-        # .shift() only works on pd.Series, not numpy arrays.
-        ind1 = f"pd.Series({indicator1}, index=data.index)" if "indicators[" in indicator1 else indicator1
-        ind2 = f"pd.Series({indicator2}, index=data.index)" if "indicators[" in indicator2 else indicator2
-        
+        rhs = self._visit_node(node.children[2])
+
+        # LHS is always a pd.Series — even if it's a bare PRICE_FIELD like
+        # CLOSE, _handle_price_field returns `data["close"]` which is a
+        # Series. Wrap unconditionally so `.shift(1)` is always safe.
+        ind1 = f"pd.Series({lhs}, index=data.index)"
+
+        # RHS: if it references an indicator or price_field, it's a Series
+        # and needs wrapping for .shift(). If it's a pure scalar (e.g. 30),
+        # don't wrap — use it as a scalar on both sides of the inequality.
+        rhs_is_series = ("indicators[" in rhs) or ("data[" in rhs)
+        if rhs_is_series:
+            ind2 = f"pd.Series({rhs}, index=data.index)"
+            shift_rhs = f"{ind2}.shift(1)"
+        else:
+            ind2 = rhs
+            shift_rhs = rhs  # scalar — no shift
+
         if crossover_type == 'CROSSES_ABOVE':
             return (f"({ind1} > {ind2}) & "
-                   f"({ind1}.shift(1) <= {ind2}.shift(1))")
+                   f"({ind1}.shift(1) <= {shift_rhs})")
         elif crossover_type == 'CROSSES_BELOW':
             return (f"({ind1} < {ind2}) & "
-                   f"({ind1}.shift(1) >= {ind2}.shift(1))")
-        else:
-            raise ValueError(f"Unknown crossover type: {crossover_type}")
-
-    def _handle_crossover_number(self, node: Tree) -> str:
-        """
-        Handle crossover against a scalar number (e.g., STOCH(14) CROSSES_ABOVE 30).
-
-        CROSSES_ABOVE number: indicator > number AND indicator.shift(1) <= number
-        CROSSES_BELOW number: indicator < number AND indicator.shift(1) >= number
-        """
-        indicator1 = self._visit_node(node.children[0])
-        crossover_type = str(node.children[1])
-        number = str(node.children[2])
-
-        ind1 = f"pd.Series({indicator1}, index=data.index)" if "indicators[" in indicator1 else indicator1
-
-        if crossover_type == 'CROSSES_ABOVE':
-            return (f"({ind1} > {number}) & "
-                    f"({ind1}.shift(1) <= {number})")
-        elif crossover_type == 'CROSSES_BELOW':
-            return (f"({ind1} < {number}) & "
-                    f"({ind1}.shift(1) >= {number})")
+                   f"({ind1}.shift(1) >= {shift_rhs})")
         else:
             raise ValueError(f"Unknown crossover type: {crossover_type}")
 

@@ -3608,15 +3608,25 @@ class StrategyEngine:
                         indicator_list.append(spec)
                         referenced_indicators.add(spec)
 
-            # Check for PRICE_CHANGE_PCT references — auto-add with correct period
+            # Check for PRICE_CHANGE_PCT references — auto-add with correct period.
+            # Multiple distinct periods in one condition (e.g. PRICE_CHANGE_PCT(1)
+            # and PRICE_CHANGE_PCT(5)) must each register as their own spec;
+            # the generic "Price Change %" spec defaults to period=1 and does
+            # NOT substitute for a period-N spec. Surfaced 2026-05-02 when
+            # Crypto 20D MA Variable Cross Daily declared required_indicators=
+            # ["SMA", "Price Change %"] but its DSL used PRICE_CHANGE_PCT(5):
+            # only PRICE_CHANGE_PCT_1 was computed, DSL eval failed with
+            # "Missing indicators: PRICE_CHANGE_PCT_5" and the template
+            # produced 0 trades on every WF.
             if "PRICE_CHANGE_PCT" in condition:
                 import re as _re_pcp
                 for match in _re_pcp.finditer(r'PRICE_CHANGE_PCT\((\d+)\)', condition):
                     period = int(match.group(1))
                     spec = f"Price Change %:{period}"
-                    if spec not in indicator_list and not any(
-                        i == spec or i == "Price Change %" for i in indicator_list
-                    ):
+                    # Only block an exact-spec duplicate. The bare-name
+                    # "Price Change %" (period=1) does NOT substitute for
+                    # period-N specs; each period needs its own computation.
+                    if spec not in indicator_list:
                         indicator_list.append(spec)
                         referenced_indicators.add(spec)
                 # Fallback: no period found, add default
@@ -3831,9 +3841,16 @@ class StrategyEngine:
                         expected_keys = [f"DONCHIAN_{side}_{period}"]
                     else:
                         params["period"] = period
-                        # Update expected keys with custom period
+                        # Update expected keys with custom period. Indicators
+                        # whose computed key carries the period need their
+                        # expected_keys rewritten so the downstream dispatch
+                        # finds the right cached series.
                         if indicator_name in ["RSI", "SMA", "EMA", "ATR", "Volume MA", "ADX"]:
                             expected_keys = [f"{method_name}_{period}"]
+                        elif indicator_name == "Price Change %":
+                            # method_name is PRICE_CHANGE_PCT; key format
+                            # matches trading_dsl mapping: PRICE_CHANGE_PCT_<period>.
+                            expected_keys = [f"PRICE_CHANGE_PCT_{period}"]
                     logger.info(f"  Using custom period: {period}")
                 elif custom_period and compound_args is not None:
                     # Compound-args indicator (e.g. Keltner:20,14,2.0)
