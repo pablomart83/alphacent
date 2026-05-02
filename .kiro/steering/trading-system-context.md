@@ -146,7 +146,7 @@ Frontend (React/Vite) → Nginx (SSL/443) → Backend (FastAPI/uvicorn)
 
 ### Position Sizing (post Apr 29 overhaul)
 - `BASE_RISK_PCT`: 0.6% of equity per trade | `CONFIDENCE_FLOOR`: 0.50 | `MINIMUM_ORDER_SIZE`: $5,000
-- Symbol cap: 3% equity | Sector soft cap: 30% | Portfolio heat cap: 30%
+- Symbol cap: 5% | Sector soft cap: 30% | Portfolio heat cap: 30%
 - Vol scaling: 0.10x–1.50x (target vol 16%)
 - Drawdown sizing: 50% reduction >5% DD, 75% reduction >10% DD (30d rolling peak)
 

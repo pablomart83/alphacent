@@ -98,7 +98,7 @@ Stock/ETF: SL 6%, TP 15% | Forex: SL 2%, TP 5% | Crypto: SL 8%, TP 20% | Index: 
 - `BASE_RISK_PCT`: 0.6% of equity per trade
 - `CONFIDENCE_FLOOR`: 0.50
 - `MINIMUM_ORDER_SIZE`: $5,000
-- Symbol cap: 3% | Sector soft cap: 30% | Portfolio heat: 30%
+- Symbol cap: 5% | Sector soft cap: 30% | Portfolio heat: 30%
 - Drawdown sizing: 50% >5% DD, 75% >10% DD (30d peak)
 - Vol scaling: 0.10x–1.50x
 - **Per-pair loser penalty (May 2)**: (template, symbol) with ≥3 net-losing trades halves size until net-P&L flips positive.

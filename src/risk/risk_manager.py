@@ -779,10 +779,13 @@ class RiskManager:
             return 0.0
 
         # ── Step 6: Symbol concentration cap ────────────────────────────────
-        # No single symbol > 3% of equity across all strategies.
-        # Reduced from 5% — with larger positions ($5-10K each), 5% = $23K per symbol
-        # is too concentrated for a 50-position book. 3% = $14K is the right limit.
-        symbol_cap = equity * 0.03
+        # No single symbol > 5% of equity across all strategies.
+        # Raised from 3% on 2026-05-02 after audit — 3% was too tight given
+        # typical per-trade size ($5-10K) and the 50+ position book. At 5% of
+        # ~$480K equity the cap is ~$24K per symbol, which lets a 2-3 position
+        # conviction stack build on winners like NVDA without every new signal
+        # being room-capped to near-zero.
+        symbol_cap = equity * 0.05
         existing_symbol_exposure = sum(
             self._get_position_value(pos)
             for pos in positions
