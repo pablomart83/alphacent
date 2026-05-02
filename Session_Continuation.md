@@ -15,7 +15,7 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 2, 2026, 08:15 UTC)
+## Current System State (May 2, 2026, 12:00 UTC post-Tier-1/2/3)
 
 - **Equity:** ~$475K (unchanged from May 1)
 - **Open positions:** 85-90 depending on cycle
@@ -25,11 +25,41 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 - **VIX:** 16.89
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
-**Verified healthy:** process 931078 (restart on SignalAction hotfix deploy). TSL cycles emitting `errors=0` consistently. No crashes in errors.log since yesterday's post-audit deploy.
+**Verified healthy:** restart on Tier-3 deploy ~11:55 UTC. errors.log clean except pre-existing DSL parse warning from Triple EMA Alignment (P2 known bug). signal_decisions still populating (397 rows in last 2h pre-restart).
 
 ---
 
-## Sessions shipped 2026-05-01 and 2026-05-02
+## Session shipped 2026-05-02 afternoon (post-audit fixes)
+
+### Tier 1 — critical / P0s
+
+- **P0-1 Retirement black hole** (commit `5ba602e`) — 33 strategies carried pending_retirement yet had submitted 91 zombie entry orders after the flag was set. Root cause: two independent bugs.
+  - Bug A: `trading_scheduler.py` BACKTESTED-branch filter checked `activation_approved` but not `pending_retirement`. 12 BACKTESTED+approved+pending-retirement strategies slipped through.
+  - Bug B: `monitoring_service._demote_idle_strategies` runs every 60s; when DEMO strategy has no open positions/orders it demotes to BACKTESTED with `activation_approved=True` — even if pending_retirement was set. This resurrected the eligibility the decay/health paths had just stripped.
+  - Fix: refactored filter into `_is_eligible()` helper that blocks pending_retirement regardless of status; `_demote_idle_strategies` now skips pending_retirement strategies (they flow through `_process_pending_retirements` instead, which does NOT resurrect the flag). Also moved `meta.pop('activation_approved')` before `flag_modified` in the health-path flagging branch.
+  - DB cleanup: stripped `activation_approved` from all 24 zombie strategies (`UPDATE strategies SET strategy_metadata = (strategy_metadata::jsonb - 'activation_approved')::json WHERE (strategy_metadata::jsonb->>'pending_retirement')::text='true' AND (strategy_metadata::jsonb->>'activation_approved')::text IS NOT NULL`).
+  - Verified post-deploy: `zombies_with_activation_approved=0`. 19 DEMO zombies + 14 BACKTESTED zombies remain and are now correctly filtered. They'll trend to 0 as positions close.
+
+- **P0-2 live_trade_count** (commit `9a44ed4`) — was 0 on all 180 strategies despite 700+ closed trades. Root cause: `order_executor._increment_strategy_live_trade_count` only fires on synchronous fills via `handle_fill()` which doesn't run in practice (all real fills are async via `order_monitor.check_submitted_orders`). Added increment in order_monitor fill-finalization block, scoped to `order_action='entry'` so exits/retirement close orders don't inflate the counter. Backfilled historical counts from trade_journal (96 strategies updated). DEMO distribution post-fix: avg 2.7 live_trade_count, max 22, 11 strategies with ≥5 trades — `min_live_trades_before_evaluation=5` gate now functional.
+
+- **P0-6 cycle_error stage** (commit `9a44ed4`) — cycle-stage failures (SignalAction NameError, Tuple NameError) only wrote to cycle_history.log, never to `signal_decisions`. Observability funnel stayed incomplete on failed cycles. Now every `stats['errors']` entry collected during a cycle is mirrored to `signal_decisions` as `stage='cycle_error'` (up to 50 errors per cycle). Also wired into the top-level fatal except block so catastrophic failures produce a funnel row.
+
+### Tier 2 — noise + sizing
+
+- **P1-5 Factor-gate noise** (commit `409ad90`) — Factor-validation gate rejections were `logger.warning` and appended to `stats['errors']`, which surfaces them as ERROR in cycle_history.log (4 per cycle). Reclassified to INFO and dropped from `stats['errors']` — they're filtering outcomes, not cycle errors.
+
+- **P1-4 MINIMUM_ORDER_SIZE penalty bypass** (commit `409ad90`) — `risk_manager.calculate_position_size` Step 11 bumped any sub-$5K position back to $5K even when drawdown sizing, vol scaling, or loser-pair penalty had fired (10× overrisking). Added `penalty_applied` flag across Steps 3 (vol scale <1.0), 9 (drawdown), 10b (loser pair). When True at Step 11, return 0 instead of bumping. Penalty-reduced trades below minimum are skipped rather than trading at 10× the risk-managed target.
+
+### Tier 3 — cleanup + infra
+
+- **P1-1** — Deleted 799 FAILED-entry legacy orders from the Apr 27-29 DST spike.
+- **P1-3** — Negative `fill_time_seconds` rows: none remained post-P1-1 delete (all were on the deleted rows).
+- **P1-extra Crypto long-horizon WF window** (commit `409ad90`) — Long-horizon 1d crypto templates (21W MA, Vol-Compression, Weekly Trend Follow, Golden Cross) hold weeks/months and can't produce enough trades in 180d. Extended `test_days`+`train_days` to 730d for this set when asset_class=crypto AND interval=1d. Applied in both WF call sites (primary + watchlist).
+- **P1-6** — Already landed in commit `8c1b263` in a prior session.
+
+---
+
+## Session shipped 2026-05-02 morning (observability fix + crypto cost + symbol cap)
 
 ### Batch 1 / Quick-wins (May 1) — data-pipeline audit
 Shipped 10:02-10:54 UTC. DST yfinance fix, stale-1d detection in full sync, 1d corruption fix in quick update, conviction threshold 70→65, ETF/Index tradability bump, min_sharpe 0.4→1.0, crypto symbol normalization, yfinance tz-aware UTC bounds, freshness SLA gate (with a hotfix for the `session_scope` AttributeError that briefly skipped TSL updates for ~30 min), interval-aware incremental-fetch gate, FRED retry, rejection/zero-trade blacklists, pool_pre_ping, errors.log rotation. See previous Session_Continuation history for details; all commits are pre-May-2.
@@ -194,7 +224,39 @@ ORDER BY ABS(COALESCE((s.strategy_metadata->>'wf_test_sharpe')::float, 0)) DESC;
 
 ## Open Items — Priority Order
 
-### Next sprint (2026-05-02 audit findings) — USE THE PROMPT BELOW TO START
+### Next sprint (after Tier 1/2/3 shipped 2026-05-02 afternoon) — next session starter
+
+Tier-1/2/3 fixes from AUDIT_REPORT_2026-05-02.md all shipped this session.
+Local commits `5ba602e`, `9a44ed4`, `409ad90` apply the full plan. Git push
+is blocked by Code Defender at the Kiro environment level — commits exist
+locally and need a `git-defender --request-repo` approval to push.
+
+Priority for next session:
+1. Request-repo approval and push commits (blocked by environment, not code).
+2. Verify post-overnight-cycle state:
+   - `active_zombies` trending to 0 as positions close
+   - `live_trade_count` incrementing on new fills (SELECT status, AVG(live_trade_count) FROM strategies GROUP BY status — compare to last-session numbers)
+   - `signal_decisions.stage='cycle_error'` rows if any stage threw
+   - Factor-gate rejections now INFO, not in cycle errors
+   - Penalty-applied trades being skipped if sized sub-$5K
+3. Deferred work (now on deck):
+   - P1-2 trade_id convention unification (90 min — pair with next architectural work)
+   - P2-1 Vol-Compression template non-propose debug
+   - P2-5 Overview chart panel rewrite (needs design doc first)
+   - Monday Asia Open session template (needs DSL HOUR() support — 2-3h infra)
+   - Entry-timing score (needs per-minute post-entry price snapshots)
+
+Copy this as-is into a new session when you're ready to execute:
+
+```
+Start this session by reading Session_Continuation.md (this file), AUDIT_REPORT_2026-05-02.md, and .kiro/steering/trading-system-context.md — in that order. They contain the full state, audit findings, and permanent rules.
+
+Context in one paragraph: previous sessions shipped Tier 1/2/3 fixes from the May 2 audit — retirement black hole (P0-1), live_trade_count async fix + backfill (P0-2), cycle_error stage (P0-6), factor-gate noise reclassification (P1-5), MINIMUM_ORDER_SIZE penalty bypass (P1-4), crypto long-horizon WF window (P1-extra), and legacy row cleanup. All local commits exist; push was blocked by Code Defender.
+
+Your mission: (a) request-repo approval and push the three pending commits (5ba602e, 9a44ed4, 409ad90), (b) verify post-overnight-cycle state with the queries in Session_Continuation.md, (c) pick up deferred work: P1-2 trade_id unification OR P2-1 Vol-Compression debug OR Monday Asia Open.
+```
+
+### Previous — next sprint (2026-05-02 audit findings) — ALREADY EXECUTED, kept for context
 
 Copy this as-is into a new session when you're ready to execute:
 
