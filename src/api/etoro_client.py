@@ -575,6 +575,51 @@ class EToroAPIClient:
 
         logger.info(f"Fetching historical data for {symbol} from {start_date.date()} to {end_date.date()}")
 
+        # Sprint 4 S4.0 (2026-05-02): Binance-first for crypto.
+        # This is the eToro-fallback path in the market_data_manager chain
+        # (Yahoo → FMP → eToro). Crypto should continue through Binance
+        # even on this fallback — there's no point falling back to the
+        # Yahoo branch below when Binance still works fine. Matches the
+        # same early-exit in market_data_manager._fetch_historical_from_yahoo_finance.
+        try:
+            from src.api.binance_ohlc import (
+                fetch_klines as _bn_fetch_e,
+                is_supported as _bn_supported_e,
+                BinanceAPIError as _BnErr_e,
+            )
+            # Normalise eToro wire → display for the adapter's symbol map
+            _CRYPTO_WIRE_TO_DISPLAY = {
+                "BTCUSD": "BTC", "ETHUSD": "ETH", "SOLUSD": "SOL",
+                "AVAXUSD": "AVAX", "LINKUSD": "LINK", "DOTUSD": "DOT",
+                "XRPUSD": "XRP", "ADAUSD": "ADA", "NEARUSD": "NEAR",
+                "LTCUSD": "LTC", "BCHUSD": "BCH",
+            }
+            _bn_sym = symbol.upper().strip()
+            if _bn_sym in _CRYPTO_WIRE_TO_DISPLAY:
+                _bn_sym = _CRYPTO_WIRE_TO_DISPLAY[_bn_sym]
+            # This fallback path has no explicit interval param — eToro
+            # fallback has always been 1d. Same default here.
+            if _bn_supported_e(_bn_sym, "1d"):
+                try:
+                    bars = _bn_fetch_e(_bn_sym, start_date, end_date, "1d")
+                    if bars:
+                        logger.info(
+                            f"Binance (eToro-fallback path): {len(bars)} 1d bars "
+                            f"for {_bn_sym}"
+                        )
+                        return bars
+                    logger.warning(
+                        f"Binance returned 0 bars for {_bn_sym} 1d; "
+                        f"falling through to Yahoo"
+                    )
+                except _BnErr_e as be:
+                    logger.info(
+                        f"Binance unavailable for {_bn_sym} 1d ({be}); "
+                        f"falling through to Yahoo"
+                    )
+        except ImportError:
+            pass
+
         try:
             import yfinance as yf
             import pandas as pd

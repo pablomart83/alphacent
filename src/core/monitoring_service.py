@@ -970,7 +970,7 @@ class MonitoringService:
             md = self._market_data
             
             end = datetime.now()
-            stats = {"1h": 0, "1d": 0, "errors": 0, "memory_loaded": 0, "db_cached": 0, "yahoo_batch": 0}
+            stats = {"1h": 0, "4h": 0, "1d": 0, "errors": 0, "memory_loaded": 0, "db_cached": 0, "yahoo_batch": 0}
             
             # Phase 1: Check DB cache for each symbol, collect those needing Yahoo fetch
             need_yahoo_1d = []  # symbols that need fresh 1d data
@@ -1075,7 +1075,29 @@ class MonitoringService:
             # Initialize yfinance cache before batch download (thread-safe, once only)
             from src.data.market_data_manager import ensure_yfinance_cache
             ensure_yfinance_cache()
-            
+
+            # Sprint 4 S4.0.1 (2026-05-02): route crypto symbols through Binance
+            # before the Yahoo batch. Binance provides deeper historical windows
+            # at 1h/4h/1d for all 6 tradeable crypto symbols, no auth required.
+            # Any fetch that fails falls back into the Yahoo batch below.
+            #
+            # Without this branch, the periodic sync would keep Yahoo-only
+            # crypto cache entries forever — the WF-path Binance wiring in
+            # _fetch_historical_from_yahoo_finance only fires on WF demand,
+            # which doesn't populate the full DB cache.
+            try:
+                from src.api.binance_ohlc import (
+                    fetch_klines as _bn_fetch,
+                    is_supported as _bn_supported,
+                    BinanceAPIError as _BnErr,
+                )
+                _crypto_symbols_handled: set = set()
+            except ImportError:
+                _bn_fetch = None
+                _bn_supported = None
+                _BnErr = Exception
+                _crypto_symbols_handled = set()
+
             for interval, need_list, start_dt, period_hint in [
                 ("1d", need_yahoo_1d, end - timedelta(days=220), "220d"),
                 ("1h", need_yahoo_1h, end - timedelta(days=180), "180d"),
@@ -1090,11 +1112,81 @@ class MonitoringService:
                     need_list = [s for s in need_list if s.upper() not in DAILY_ONLY_SYMBOLS]
                     if not need_list:
                         continue
-                
+
+                # Binance-first branch for crypto. Process each supported
+                # symbol, write its bars to DB cache, and remove it from
+                # need_list so the Yahoo batch below doesn't re-fetch.
+                if _bn_fetch is not None:
+                    remaining = []
+                    bn_symbols_fetched = 0
+                    bn_bars_total = 0
+                    for sym in need_list:
+                        if sym.upper() not in crypto_set:
+                            remaining.append(sym)
+                            continue
+                        if not _bn_supported(sym, interval):
+                            remaining.append(sym)
+                            continue
+                        try:
+                            bars = _bn_fetch(sym, start_dt, end, interval)
+                        except _BnErr as be:
+                            logger.info(
+                                f"[bg-full-sync] Binance failed for {sym} {interval} "
+                                f"({be}); falling back to Yahoo"
+                            )
+                            remaining.append(sym)
+                            continue
+                        except Exception as be:
+                            logger.warning(
+                                f"[bg-full-sync] Binance unexpected error for {sym} "
+                                f"{interval}: {be}"
+                            )
+                            remaining.append(sym)
+                            continue
+                        if not bars:
+                            logger.warning(
+                                f"[bg-full-sync] Binance returned 0 bars for {sym} "
+                                f"{interval}; falling back to Yahoo"
+                            )
+                            remaining.append(sym)
+                            continue
+                        # Write to DB cache using the manager's existing save path,
+                        # which dedupes against existing rows.
+                        try:
+                            md._save_historical_to_db(sym, bars, interval)
+                            stats[interval] = stats.get(interval, 0) + 1
+                            stats["db_cached"] = stats.get("db_cached", 0) + 1
+                            bn_symbols_fetched += 1
+                            bn_bars_total += len(bars)
+                            _crypto_symbols_handled.add(sym)
+                            # Load into in-memory cache if this is an active
+                            # strategy symbol (matches the active-boost logic
+                            # in the Yahoo batch below).
+                            if sym in active_symbols:
+                                cache_key = f"{sym}:{interval}:25"
+                                hist_cache.set(cache_key, list(bars))
+                                stats["memory_loaded"] = stats.get("memory_loaded", 0) + 1
+                        except Exception as e:
+                            logger.warning(
+                                f"[bg-full-sync] Binance DB save failed for {sym} "
+                                f"{interval}: {e}"
+                            )
+                            remaining.append(sym)
+                    if bn_symbols_fetched:
+                        logger.info(
+                            f"[bg-full-sync] Binance: {bn_symbols_fetched} crypto symbols "
+                            f"({bn_bars_total} bars) for {interval} — "
+                            f"{len(remaining)} remaining for Yahoo"
+                        )
+                    need_list = remaining
+
+                if not need_list:
+                    continue
+
                 # Convert to Yahoo tickers
                 sym_to_yf = {sym: to_yahoo_ticker(sym) for sym in need_list}
                 yf_tickers = list(set(sym_to_yf.values()))
-                
+
                 logger.info(f"[bg-full-sync] Batch Yahoo download: {len(yf_tickers)} symbols for {interval}")
                 
                 try:
@@ -1255,11 +1347,62 @@ class MonitoringService:
                 except Exception as e:
                     logger.warning(f"[bg-full-sync] Yahoo batch download failed for {interval}: {e}")
                     stats["errors"] += len(need_list)
-            
+
+            # Sprint 4 S4.0.2 (2026-05-02): dedicated crypto 4h Binance pass.
+            # The main loop above only covers 1d and 1h because non-crypto 4h
+            # is fetched on-demand by 4h strategies (Yahoo 1h→4h resample).
+            # But crypto 4h strategies need the cache fresh between cycles so
+            # WF doesn't stall waiting for a cold fetch. Binance serves 4h
+            # natively with years of depth; we pull 730d (~4380 bars) for
+            # all 6 crypto symbols and dedupe against existing rows.
+            #
+            # Kept separate from the main loop so this path doesn't interact
+            # with the Yahoo-based staleness/batch logic, and so a Binance
+            # outage only affects crypto 4h (not 1d/1h which also now route
+            # through Binance inside the main loop).
+            if _bn_fetch is not None:
+                bn_4h_symbols = 0
+                bn_4h_bars = 0
+                crypto_syms_for_4h = [s for s in crypto_set if _bn_supported(s, "4h")]
+                start_4h = end - timedelta(days=730)
+                for sym in crypto_syms_for_4h:
+                    try:
+                        bars = _bn_fetch(sym, start_4h, end, "4h")
+                    except _BnErr as be:
+                        logger.info(
+                            f"[bg-full-sync] Binance 4h failed for {sym} ({be})"
+                        )
+                        continue
+                    except Exception as be:
+                        logger.warning(
+                            f"[bg-full-sync] Binance 4h unexpected error for {sym}: {be}"
+                        )
+                        continue
+                    if not bars:
+                        continue
+                    try:
+                        md._save_historical_to_db(sym, bars, "4h")
+                        stats["4h"] = stats.get("4h", 0) + 1
+                        bn_4h_symbols += 1
+                        bn_4h_bars += len(bars)
+                        if sym in active_symbols:
+                            hist_cache.set(f"{sym}:4h:25", list(bars))
+                            stats["memory_loaded"] = stats.get("memory_loaded", 0) + 1
+                    except Exception as e:
+                        logger.warning(
+                            f"[bg-full-sync] Binance 4h DB save failed for {sym}: {e}"
+                        )
+                if bn_4h_symbols:
+                    logger.info(
+                        f"[bg-full-sync] Binance 4h: {bn_4h_symbols} crypto symbols "
+                        f"({bn_4h_bars} bars) for 4h (730d window)"
+                    )
+
             elapsed = _time.time() - t0
             logger.info(
-                f"Price data sync complete: {stats['1d']} daily + {stats['1h']} hourly symbols "
-                f"synced in {elapsed:.1f}s ({stats['db_cached']} from DB cache, "
+                f"Price data sync complete: {stats['1d']} daily + {stats['1h']} hourly "
+                f"+ {stats.get('4h', 0)} 4h symbols synced in {elapsed:.1f}s "
+                f"({stats['db_cached']} from DB cache, "
                 f"{stats['yahoo_batch']} from Yahoo batch, {stats['memory_loaded']} loaded to memory, "
                 f"{stats['errors']} errors, {len(active_symbols)} active strategy symbols)"
             )
@@ -1269,6 +1412,7 @@ class MonitoringService:
             self._last_price_sync_result = {
                 "1d": stats.get("1d", 0),
                 "1h": stats.get("1h", 0),
+                "4h": stats.get("4h", 0),
                 "db_cached": stats.get("db_cached", 0),
                 "yahoo_batch": stats.get("yahoo_batch", 0),
                 "memory_loaded": stats.get("memory_loaded", 0),

@@ -476,6 +476,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
               {[
                 { name: 'eToro', data: monitoringStatus?.system?.etoro },
                 { name: 'Yahoo', data: monitoringStatus?.system?.yahoo },
+                { name: 'Binance', data: monitoringStatus?.system?.binance },
                 { name: 'FMP', data: monitoringStatus?.system?.fmp },
                 { name: 'FRED', data: monitoringStatus?.system?.fred },
                 { name: 'Marketaux', data: newsSentimentStatus ? {
@@ -492,6 +493,7 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                       data?.status === 'configured' ? 'bg-blue-400' :
                       data?.status === 'degraded' ? 'bg-amber-400' :
                       data?.status === 'disabled' || data?.status === 'no_api_key' || data?.status === 'rate_limited' ? 'bg-gray-500' :
+                      data?.status === 'stale' || data?.status === 'idle' ? 'bg-amber-400' :
                       !data ? 'bg-gray-600' : 'bg-red-400'
                     }`} />
                     <span className="text-xs font-mono font-semibold" style={{ color: 'var(--color-text-primary)' }}>{name}</span>
@@ -501,12 +503,30 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                       data?.status === 'healthy' ? 'text-green-400' :
                       data?.status === 'configured' ? 'text-blue-400' :
                       data?.status === 'degraded' ? 'text-amber-400' :
+                      data?.status === 'stale' || data?.status === 'idle' ? 'text-amber-400' :
                       'text-gray-500'
                     }>{data?.status ?? 'unknown'}</span>
                   </p>
                   {data?.coverage != null && (
                     <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {data.coverage} coverage
+                      {data.coverage}
+                    </p>
+                  )}
+                  {data?.last_fetch_age != null && (
+                    <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                      {data.last_fetch_age}
+                    </p>
+                  )}
+                  {data?.total_bars != null && (
+                    <p className="text-xs font-mono mt-0.5" style={{ color: '#22c55e' }}>
+                      {data.total_bars.toLocaleString()} bars
+                    </p>
+                  )}
+                  {data?.bars_by_interval != null && (
+                    <p className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                      {Object.entries(data.bars_by_interval as Record<string, { bars: number }>)
+                        .map(([iv, info]) => `${iv}:${info.bars}`)
+                        .join(' ')}
                     </p>
                   )}
                   {data?.req_remaining != null && (

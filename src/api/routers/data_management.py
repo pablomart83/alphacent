@@ -539,6 +539,51 @@ def _run_sync_with_logging(mon) -> None:
                     f"1h: {stats['1h_fetched']} fetched, {stats['1h_cached']} cached, {stats['1h_err']} err"
                 )
 
+        # Sprint 4 S4.0.2 (2026-05-02): crypto 4h pass via Binance.
+        # Mirrors the background sync's dedicated 4h block. The main loop
+        # above covers 1d and 1h but not 4h because non-crypto 4h is
+        # fetched on-demand by 4h strategies. Crypto 4h benefits from a
+        # fresh cache between cycles so WF doesn't stall on a cold fetch.
+        stats["4h_fetched"] = 0
+        stats["4h_err"] = 0
+        try:
+            from src.api.binance_ohlc import (
+                fetch_klines as _bn_fetch_4h,
+                is_supported as _bn_supported_4h,
+                BinanceAPIError as _BnErr4h,
+            )
+            start_4h = end - timedelta(days=730)
+            for sym in sorted(crypto_set):
+                if not _bn_supported_4h(sym, "4h"):
+                    continue
+                try:
+                    bars = _bn_fetch_4h(sym, start_4h, end, "4h")
+                except _BnErr4h as be:
+                    _capture_log(f"  4h ERROR {sym}: Binance — {str(be)[:100]}")
+                    stats["4h_err"] += 1
+                    continue
+                except Exception as be:
+                    _capture_log(f"  4h ERROR {sym}: unexpected — {str(be)[:100]}")
+                    stats["4h_err"] += 1
+                    continue
+                if not bars:
+                    continue
+                try:
+                    md._save_historical_to_db(sym, bars, "4h")
+                    stats["4h_fetched"] += 1
+                    if sym in active_symbols:
+                        hist_cache.set(f"{sym}:4h:25", list(bars))
+                        stats["memory"] += 1
+                except Exception as e:
+                    _capture_log(f"  4h SAVE ERROR {sym}: {str(e)[:100]}")
+                    stats["4h_err"] += 1
+            _capture_log(
+                f"4h crypto: {stats['4h_fetched']} symbols fetched via Binance, "
+                f"{stats['4h_err']} errors"
+            )
+        except ImportError:
+            _capture_log("4h crypto skipped — Binance adapter unavailable")
+
         elapsed = _time.time() - t0
         total_1d = stats['1d_fetched'] + stats['1d_cached']
         total_1h = stats['1h_fetched'] + stats['1h_cached']
@@ -546,16 +591,17 @@ def _run_sync_with_logging(mon) -> None:
             f"DONE in {elapsed:.1f}s — "
             f"1d: {stats['1d_fetched']} fetched + {stats['1d_cached']} from DB = {total_1d} | "
             f"1h: {stats['1h_fetched']} fetched + {stats['1h_cached']} from DB = {total_1h} | "
+            f"4h: {stats['4h_fetched']} fetched (crypto only) | "
             f"{stats['memory']} loaded to memory | "
             f"{stats['weekend_skip']} weekend-skipped | "
-            f"{stats['1d_err']+stats['1h_err']} errors"
+            f"{stats['1d_err']+stats['1h_err']+stats['4h_err']} errors"
         )
 
         # Signal to trading scheduler
         mon._price_sync_completed = True
 
         _last_sync_result = {
-            "success": stats['1d_err'] + stats['1h_err'] < len(all_symbols) * 0.2,
+            "success": stats['1d_err'] + stats['1h_err'] + stats.get('4h_err', 0) < len(all_symbols) * 0.2,
             "completed_at": datetime.now().isoformat(),
             "duration_s": round(elapsed, 1),
             "stats": {
@@ -567,6 +613,8 @@ def _run_sync_with_logging(mon) -> None:
                 "hourly_cached": stats["1h_cached"],
                 "hourly_errors": stats["1h_err"],
                 "hourly_skipped": stats["1h_skip"],
+                "fourhour_fetched": stats.get("4h_fetched", 0),
+                "fourhour_errors": stats.get("4h_err", 0),
                 "weekend_skipped": stats["weekend_skip"],
                 "memory_loaded": stats["memory"],
                 "total_symbols": len(all_symbols),
@@ -946,7 +994,86 @@ async def get_monitoring_status():
             result["system"]["yahoo"] = yahoo_status
         except Exception:
             result["system"]["yahoo"] = {"name": "Yahoo Finance", "status": "unknown"}
-        
+
+        # Binance status — primary for crypto 1h/4h/1d since Sprint 4 S4.0.
+        # Derived from:
+        #   - DB row counts by source=BINANCE on crypto symbols (coverage)
+        #   - Latest fetched_at on Binance-sourced rows (freshness)
+        #   - Last Binance log line isn't available programmatically, so we
+        #     use the DB as source of truth: if the latest Binance-sourced
+        #     fetched_at is within 10 minutes we're healthy.
+        try:
+            binance_status = {
+                "name": "Binance",
+                "status": "unknown",
+                "note": "Public API — crypto 1h/4h/1d primary",
+            }
+            from src.models.database import get_database as _gd_bn
+            from sqlalchemy import text as _bn_text
+            _db_bn = _gd_bn()
+            _sess_bn = _db_bn.get_session()
+            try:
+                # Coverage: bar count by interval
+                by_interval = _sess_bn.execute(_bn_text(
+                    """
+                    SELECT interval, COUNT(*) AS bars,
+                           MIN(date) AS min_date, MAX(date) AS max_date,
+                           MAX(fetched_at) AS latest_fetch
+                    FROM historical_price_cache
+                    WHERE source = 'BINANCE'
+                    GROUP BY interval
+                    ORDER BY interval
+                    """
+                )).fetchall()
+                bars_by_interval = {}
+                latest_fetch_overall = None
+                for row in by_interval:
+                    iv = row[0]
+                    bars_by_interval[iv] = {
+                        "bars": int(row[1]),
+                        "earliest": row[2].isoformat() if row[2] else None,
+                        "latest": row[3].isoformat() if row[3] else None,
+                        "last_fetch": row[4].isoformat() if row[4] else None,
+                    }
+                    if row[4] and (latest_fetch_overall is None or row[4] > latest_fetch_overall):
+                        latest_fetch_overall = row[4]
+                # Symbol coverage count
+                sym_count = _sess_bn.execute(_bn_text(
+                    "SELECT COUNT(DISTINCT symbol) FROM historical_price_cache "
+                    "WHERE source = 'BINANCE'"
+                )).scalar() or 0
+                binance_status["symbols_covered"] = int(sym_count)
+                binance_status["bars_by_interval"] = bars_by_interval
+                total_bars = sum(b["bars"] for b in bars_by_interval.values())
+                binance_status["total_bars"] = total_bars
+                if latest_fetch_overall:
+                    age_s = (now - latest_fetch_overall).total_seconds()
+                    binance_status["last_fetch"] = latest_fetch_overall.isoformat()
+                    binance_status["last_fetch_age"] = _age_str(latest_fetch_overall)
+                    # Healthy if last Binance write within 15 min; otherwise degraded.
+                    # Binance itself almost never goes down — staleness means our
+                    # sync loop isn't invoking it, not that Binance is failing.
+                    if age_s < 900:
+                        binance_status["status"] = "healthy"
+                    elif age_s < 3600:
+                        binance_status["status"] = "degraded"
+                    else:
+                        binance_status["status"] = "stale"
+                else:
+                    binance_status["status"] = "idle"
+                # Coverage string for the UI (matches Yahoo/FMP convention)
+                if sym_count > 0:
+                    binance_status["coverage"] = f"{sym_count} crypto symbols"
+            finally:
+                _sess_bn.close()
+            result["system"]["binance"] = binance_status
+        except Exception as _bn_err:
+            result["system"]["binance"] = {
+                "name": "Binance",
+                "status": "error",
+                "note": f"status check failed: {str(_bn_err)[:80]}",
+            }
+
         # Circuit breaker states
         try:
             cb_states = mon.get_circuit_breaker_states()
@@ -1061,14 +1188,26 @@ async def get_data_quality():
                 if not existing or (r.validated_at and existing.validated_at and r.validated_at > existing.validated_at):
                     quality_reports[r.symbol] = r
 
-            # Latest price per symbol from historical_price_cache
+            # Latest price per symbol from historical_price_cache, plus the
+            # actual source that wrote the most recent bar. Without a per-
+            # source max, the UI shows "yahoo" for every symbol even after
+            # Binance takes over crypto. Use a LATERAL/window-style query to
+            # get the source of the bar whose fetched_at is the max.
             latest_prices: dict[str, datetime] = {}
+            latest_source: dict[str, str] = {}
             for row in session.execute(text(
-                "SELECT symbol, MAX(fetched_at) FROM historical_price_cache GROUP BY symbol"
+                """
+                SELECT DISTINCT ON (symbol) symbol, fetched_at, source
+                FROM historical_price_cache
+                WHERE fetched_at IS NOT NULL
+                ORDER BY symbol, fetched_at DESC
+                """
             )).fetchall():
-                sym, ts = row[0], row[1]
+                sym, ts, src = row[0], row[1], row[2]
                 if ts:
                     latest_prices[sym] = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
+                if src:
+                    latest_source[sym] = str(src).lower()
 
             # FMP fundamentals: latest fetch per symbol
             fmp_data: dict[str, FundamentalDataORM] = {}
@@ -1141,12 +1280,28 @@ async def get_data_quality():
                             sentiment_age_hours = round((now - fa).total_seconds() / 3600, 1)
                     sentiment_label = "bullish" if sentiment_score > 0.15 else "bearish" if sentiment_score < -0.15 else "neutral"
 
+                # Resolve data source from the most recent bar written.
+                # Source values in DB: 'YAHOO_FINANCE', 'BINANCE', 'FMP', 'ETORO'.
+                # Normalise to lowercase short names for the UI.
+                raw_src = latest_source.get(sym) or latest_source.get(alt) or "unknown"
+                src_lc = raw_src.lower()
+                if "binance" in src_lc:
+                    ui_source = "binance"
+                elif "yahoo" in src_lc:
+                    ui_source = "yahoo"
+                elif "fmp" in src_lc:
+                    ui_source = "fmp"
+                elif "etoro" in src_lc:
+                    ui_source = "etoro"
+                else:
+                    ui_source = raw_src
+
                 entries.append(DataQualityEntry(
                     symbol=sym,
                     asset_class=asset_class_map.get(sym, "stock"),
                     quality_score=round(quality_score, 1),
                     last_price_update=last_price_str,
-                    data_source="yahoo",
+                    data_source=ui_source,
                     active_issues=active_issues,
                     staleness_seconds=round(staleness_seconds, 1),
                     fmp_score=fmp_score,

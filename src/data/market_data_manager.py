@@ -1124,23 +1124,49 @@ class MarketDataManager:
         Raises:
             Exception: If fetch fails
         """
-        # Sprint 4 S4.0: try Binance first for crypto 1h/4h.
+        # Sprint 4 S4.0: try Binance first for crypto 1h/4h/1d.
         # Binance is the industry reference for crypto historical
         # candles (deep spot volume since 2018). Only engaged when the
         # (symbol, interval) combo is explicitly supported — unsupported
         # combos silently skip straight to Yahoo.
-        if interval in ("1h", "4h"):
+        #
+        # S4.0.1 extension: 1d added too. Rationale is single-source-of-
+        # truth across timeframes — Binance 1h/4h/1d candles all roll up
+        # consistently, where Yahoo 1d is a cross-venue aggregate with
+        # occasional weekend-boundary anomalies. Keeps backtest and live
+        # signal-gen agreeing on "what was the close of 2025-10-03".
+        #
+        # Symbol form: callers pass either display form ("BTC", "SOL") or
+        # eToro wire form ("BTCUSD", "SOLUSD"). Our Binance adapter keys
+        # on display form, so strip the USD suffix up-front. Without this
+        # normalisation, calls from get_historical_data() (which passes
+        # normalized_symbol = wire form) silently miss the Binance path
+        # and fall straight to Yahoo.
+        if interval in ("1h", "4h", "1d"):
+            _bn_symbol = symbol.upper().strip()
+            # Map eToro wire → canonical display for crypto. Mirrors the
+            # table in get_historical_data (kept local to avoid an import
+            # cycle for a trivial 6-entry dict).
+            _CRYPTO_WIRE_TO_DISPLAY = {
+                "BTCUSD": "BTC", "ETHUSD": "ETH", "SOLUSD": "SOL",
+                "AVAXUSD": "AVAX", "LINKUSD": "LINK", "DOTUSD": "DOT",
+                "XRPUSD": "XRP", "ADAUSD": "ADA", "NEARUSD": "NEAR",
+                "LTCUSD": "LTC", "BCHUSD": "BCH",
+            }
+            if _bn_symbol in _CRYPTO_WIRE_TO_DISPLAY:
+                _bn_symbol = _CRYPTO_WIRE_TO_DISPLAY[_bn_symbol]
+
             try:
                 from src.api.binance_ohlc import is_supported as _binance_supported
                 from src.api.binance_ohlc import fetch_klines as _binance_fetch
                 from src.api.binance_ohlc import BinanceAPIError as _BinanceAPIError
 
-                if _binance_supported(symbol, interval):
+                if _binance_supported(_bn_symbol, interval):
                     try:
-                        bars = _binance_fetch(symbol, start, end, interval)
+                        bars = _binance_fetch(_bn_symbol, start, end, interval)
                         if bars:
                             logger.info(
-                                f"Binance (primary): {len(bars)} {interval} bars for {symbol} "
+                                f"Binance (primary): {len(bars)} {interval} bars for {_bn_symbol} "
                                 f"({bars[0].timestamp.date()} → {bars[-1].timestamp.date()})"
                             )
                             return bars
@@ -1149,7 +1175,7 @@ class MarketDataManager:
                         # trading activity). Fall through to Yahoo as a
                         # safety net rather than returning [].
                         logger.warning(
-                            f"Binance returned 0 bars for {symbol} {interval} "
+                            f"Binance returned 0 bars for {_bn_symbol} {interval} "
                             f"{start.date()}→{end.date()}; falling back to Yahoo"
                         )
                     except _BinanceAPIError as be:
@@ -1157,7 +1183,7 @@ class MarketDataManager:
                         # temporary outage. Logged at INFO not WARNING
                         # because this is the designed behaviour.
                         logger.info(
-                            f"Binance unavailable for {symbol} {interval} "
+                            f"Binance unavailable for {_bn_symbol} {interval} "
                             f"({be}); falling back to Yahoo"
                         )
             except ImportError:
