@@ -897,6 +897,33 @@ class AutonomousStrategyManager:
                 for err in stats.get("errors", []):
                     cl.log_error("CYCLE", str(err))
 
+                # Mirror stage-level errors into signal_decisions so the
+                # Observability funnel reflects cycle failures. Without this
+                # a stage NameError (e.g. SignalAction / Tuple on 2026-05-02)
+                # was only visible in cycle_history.log, not the funnel.
+                try:
+                    from src.analytics.decision_log import record_decision
+                    for err in stats.get("errors", [])[:50]:
+                        if not isinstance(err, dict):
+                            err = {"type": "unknown", "message": str(err)}
+                        record_decision(
+                            stage="cycle_error",
+                            decision="rejected",
+                            strategy_id=err.get("strategy_id") or err.get("strategy"),
+                            template=None,
+                            symbol=None,
+                            direction=None,
+                            market_regime=None,
+                            score=None,
+                            reason=str(err.get("message") or err.get("error") or err)[:500],
+                            metadata={
+                                "cycle_id": cycle_id,
+                                "step": err.get("step") or err.get("type"),
+                            },
+                        )
+                except Exception:
+                    pass
+
                 cl.end_cycle(cycle_duration, {
                     "proposals_generated": stats['proposals_generated'],
                     "template_count": template_count,
@@ -920,6 +947,34 @@ class AutonomousStrategyManager:
             stats["errors"].append({"type": "fatal", "message": str(e)})
             self._update_cycle_run(cycle_id, "error", datetime.now(), 
                                    (datetime.now() - cycle_start).total_seconds(), stats, {})
+
+            # Surface cycle-level failures in the observability funnel so the
+            # System page reflects that the cycle aborted. Without this a stage
+            # NameError (e.g. the SignalAction / Tuple ones on May 2) only
+            # showed up in cycle_history.log and never appeared in the funnel.
+            try:
+                from src.analytics.decision_log import record_decision
+                import traceback
+                tb_last = traceback.format_exception_only(type(e), e)[-1].strip()
+                record_decision(
+                    stage="cycle_error",
+                    decision="rejected",
+                    strategy_id=None,
+                    template=None,
+                    symbol=None,
+                    direction=None,
+                    market_regime=None,
+                    score=None,
+                    reason=str(tb_last)[:500],
+                    metadata={
+                        "cycle_id": cycle_id,
+                        "error_type": type(e).__name__,
+                        "cycle_duration_s": (datetime.now() - cycle_start).total_seconds(),
+                    },
+                )
+            except Exception:
+                pass
+
             self._safe_broadcast(
                 self.websocket_manager.broadcast_autonomous_notification,
                 {

@@ -1144,6 +1144,20 @@ class OrderMonitor:
                             )
                         except Exception:
                             pass
+
+                        # Increment strategy.live_trade_count on entry fills.
+                        # eToro async fills ALL go through this path; the synchronous
+                        # counterpart in order_executor only fires on immediate fills
+                        # which do not happen in practice. Without this, the counter
+                        # is always 0 and retirement min-trade gates never fire.
+                        try:
+                            if getattr(order, 'order_action', None) == 'entry' and order.strategy_id:
+                                from src.models.orm import StrategyORM
+                                strat = session.query(StrategyORM).filter_by(id=order.strategy_id).first()
+                                if strat:
+                                    strat.live_trade_count = (strat.live_trade_count or 0) + 1
+                        except Exception as ltc_err:
+                            logger.debug(f"live_trade_count increment failed for {order.id}: {ltc_err}")
                 
                 except Exception as e:
                     logger.error(f"Error checking order {order.id}: {e}")
