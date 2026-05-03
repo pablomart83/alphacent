@@ -1197,12 +1197,21 @@ class PortfolioManager:
                     _gross_act = float(net_return) + float(
                         getattr(backtest_results, 'transaction_costs_pct', 0.0) or 0.0
                     )
+                # Pass avg_trade_value / init_cash so edge_ratio normalizes
+                # numerator and denominator to the same per-position basis
+                # (Fix #3, 2026-05-03). Without these, the numerator is
+                # fraction-of-init_cash and the denominator is fraction-of-
+                # position — the ratio is 3-10x too low at fractional sizing.
+                _atv_act = float(getattr(backtest_results, 'avg_trade_value', 0.0) or 0.0)
+                _ic_act = float(getattr(backtest_results, 'init_cash', 0.0) or 0.0)
                 _er_act, _gpt_act, _rtc_act = _edge_ratio_fn(
                     _gross_act,
                     backtest_results.total_trades,
                     primary_symbol,
                     (strategy.metadata or {}).get('interval', '1d') if hasattr(strategy, 'metadata') else '1d',
                     asset_class,
+                    avg_trade_value=_atv_act,
+                    init_cash=_ic_act,
                 )
                 # Persist edge-ratio metrics on the strategy for Data Page /
                 # analytics observability. Non-fatal if the metadata field
@@ -1294,7 +1303,45 @@ class PortfolioManager:
                 except (TypeError, ValueError):
                     logger.debug(f"Invalid min_rpt_override on {strategy.name}: {_template_rpt_override}")
             if backtest_results.total_trades > 0:
-                return_per_trade = backtest_results.total_return / backtest_results.total_trades
+                # Per-position RPT normalization (Fix #2, 2026-05-03).
+                #
+                # `backtest_results.total_return` from the DSL backtest path
+                # is vectorbt's `(final_value - init_cash) / init_cash` — a
+                # fraction of init_cash, NOT a per-position return. At
+                # fractional position sizing (default ~10-30% of init_cash
+                # per trade for DSL strategies), a simple
+                # `total_return / n_trades` understates the per-position
+                # return by `1 / position_size_pct` (typically 3-10x).
+                #
+                # The threshold `min_return_per_trade` was derived in
+                # Sprint 1 F3 as a PER-POSITION floor:
+                # "round_trip_cost (2.96%) + 50bps edge = 3.5%"
+                # so the comparand needs to be per-position too.
+                #
+                # Normalization: divide by (avg_trade_value / init_cash).
+                # BacktestResults now carries avg_trade_value / init_cash
+                # (strategy_engine _run_vectorbt_backtest populates them).
+                # The Alpha Edge backtest writes avg_trade_value == init_cash
+                # so its path is a no-op (AE already returns per-position
+                # aggregated returns, not init-cash-basis).
+                #
+                # Safety: if avg_trade_value is missing or zero (legacy rows
+                # or zero-trade returns), fall back to the old math so we
+                # never silently pass a bad strategy due to missing metadata.
+                #
+                # See INVESTIGATION_2026-05-03.md for the full arithmetic.
+                _init_cash = float(getattr(backtest_results, 'init_cash', 0.0) or 0.0)
+                _avg_trade_value = float(getattr(backtest_results, 'avg_trade_value', 0.0) or 0.0)
+                raw_rpt = backtest_results.total_return / backtest_results.total_trades
+                if _init_cash > 0 and _avg_trade_value > 0:
+                    position_size_pct = _avg_trade_value / _init_cash
+                    return_per_trade = raw_rpt / position_size_pct
+                    _rpt_basis = f"per-position @ {position_size_pct:.1%} sizing"
+                else:
+                    # Legacy fallback — no per-position data available
+                    return_per_trade = raw_rpt
+                    _rpt_basis = "raw init_cash basis (no avg_trade_value)"
+
                 if return_per_trade < min_return_per_trade:
                     # Sprint 2 F2 — family-cross-validated templates bypass
                     # per-pair RPT. RPT is a small-sample metric and the
@@ -1315,13 +1362,18 @@ class PortfolioManager:
                         reason = (
                             f"Return/trade {return_per_trade:.3%} < {min_return_per_trade:.3%} min "
                             f"({_rpt_source}, {backtest_results.total_trades} trades, "
-                            f"gross {backtest_results.total_return:.1%})"
+                            f"gross {backtest_results.total_return:.1%}, "
+                            f"basis={_rpt_basis})"
                         )
                         logger.info(f"Strategy {strategy.name} failed activation: {reason}")
                         return False, reason
 
+            # Log the per-position basis RPT (matches the gate comparand above)
+            # so operators see the same number that drove the pass/fail decision.
+            _pass_rpt = locals().get('return_per_trade', backtest_results.total_return / max(backtest_results.total_trades, 1))
+            _pass_basis = locals().get('_rpt_basis', 'raw init_cash basis')
             logger.info(
-                f"Cost check passed: net={net_return:.2%}, rpt={backtest_results.total_return/max(backtest_results.total_trades,1):.3%}, "
+                f"Cost check passed: net={net_return:.2%}, rpt={_pass_rpt:.3%} ({_pass_basis}), "
                 f"asset_class={asset_class}, edge_ratio={locals().get('_er_act', 0.0):.2f}"
             )
         except Exception as e:

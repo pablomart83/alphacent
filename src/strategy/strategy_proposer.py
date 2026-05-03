@@ -527,6 +527,14 @@ class StrategyProposer:
                 "min_sharpe_crypto": cfg.get("activation_thresholds", {}).get("min_sharpe_crypto"),
                 "min_win_rate_crypto": cfg.get("activation_thresholds", {}).get("min_win_rate_crypto"),
                 "tx_crypto": cfg.get("backtest", {}).get("transaction_costs", {}).get("per_asset_class", {}).get("crypto", {}),
+                # Per-symbol cost overrides now read by backtest engine (Fix #1, 2026-05-03)
+                # — bump the schema version when they change so cached WF results
+                # get refreshed against the new per-instrument costs.
+                "tx_per_symbol": cfg.get("backtest", {}).get("transaction_costs", {}).get("per_symbol", {}),
+                # Bump marker — ensures the RPT/edge_ratio per-position fix
+                # invalidates all cached crypto WF results at deploy time,
+                # forcing a fresh re-eval with the corrected math.
+                "schema_rev": "rpt_per_position_2026_05_03",
             }
             s = str(sorted(keys.items()))
             return hashlib.md5(s.encode()).hexdigest()[:8]
@@ -2175,8 +2183,13 @@ class StrategyProposer:
                     )
                 _primary_sym = s.symbols[0] if s.symbols else ''
                 _strat_interval = (s.metadata or {}).get('interval', '1d')
+                # Pass avg_trade_value / init_cash so edge_ratio uses a
+                # per-position basis matching round_trip_cost (Fix #3).
+                _atv = float(getattr(_tr, 'avg_trade_value', 0.0) or 0.0) if _tr else 0.0
+                _ic = float(getattr(_tr, 'init_cash', 0.0) or 0.0) if _tr else 0.0
                 _er, _gpt, _rtc = _edge_ratio_fn(
-                    _gross, test_trades, _primary_sym, _strat_interval
+                    _gross, test_trades, _primary_sym, _strat_interval,
+                    avg_trade_value=_atv, init_cash=_ic,
                 )
                 # Informational log when edge is economically thin. No gate
                 # effect — purely for funnel observability.

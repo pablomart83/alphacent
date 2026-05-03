@@ -131,6 +131,16 @@ class BacktestResults:
     transaction_costs_pct: float = 0.0  # Costs as % of gross returns
     gross_return: float = 0.0  # Return before costs
     net_return: float = 0.0  # Return after costs (same as total_return)
+    # Per-position sizing — mean dollar value deployed per trade. Used to
+    # convert the init-cash-basis total_return into per-position returns at
+    # activation (portfolio_manager.evaluate_for_activation) and in the
+    # edge_ratio observability helper. Without this, RPT / edge_ratio have
+    # a unit mismatch: they compare a fraction-of-init-cash numerator
+    # against a fraction-of-position denominator, which silently rejects
+    # strategies with real per-position edge at fractional sizing.
+    # See INVESTIGATION_2026-05-03.md for the full arithmetic.
+    avg_trade_value: float = 0.0   # mean dollar size per trade ($)
+    init_cash: float = 100000.0    # backtest init_cash (anchor for % conversions)
 
 
 @dataclass

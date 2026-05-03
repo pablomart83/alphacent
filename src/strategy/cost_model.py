@@ -226,11 +226,14 @@ def edge_ratio(
     symbol: str,
     interval: str = "1d",
     asset_class: Optional[str] = None,
+    avg_trade_value: float = 0.0,
+    init_cash: float = 0.0,
 ) -> tuple[float, float, float]:
     """
-    Compute the edge ratio for a backtest result.
+    Compute the edge ratio for a backtest result — on a per-POSITION basis
+    so numerator and denominator share the same denominator-of-a-trade.
 
-    Edge ratio = gross_per_trade / round_trip_cost_per_trade
+    Edge ratio = gross_per_position_per_trade / round_trip_cost_per_trade
 
     Values:
       < 1.0   strategy is economically unprofitable — gross edge doesn't cover cost
@@ -238,23 +241,56 @@ def edge_ratio(
       1.5     comfortable margin for live trading (our activation floor)
       2.0+    strong edge — real alpha
 
+    Why the per-position normalization matters (Fix #3, 2026-05-03):
+
+    `gross_return` from the vectorbt backtest is `(final_value − init_cash)
+    / init_cash` — a fraction of init_cash, not a per-position return. At
+    fractional position sizing (10-30% of init_cash typical), a simple
+    `gross_return / n_trades` understates per-position return by
+    `1 / position_size_pct`. Comparing that understated numerator against
+    `round_trip_cost_pct` (which IS per-position) produces an edge_ratio
+    that is 3-10x too low.
+
+    With `avg_trade_value` and `init_cash` from BacktestResults (added
+    2026-05-03), we convert the init-cash-basis numerator to per-position
+    before comparison. When those are missing (legacy rows / AE-style
+    backtests where total_return is already per-position), we fall back
+    to the old behaviour to avoid regressions.
+
+    See INVESTIGATION_2026-05-03.md for the full walk-through.
+
     Args:
         gross_return: Total gross return across the backtest (pre-cost).
-                      For vectorbt backtests this is `portfolio.total_return()`.
+                      For vectorbt this is `portfolio.total_return()` — a
+                      fraction of init_cash.
         n_trades: Number of complete trades (entries).
         symbol: Primary instrument symbol.
         interval: Bar interval.
         asset_class: Optional pre-computed asset class.
+        avg_trade_value: Mean $ size per trade (from BacktestResults).
+        init_cash: Backtest init_cash (from BacktestResults).
 
     Returns:
-        Tuple of (edge_ratio, gross_per_trade, round_trip_cost_pct).
+        Tuple of (edge_ratio, gross_per_trade_per_position, round_trip_cost_pct).
         If n_trades <= 0, returns (0.0, 0.0, round_trip_cost_pct).
     """
     rtc = round_trip_cost_pct(symbol, interval, asset_class)
     if n_trades <= 0 or rtc <= 0:
         return 0.0, 0.0, rtc
-    gross_per_trade = gross_return / n_trades
-    return gross_per_trade / rtc, gross_per_trade, rtc
+    # Init-cash-basis per-trade contribution
+    gross_per_trade_init_cash = gross_return / n_trades
+    # Convert to per-position basis. When avg_trade_value or init_cash are
+    # missing/zero, position_size_pct defaults to 1.0 (no scaling), which
+    # reproduces the legacy behaviour for any caller that hasn't been updated.
+    # For AE backtests, BacktestResults is populated with avg_trade_value =
+    # init_cash, which also yields a 1.0 scale — no-op (AE returns are
+    # already per-position).
+    if avg_trade_value > 0 and init_cash > 0:
+        position_size_pct = avg_trade_value / init_cash
+        gross_per_trade_per_position = gross_per_trade_init_cash / position_size_pct
+    else:
+        gross_per_trade_per_position = gross_per_trade_init_cash
+    return gross_per_trade_per_position / rtc, gross_per_trade_per_position, rtc
 
 
 def format_edge_log(
@@ -264,10 +300,16 @@ def format_edge_log(
     symbol: str,
     interval: str = "1d",
     asset_class: Optional[str] = None,
+    avg_trade_value: float = 0.0,
+    init_cash: float = 0.0,
 ) -> str:
     """Human-readable edge-ratio log line for use in WF and activation logs."""
-    ratio, gpt, rtc = edge_ratio(gross_return, n_trades, symbol, interval, asset_class)
+    ratio, gpt, rtc = edge_ratio(
+        gross_return, n_trades, symbol, interval, asset_class,
+        avg_trade_value=avg_trade_value, init_cash=init_cash,
+    )
     return (
         f"{strategy_name}: gross={gross_return:.2%} on {n_trades} trades "
-        f"→ gross/trade={gpt:.3%}, cost/trade={rtc:.3%}, edge_ratio={ratio:.2f}"
+        f"→ gross/trade={gpt:.3%} (per-position), cost/trade={rtc:.3%}, "
+        f"edge_ratio={ratio:.2f}"
     )

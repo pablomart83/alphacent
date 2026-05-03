@@ -1070,7 +1070,16 @@ class StrategyEngine:
             "win_rate": results.win_rate,
             "avg_win": results.avg_win,
             "avg_loss": results.avg_loss,
-            "total_trades": results.total_trades
+            "total_trades": results.total_trades,
+            # Per-position sizing and cost breakdown fields — persist so WF
+            # cache round-trips preserve them and activation-time RPT /
+            # edge_ratio normalization work on cached validations.
+            # Added 2026-05-03 (INVESTIGATION_2026-05-03.md).
+            "avg_trade_value": getattr(results, "avg_trade_value", 0.0),
+            "init_cash": getattr(results, "init_cash", 100000.0),
+            "gross_return": getattr(results, "gross_return", 0.0),
+            "net_return": getattr(results, "net_return", 0.0),
+            "transaction_costs_pct": getattr(results, "transaction_costs_pct", 0.0),
         }
         
         # Handle optional fields
@@ -1191,7 +1200,15 @@ class StrategyEngine:
             total_trades=data.get("total_trades", 0),
             equity_curve=equity_curve,
             trades=trades,
-            backtest_period=backtest_period
+            backtest_period=backtest_period,
+            # Per-position sizing fields (added 2026-05-03 for RPT / edge_ratio
+            # per-position normalization). Old cached rows return 0.0 which
+            # triggers the safe legacy fallback in portfolio_manager.
+            avg_trade_value=float(data.get("avg_trade_value", 0.0) or 0.0),
+            init_cash=float(data.get("init_cash", 100000.0) or 100000.0),
+            gross_return=float(data.get("gross_return", 0.0) or 0.0),
+            net_return=float(data.get("net_return", 0.0) or 0.0),
+            transaction_costs_pct=float(data.get("transaction_costs_pct", 0.0) or 0.0),
         )
     
     def backtest_strategy(
@@ -1243,10 +1260,35 @@ class StrategyEngine:
                         asset_class = self._get_asset_class(primary_symbol) if primary_symbol else 'stock'
                         ac_costs = tx_costs.get('per_asset_class', {}).get(asset_class, {})
 
-                        # Per-asset-class costs take priority over global defaults
-                        commission = ac_costs.get('commission_percent', tx_costs.get('commission_percent', 0.0))
-                        slippage_pct_raw = ac_costs.get('slippage_percent', tx_costs.get('slippage_percent', 0.0003))
+                        # Cost precedence (matches cost_model.round_trip_cost_pct documented order):
+                        #   1. per_symbol.<SYMBOL>.<field>   — per-instrument override (tightest quotes)
+                        #   2. per_asset_class.<class>.<field> — asset-class default
+                        #   3. transaction_costs.<field>     — global default
+                        # Previously only 2 & 3 were consulted here, so BTC/ETH backtests
+                        # paid the generic crypto alt-coin cost (2.96% round-trip) instead
+                        # of their per_symbol override (2.18%/2.20%). That put every
+                        # BTC/ETH backtest ~0.76% below its honest net return.
+                        # Fixed 2026-05-03 — see INVESTIGATION_2026-05-03.md.
+                        sym_key = primary_symbol.upper() if primary_symbol else ''
+                        sym_costs = tx_costs.get('per_symbol', {}).get(sym_key, {}) if sym_key else {}
+
+                        def _resolve_cost(field_name: str, default_val: float) -> float:
+                            if field_name in sym_costs:
+                                return float(sym_costs[field_name])
+                            if field_name in ac_costs:
+                                return float(ac_costs[field_name])
+                            if field_name in tx_costs:
+                                return float(tx_costs[field_name])
+                            return default_val
+
+                        commission = _resolve_cost('commission_percent', 0.0)
+                        slippage_pct_raw = _resolve_cost('slippage_percent', 0.0003)
                         slippage_bps = slippage_pct_raw * 10000  # Convert to bps
+                        if sym_costs:
+                            logger.info(
+                                f"Using per_symbol cost override for {sym_key}: "
+                                f"commission={commission:.4%}, slippage={slippage_pct_raw:.4%}"
+                            )
                         
                         # Override slippage with actual measured slippage from trade journal
                         # if we have enough data for the primary symbol
@@ -3313,9 +3355,23 @@ class StrategyEngine:
         total_slippage_cost = 0.0
         total_spread_cost = 0.0
         total_cost_pct = 0.0
-        
+
+        # Compute avg_trade_value once, regardless of whether costs are applied.
+        # Persisted onto BacktestResults so downstream consumers can convert
+        # init_cash-basis returns into per-position returns (used by the RPT
+        # gate at portfolio_manager.evaluate_for_activation and the edge_ratio
+        # observability helper). See INVESTIGATION_2026-05-03.md.
+        _bt_init_cash = 100000
+        _entry_sizes_for_avg = position_sizes[entries] if entries.any() else pd.Series(dtype=float)
+        if len(_entry_sizes_for_avg) > 0 and _entry_sizes_for_avg.sum() > 0:
+            avg_trade_value = float(_entry_sizes_for_avg.mean())
+        else:
+            avg_trade_value = float(_bt_init_cash * 0.1)  # Fallback if no entries
+
         if commission > 0 or slippage_bps > 0:
-            # Load spread from config — asset-class-aware
+            # Load spread from config — per_symbol > per_asset_class > global.
+            # Matches the precedence documented in cost_model.py. Must stay in
+            # sync with the commission/slippage resolution at line ~1247 above.
             spread_pct = 0.0003  # Default
             try:
                 import yaml
@@ -3329,20 +3385,24 @@ class StrategyEngine:
                         primary_symbol = strategy.symbols[0] if strategy.symbols else ''
                         asset_class = self._get_asset_class(primary_symbol) if primary_symbol else 'stock'
                         ac_costs = tx_costs.get('per_asset_class', {}).get(asset_class, {})
-                        spread_pct = ac_costs.get('spread_percent', tx_costs.get('spread_percent', 0.0003))
+                        # Per-symbol override takes precedence over per-asset-class
+                        sym_key = primary_symbol.upper() if primary_symbol else ''
+                        sym_costs = tx_costs.get('per_symbol', {}).get(sym_key, {}) if sym_key else {}
+                        if 'spread_percent' in sym_costs:
+                            spread_pct = float(sym_costs['spread_percent'])
+                        elif 'spread_percent' in ac_costs:
+                            spread_pct = float(ac_costs['spread_percent'])
+                        elif 'spread_percent' in tx_costs:
+                            spread_pct = float(tx_costs['spread_percent'])
             except Exception:
                 pass
             
             # Calculate transaction costs per trade using actual position sizes
-            # instead of a fixed 10% assumption. The position_sizes Series has the
-            # actual dollar amount for each entry signal.
-            init_cash = 100000
-            entry_sizes = position_sizes[entries] if entries.any() else pd.Series(dtype=float)
-            if len(entry_sizes) > 0 and entry_sizes.sum() > 0:
-                avg_trade_value = entry_sizes.mean()
-            else:
-                avg_trade_value = init_cash * 0.1  # Fallback if no entries
-            
+            # instead of a fixed 10% assumption. avg_trade_value is already
+            # computed above (hoisted out so BacktestResults can carry it
+            # regardless of cost path).
+            init_cash = _bt_init_cash
+
             # Commission cost (percentage-based)
             commission_per_trade = avg_trade_value * commission
             total_commission_cost = total_trades * 2 * commission_per_trade  # Entry + Exit
@@ -3371,10 +3431,15 @@ class StrategyEngine:
                     _primary = strategy.symbols[0] if strategy.symbols else ''
                     _ac = self._get_asset_class(_primary) if _primary else 'stock'
                     _ac_costs = _tx.get('per_asset_class', {}).get(_ac, {})
-                    overnight_rate = _ac_costs.get(
-                        'overnight_financing_pct_per_day',
-                        _tx.get('overnight_financing_pct_per_day', 0.0002)
-                    )
+                    # Per-symbol override precedence (per_symbol > per_asset_class > global).
+                    _sym_key = _primary.upper() if _primary else ''
+                    _sym_costs = _tx.get('per_symbol', {}).get(_sym_key, {}) if _sym_key else {}
+                    if 'overnight_financing_pct_per_day' in _sym_costs:
+                        overnight_rate = float(_sym_costs['overnight_financing_pct_per_day'])
+                    elif 'overnight_financing_pct_per_day' in _ac_costs:
+                        overnight_rate = float(_ac_costs['overnight_financing_pct_per_day'])
+                    else:
+                        overnight_rate = float(_tx.get('overnight_financing_pct_per_day', 0.0002))
                     if overnight_rate > 0 and total_trades > 0:
                         # Estimate avg holding period from trades list if available
                         avg_hold_days = 7.0  # Conservative default
@@ -3457,7 +3522,12 @@ class StrategyEngine:
             total_transaction_costs=total_commission_cost + total_slippage_cost + total_spread_cost,
             transaction_costs_pct=total_cost_pct if total_trades > 0 else 0.0,
             gross_return=gross_return,
-            net_return=adjusted_return
+            net_return=adjusted_return,
+            # Per-position sizing — required by portfolio_manager RPT gate and
+            # cost_model.edge_ratio to convert init-cash-basis numbers into
+            # per-position returns. See INVESTIGATION_2026-05-03.md for math.
+            avg_trade_value=float(avg_trade_value),
+            init_cash=float(_bt_init_cash),
         )
     
     def _calculate_rsi(self, prices: pd.Series, period: int = 14) -> pd.Series:
@@ -8808,7 +8878,14 @@ class StrategyEngine:
             total_trades=len(trades),
             avg_win=avg_win,
             avg_loss=avg_loss,
-            sortino_ratio=sortino_ratio
+            sortino_ratio=sortino_ratio,
+            # Alpha Edge backtest stores PER-POSITION returns directly
+            # (total_return = sum of pnl_pct). Mark this by setting
+            # avg_trade_value == init_cash so downstream per-position
+            # conversion (RPT gate, edge_ratio) is a no-op: the AE path
+            # has no init_cash-to-position scaling.
+            avg_trade_value=100000.0,
+            init_cash=100000.0,
         )
     
     def _generate_alpha_edge_signal(
