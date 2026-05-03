@@ -119,8 +119,38 @@ backtest:
   warmup_days: 100
   min_trades: 5
   walk_forward:
+    # Fallback default. Only used when no asset_class_windows key matches
+    # (e.g. a new asset_class / interval combo appears). The live windows
+    # for every currently-supported combo are in asset_class_windows below.
     train_days: 365
     test_days: 180
+    # ──────────────────────────────────────────────────────────────────
+    # asset_class_windows — the live walk-forward windows that actually run
+    # per (asset_class, interval, template). Single source of truth;
+    # strategy_proposer._select_wf_window() reads these at cycle time.
+    #
+    # Non-crypto 1h and 4h are bounded by Yahoo's ~7-month 1h data cap
+    # (4h is resampled from 1h, same limit). Widening non_crypto_1h /
+    # non_crypto_4h beyond the values below will silently truncate at
+    # the engine level (strategy_engine.walk_forward_validate), which is
+    # the correct behaviour — the data source, not the gate, is the
+    # limit. See logs for "WF window capped by data-source limit".
+    # ──────────────────────────────────────────────────────────────────
+    asset_class_windows:
+      crypto_1h:             { train: 365, test: 365 }
+      crypto_4h:             { train: 365, test: 365 }
+      crypto_1d:             { train: 365, test: 365 }
+      crypto_1d_longhorizon: { train: 730, test: 730 }
+      non_crypto_1d:         { train: 730, test: 365 }
+      non_crypto_1h:         { train: 180, test: 90  }
+      non_crypto_4h:         { train: 240, test: 120 }
+    # Templates that get the longhorizon crypto_1d window (previously a
+    # hardcoded set inside strategy_proposer.py). Add / remove by name.
+    long_horizon_templates:
+      - Crypto 21W MA Trend Follow
+      - Crypto Vol-Compression Momentum
+      - Crypto Weekly Trend Follow
+      - Crypto Golden Cross
     direction_aware_thresholds:
       default:
         min_return: 0.0

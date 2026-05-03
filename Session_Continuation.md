@@ -15,32 +15,66 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 3, 2026, ~12:00 UTC, post-Per-Position-Fix)
+## Current System State (May 3, 2026, ~15:20 UTC, post-WF-window-refactor)
 
 - **Equity:** ~$480K (unchanged)
 - **Open positions:** 84
-- **Active strategies:** 63 DEMO + 5 BACKTESTED/approved = **68 trading strategies** (up 1 from yesterday after RPT gate fix)
+- **Active strategies:** 63 DEMO + 5 BACKTESTED/approved = **68 trading strategies**
 - **Crypto-native strategies:** 5 (4 BTC Follower Daily ETH/SOL/LINK/AVAX + 1 BTC Follower 4H ETH, the first non-F2-bypass crypto activation)
 - **Directional split:** ~82 LONG / ~5 SHORT (unchanged)
 - **Market regime (equity):** `STRONG UPTREND` (20d +10.83%, 50d +5.49%, ATR/price 1.08%)
 - **Market regime (crypto):** `RANGING_LOW_VOL` (20d +2.3%, 50d +6.6%, ATR 1.7%)
 - **VIX:** 16.89
 - **Mode:** eToro DEMO
-- **Last cycle:** `cycle_1777808795` at 11:52 UTC, 333s, 1 activation (BTC Follower 4H ETH LONG), clean errors.log.
+- **Last cycle:** `cycle_1777816532` at 15:15 UTC, 59s, 0 activations (6 rejections — honest output, all on Sharpe/RPT floors), clean errors.log.
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
-**Three cost-math bug fixes shipped this session (commit `b10cb6c`):**
+**Two sprints shipped today:**
 
-See the "Session shipped 2026-05-03 morning" block below for full context. The short version: the RPT activation gate was comparing a fraction-of-init_cash metric against a per-position threshold, creating a 5-10x over-demand on any strategy using fractional position sizing. Most crypto strategies that were being "rejected for not clearing the 3% min RPT floor" actually had strong per-position edge (edge_ratio 3-5× over break-even) but were rejected on the unit-mismatched math.
+1. **Morning** (commit `b10cb6c`): three cost-math bug fixes — per_symbol precedence in backtest engine, RPT gate unit mismatch, edge_ratio numerator. See "Session shipped 2026-05-03 morning" below. First non-F2-bypass crypto activation (BTC Follower 4H ETH LONG) confirmed in `cycle_1777808795`.
 
-Live verification: `Crypto BTC Follower 4H ETH LONG` — rejected in every cycle since 2026-05-02 20:04 with `Return/trade 0.831% < 1.800%`. Post-fix (cycle_1777808795, 11:52 UTC), **activated** with:
-```
-Cost check passed: net=5.53%, rpt=7.712% (per-position @ 12.0% sizing),
-  asset_class=crypto, edge_ratio=4.51
-```
-Same strategy, same test window, same WF result — different (correct) math.
+2. **Afternoon** (this session): WF-window single-source-of-truth refactor. The live per-(asset_class, interval, template) walk-forward windows are now in `config/autonomous_trading.yaml` under `backtest.walk_forward.asset_class_windows` + `long_horizon_templates`. The proposer's `_select_wf_window()` helper is the only Python site picking windows, called from both WF call sites. Zero behavioural change — verified via `scripts/verify_wf_window_helper.py` (8 archetypes, identical outputs) and the first post-deploy cycle showing every expected key firing with the exact pre-refactor values. See "Session shipped 2026-05-03 afternoon" below.
 
 **BTC Follower Daily armed but waiting on trigger:** 4 of 5 strategies (activated 2026-05-02) still haven't fired. Entry gate is `LAG_RETURN("BTC", 2, "1d") > 0.05` — BTC's current 2-bar return is below threshold. Gate fires ~2x/month historically.
+
+---
+
+## Session shipped 2026-05-03 afternoon (WF-window single-source-of-truth refactor)
+
+The yaml `backtest.walk_forward.train_days: 365 / test_days: 180` values were misleading — they looked like the live walk-forward windows but were only a fallback. The real windows were overridden per-strategy in `strategy_proposer.py` across five hardcoded branches, duplicated across two call sites (primary WF path at ~1702-1792, watchlist WF path at ~2750-2787). Non-crypto 1h/4h were further capped at `strategy_engine.walk_forward_validate` (~1625-1650) by Yahoo's ~7-month 1h data limit. Operators reading the yaml couldn't tell what actually ran; any future change had to land in two Python sites plus the yaml.
+
+**What shipped:**
+
+- **`config/autonomous_trading.yaml`** — new `backtest.walk_forward.asset_class_windows` block with 7 keys (`crypto_1h`, `crypto_4h`, `crypto_1d`, `crypto_1d_longhorizon`, `non_crypto_1d`, `non_crypto_1h`, `non_crypto_4h`) and a `long_horizon_templates` list (previously a hardcoded set in Python). Header comment documents the Yahoo 7-month 1h cap constraint on `non_crypto_1h` / `non_crypto_4h`. The yaml `train_days` / `test_days` remain editable from the Settings UI as the fallback when no asset-class-window key matches.
+
+- **`src/strategy/strategy_proposer.py`** — new `_select_wf_window(strategy, end_date) -> (train, test, start, end)` helper. Loads the asset_class_windows + long_horizon_templates + fallback once per instance in `_load_wf_window_config()` at `__init__`. Picks the key via `(is_crypto, interval, template_name)` detection, anchors `start = end - (train + test)`, logs selection at INFO (`WF window [<key>]: <name> → train=Xd test=Yd`), fails open to the yaml fallback on any error. Both WF call sites now delegate to the helper — the two 90-line / 40-line override blocks are gone. One place in Python picks windows.
+
+- **`src/strategy/strategy_engine.py`** — Yahoo data-source caps at `walk_forward_validate` retained (180/90 non-crypto 1h, 240/120 non-crypto 4h) as a safety net against future yaml drift. Added INFO log when the cap kicks in so silent truncation is no longer silent: `WF window capped by data-source limit (Yahoo ..., non-crypto): requested train=Xd test=Yd → truncated to train=X'd test=Y'd`.
+
+- **`src/api/routers/config.py`** — extended `AdvancedReadonly` with `wf_asset_class_windows: Dict[str, Dict[str, int]]` and `wf_long_horizon_templates: List[str]`. Populated from the yaml in the GET `/config/autonomous` endpoint. Not added to the PUT schema — these values are tied to data-source constraints; editable surface is still the fallback `wf_train_days` / `wf_test_days` which matter when no key matches.
+
+- **`frontend/src/pages/SettingsNew.tsx`** — Card 6 (Walk-Forward & Direction-Aware) now shows a read-only "Per-Asset-Class Windows" table below the editable train/test inputs. 7 keys × (train, test), the long-horizon template list, and a note pointing operators to the yaml for edits.
+
+- **`scripts/verify_wf_window_helper.py`** — regression check. Instantiates a `StrategyProposer` with mocked deps, calls `_select_wf_window` for 8 archetype strategies (BTC Follower 4H ETH, Weekly Trend Follow BTC, BTC Follower Daily ETH, Hourly RSI Bounce SOL, Fast EMA Crossover AAPL, RSI Dip Buy EURUSD 1h, 4H Bollinger SPY, fallback path). Asserts each returns identical `(train, test)` to the pre-refactor hardcoded branches. All pass.
+
+**Post-deploy verification (`cycle_1777816532` at 15:15 UTC):**
+
+- Config load: `WF window config loaded: 7 asset-class keys, 4 long-horizon templates, fallback=365d train / 180d test`
+- Helper firing for every key observed in the cycle:
+  ```
+  WF window [crypto_1d]:            Crypto Trend Breakout ETH LONG          → train=365d test=365d
+  WF window [non_crypto_1d]:        Keltner Channel Breakout TXN LONG       → train=730d test=365d
+  WF window [non_crypto_4h]:        4H EMA Ribbon Trend Long AVGO LONG      → train=240d test=120d
+  WF window [crypto_1d_longhorizon]: Crypto Vol-Compression Momentum BTC    → train=730d test=730d
+  WF window [crypto_4h]:            Crypto 4H MACD Trend LINK LONG          → train=365d test=365d
+  WF window [crypto_1h]:            Crypto EMA Ribbon BTC LONG              → train=365d test=365d
+  ```
+- Cycle outcome: 6 proposals → 6/6 WF passed → 0 activated, 6 rejected on Sharpe/RPT/ex-post floors. Same rejection shape as `cycle_1777808795` earlier today. No regressions.
+- errors.log clean since deploy. Service restart clean. Frontend build clean.
+
+**What this unblocks:** future window changes happen in yaml (visible to ops), not Python (invisible). The engine-level Yahoo cap is now observable — when someone widens `non_crypto_1h` in yaml by mistake, the truncation log line makes it obvious.
+
+**What this is NOT:** a calibration change. Every window value is identical to the pre-refactor effective runtime value. Any future widening requires its own sprint with data.
 
 ---
 

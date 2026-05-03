@@ -920,6 +920,14 @@ class AdvancedReadonly(BaseModel):
     validation_rules: Dict[str, Any] = {}
     symbol_counts: Dict[str, int] = {}
     data_sources: Dict[str, Any] = {}
+    # Walk-forward per-(asset_class, interval) windows — single source of truth
+    # for the windows that actually run in the proposer's _select_wf_window().
+    # Read-only here because these values are bounded by data-source limits
+    # (notably Yahoo's ~7-month 1h cap for non_crypto_1h / non_crypto_4h);
+    # editing from a UI invites silent truncation by the engine. Managed in
+    # config/autonomous_trading.yaml on EC2.
+    wf_asset_class_windows: Dict[str, Dict[str, int]] = {}
+    wf_long_horizon_templates: List[str] = []
 
 
 class AutonomousConfigResponse(BaseModel):
@@ -1319,6 +1327,17 @@ async def get_autonomous_config(
                 k: {'enabled': v.get('enabled', False), 'cache_duration': v.get('cache_duration')}
                 for k, v in data_sources.items() if isinstance(v, dict)
             },
+            wf_asset_class_windows={
+                k: {
+                    'train': int(v.get('train', 0) or 0),
+                    'test': int(v.get('test', 0) or 0),
+                }
+                for k, v in (wf.get('asset_class_windows') or {}).items()
+                if isinstance(v, dict)
+            },
+            wf_long_horizon_templates=[
+                str(x) for x in (wf.get('long_horizon_templates') or [])
+            ],
         ),
     )
 

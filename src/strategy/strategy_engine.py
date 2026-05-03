@@ -1627,8 +1627,15 @@ class StrategyEngine:
                     # Yahoo's 1h data has a hard ~7-month cap. Keep the
                     # historical window to stay within what the data source
                     # can serve.
+                    _orig_train, _orig_test = train_days, test_days
                     train_days = min(train_days, 180)
                     test_days = min(test_days, 90)
+                    if train_days < _orig_train or test_days < _orig_test:
+                        logger.info(
+                            f"WF window capped by data-source limit (Yahoo 1h, non-crypto): "
+                            f"requested train={_orig_train}d test={_orig_test}d → "
+                            f"truncated to train={train_days}d test={test_days}d"
+                        )
                 # Whether capped (Yahoo) or pass-through (Binance), anchor
                 # start so train + test fit exactly in the requested window.
                 start = end - timedelta(days=train_days + test_days)
@@ -1641,8 +1648,15 @@ class StrategyEngine:
                 backtest_interval = "4h"
                 if not _primary_crypto:
                     # Non-crypto 4h is resampled from Yahoo 1h — same 180d source cap.
+                    _orig_train, _orig_test = train_days, test_days
                     train_days = min(train_days, 240)
                     test_days = min(test_days, 120)
+                    if train_days < _orig_train or test_days < _orig_test:
+                        logger.info(
+                            f"WF window capped by data-source limit (Yahoo 4h resampled, non-crypto): "
+                            f"requested train={_orig_train}d test={_orig_test}d → "
+                            f"truncated to train={train_days}d test={test_days}d"
+                        )
                 start = end - timedelta(days=train_days + test_days)
                 _src = "Binance" if _primary_crypto else "Yahoo(resampled)"
                 logger.info(

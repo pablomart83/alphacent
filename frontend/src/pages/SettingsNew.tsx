@@ -2253,6 +2253,38 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       </div>
                     </div>
 
+                    {/* Per-Asset-Class Windows — read-only single source of truth */}
+                    {autonomousAdvanced?.wf_asset_class_windows && Object.keys(autonomousAdvanced.wf_asset_class_windows).length > 0 && (
+                      <div className="pt-3 border-t border-dark-border">
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">Per-Asset-Class Windows (read-only)</h4>
+                        <div className="space-y-1 text-[11px] font-mono">
+                          <div className="grid grid-cols-3 gap-1 text-gray-500 border-b border-dark-border pb-1 mb-1">
+                            <span>key</span>
+                            <span className="text-right">train (days)</span>
+                            <span className="text-right">test (days)</span>
+                          </div>
+                          {Object.entries(autonomousAdvanced.wf_asset_class_windows).map(([key, w]: [string, any]) => (
+                            <div key={key} className="grid grid-cols-3 gap-1 text-gray-400">
+                              <span className="text-gray-300">{key}</span>
+                              <span className="text-right">{w?.train ?? '—'}</span>
+                              <span className="text-right">{w?.test ?? '—'}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {autonomousAdvanced.wf_long_horizon_templates?.length > 0 && (
+                          <div className="mt-2 text-[11px] text-gray-500">
+                            <span className="text-gray-400">Long-horizon templates</span> (use the <code>crypto_1d_longhorizon</code> window):{' '}
+                            <span className="font-mono">{autonomousAdvanced.wf_long_horizon_templates.join(', ')}</span>
+                          </div>
+                        )}
+                        <p className="text-xs text-gray-500 mt-2">
+                          These windows are hardcoded to match data-source constraints.
+                          Non-crypto 1h/4h are bounded by Yahoo's 7-month 1h cap.
+                          Managed in <code>config/autonomous_trading.yaml</code>.
+                        </p>
+                      </div>
+                    )}
+
                     {/* Direction-aware — default */}
                     <div className="pt-3 border-t border-dark-border">
                       <h4 className="text-[11px] text-gray-400 font-medium mb-2">Default (used when no regime match)</h4>

@@ -115,7 +115,172 @@ class StrategyProposer:
         self._proposal_tracker_path = "config/.proposal_tracker.json"
         self._proposal_tracker: Dict[str, Dict] = {}  # template_name -> {proposed: N, approved: N, last_proposed: iso, last_approved: iso}
         self._load_proposal_tracker()
+        # Walk-forward per-(asset_class, interval) window config.
+        # Loaded once at init; re-read only if the yaml change needs a
+        # restart. Single source of truth for which (train, test) window
+        # each strategy gets. See _select_wf_window().
+        self._wf_asset_class_windows: Dict[str, Dict[str, int]] = {}
+        self._wf_long_horizon_templates: set = set()
+        self._wf_fallback_train_days: int = 365
+        self._wf_fallback_test_days: int = 180
+        self._load_wf_window_config()
         logger.info(f"StrategyProposer initialized with {len(self._trading_symbols)} trading symbols, {len(self._wf_validated)} validated combos")
+
+    def _load_wf_window_config(self) -> None:
+        """Load the asset_class_windows + long_horizon_templates block from
+        autonomous_trading.yaml into instance caches.
+
+        Single source of truth for per-(asset_class, interval, template)
+        walk-forward window selection. Called once at __init__; if the yaml
+        changes, the service is restarted (no mid-cycle hot reload path).
+
+        Fail-open: any load or parse error leaves the caches empty, which
+        forces _select_wf_window to return the yaml fallback default. The
+        fallback keys themselves (train_days / test_days) are loaded from
+        the same yaml; on total yaml failure we retain the hardcoded
+        defaults (365 / 180) set in __init__.
+        """
+        import yaml
+        from pathlib import Path
+        try:
+            path = Path("config/autonomous_trading.yaml")
+            if not path.exists():
+                logger.info("WF window config: yaml not found, using hardcoded fallback (365/180)")
+                return
+            with open(path, 'r') as f:
+                cfg = yaml.safe_load(f) or {}
+            wf_cfg = (cfg.get('backtest') or {}).get('walk_forward') or {}
+            # Fallback default
+            try:
+                self._wf_fallback_train_days = int(wf_cfg.get('train_days', 365))
+                self._wf_fallback_test_days = int(wf_cfg.get('test_days', 180))
+            except (TypeError, ValueError):
+                pass  # keep hardcoded defaults on bad values
+            # Per-(asset_class, interval) block
+            raw_windows = wf_cfg.get('asset_class_windows') or {}
+            parsed: Dict[str, Dict[str, int]] = {}
+            for key, vals in raw_windows.items():
+                if not isinstance(vals, dict):
+                    continue
+                try:
+                    parsed[key] = {
+                        'train': int(vals.get('train', self._wf_fallback_train_days)),
+                        'test': int(vals.get('test', self._wf_fallback_test_days)),
+                    }
+                except (TypeError, ValueError):
+                    continue
+            self._wf_asset_class_windows = parsed
+            # Long-horizon template set
+            lh = wf_cfg.get('long_horizon_templates') or []
+            if isinstance(lh, list):
+                self._wf_long_horizon_templates = {str(x) for x in lh}
+            logger.info(
+                f"WF window config loaded: {len(self._wf_asset_class_windows)} asset-class keys, "
+                f"{len(self._wf_long_horizon_templates)} long-horizon templates, "
+                f"fallback={self._wf_fallback_train_days}d train / {self._wf_fallback_test_days}d test"
+            )
+        except Exception as e:
+            logger.warning(f"WF window config load failed ({e}); using yaml/hardcoded fallback")
+
+    def _select_wf_window(
+        self,
+        strategy,
+        end_date: datetime,
+    ) -> Tuple[int, int, datetime, datetime]:
+        """Pick the walk-forward (train_days, test_days, start, end) for a
+        given strategy.
+
+        Key selection order (most specific first):
+            crypto_1d_longhorizon  — crypto 1d AND template in long_horizon_templates
+            crypto_1d              — crypto 1d, any other template
+            crypto_4h              — crypto 4h
+            crypto_1h              — crypto 1h
+            non_crypto_1d          — non-crypto 1d (Yahoo; wide window OK)
+            non_crypto_4h          — non-crypto 4h (Yahoo; bounded by 7-month 1h cap → engine may truncate)
+            non_crypto_1h          — non-crypto 1h (Yahoo; same cap)
+            fallback               — yaml default train_days / test_days
+
+        Fail-open: on any detection error, returns fallback (train, test)
+        with start = end - (train + test). Logs the fallback at INFO so
+        the fact that we didn't find a match is visible.
+
+        Args:
+            strategy: the Strategy object being walk-forward validated.
+            end_date: the end of the walk-forward window (caller-supplied;
+                typically datetime.now() at cycle start).
+
+        Returns:
+            (train_days, test_days, start_date, end_date)
+        """
+        try:
+            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+            crypto_set = set(DEMO_ALLOWED_CRYPTO)
+            # Resolve symbol class
+            primary_symbol = ''
+            if getattr(strategy, 'symbols', None):
+                primary_symbol = (strategy.symbols[0] or '').upper()
+            is_crypto = primary_symbol in crypto_set
+            # Resolve interval (metadata first, then rules, then default 1d)
+            meta = (getattr(strategy, 'metadata', None) or {})
+            interval = meta.get('interval') or ''
+            if not interval and getattr(strategy, 'rules', None):
+                interval = (strategy.rules or {}).get('interval', '') or ''
+            if not interval:
+                interval = '1d'
+            interval = str(interval).lower()
+            # Resolve template name for long-horizon check
+            template_name = meta.get('template_name', '') or ''
+            # Key selection
+            key: Optional[str] = None
+            if is_crypto:
+                if interval == '1d':
+                    if template_name in self._wf_long_horizon_templates:
+                        key = 'crypto_1d_longhorizon'
+                    else:
+                        key = 'crypto_1d'
+                elif interval == '4h':
+                    key = 'crypto_4h'
+                elif interval == '1h':
+                    key = 'crypto_1h'
+            else:
+                if interval == '1d':
+                    key = 'non_crypto_1d'
+                elif interval == '4h':
+                    key = 'non_crypto_4h'
+                elif interval == '1h':
+                    key = 'non_crypto_1h'
+            window = self._wf_asset_class_windows.get(key) if key else None
+            if window is not None:
+                train_days = int(window['train'])
+                test_days = int(window['test'])
+                start_date = end_date - timedelta(days=train_days + test_days)
+                strat_name = getattr(strategy, 'name', '<unnamed>')
+                logger.info(
+                    f"WF window [{key}]: {strat_name} → train={train_days}d test={test_days}d "
+                    f"({start_date.date()} → {end_date.date()})"
+                )
+                return train_days, test_days, start_date, end_date
+            # No key match — fall back to yaml default
+            train_days = self._wf_fallback_train_days
+            test_days = self._wf_fallback_test_days
+            start_date = end_date - timedelta(days=train_days + test_days)
+            strat_name = getattr(strategy, 'name', '<unnamed>')
+            logger.info(
+                f"WF window [fallback]: {strat_name} (is_crypto={is_crypto}, interval={interval}) "
+                f"→ train={train_days}d test={test_days}d"
+            )
+            return train_days, test_days, start_date, end_date
+        except Exception as e:
+            # Fail-open: yaml fallback, start computed from end
+            train_days = self._wf_fallback_train_days
+            test_days = self._wf_fallback_test_days
+            start_date = end_date - timedelta(days=train_days + test_days)
+            logger.info(
+                f"WF window [fallback-on-error]: {getattr(strategy, 'name', '<unnamed>')} "
+                f"({e}) → train={train_days}d test={test_days}d"
+            )
+            return train_days, test_days, start_date, end_date
+
 
     def _load_blacklist_from_disk(self):
         """Load zero-trade blacklist from JSON, expiring stale entries."""
@@ -1683,112 +1848,13 @@ class StrategyProposer:
                     if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
                         strategy_engine.market_data._historical_memory_cache.clear()
 
-                    # Per-strategy WF window override:
-                    # - long-horizon 1d crypto → 730d (weekly/monthly holds need more data)
-                    # - 1h crypto → 365d/365d (Binance, Sprint 4 S4.0.3)
-                    # - 4h crypto → 365d/365d (Binance, Sprint 4 S4.0)
-                    # - non-long-horizon 1d crypto → 365d/365d (Sprint 4 S4.0.4;
-                    #   matches 1h/4h now that Binance has 2y of 1d. Was using
-                    #   yaml default 365/180.)
-                    # - non-crypto 1d → 730d/365d (Sprint 4 S4.0.5; Yahoo has
-                    #   decades of 1d history, so widening from yaml default
-                    #   365/180 gives swing templates 12-24 trades in the test
-                    #   window instead of 6-12, crossing Bailey & López de Prado's
-                    #   threshold for reliable Sharpe estimation. 2y train covers
-                    #   at least one regime pair (e.g. 2023 recovery + 2024 rally).
-                    # - non-crypto 1h / 4h stays at yaml default because Yahoo
-                    #   caps 1h/4h at ~7 months; widening would silently truncate.
-                    # - everything else uses yaml-configured train/test
-                    _wf_train_days = train_days
-                    _wf_test_days = test_days
-                    _wf_start = start_date
-                    _wf_end = end_date
-                    try:
-                        _tname = (strategy.metadata or {}).get('template_name', '')
-                        _interval_ck = (strategy.metadata or {}).get('interval', '1d')
-                        _sym_ck = strategy.symbols[0].upper() if strategy.symbols else ''
-                        from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO as _CRYPTO
-                        _is_cr = _sym_ck in _CRYPTO
-                        _LONG_HORIZON = {
-                            'Crypto 21W MA Trend Follow',
-                            'Crypto Vol-Compression Momentum',
-                            'Crypto Weekly Trend Follow',
-                            'Crypto Golden Cross',
-                        }
-                        if _is_cr and _interval_ck == '1d' and _tname in _LONG_HORIZON:
-                            _wf_test_days = 730
-                            _wf_train_days = 730
-                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
-                            logger.info(
-                                f"WF window extended for long-horizon crypto: {strategy.name} "
-                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
-                            )
-                        elif _is_cr and _interval_ck == '1h':
-                            # Sprint 4 S4.0.3 (2026-05-02): widened from 180/180
-                            # to 365/365. Binance serves 1h crypto back to 2017+
-                            # (24*365*2=17520 bars per symbol for 2y), so 1y/1y
-                            # gives the test window a full year — covers at least
-                            # one regime transition, which 180d couldn't. 2y total
-                            # window gets 2190 bars/symbol/year which is plenty
-                            # for WF stat significance.
-                            _wf_test_days = 365
-                            _wf_train_days = 365
-                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
-                            logger.info(
-                                f"WF window extended for 1h crypto (Binance): {strategy.name} "
-                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
-                            )
-                        elif _is_cr and _interval_ck == '4h':
-                            # Sprint 4 S4.0: widened from 180/180 to 365/365. Binance
-                            # serves 4h back to 2018 so crypto 4h strategies now get a
-                            # full year of out-of-sample test, enough to span a
-                            # regime transition (range→trend or vice versa).
-                            _wf_test_days = 365
-                            _wf_train_days = 365
-                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
-                            logger.info(
-                                f"WF window extended for 4h crypto (Binance): {strategy.name} "
-                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
-                            )
-                        elif _is_cr and _interval_ck == '1d':
-                            # Sprint 4 S4.0.4 (2026-05-02): non-long-horizon crypto
-                            # 1d templates (BTC Follower Daily, Cross-Sectional
-                            # Momentum, Donchian Breakout, OBV Accumulation, BB
-                            # Volume Breakout, 20D MA Variable Cross) previously
-                            # used the yaml default 365/180. With Binance now
-                            # giving us 2y of crypto 1d, symmetric 365/365 gets
-                            # better stat-significance on templates that fire
-                            # 1-3x/month (180d test = ~12 trades, 365d = ~24).
-                            _wf_test_days = 365
-                            _wf_train_days = 365
-                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
-                            logger.info(
-                                f"WF window extended for 1d crypto (Binance): {strategy.name} "
-                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
-                            )
-                        elif (not _is_cr) and _interval_ck == '1d':
-                            # Sprint 4 S4.0.5 (2026-05-02): non-crypto 1d
-                            # (equities, ETFs, forex, indices, commodities).
-                            # Yahoo has decades of 1d data; yaml default 365/180
-                            # is a relic of matching crypto's Yahoo cap. A
-                            # 730 train / 365 test window gives:
-                            #   - 1-2 yr of OOS test: 12-24 trades for typical
-                            #     swing templates (was 6-12 trades)
-                            #   - 2 yr train: covers at least one regime pair
-                            #     (bull/correction/sideways)
-                            # Per Bailey & López de Prado (2014), 20-30 OOS
-                            # trades is the floor for a reliable Sharpe estimate.
-                            # 365d test gets us there on typical swing/trend
-                            # templates; 180d didn't.
-                            _wf_test_days = 365
-                            _wf_train_days = 730
-                            _wf_start = end_date - timedelta(days=_wf_train_days + _wf_test_days)
-                            logger.info(
-                                f"WF window widened for non-crypto 1d: {strategy.name} "
-                                f"→ test={_wf_test_days}d train={_wf_train_days}d"
-                            )
-                    except Exception as _wf_ext_err:
-                        logger.debug(f"WF window extension check failed: {_wf_ext_err}")
+                    # Per-strategy WF window — single source of truth in
+                    # backtest.walk_forward.asset_class_windows (yaml) via
+                    # _select_wf_window(). Replaces the previous 5-branch
+                    # hardcoded override block (refactor 2026-05-03).
+                    _wf_train_days, _wf_test_days, _wf_start, _wf_end = self._select_wf_window(
+                        strategy, end_date
+                    )
 
                     wf_results = strategy_engine.walk_forward_validate(
                         strategy=strategy,
@@ -2742,49 +2808,14 @@ class StrategyProposer:
                         if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
                             strategy_engine.market_data._historical_memory_cache.clear()
 
-                        # Per-strategy WF window override (matches primary WF call above):
-                        # - long-horizon 1d crypto → 730d/730d
-                        # - 1h crypto → 365d/365d (Binance, Sprint 4 S4.0.3)
-                        # - 4h crypto → 365d/365d (Binance, Sprint 4 S4.0)
-                        # - non-long-horizon 1d crypto → 365d/365d (S4.0.4)
-                        _wl_train_days = train_days
-                        _wl_test_days = test_days
-                        _wl_start = start_date
-                        _wl_end = end_date
-                        try:
-                            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO as _CRYPTO_WL
-                            _sym_wl = sym.upper() if sym else ''
-                            _interval_wl = (strategy.metadata or {}).get('interval', '1d')
-                            _LONG_HORIZON_WL = {
-                                'Crypto 21W MA Trend Follow',
-                                'Crypto Vol-Compression Momentum',
-                                'Crypto Weekly Trend Follow',
-                                'Crypto Golden Cross',
-                            }
-                            if _sym_wl in _CRYPTO_WL and _interval_wl == '1d' and template_name in _LONG_HORIZON_WL:
-                                _wl_test_days = 730
-                                _wl_train_days = 730
-                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
-                            elif _sym_wl in _CRYPTO_WL and _interval_wl == '1h':
-                                _wl_test_days = 365
-                                _wl_train_days = 365
-                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
-                            elif _sym_wl in _CRYPTO_WL and _interval_wl == '4h':
-                                _wl_test_days = 365
-                                _wl_train_days = 365
-                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
-                            elif _sym_wl in _CRYPTO_WL and _interval_wl == '1d':
-                                # Non-long-horizon crypto 1d — symmetric 365/365
-                                _wl_test_days = 365
-                                _wl_train_days = 365
-                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
-                            elif (_sym_wl not in _CRYPTO_WL) and _interval_wl == '1d':
-                                # Non-crypto 1d — 730 train / 365 test (S4.0.5)
-                                _wl_test_days = 365
-                                _wl_train_days = 730
-                                _wl_start = end_date - timedelta(days=_wl_train_days + _wl_test_days)
-                        except Exception:
-                            pass
+                        # Per-strategy WF window — single source of truth via
+                        # _select_wf_window(). Helper reads the temp_strategy's
+                        # primary symbol + metadata, so cross-class watchlists
+                        # (e.g. stock strategy with an ETF watchlist entry)
+                        # correctly pick per-(asset_class, interval) windows.
+                        _wl_train_days, _wl_test_days, _wl_start, _wl_end = self._select_wf_window(
+                            temp_strategy, end_date
+                        )
 
                         wf_result = strategy_engine.walk_forward_validate(
                             strategy=temp_strategy,
