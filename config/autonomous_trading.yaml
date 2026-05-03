@@ -234,6 +234,35 @@ backtest:
         spread_percent: 0.0004
         slippage_percent: 0.0002
         overnight_financing_pct_per_day: 0.0002
+    # Sprint 5 S5.1 A3 (2026-05-02): per-symbol cost overrides.
+    # eToro's crypto round-trip cost varies widely by coin — BTC / ETH
+    # trade on the tightest book (~0.04% spread per side), alts sit at
+    # 0.3-0.5% spread per side. The `crypto` per-asset-class default
+    # above models the alt-coin worst case. Per-symbol overrides below
+    # reflect tighter-spread instruments.
+    #
+    # Source: eToro live quotes sampled 2026-05-01 during EU session.
+    # Commission remains 1% per side on all crypto (unchanged since
+    # mid-2025 when eToro broke it out as explicit fee).
+    #
+    # Read by src/strategy/cost_model.round_trip_cost_pct which checks
+    # per_symbol before per_asset_class.
+    per_symbol:
+      BTC:
+        commission_percent: 0.01    # 1% per side
+        spread_percent: 0.0004      # 0.04% per side (tightest book)
+        slippage_percent: 0.0005    # 0.05% per side
+        overnight_financing_pct_per_day: 0.0
+        # Round-trip: 2 × (1% + 0.04% + 0.05%) = 2.18%
+      ETH:
+        commission_percent: 0.01
+        spread_percent: 0.0005
+        slippage_percent: 0.0005
+        overnight_financing_pct_per_day: 0.0
+        # Round-trip: 2 × (1% + 0.05% + 0.05%) = 2.20%
+      # SOL, LINK, DOT, AVAX, ADA: use `crypto` asset-class defaults (2.96%)
+      # Altcoin spreads can be 0.3-0.5% per side; we keep the conservative
+      # 0.38% default until we have per-coin live-quote sampling.
   period_days: 730
   adaptive_risk:
     enabled: true

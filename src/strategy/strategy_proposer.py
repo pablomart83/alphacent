@@ -3550,7 +3550,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
         if template.metadata:
             for key in ['crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'strategy_category', 'btc_leader', 'btc_leader_interval', 'btc_leader_bars', 'btc_leader_threshold_pct', 'btc_leader_direction', 'leader_symbol', 'cross_sectional_rank', 'rank_window_days', 'rank_top_n', 'rank_metric', 'rank_universe', 'skip_adx_gate',
                         'requires_cross_validation', 'family_universe',
-                        'direction', 'alpha_edge_type', 'alpha_edge_bypass', 'market_neutral', 'pair_symbols']:
+                        'direction', 'alpha_edge_type', 'alpha_edge_bypass', 'market_neutral', 'pair_symbols',
+                        'min_rpt_override']:
                 if key in template.metadata:
                     strategy.metadata[key] = template.metadata[key]
         
@@ -3668,7 +3669,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
         if template.metadata:
             for key in ['crypto_optimized', 'intraday', 'interval', 'interval_4h', 'skip_param_override', 'strategy_category', 'btc_leader', 'btc_leader_interval', 'btc_leader_bars', 'btc_leader_threshold_pct', 'btc_leader_direction', 'leader_symbol', 'cross_sectional_rank', 'rank_window_days', 'rank_top_n', 'rank_metric', 'rank_universe', 'skip_adx_gate',
                         'requires_cross_validation', 'family_universe',
-                        'direction', 'alpha_edge_type', 'alpha_edge_bypass', 'market_neutral', 'pair_symbols']:
+                        'direction', 'alpha_edge_type', 'alpha_edge_bypass', 'market_neutral', 'pair_symbols',
+                        'min_rpt_override']:
                 if key in template.metadata:
                     strategy.metadata[key] = template.metadata[key]
         

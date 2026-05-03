@@ -703,17 +703,12 @@ class PortfolioManager:
         # now runs a second 730d backtest on WF-validated strategies and
         # stamps the results on strategy.metadata (expost_730d_*).
         #
-        # This veto is LENIENT by design. We do NOT require positive 730d
-        # Sharpe (crypto regimes don't last 2 years — a mean-reversion
-        # strategy might be negative through a 2-year bull). We only reject
-        # the "broken in both regimes" case: Sharpe < -0.5 over 730d means
-        # the strategy lost money in current regime AND was negative in
-        # the prior regime — not a single-regime tradeoff, just a bad strategy.
-        #
-        # Threshold calibration (-0.5):
-        #   Sharpe -0.5 on 730d crypto ≈ ~15% annualised loss at typical
-        #   crypto vol. Anything better than that could still be a one-
-        #   regime strategy; we let WF be the primary gate on that.
+        # S5.1 C3 (2026-05-02): asset-class-aware floor.
+        #   crypto  -> -0.5 (regimes don't last 2y; a mean-reversion strategy
+        #                    could legitimately be negative through a 2y bull)
+        #   other   ->  0.0 (equity/ETF/forex regimes are more stable over
+        #                    2y; requiring non-negative 2y Sharpe is
+        #                    realistic and catches obviously-broken strategies)
         #
         # Fail-open if metadata missing (e.g. 730d backtest errored — that
         # failure is logged upstream; don't double-punish the strategy).
@@ -724,14 +719,23 @@ class PortfolioManager:
             if (_expost_sharpe is not None
                     and _expost_trades is not None
                     and int(_expost_trades) >= 10):  # need stat-meaningful sample
-                _EXPOST_SHARPE_FLOOR = -0.5
+                # Asset-class-aware floor
+                _is_crypto_primary = False
+                if hasattr(strategy, 'symbols') and strategy.symbols:
+                    try:
+                        from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO as _CR
+                        _is_crypto_primary = strategy.symbols[0].upper() in set(_CR)
+                    except Exception:
+                        pass
+                _EXPOST_SHARPE_FLOOR = -0.5 if _is_crypto_primary else 0.0
                 if float(_expost_sharpe) < _EXPOST_SHARPE_FLOOR:
+                    _ac_label = "crypto" if _is_crypto_primary else "equity/other"
                     reason = (
                         f"Ex-post 730d Sharpe {float(_expost_sharpe):.2f} < "
-                        f"{_EXPOST_SHARPE_FLOOR:.1f} floor "
+                        f"{_EXPOST_SHARPE_FLOOR:.1f} floor ({_ac_label}) "
                         f"(return={float(_expost_return or 0):.1%}, "
                         f"{int(_expost_trades)} trades over 2y) — "
-                        f"strategy was loss-making in both current AND prior regimes"
+                        f"strategy was loss-making over 2 years"
                     )
                     logger.info(f"Strategy {strategy.name} failed activation: {reason}")
                     return False, reason
@@ -1245,6 +1249,50 @@ class PortfolioManager:
             else:
                 min_return_per_trade = 0.002
                 _rpt_source = 'default'
+
+            # Sprint 5 S5.1 A1 (2026-05-02): per-template RPT override.
+            # Some swing templates (2-5 trades/month, multi-day holds, R:R ≥ 2.0)
+            # legitimately produce lower gross per trade than the asset-class
+            # default but still have positive expectancy after costs. Example:
+            # BTC Follower 4H ETH passed WF at Sharpe 1.44, WR 67%, 5% gross
+            # over 6 trades (0.83%/trade) vs the crypto_4h floor of 3%.
+            #
+            # Template authors declare `min_rpt_override` in metadata based on
+            # the template's design (expected_trade_frequency × holding_period
+            # × risk_reward_ratio). Safety rail: override can only LOWER the
+            # floor, and cannot drop below 60% of the config value. This
+            # prevents an over-aggressive override from admitting garbage.
+            _template_rpt_override = None
+            if hasattr(strategy, 'metadata') and strategy.metadata:
+                _template_rpt_override = strategy.metadata.get('min_rpt_override')
+            if _template_rpt_override is not None:
+                try:
+                    _template_rpt_override = float(_template_rpt_override)
+                    _safety_floor = min_return_per_trade * 0.6
+                    if _template_rpt_override < _safety_floor:
+                        logger.info(
+                            f"RPT override clamped: {strategy.name} requested "
+                            f"{_template_rpt_override:.3%} < safety floor "
+                            f"{_safety_floor:.3%} (60% of {_rpt_source}={min_return_per_trade:.3%}) — "
+                            f"using safety floor"
+                        )
+                        _template_rpt_override = _safety_floor
+                    if _template_rpt_override > min_return_per_trade:
+                        # Override only loosens, never tightens.
+                        logger.info(
+                            f"RPT override ignored (tightening): {strategy.name} requested "
+                            f"{_template_rpt_override:.3%} > config {min_return_per_trade:.3%}"
+                        )
+                    else:
+                        logger.info(
+                            f"RPT override applied: {strategy.name} floor "
+                            f"{min_return_per_trade:.3%} -> {_template_rpt_override:.3%} "
+                            f"(template={(strategy.metadata or {}).get('template_name', 'unknown')})"
+                        )
+                        min_return_per_trade = _template_rpt_override
+                        _rpt_source = f"{_rpt_source}+template_override"
+                except (TypeError, ValueError):
+                    logger.debug(f"Invalid min_rpt_override on {strategy.name}: {_template_rpt_override}")
             if backtest_results.total_trades > 0:
                 return_per_trade = backtest_results.total_return / backtest_results.total_trades
                 if return_per_trade < min_return_per_trade:
