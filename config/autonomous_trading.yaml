@@ -5,7 +5,7 @@ autonomous:
   enabled: true
   watchlist_size: 5
   proposal_frequency: daily
-  proposal_count: 200
+  proposal_count: 400
   max_active_strategies: 200
   min_active_strategies: 10
   backtested_ttl_cycles: 168
@@ -16,61 +16,35 @@ autonomous_schedule:
   hour: 15
   minute: 15
 activation_thresholds:
-  # ─────────────────────────────────────────────────────────────────────
-  # DEMO LEARNING CALIBRATION (2026-05-02, Sprint 3 S3.0b)
-  #
-  # Current posture: loosened crypto gates to generate more live signal
-  # data on eToro DEMO. On DEMO we pay no real money; the goal is data
-  # collection — more live trades produce more MAE/MFE, live-vs-backtest
-  # divergence, and entry-timing feedback.
-  #
-  # This is NOT a "proper" cost calibration. Each live-crypto trade now
-  # has only ~40bps of expected edge over round-trip cost vs 54bps before.
-  # On a live account with real money, expect capital erosion — revert
-  # BEFORE going live.
-  #
-  # Revert-to-live values (restore when moving to real capital):
-  #   min_sharpe_crypto:        0.5   (currently 0.3)
-  #   min_return_per_trade.crypto_1d:  0.035  (currently 0.030)
-  #   min_return_per_trade.crypto_4h:  0.035  (currently 0.030)
-  #   min_return_per_trade.crypto_1h:  0.035  (currently 0.030)
-  #
-  # Diagnostic basis: cycle_1777741379 (2026-05-02 17:02) had 4 wf_validated
-  # crypto strategies, ALL rejected at activation. 2 on Sharpe (0.39, 0.46),
-  # 2 on net return < 0 (which stays rejected — correct), 1 on RPT 0.945%
-  # (gross 2.8% on 3 trades — below 3.5% floor). The Sharpe rejections are
-  # the DEMO-learning targets — those strategies show edge but not enough
-  # to clear a live-profitability bar. DEMO exposure produces useful data.
-  # ─────────────────────────────────────────────────────────────────────
-  min_sharpe: 1.0               # Raised from 0.4 — live data shows Sharpe 0.4-1.0 strategies have <30% live win rate
-  min_sharpe_crypto: 0.3        # DEMO loosen from 0.5 (2026-05-02) — see header for revert value
-  min_sharpe_commodity: 0.5     # Was 0.3
+  min_sharpe: 1.0
+  min_sharpe_crypto: 0.3
+  min_sharpe_commodity: 0.5
   max_drawdown: 0.25
   min_win_rate: 0.45
   min_win_rate_crypto: 0.3
   min_win_rate_commodity: 0.35
   min_trades: 2
-  min_trades_alpha_edge: 8      # Was 10 — alpha edge strategies are lower frequency by design
-  min_trades_dsl: 8             # Was 15 — too strict; selective 1d strategies fire 6-10x/6mo
-  min_trades_dsl_1h: 15          # Was 20 — 1h strategies with 15+ trades in 180d test window is sufficient
-  min_trades_dsl_4h: 8          # Was 12 — 4h strategies in 180-day test window: 8 is sufficient
-  min_trades_crypto_1d: 4       # Added 2026-05-02 — weekly/swing crypto templates produce 3-7 trades in 120d (thin liquidity); paired with min_sharpe_crypto=0.5 floor
-  min_trades_crypto_4h: 4       # Added 2026-05-02 — same rationale for 4H crypto templates
-  min_trades_crypto_1h: 15      # Added 2026-05-02 — 1h crypto needs statistical significance (~100-200 bars-at-signal in 180d)
-  min_trades_commodity: 6       # Was 8 — commodities are inherently lower frequency
+  min_trades_alpha_edge: 8
+  min_trades_dsl: 8
+  min_trades_dsl_1h: 15
+  min_trades_dsl_4h: 8
+  min_trades_crypto_1d: 4
+  min_trades_crypto_4h: 4
+  min_trades_crypto_1h: 15
+  min_trades_commodity: 6
   min_return_per_trade:
-    stock: 0.0015       # daily: ~7-30 day holds
-    stock_4h: 0.0008    # 4h: shorter holds, lower per-trade target
-    stock_1h: 0.0003    # 1h: high frequency, small per-trade is expected
+    stock: 0.0015
+    stock_4h: 0.0008
+    stock_1h: 0.0003
     etf: 0.001
     etf_4h: 0.0005
     etf_1h: 0.0002
     forex: 0.0005
     forex_1h: 0.0001
-    crypto: 0.05         # Sprint 1 F3: 0.04→0.05 for 21d+ weekly/monthly-hold templates. Real round-trip cost on eToro = 2.96%.
-    crypto_1d: 0.030     # DEMO loosen from 0.035 (2026-05-02) — 40bps edge over round-trip cost; was 54bps. See header for revert.
-    crypto_4h: 0.030     # DEMO loosen from 0.035 (2026-05-02) — same rationale.
-    crypto_1h: 0.030     # DEMO loosen from 0.035 (2026-05-02) — same rationale.
+    crypto: 0.05
+    crypto_1d: 0.03
+    crypto_4h: 0.03
+    crypto_1h: 0.03
     index: 0.001
     index_1h: 0.0002
     commodity: 0.0015
@@ -139,6 +113,7 @@ signal_generation:
   - 4h
   - 1h
   default_interval: 1h
+  interval_seconds: 1800
 backtest:
   days: 730
   warmup_days: 100
@@ -195,16 +170,13 @@ backtest:
     commission_percent: 0.001
     slippage_percent: 0.0005
     spread_percent: 0.0002
-    # Overnight financing: eToro charges ~0.02% per night on CFD positions (1x leverage).
-    # Applied as: overnight_cost_pct * expected_holding_days at backtest time.
-    # This is the single biggest cost gap vs live trading for multi-day holds.
-    overnight_financing_pct_per_day: 0.0002  # 0.02% per night
+    overnight_financing_pct_per_day: 0.0002
     per_asset_class:
       stock:
         commission_percent: 0.0
         spread_percent: 0.0015
         slippage_percent: 0.0002
-        overnight_financing_pct_per_day: 0.0002  # ~0.02%/night on CFDs
+        overnight_financing_pct_per_day: 0.0002
       etf:
         commission_percent: 0.0
         spread_percent: 0.0015
@@ -213,72 +185,42 @@ backtest:
       forex:
         commission_percent: 0.0
         spread_percent: 0.00015
-        slippage_percent: 0.00005
-        overnight_financing_pct_per_day: 0.0001  # Forex swap rates vary; 0.01% conservative
+        slippage_percent: 5.0e-05
+        overnight_financing_pct_per_day: 0.0001
       crypto:
-        commission_percent: 0.01   # eToro charges explicit 1% per side since 2025
-        spread_percent: 0.0038     # + ~0.38% per side bid/ask spread on BTC/ETH (wider on altcoins)
-        slippage_percent: 0.001    # + 0.1% per side slippage
-        # Real round-trip cost on crypto: ~2.96% (2% commission + 0.76% spread + 0.2% slippage).
-        # Previous config had commission=0.0 assuming it was baked into spread — stale
-        # since eToro broke out commission as explicit 1% per side. Crypto backtests
-        # with old values overstated returns by ~2% per trade.
-        overnight_financing_pct_per_day: 0.0  # Crypto: no overnight fee on eToro
+        commission_percent: 0.01
+        spread_percent: 0.0038
+        slippage_percent: 0.001
+        overnight_financing_pct_per_day: 0.0
       index:
         commission_percent: 0.0
         spread_percent: 0.00015
         slippage_percent: 0.0001
-        overnight_financing_pct_per_day: 0.00015  # Indices: ~0.015%/night
+        overnight_financing_pct_per_day: 0.00015
       commodity:
         commission_percent: 0.0
         spread_percent: 0.0004
         slippage_percent: 0.0002
         overnight_financing_pct_per_day: 0.0002
-    # Sprint 5 S5.1 A3 (2026-05-02): per-symbol cost overrides.
-    # eToro's crypto round-trip cost varies widely by coin — BTC / ETH
-    # trade on the tightest book (~0.04% spread per side), alts sit at
-    # 0.3-0.5% spread per side. The `crypto` per-asset-class default
-    # above models the alt-coin worst case. Per-symbol overrides below
-    # reflect tighter-spread instruments.
-    #
-    # Source: eToro live quotes sampled 2026-05-01 during EU session.
-    # Commission remains 1% per side on all crypto (unchanged since
-    # mid-2025 when eToro broke it out as explicit fee).
-    #
-    # Read by src/strategy/cost_model.round_trip_cost_pct which checks
-    # per_symbol before per_asset_class.
     per_symbol:
       BTC:
-        commission_percent: 0.01    # 1% per side
-        spread_percent: 0.0004      # 0.04% per side (tightest book)
-        slippage_percent: 0.0005    # 0.05% per side
+        commission_percent: 0.01
+        spread_percent: 0.0004
+        slippage_percent: 0.0005
         overnight_financing_pct_per_day: 0.0
-        # Round-trip: 2 × (1% + 0.04% + 0.05%) = 2.18%
       ETH:
         commission_percent: 0.01
         spread_percent: 0.0005
         slippage_percent: 0.0005
         overnight_financing_pct_per_day: 0.0
-        # Round-trip: 2 × (1% + 0.05% + 0.05%) = 2.20%
-      # SOL, LINK, DOT, AVAX, ADA: use `crypto` asset-class defaults (2.96%)
-      # Altcoin spreads can be 0.3-0.5% per side; we keep the conservative
-      # 0.38% default until we have per-coin live-quote sampling.
   period_days: 730
   adaptive_risk:
     enabled: true
-    # NOTE: ATR multipliers for SL and TP are hardcoded in
-    # src/execution/order_executor.py (1.5× ATR SL, Wilder's standard;
-    # TP from template risk_reward_ratio). Config keys previously here
-    # (atr_sl_multiplier, atr_tp_multiplier) were never read — removed
-    # 2026-05-01 to eliminate documentation-vs-code drift. If you need
-    # to tune multipliers, edit order_executor.py and update the
-    # steering file / Session_Continuation.md in the same change.
     min_sl_pct: 0.02
     max_sl_pct: 0.08
     min_tp_pct: 0.04
-    max_tp_pct: 0.20
-    min_reward_risk_ratio: 1.5  # Relaxed from 2.0 — mean-reversion at 65%+ WR is fine at 1.5:1
-    # Note: trend-following strategies enforce 2:1 via strategy_proposer asset-class overrides
+    max_tp_pct: 0.2
+    min_reward_risk_ratio: 1.5
 data_sources:
   financial_modeling_prep:
     enabled: true
@@ -292,9 +234,6 @@ data_sources:
       earnings_period_ttl: 86400
       earnings_calendar_ttl: 604800
   alpha_vantage:
-    # Free tier: 25 req/day — exhausted in minutes during cache warming, provides nothing.
-    # NEWS_SENTIMENT is the only valuable AV endpoint for quant use (pre-scored NLP sentiment).
-    # Enable and upgrade to $50/month plan if/when news sentiment is wired into conviction scorer.
     enabled: false
     api_key: REPLACE_VIA_SECRETS_MANAGER
     rate_limit: 500
@@ -306,8 +245,6 @@ data_sources:
   marketaux:
     enabled: true
     api_key: nwpVfgSsnX2V5wkzXatGNIBMPEwZQr7Cwk8J12Th
-    # Free tier: 100 req/day. Sentiment cached in DB with TTL (6h-72h).
-    # Priority queue: open positions > pending signals > earnings week > background fill
   yahoo_finance:
     enabled: true
     cache_duration: 3600
@@ -324,7 +261,7 @@ data_management:
   cleanup_enabled: true
 alpha_edge:
   max_active_strategies: 10
-  min_conviction_score: 65   # Lowered from 70 (Apr 30) — 70 was above practical ceiling for DSL strategies (max observed: 69.x). 65 gives ~25% pass rate.
+  min_conviction_score: 65
   min_holding_period_days: 3
   max_holding_period_days: 30
   max_trades_per_strategy_per_month: 4
@@ -433,10 +370,7 @@ alpha_edge:
     earnings_miss_threshold: -0.05
     revenue_decline_exit: true
     sector_rotation_exit: true
-    # Regime stability: sector rotation exits only fire if regime has been
-    # stable for this many days (prevents whipsawing on single-day blips)
     sector_rotation_regime_stability_days: 3
-    # Only exit on earnings miss if position is profitable OR SL is > 50% consumed
     earnings_exit_only_if_profitable: true
 templates:
 - name: RSI Mean Reversion
@@ -594,7 +528,7 @@ asset_class_parameters:
     volatility_tolerance: low
   crypto:
     stop_loss_pct: 0.08
-    take_profit_pct: 0.20
+    take_profit_pct: 0.2
     holding_period_days_min: 21
     holding_period_days_max: 60
     signal_hours: 24/7
@@ -608,7 +542,7 @@ asset_class_parameters:
     volatility_tolerance: standard
   commodity:
     stop_loss_pct: 0.04
-    take_profit_pct: 0.10
+    take_profit_pct: 0.1
     holding_period_days_min: 10
     holding_period_days_max: 45
     signal_hours: market_hours
@@ -644,14 +578,6 @@ position_management:
   max_holding_period_days_intraday: 2
   trailing_stops:
     enabled: true
-    # Per-asset-class thresholds are used (defined in PositionManager.TRAILING_STOP_PARAMS):
-    #   stocks:  3% activation, 5% distance
-    #   etfs:    3% activation, 4% distance
-    #   crypto:  6% activation, 8% distance
-    #   forex:   2% activation, 3% distance
-    #   commodities: 4% activation, 6% distance
-    #   indices: 3% activation, 4% distance
-    # These legacy fields are kept for backward compatibility but no longer override.
     activation_pct: 0.05
     distance_pct: 0.03
   partial_exits:
@@ -669,7 +595,7 @@ position_management:
       high_volatility: 0.5
       low_volatility: 1.2
       trending: 1.0
-      trending_up_long: 1.25   # Size up longs in bull markets (shorts blocked by regime gate)
+      trending_up_long: 1.25
       ranging: 1.0
   portfolio_balance:
     enabled: true
@@ -679,38 +605,38 @@ position_management:
   portfolio_var:
     enabled: true
     confidence: 0.95
-    max_var_pct: 0.02        # Reject if 1-day 95% VaR > 2% of equity
-    lookback_days: 252       # 1 year of daily returns
-    min_history_days: 30     # Skip check if fewer than 30 equity snapshots
+    max_var_pct: 0.02
+    lookback_days: 252
+    min_history_days: 30
   drawdown_sizing:
     enabled: true
-    threshold_5pct: 0.50     # 50% size reduction when drawdown > 5%
-    threshold_10pct: 0.25    # 75% size reduction when drawdown > 10%
-    lookback_days: 30        # Rolling peak over last 30 days
+    threshold_5pct: 0.5
+    threshold_10pct: 0.25
+    lookback_days: 30
   vol_scaling:
-    min_scale: 0.10          # Was 0.25 — properly shrink high-vol (crypto) positions
-    max_scale: 1.50          # Was 2.50 — cap forex over-sizing
-    confidence_min: 0.30     # Reject signals with confidence < 0.30 (safety net)
-    max_symbol_pct: 0.05     # Hard cap: no symbol > 5% of equity
-    sector_soft_cap_pct: 0.30  # Halve size if sector already > 30% of equity
+    min_scale: 0.1
+    max_scale: 1.5
+    confidence_min: 0.3
+    max_symbol_pct: 0.05
+    sector_soft_cap_pct: 0.3
   directional_quotas:
     enabled: true
     adjacent_regime_reserve_pct: 0.2
     ranging:
-      min_long_pct: 0.70
+      min_long_pct: 0.7
       min_short_pct: 0.0
     ranging_low_vol:
       min_long_pct: 0.75
       min_short_pct: 0.0
     trending_up:
-      min_long_pct: 0.80
-      min_short_pct: 0.05   # Minimum 5% short — hedging floor even in bull markets
+      min_long_pct: 0.8
+      min_short_pct: 0.05
     trending_up_weak:
       min_long_pct: 0.75
-      min_short_pct: 0.08   # Weak uptrend = elevated correction risk, maintain larger hedge
+      min_short_pct: 0.08
     trending_up_strong:
       min_long_pct: 0.85
-      min_short_pct: 0.03   # Strong uptrend = smaller hedge, but never zero
+      min_short_pct: 0.03
     trending_down:
       min_long_pct: 0.2
       min_short_pct: 0.5
@@ -746,6 +672,6 @@ regime_detection:
     normal:
     - all
 market_regime:
-  current: ranging_low_vol
-  confidence: 0.568971087412122
-  updated_at: '2026-04-09T23:50:39.472545'
+  current: trending_up_strong
+  confidence: 0.9347988845014702
+  updated_at: '2026-05-03T14:36:29.373966'

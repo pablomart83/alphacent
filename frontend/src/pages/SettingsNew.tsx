@@ -50,6 +50,7 @@ const riskLimitsSchema = z.object({
 });
 
 const autonomousConfigSchema = z.object({
+  // ─── Core ──────────────────────────────────────────────────────────
   enabled: z.boolean(),
   proposal_count: z.number().min(10).max(500),
   max_active_strategies: z.number().min(5).max(500),
@@ -58,19 +59,133 @@ const autonomousConfigSchema = z.object({
   backtested_ttl_cycles: z.number().min(6).max(200),
   signal_generation_interval: z.number().min(300).max(3600),
   dynamic_symbol_additions: z.number().min(0).max(50),
-  // Activation thresholds
+
+  // ─── Activation — Sharpe / WR / DD ────────────────────────────────
   min_sharpe: z.number().min(0).max(3.0),
   min_sharpe_crypto: z.number().min(0).max(3.0),
+  min_sharpe_commodity: z.number().min(0).max(3.0),
   max_drawdown: z.number().min(5).max(50),
-  min_win_rate: z.number().min(30).max(80),
-  min_win_rate_crypto: z.number().min(20).max(70),
+  min_win_rate: z.number().min(20).max(80),
+  min_win_rate_crypto: z.number().min(15).max(70),
+  min_win_rate_commodity: z.number().min(20).max(70),
+
+  // ─── Activation — Min Trades ──────────────────────────────────────
   min_trades: z.number().min(1).max(50),
-  min_trades_alpha_edge: z.number().min(1).max(50),
   min_trades_dsl: z.number().min(1).max(50),
-  // Retirement thresholds
-  retirement_max_sharpe: z.number().min(0).max(2.0),
+  min_trades_dsl_4h: z.number().min(1).max(50),
+  min_trades_dsl_1h: z.number().min(1).max(100),
+  min_trades_alpha_edge: z.number().min(1).max(50),
+  min_trades_crypto_1d: z.number().min(1).max(50),
+  min_trades_crypto_4h: z.number().min(1).max(50),
+  min_trades_crypto_1h: z.number().min(1).max(100),
+  min_trades_commodity: z.number().min(1).max(50),
+
+  // ─── Activation — Min Return Per Trade (percentages) ──────────────
+  min_rpt_stock: z.number().min(0).max(20),
+  min_rpt_stock_4h: z.number().min(0).max(20),
+  min_rpt_stock_1h: z.number().min(0).max(10),
+  min_rpt_etf: z.number().min(0).max(20),
+  min_rpt_etf_4h: z.number().min(0).max(20),
+  min_rpt_etf_1h: z.number().min(0).max(10),
+  min_rpt_forex: z.number().min(0).max(10),
+  min_rpt_forex_1h: z.number().min(0).max(5),
+  min_rpt_crypto: z.number().min(0).max(30),
+  min_rpt_crypto_1d: z.number().min(0).max(30),
+  min_rpt_crypto_4h: z.number().min(0).max(30),
+  min_rpt_crypto_1h: z.number().min(0).max(20),
+  min_rpt_index: z.number().min(0).max(20),
+  min_rpt_index_1h: z.number().min(0).max(10),
+  min_rpt_commodity: z.number().min(0).max(20),
+  min_rpt_commodity_4h: z.number().min(0).max(20),
+
+  // ─── Retirement ─────────────────────────────────────────────────────
+  retirement_max_sharpe: z.number().min(-1.0).max(2.0),
   retirement_max_drawdown: z.number().min(5).max(50),
-  retirement_min_win_rate: z.number().min(20).max(60),
+  retirement_min_win_rate: z.number().min(15).max(60),
+  retirement_min_trades_for_evaluation: z.number().min(3).max(100),
+  retirement_min_live_trades: z.number().min(1).max(50),
+  retirement_rolling_window_days: z.number().min(7).max(365),
+  retirement_consecutive_failures: z.number().min(1).max(10),
+  retirement_probation_days: z.number().min(1).max(365),
+
+  // ─── Walk-Forward ──────────────────────────────────────────────────
+  wf_train_days: z.number().min(30).max(1460),
+  wf_test_days: z.number().min(30).max(1460),
+
+  // Direction-aware thresholds (5 regimes × long/short × 3 metrics + default)
+  da_default_min_return: z.number().min(-0.2).max(0.2),
+  da_default_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_default_min_win_rate: z.number().min(0.2).max(0.8),
+  da_ranging_long_min_return: z.number().min(-0.2).max(0.2),
+  da_ranging_long_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_ranging_long_min_win_rate: z.number().min(0.2).max(0.8),
+  da_ranging_short_min_return: z.number().min(-0.2).max(0.2),
+  da_ranging_short_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_ranging_short_min_win_rate: z.number().min(0.2).max(0.8),
+  da_trending_up_long_min_return: z.number().min(-0.2).max(0.2),
+  da_trending_up_long_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_trending_up_long_min_win_rate: z.number().min(0.2).max(0.8),
+  da_trending_up_short_min_return: z.number().min(-0.2).max(0.2),
+  da_trending_up_short_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_trending_up_short_min_win_rate: z.number().min(0.2).max(0.8),
+  da_trending_down_long_min_return: z.number().min(-0.2).max(0.2),
+  da_trending_down_long_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_trending_down_long_min_win_rate: z.number().min(0.2).max(0.8),
+  da_trending_down_short_min_return: z.number().min(-0.2).max(0.2),
+  da_trending_down_short_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_trending_down_short_min_win_rate: z.number().min(0.2).max(0.8),
+  da_high_vol_long_min_return: z.number().min(-0.2).max(0.2),
+  da_high_vol_long_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_high_vol_long_min_win_rate: z.number().min(0.2).max(0.8),
+  da_high_vol_short_min_return: z.number().min(-0.2).max(0.2),
+  da_high_vol_short_min_sharpe: z.number().min(-0.5).max(2.0),
+  da_high_vol_short_min_win_rate: z.number().min(0.2).max(0.8),
+
+  // ─── Adaptive Risk ──────────────────────────────────────────────────
+  adaptive_risk_enabled: z.boolean(),
+  adaptive_min_sl_pct: z.number().min(0.5).max(20),
+  adaptive_max_sl_pct: z.number().min(1).max(30),
+  adaptive_min_tp_pct: z.number().min(1).max(30),
+  adaptive_max_tp_pct: z.number().min(2).max(50),
+  adaptive_min_rr_ratio: z.number().min(0.5).max(5),
+
+  // ─── Performance Feedback ──────────────────────────────────────────
+  feedback_lookback_days: z.number().min(7).max(365),
+  feedback_min_trades: z.number().min(1).max(50),
+  feedback_max_weight: z.number().min(1.0).max(3.0),
+  feedback_min_weight: z.number().min(0.1).max(1.0),
+  feedback_weight_decay_per_day: z.number().min(0).max(0.1),
+
+  // ─── Directional Balance + Quotas ──────────────────────────────────
+  directional_balance_enabled: z.boolean(),
+  directional_min_long_pct: z.number().min(0).max(100),
+  directional_max_long_pct: z.number().min(0).max(100),
+  directional_min_short_pct: z.number().min(0).max(100),
+  directional_max_short_pct: z.number().min(0).max(100),
+  // Per-regime quotas
+  dq_enabled: z.boolean(),
+  dq_adjacent_regime_reserve_pct: z.number().min(0).max(100),
+  dq_ranging_long: z.number().min(0).max(100),
+  dq_ranging_short: z.number().min(0).max(100),
+  dq_ranging_low_vol_long: z.number().min(0).max(100),
+  dq_ranging_low_vol_short: z.number().min(0).max(100),
+  dq_trending_up_long: z.number().min(0).max(100),
+  dq_trending_up_short: z.number().min(0).max(100),
+  dq_trending_up_weak_long: z.number().min(0).max(100),
+  dq_trending_up_weak_short: z.number().min(0).max(100),
+  dq_trending_up_strong_long: z.number().min(0).max(100),
+  dq_trending_up_strong_short: z.number().min(0).max(100),
+  dq_trending_down_long: z.number().min(0).max(100),
+  dq_trending_down_short: z.number().min(0).max(100),
+  dq_trending_down_weak_long: z.number().min(0).max(100),
+  dq_trending_down_weak_short: z.number().min(0).max(100),
+  dq_high_volatility_long: z.number().min(0).max(100),
+  dq_high_volatility_short: z.number().min(0).max(100),
+
+  // ─── Portfolio balance / sector caps ───────────────────────────────
+  max_long_exposure_pct: z.number().min(10).max(100),
+  max_short_exposure_pct: z.number().min(10).max(100),
+  max_sector_exposure_pct: z.number().min(10).max(100),
 });
 
 const positionManagementSchema = z.object({
@@ -134,6 +249,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
   const [showTradingModeDialog, setShowTradingModeDialog] = useState(false);
   const [pendingTradingMode, setPendingTradingMode] = useState<TradingMode | null>(null);
   const [apiUsage, setApiUsage] = useState<ApiUsageStats | null>(null);
+  // Read-only audit view of yaml fields that aren't editable from the UI
+  // (cost model, validation rules, symbol counts, data source status).
+  // Populated by the /config/autonomous GET response.
+  const [autonomousAdvanced, setAutonomousAdvanced] = useState<any>(null);
   
   // Alert configuration state
   const [alertConfig, setAlertConfig] = useState({
@@ -197,25 +316,131 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
   const autonomousForm = useForm<AutonomousConfigFormData>({
     resolver: zodResolver(autonomousConfigSchema),
     defaultValues: {
+      // Core
       enabled: true,
-      proposal_count: 100,
-      max_active_strategies: 25,
+      proposal_count: 200,
+      max_active_strategies: 200,
       min_active_strategies: 10,
-      watchlist_size: 10,
-      backtested_ttl_cycles: 48,
+      watchlist_size: 5,
+      backtested_ttl_cycles: 168,
       signal_generation_interval: 1800,
-      dynamic_symbol_additions: 10,
+      dynamic_symbol_additions: 0,
+      // Activation — Sharpe / WR / DD
       min_sharpe: 1.0,
-      min_sharpe_crypto: 0.4,
-      max_drawdown: 12,
-      min_win_rate: 50,
-      min_win_rate_crypto: 38,
-      min_trades: 5,
-      min_trades_alpha_edge: 5,
-      min_trades_dsl: 10,
-      retirement_max_sharpe: 0.5,
-      retirement_max_drawdown: 15,
-      retirement_min_win_rate: 40,
+      min_sharpe_crypto: 0.3,
+      min_sharpe_commodity: 0.5,
+      max_drawdown: 25,
+      min_win_rate: 45,
+      min_win_rate_crypto: 30,
+      min_win_rate_commodity: 35,
+      // Min Trades
+      min_trades: 2,
+      min_trades_dsl: 8,
+      min_trades_dsl_4h: 8,
+      min_trades_dsl_1h: 15,
+      min_trades_alpha_edge: 8,
+      min_trades_crypto_1d: 4,
+      min_trades_crypto_4h: 4,
+      min_trades_crypto_1h: 15,
+      min_trades_commodity: 6,
+      // Min RPT
+      min_rpt_stock: 0.15,
+      min_rpt_stock_4h: 0.08,
+      min_rpt_stock_1h: 0.03,
+      min_rpt_etf: 0.1,
+      min_rpt_etf_4h: 0.05,
+      min_rpt_etf_1h: 0.02,
+      min_rpt_forex: 0.05,
+      min_rpt_forex_1h: 0.01,
+      min_rpt_crypto: 5.0,
+      min_rpt_crypto_1d: 3.0,
+      min_rpt_crypto_4h: 3.0,
+      min_rpt_crypto_1h: 3.0,
+      min_rpt_index: 0.1,
+      min_rpt_index_1h: 0.02,
+      min_rpt_commodity: 0.15,
+      min_rpt_commodity_4h: 0.08,
+      // Retirement
+      retirement_max_sharpe: 0.0,
+      retirement_max_drawdown: 31,
+      retirement_min_win_rate: 28,
+      retirement_min_trades_for_evaluation: 10,
+      retirement_min_live_trades: 5,
+      retirement_rolling_window_days: 60,
+      retirement_consecutive_failures: 3,
+      retirement_probation_days: 30,
+      // Walk-forward
+      wf_train_days: 365,
+      wf_test_days: 180,
+      // Direction-aware defaults
+      da_default_min_return: 0,
+      da_default_min_sharpe: 0.3,
+      da_default_min_win_rate: 0.45,
+      da_ranging_long_min_return: -0.02,
+      da_ranging_long_min_sharpe: 0.15,
+      da_ranging_long_min_win_rate: 0.4,
+      da_ranging_short_min_return: 0,
+      da_ranging_short_min_sharpe: 0.3,
+      da_ranging_short_min_win_rate: 0.45,
+      da_trending_up_long_min_return: 0,
+      da_trending_up_long_min_sharpe: 0.3,
+      da_trending_up_long_min_win_rate: 0.45,
+      da_trending_up_short_min_return: -0.02,
+      da_trending_up_short_min_sharpe: 0.15,
+      da_trending_up_short_min_win_rate: 0.4,
+      da_trending_down_long_min_return: -0.02,
+      da_trending_down_long_min_sharpe: 0.15,
+      da_trending_down_long_min_win_rate: 0.4,
+      da_trending_down_short_min_return: 0,
+      da_trending_down_short_min_sharpe: 0.3,
+      da_trending_down_short_min_win_rate: 0.45,
+      da_high_vol_long_min_return: -0.01,
+      da_high_vol_long_min_sharpe: 0.2,
+      da_high_vol_long_min_win_rate: 0.42,
+      da_high_vol_short_min_return: -0.01,
+      da_high_vol_short_min_sharpe: 0.2,
+      da_high_vol_short_min_win_rate: 0.42,
+      // Adaptive risk
+      adaptive_risk_enabled: true,
+      adaptive_min_sl_pct: 2.0,
+      adaptive_max_sl_pct: 8.0,
+      adaptive_min_tp_pct: 4.0,
+      adaptive_max_tp_pct: 20.0,
+      adaptive_min_rr_ratio: 1.5,
+      // Performance feedback
+      feedback_lookback_days: 60,
+      feedback_min_trades: 5,
+      feedback_max_weight: 1.5,
+      feedback_min_weight: 0.4,
+      feedback_weight_decay_per_day: 0.01,
+      // Directional balance + quotas
+      directional_balance_enabled: true,
+      directional_min_long_pct: 30,
+      directional_max_long_pct: 70,
+      directional_min_short_pct: 20,
+      directional_max_short_pct: 50,
+      dq_enabled: true,
+      dq_adjacent_regime_reserve_pct: 20,
+      dq_ranging_long: 70,
+      dq_ranging_short: 0,
+      dq_ranging_low_vol_long: 75,
+      dq_ranging_low_vol_short: 0,
+      dq_trending_up_long: 80,
+      dq_trending_up_short: 5,
+      dq_trending_up_weak_long: 75,
+      dq_trending_up_weak_short: 8,
+      dq_trending_up_strong_long: 85,
+      dq_trending_up_strong_short: 3,
+      dq_trending_down_long: 20,
+      dq_trending_down_short: 50,
+      dq_trending_down_weak_long: 30,
+      dq_trending_down_weak_short: 30,
+      dq_high_volatility_long: 30,
+      dq_high_volatility_short: 10,
+      // Portfolio balance
+      max_long_exposure_pct: 65,
+      max_short_exposure_pct: 60,
+      max_sector_exposure_pct: 40,
     },
   });
 
@@ -336,27 +561,146 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
       }
 
       if (autonomousConfig) {
+        // Helper to safely map nested direction-aware and quota blocks
+        const da = autonomousConfig.direction_aware_thresholds || {};
+        const daDefault = da.default || {};
+        const daRanging = da.ranging || {};
+        const daTrendingUp = da.trending_up || {};
+        const daTrendingDown = da.trending_down || {};
+        const daHighVol = da.high_vol || {};
+        const dq = autonomousConfig.directional_quotas || {};
+        const num = (v: any, def: number) => typeof v === 'number' ? v : def;
+
         autonomousForm.reset({
-          enabled: autonomousConfig.enabled,
-          proposal_count: autonomousConfig.proposal_count,
-          max_active_strategies: autonomousConfig.max_active_strategies,
-          min_active_strategies: autonomousConfig.min_active_strategies,
-          watchlist_size: autonomousConfig.watchlist_size,
-          backtested_ttl_cycles: autonomousConfig.backtested_ttl_cycles ?? 48,
-          signal_generation_interval: autonomousConfig.signal_generation_interval,
-          dynamic_symbol_additions: autonomousConfig.dynamic_symbol_additions,
-          min_sharpe: autonomousConfig.min_sharpe,
-          min_sharpe_crypto: autonomousConfig.min_sharpe_crypto,
-          max_drawdown: autonomousConfig.max_drawdown,
-          min_win_rate: autonomousConfig.min_win_rate,
-          min_win_rate_crypto: autonomousConfig.min_win_rate_crypto ?? 38,
-          min_trades: autonomousConfig.min_trades,
-          min_trades_alpha_edge: autonomousConfig.min_trades_alpha_edge ?? 5,
-          min_trades_dsl: autonomousConfig.min_trades_dsl ?? 10,
-          retirement_max_sharpe: autonomousConfig.retirement_max_sharpe,
-          retirement_max_drawdown: autonomousConfig.retirement_max_drawdown,
-          retirement_min_win_rate: autonomousConfig.retirement_min_win_rate,
+          // Core
+          enabled: autonomousConfig.enabled ?? true,
+          proposal_count: num(autonomousConfig.proposal_count, 200),
+          max_active_strategies: num(autonomousConfig.max_active_strategies, 200),
+          min_active_strategies: num(autonomousConfig.min_active_strategies, 10),
+          watchlist_size: num(autonomousConfig.watchlist_size, 5),
+          backtested_ttl_cycles: num(autonomousConfig.backtested_ttl_cycles, 168),
+          signal_generation_interval: num(autonomousConfig.signal_generation_interval, 1800),
+          dynamic_symbol_additions: num(autonomousConfig.dynamic_symbol_additions, 0),
+          // Activation — Sharpe / WR / DD
+          min_sharpe: num(autonomousConfig.min_sharpe, 1.0),
+          min_sharpe_crypto: num(autonomousConfig.min_sharpe_crypto, 0.3),
+          min_sharpe_commodity: num(autonomousConfig.min_sharpe_commodity, 0.5),
+          max_drawdown: num(autonomousConfig.max_drawdown, 25),
+          min_win_rate: num(autonomousConfig.min_win_rate, 45),
+          min_win_rate_crypto: num(autonomousConfig.min_win_rate_crypto, 30),
+          min_win_rate_commodity: num(autonomousConfig.min_win_rate_commodity, 35),
+          // Min Trades
+          min_trades: num(autonomousConfig.min_trades, 2),
+          min_trades_dsl: num(autonomousConfig.min_trades_dsl, 8),
+          min_trades_dsl_4h: num(autonomousConfig.min_trades_dsl_4h, 8),
+          min_trades_dsl_1h: num(autonomousConfig.min_trades_dsl_1h, 15),
+          min_trades_alpha_edge: num(autonomousConfig.min_trades_alpha_edge, 8),
+          min_trades_crypto_1d: num(autonomousConfig.min_trades_crypto_1d, 4),
+          min_trades_crypto_4h: num(autonomousConfig.min_trades_crypto_4h, 4),
+          min_trades_crypto_1h: num(autonomousConfig.min_trades_crypto_1h, 15),
+          min_trades_commodity: num(autonomousConfig.min_trades_commodity, 6),
+          // Min RPT (already as percentage from API)
+          min_rpt_stock: num(autonomousConfig.min_rpt_stock, 0.15),
+          min_rpt_stock_4h: num(autonomousConfig.min_rpt_stock_4h, 0.08),
+          min_rpt_stock_1h: num(autonomousConfig.min_rpt_stock_1h, 0.03),
+          min_rpt_etf: num(autonomousConfig.min_rpt_etf, 0.1),
+          min_rpt_etf_4h: num(autonomousConfig.min_rpt_etf_4h, 0.05),
+          min_rpt_etf_1h: num(autonomousConfig.min_rpt_etf_1h, 0.02),
+          min_rpt_forex: num(autonomousConfig.min_rpt_forex, 0.05),
+          min_rpt_forex_1h: num(autonomousConfig.min_rpt_forex_1h, 0.01),
+          min_rpt_crypto: num(autonomousConfig.min_rpt_crypto, 5.0),
+          min_rpt_crypto_1d: num(autonomousConfig.min_rpt_crypto_1d, 3.0),
+          min_rpt_crypto_4h: num(autonomousConfig.min_rpt_crypto_4h, 3.0),
+          min_rpt_crypto_1h: num(autonomousConfig.min_rpt_crypto_1h, 3.0),
+          min_rpt_index: num(autonomousConfig.min_rpt_index, 0.1),
+          min_rpt_index_1h: num(autonomousConfig.min_rpt_index_1h, 0.02),
+          min_rpt_commodity: num(autonomousConfig.min_rpt_commodity, 0.15),
+          min_rpt_commodity_4h: num(autonomousConfig.min_rpt_commodity_4h, 0.08),
+          // Retirement
+          retirement_max_sharpe: num(autonomousConfig.retirement_max_sharpe, 0),
+          retirement_max_drawdown: num(autonomousConfig.retirement_max_drawdown, 31),
+          retirement_min_win_rate: num(autonomousConfig.retirement_min_win_rate, 28),
+          retirement_min_trades_for_evaluation: num(autonomousConfig.retirement_min_trades_for_evaluation, 10),
+          retirement_min_live_trades: num(autonomousConfig.retirement_min_live_trades, 5),
+          retirement_rolling_window_days: num(autonomousConfig.retirement_rolling_window_days, 60),
+          retirement_consecutive_failures: num(autonomousConfig.retirement_consecutive_failures, 3),
+          retirement_probation_days: num(autonomousConfig.retirement_probation_days, 30),
+          // Walk-forward
+          wf_train_days: num(autonomousConfig.wf_train_days, 365),
+          wf_test_days: num(autonomousConfig.wf_test_days, 180),
+          // Direction-aware defaults (yaml stores decimals; keep as-is for the form since these are typically tiny)
+          da_default_min_return: num(daDefault.min_return, 0),
+          da_default_min_sharpe: num(daDefault.min_sharpe, 0.3),
+          da_default_min_win_rate: num(daDefault.min_win_rate, 0.45),
+          da_ranging_long_min_return: num(daRanging.long?.min_return, -0.02),
+          da_ranging_long_min_sharpe: num(daRanging.long?.min_sharpe, 0.15),
+          da_ranging_long_min_win_rate: num(daRanging.long?.min_win_rate, 0.4),
+          da_ranging_short_min_return: num(daRanging.short?.min_return, 0),
+          da_ranging_short_min_sharpe: num(daRanging.short?.min_sharpe, 0.3),
+          da_ranging_short_min_win_rate: num(daRanging.short?.min_win_rate, 0.45),
+          da_trending_up_long_min_return: num(daTrendingUp.long?.min_return, 0),
+          da_trending_up_long_min_sharpe: num(daTrendingUp.long?.min_sharpe, 0.3),
+          da_trending_up_long_min_win_rate: num(daTrendingUp.long?.min_win_rate, 0.45),
+          da_trending_up_short_min_return: num(daTrendingUp.short?.min_return, -0.02),
+          da_trending_up_short_min_sharpe: num(daTrendingUp.short?.min_sharpe, 0.15),
+          da_trending_up_short_min_win_rate: num(daTrendingUp.short?.min_win_rate, 0.4),
+          da_trending_down_long_min_return: num(daTrendingDown.long?.min_return, -0.02),
+          da_trending_down_long_min_sharpe: num(daTrendingDown.long?.min_sharpe, 0.15),
+          da_trending_down_long_min_win_rate: num(daTrendingDown.long?.min_win_rate, 0.4),
+          da_trending_down_short_min_return: num(daTrendingDown.short?.min_return, 0),
+          da_trending_down_short_min_sharpe: num(daTrendingDown.short?.min_sharpe, 0.3),
+          da_trending_down_short_min_win_rate: num(daTrendingDown.short?.min_win_rate, 0.45),
+          da_high_vol_long_min_return: num(daHighVol.long?.min_return, -0.01),
+          da_high_vol_long_min_sharpe: num(daHighVol.long?.min_sharpe, 0.2),
+          da_high_vol_long_min_win_rate: num(daHighVol.long?.min_win_rate, 0.42),
+          da_high_vol_short_min_return: num(daHighVol.short?.min_return, -0.01),
+          da_high_vol_short_min_sharpe: num(daHighVol.short?.min_sharpe, 0.2),
+          da_high_vol_short_min_win_rate: num(daHighVol.short?.min_win_rate, 0.42),
+          // Adaptive risk
+          adaptive_risk_enabled: autonomousConfig.adaptive_risk_enabled ?? true,
+          adaptive_min_sl_pct: num(autonomousConfig.adaptive_min_sl_pct, 2),
+          adaptive_max_sl_pct: num(autonomousConfig.adaptive_max_sl_pct, 8),
+          adaptive_min_tp_pct: num(autonomousConfig.adaptive_min_tp_pct, 4),
+          adaptive_max_tp_pct: num(autonomousConfig.adaptive_max_tp_pct, 20),
+          adaptive_min_rr_ratio: num(autonomousConfig.adaptive_min_rr_ratio, 1.5),
+          // Performance feedback
+          feedback_lookback_days: num(autonomousConfig.feedback_lookback_days, 60),
+          feedback_min_trades: num(autonomousConfig.feedback_min_trades, 5),
+          feedback_max_weight: num(autonomousConfig.feedback_max_weight, 1.5),
+          feedback_min_weight: num(autonomousConfig.feedback_min_weight, 0.4),
+          feedback_weight_decay_per_day: num(autonomousConfig.feedback_weight_decay_per_day, 0.01),
+          // Directional balance + quotas
+          directional_balance_enabled: autonomousConfig.directional_balance_enabled ?? true,
+          directional_min_long_pct: num(autonomousConfig.directional_min_long_pct, 30),
+          directional_max_long_pct: num(autonomousConfig.directional_max_long_pct, 70),
+          directional_min_short_pct: num(autonomousConfig.directional_min_short_pct, 20),
+          directional_max_short_pct: num(autonomousConfig.directional_max_short_pct, 50),
+          dq_enabled: dq.enabled ?? true,
+          dq_adjacent_regime_reserve_pct: num(dq.adjacent_regime_reserve_pct, 20),
+          dq_ranging_long: num(dq.ranging?.min_long_pct, 70),
+          dq_ranging_short: num(dq.ranging?.min_short_pct, 0),
+          dq_ranging_low_vol_long: num(dq.ranging_low_vol?.min_long_pct, 75),
+          dq_ranging_low_vol_short: num(dq.ranging_low_vol?.min_short_pct, 0),
+          dq_trending_up_long: num(dq.trending_up?.min_long_pct, 80),
+          dq_trending_up_short: num(dq.trending_up?.min_short_pct, 5),
+          dq_trending_up_weak_long: num(dq.trending_up_weak?.min_long_pct, 75),
+          dq_trending_up_weak_short: num(dq.trending_up_weak?.min_short_pct, 8),
+          dq_trending_up_strong_long: num(dq.trending_up_strong?.min_long_pct, 85),
+          dq_trending_up_strong_short: num(dq.trending_up_strong?.min_short_pct, 3),
+          dq_trending_down_long: num(dq.trending_down?.min_long_pct, 20),
+          dq_trending_down_short: num(dq.trending_down?.min_short_pct, 50),
+          dq_trending_down_weak_long: num(dq.trending_down_weak?.min_long_pct, 30),
+          dq_trending_down_weak_short: num(dq.trending_down_weak?.min_short_pct, 30),
+          dq_high_volatility_long: num(dq.high_volatility?.min_long_pct, 30),
+          dq_high_volatility_short: num(dq.high_volatility?.min_short_pct, 10),
+          // Portfolio balance
+          max_long_exposure_pct: num(autonomousConfig.max_long_exposure_pct, 65),
+          max_short_exposure_pct: num(autonomousConfig.max_short_exposure_pct, 60),
+          max_sector_exposure_pct: num(autonomousConfig.max_sector_exposure_pct, 40),
         });
+
+        // Keep the advanced_readonly block on a separate state for display
+        setAutonomousAdvanced(autonomousConfig.advanced_readonly || null);
       }
 
       if (alphaEdgeSettings) {
@@ -471,9 +815,163 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
   const onAutonomousConfigSubmit = async (formData: AutonomousConfigFormData) => {
     try {
-      await apiClient.updateAutonomousConfig(formData);
+      // Flatten top-level scalar fields, but rebuild the nested structures
+      // the backend expects for direction_aware_thresholds and
+      // directional_quotas (both are BaseModels on the backend side).
+      const payload: any = {
+        // Core
+        enabled: formData.enabled,
+        proposal_count: formData.proposal_count,
+        max_active_strategies: formData.max_active_strategies,
+        min_active_strategies: formData.min_active_strategies,
+        watchlist_size: formData.watchlist_size,
+        backtested_ttl_cycles: formData.backtested_ttl_cycles,
+        signal_generation_interval: formData.signal_generation_interval,
+        dynamic_symbol_additions: formData.dynamic_symbol_additions,
+        // Activation — Sharpe / WR / DD
+        min_sharpe: formData.min_sharpe,
+        min_sharpe_crypto: formData.min_sharpe_crypto,
+        min_sharpe_commodity: formData.min_sharpe_commodity,
+        max_drawdown: formData.max_drawdown,
+        min_win_rate: formData.min_win_rate,
+        min_win_rate_crypto: formData.min_win_rate_crypto,
+        min_win_rate_commodity: formData.min_win_rate_commodity,
+        // Min Trades
+        min_trades: formData.min_trades,
+        min_trades_dsl: formData.min_trades_dsl,
+        min_trades_dsl_4h: formData.min_trades_dsl_4h,
+        min_trades_dsl_1h: formData.min_trades_dsl_1h,
+        min_trades_alpha_edge: formData.min_trades_alpha_edge,
+        min_trades_crypto_1d: formData.min_trades_crypto_1d,
+        min_trades_crypto_4h: formData.min_trades_crypto_4h,
+        min_trades_crypto_1h: formData.min_trades_crypto_1h,
+        min_trades_commodity: formData.min_trades_commodity,
+        // Min RPT
+        min_rpt_stock: formData.min_rpt_stock,
+        min_rpt_stock_4h: formData.min_rpt_stock_4h,
+        min_rpt_stock_1h: formData.min_rpt_stock_1h,
+        min_rpt_etf: formData.min_rpt_etf,
+        min_rpt_etf_4h: formData.min_rpt_etf_4h,
+        min_rpt_etf_1h: formData.min_rpt_etf_1h,
+        min_rpt_forex: formData.min_rpt_forex,
+        min_rpt_forex_1h: formData.min_rpt_forex_1h,
+        min_rpt_crypto: formData.min_rpt_crypto,
+        min_rpt_crypto_1d: formData.min_rpt_crypto_1d,
+        min_rpt_crypto_4h: formData.min_rpt_crypto_4h,
+        min_rpt_crypto_1h: formData.min_rpt_crypto_1h,
+        min_rpt_index: formData.min_rpt_index,
+        min_rpt_index_1h: formData.min_rpt_index_1h,
+        min_rpt_commodity: formData.min_rpt_commodity,
+        min_rpt_commodity_4h: formData.min_rpt_commodity_4h,
+        // Retirement
+        retirement_max_sharpe: formData.retirement_max_sharpe,
+        retirement_max_drawdown: formData.retirement_max_drawdown,
+        retirement_min_win_rate: formData.retirement_min_win_rate,
+        retirement_min_trades_for_evaluation: formData.retirement_min_trades_for_evaluation,
+        retirement_min_live_trades: formData.retirement_min_live_trades,
+        retirement_rolling_window_days: formData.retirement_rolling_window_days,
+        retirement_consecutive_failures: formData.retirement_consecutive_failures,
+        retirement_probation_days: formData.retirement_probation_days,
+        // Walk-forward
+        wf_train_days: formData.wf_train_days,
+        wf_test_days: formData.wf_test_days,
+        // Direction-aware (nested)
+        direction_aware_thresholds: {
+          default: {
+            min_return: formData.da_default_min_return,
+            min_sharpe: formData.da_default_min_sharpe,
+            min_win_rate: formData.da_default_min_win_rate,
+          },
+          ranging: {
+            long: {
+              min_return: formData.da_ranging_long_min_return,
+              min_sharpe: formData.da_ranging_long_min_sharpe,
+              min_win_rate: formData.da_ranging_long_min_win_rate,
+            },
+            short: {
+              min_return: formData.da_ranging_short_min_return,
+              min_sharpe: formData.da_ranging_short_min_sharpe,
+              min_win_rate: formData.da_ranging_short_min_win_rate,
+            },
+          },
+          trending_up: {
+            long: {
+              min_return: formData.da_trending_up_long_min_return,
+              min_sharpe: formData.da_trending_up_long_min_sharpe,
+              min_win_rate: formData.da_trending_up_long_min_win_rate,
+            },
+            short: {
+              min_return: formData.da_trending_up_short_min_return,
+              min_sharpe: formData.da_trending_up_short_min_sharpe,
+              min_win_rate: formData.da_trending_up_short_min_win_rate,
+            },
+          },
+          trending_down: {
+            long: {
+              min_return: formData.da_trending_down_long_min_return,
+              min_sharpe: formData.da_trending_down_long_min_sharpe,
+              min_win_rate: formData.da_trending_down_long_min_win_rate,
+            },
+            short: {
+              min_return: formData.da_trending_down_short_min_return,
+              min_sharpe: formData.da_trending_down_short_min_sharpe,
+              min_win_rate: formData.da_trending_down_short_min_win_rate,
+            },
+          },
+          high_vol: {
+            long: {
+              min_return: formData.da_high_vol_long_min_return,
+              min_sharpe: formData.da_high_vol_long_min_sharpe,
+              min_win_rate: formData.da_high_vol_long_min_win_rate,
+            },
+            short: {
+              min_return: formData.da_high_vol_short_min_return,
+              min_sharpe: formData.da_high_vol_short_min_sharpe,
+              min_win_rate: formData.da_high_vol_short_min_win_rate,
+            },
+          },
+        },
+        // Adaptive risk
+        adaptive_risk_enabled: formData.adaptive_risk_enabled,
+        adaptive_min_sl_pct: formData.adaptive_min_sl_pct,
+        adaptive_max_sl_pct: formData.adaptive_max_sl_pct,
+        adaptive_min_tp_pct: formData.adaptive_min_tp_pct,
+        adaptive_max_tp_pct: formData.adaptive_max_tp_pct,
+        adaptive_min_rr_ratio: formData.adaptive_min_rr_ratio,
+        // Performance feedback
+        feedback_lookback_days: formData.feedback_lookback_days,
+        feedback_min_trades: formData.feedback_min_trades,
+        feedback_max_weight: formData.feedback_max_weight,
+        feedback_min_weight: formData.feedback_min_weight,
+        feedback_weight_decay_per_day: formData.feedback_weight_decay_per_day,
+        // Directional balance + quotas (nested for quotas)
+        directional_balance_enabled: formData.directional_balance_enabled,
+        directional_min_long_pct: formData.directional_min_long_pct,
+        directional_max_long_pct: formData.directional_max_long_pct,
+        directional_min_short_pct: formData.directional_min_short_pct,
+        directional_max_short_pct: formData.directional_max_short_pct,
+        directional_quotas: {
+          enabled: formData.dq_enabled,
+          adjacent_regime_reserve_pct: formData.dq_adjacent_regime_reserve_pct,
+          ranging: { min_long_pct: formData.dq_ranging_long, min_short_pct: formData.dq_ranging_short },
+          ranging_low_vol: { min_long_pct: formData.dq_ranging_low_vol_long, min_short_pct: formData.dq_ranging_low_vol_short },
+          trending_up: { min_long_pct: formData.dq_trending_up_long, min_short_pct: formData.dq_trending_up_short },
+          trending_up_weak: { min_long_pct: formData.dq_trending_up_weak_long, min_short_pct: formData.dq_trending_up_weak_short },
+          trending_up_strong: { min_long_pct: formData.dq_trending_up_strong_long, min_short_pct: formData.dq_trending_up_strong_short },
+          trending_down: { min_long_pct: formData.dq_trending_down_long, min_short_pct: formData.dq_trending_down_short },
+          trending_down_weak: { min_long_pct: formData.dq_trending_down_weak_long, min_short_pct: formData.dq_trending_down_weak_short },
+          high_volatility: { min_long_pct: formData.dq_high_volatility_long, min_short_pct: formData.dq_high_volatility_short },
+        },
+        // Portfolio balance
+        max_long_exposure_pct: formData.max_long_exposure_pct,
+        max_short_exposure_pct: formData.max_short_exposure_pct,
+        max_sector_exposure_pct: formData.max_sector_exposure_pct,
+      };
+      await apiClient.updateAutonomousConfig(payload);
       toast.success('Autonomous configuration saved successfully');
       setLastUpdated(new Date());
+      // Refresh to re-read yaml (writes may normalize some values)
+      await loadConfiguration();
     } catch (error) {
       console.error('Failed to save autonomous configuration:', error);
       toast.error('Failed to save autonomous configuration');
@@ -1443,273 +1941,651 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
           {/* Autonomous Configuration Tab */}
           <TabsContent value="autonomous" className="space-y-4">
             <SectionLabel>Autonomous Trading Configuration</SectionLabel>
+            <p className="text-xs text-gray-500 mb-3">
+              Every editable parameter from <code className="text-[10px] bg-dark-bg px-1 rounded">config/autonomous_trading.yaml</code>.
+              Changes take effect on the next cycle (proposer re-reads yaml fresh each cycle).
+              Toggling <em>Enable Autonomous System</em> or changing schedule requires a service restart.
+            </p>
                 <form onSubmit={autonomousForm.handleSubmit(onAutonomousConfigSubmit)} className="space-y-6">
-                  {/* Enable/Disable */}
-                  <div className="flex items-center justify-between p-4 bg-dark-bg border border-dark-border rounded-lg">
-                    <div className="space-y-0.5">
-                      <Label htmlFor="autonomous-enabled" className="text-[11px]">Enable Autonomous System</Label>
-                      <p className="text-xs text-gray-500">Allow the system to autonomously propose and manage strategies</p>
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 1 — Core: enable, proposals, limits, scheduling         */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="autonomous-enabled" className="text-[11px]">Enable Autonomous System</Label>
+                        <p className="text-xs text-gray-500">Master switch — when off, proposer / WF / activation all stand down (service restart required)</p>
+                      </div>
+                      <Switch
+                        id="autonomous-enabled"
+                        checked={autonomousForm.watch('enabled')}
+                        onCheckedChange={(checked) => autonomousForm.setValue('enabled', checked)}
+                      />
                     </div>
-                    <Switch
-                      id="autonomous-enabled"
-                      checked={autonomousForm.watch('enabled')}
-                      onCheckedChange={(checked) => autonomousForm.setValue('enabled', checked)}
-                    />
-                  </div>
 
-                  {/* Strategy Generation */}
-                  <div className="space-y-4">
-                    <h3 className="text-[11px] font-semibold text-gray-300">Strategy Generation</h3>
+                    <h3 className="text-[11px] font-semibold text-gray-300 pt-2 border-t border-dark-border">Strategy Generation</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="proposal_count" className="text-[11px]">Proposal Count</Label>
-                        <Input
-                          id="proposal_count"
-                          type="number"
-                          min="10"
-                          max="500"
-                          {...autonomousForm.register('proposal_count', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Number of strategy proposals per cycle (10-500)</p>
+                        <Input id="proposal_count" type="number" min="10" max="500" {...autonomousForm.register('proposal_count', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Proposals per cycle (10-500)</p>
                       </div>
-
                       <div className="space-y-2">
                         <Label htmlFor="watchlist_size" className="text-[11px]">Watchlist Size</Label>
-                        <Input
-                          id="watchlist_size"
-                          type="number"
-                          min="1"
-                          max="20"
-                          {...autonomousForm.register('watchlist_size', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Number of symbols to watch (1-20)</p>
+                        <Input id="watchlist_size" type="number" min="1" max="20" {...autonomousForm.register('watchlist_size', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Symbols per template watchlist (1-20)</p>
                       </div>
-
                       <div className="space-y-2">
                         <Label htmlFor="dynamic_symbol_additions" className="text-[11px]">Dynamic Symbol Additions</Label>
-                        <Input
-                          id="dynamic_symbol_additions"
-                          type="number"
-                          min="0"
-                          max="50"
-                          {...autonomousForm.register('dynamic_symbol_additions', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Extra symbols added dynamically per strategy during signal generation (0-50)</p>
+                        <Input id="dynamic_symbol_additions" type="number" min="0" max="50" {...autonomousForm.register('dynamic_symbol_additions', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Extra symbols added at signal-gen time (0-50)</p>
                       </div>
-
                       <div className="space-y-2">
                         <Label htmlFor="signal_generation_interval" className="text-[11px]">Signal Interval (minutes)</Label>
-                        <Input
-                          id="signal_generation_interval"
-                          type="number"
-                          min="5"
-                          max="60"
+                        <Input id="signal_generation_interval" type="number" min="5" max="60"
                           value={Math.round(autonomousForm.watch('signal_generation_interval') / 60)}
-                          onChange={(e) => autonomousForm.setValue('signal_generation_interval', Number(e.target.value) * 60)}
-                        />
-                        <p className="text-xs text-gray-500">Time between signal generation runs (5-60 min)</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Strategy Limits */}
-                  <div className="space-y-4">
-                    <h3 className="text-[11px] font-semibold text-gray-300">Strategy Limits</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="max_active_strategies" className="text-[11px]">Max Active Strategies</Label>
-                        <Input
-                          id="max_active_strategies"
-                          type="number"
-                          min="5"
-                          max="500"
-                          {...autonomousForm.register('max_active_strategies', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Maximum strategies to run simultaneously (5-500)</p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="min_active_strategies" className="text-[11px]">Min Active Strategies</Label>
-                        <Input
-                          id="min_active_strategies"
-                          type="number"
-                          min="3"
-                          max="25"
-                          {...autonomousForm.register('min_active_strategies', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Minimum strategies to maintain (3-25)</p>
+                          onChange={(e) => autonomousForm.setValue('signal_generation_interval', Number(e.target.value) * 60)} />
+                        <p className="text-xs text-gray-500">Signal-gen cadence (5-60 min)</p>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="backtested_ttl_cycles" className="text-[11px]">Backtested Strategy TTL (signal cycles)</Label>
-                        <Input
-                          id="backtested_ttl_cycles"
-                          type="number"
-                          min="6"
-                          max="200"
-                          {...autonomousForm.register('backtested_ttl_cycles', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Retire BACKTESTED strategies after N signal cycles without a trade (6-200, default 48 ≈ 24h)</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Activation Thresholds */}
-                  <div className="space-y-4">
-                    <h3 className="text-[11px] font-semibold text-gray-300">Activation Thresholds</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="min_sharpe" className="text-[11px]">Min Sharpe Ratio (Stocks/ETFs)</Label>
-                        <Input
-                          id="min_sharpe"
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="3.0"
-                          {...autonomousForm.register('min_sharpe', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Minimum Sharpe for stocks, ETFs, forex, indices, commodities (0-3.0)</p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="min_sharpe_crypto" className="text-[11px]">Min Sharpe Ratio (Crypto)</Label>
-                        <Input
-                          id="min_sharpe_crypto"
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="3.0"
-                          {...autonomousForm.register('min_sharpe_crypto', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Minimum Sharpe for crypto strategies (0-3.0)</p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="max_drawdown" className="text-[11px]">Max Drawdown (%)</Label>
-                        <Input
-                          id="max_drawdown"
-                          type="number"
-                          step="1"
-                          min="5"
-                          max="50"
-                          {...autonomousForm.register('max_drawdown', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Maximum acceptable drawdown (5-50%)</p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="min_win_rate" className="text-[11px]">Min Win Rate (%)</Label>
-                        <Input
-                          id="min_win_rate"
-                          type="number"
-                          step="1"
-                          min="30"
-                          max="80"
-                          {...autonomousForm.register('min_win_rate', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Minimum win rate for stocks/ETFs (30-80%)</p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="min_win_rate_crypto" className="text-[11px]">Min Win Rate Crypto (%)</Label>
-                        <Input
-                          id="min_win_rate_crypto"
-                          type="number"
-                          step="1"
-                          min="20"
-                          max="70"
-                          {...autonomousForm.register('min_win_rate_crypto', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Minimum win rate for crypto strategies (20-70%)</p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="min_trades_dsl" className="text-[11px]">Min Trades (DSL)</Label>
-                        <Input
-                          id="min_trades_dsl"
-                          type="number"
-                          min="1"
-                          max="50"
-                          {...autonomousForm.register('min_trades_dsl', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Min trades for technical strategies</p>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="min_trades_alpha_edge" className="text-[11px]">Min Trades (Alpha Edge)</Label>
-                        <Input
-                          id="min_trades_alpha_edge"
-                          type="number"
-                          min="1"
-                          max="50"
-                          {...autonomousForm.register('min_trades_alpha_edge', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Min trades for fundamental strategies</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Retirement Thresholds */}
-                  <div className="space-y-4">
-                    <h3 className="text-[11px] font-semibold text-gray-300">Retirement Thresholds</h3>
+                    <h3 className="text-[11px] font-semibold text-gray-300 pt-2 border-t border-dark-border">Active-Book Limits</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="retirement_max_sharpe" className="text-[11px]">Max Sharpe (Retire Below)</Label>
-                        <Input
-                          id="retirement_max_sharpe"
-                          type="number"
-                          step="0.1"
-                          min="0"
-                          max="2.0"
-                          {...autonomousForm.register('retirement_max_sharpe', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Retire if Sharpe falls below this (0-2.0)</p>
+                        <Label htmlFor="max_active_strategies" className="text-[11px]">Max Active Strategies</Label>
+                        <Input id="max_active_strategies" type="number" min="5" max="500" {...autonomousForm.register('max_active_strategies', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Cap on simultaneously-running strategies (5-500)</p>
                       </div>
-
                       <div className="space-y-2">
-                        <Label htmlFor="retirement_max_drawdown" className="text-[11px]">Max Drawdown (Retire Above) (%)</Label>
-                        <Input
-                          id="retirement_max_drawdown"
-                          type="number"
-                          step="1"
-                          min="5"
-                          max="50"
-                          {...autonomousForm.register('retirement_max_drawdown', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Retire if drawdown exceeds this (5-50%)</p>
+                        <Label htmlFor="min_active_strategies" className="text-[11px]">Min Active Strategies</Label>
+                        <Input id="min_active_strategies" type="number" min="3" max="25" {...autonomousForm.register('min_active_strategies', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Floor below which the proposer self-boosts (3-25)</p>
                       </div>
-
                       <div className="space-y-2">
-                        <Label htmlFor="retirement_min_win_rate" className="text-[11px]">Min Win Rate (Retire Below) (%)</Label>
-                        <Input
-                          id="retirement_min_win_rate"
-                          type="number"
-                          step="1"
-                          min="20"
-                          max="60"
-                          {...autonomousForm.register('retirement_min_win_rate', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Retire if win rate falls below this (20-60%)</p>
+                        <Label htmlFor="backtested_ttl_cycles" className="text-[11px]">Backtested TTL (cycles)</Label>
+                        <Input id="backtested_ttl_cycles" type="number" min="6" max="200" {...autonomousForm.register('backtested_ttl_cycles', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Retire BACKTESTED strategies after N signal cycles without a trade (default 168 ≈ 1 week)</p>
                       </div>
                     </div>
                   </div>
 
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 2 — Activation thresholds: Sharpe / Win Rate / DD      */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <h3 className="text-[11px] font-semibold text-gray-300">Activation Thresholds — Sharpe / Win Rate / Drawdown</h3>
+                    <p className="text-xs text-gray-500">Minimum quality bar for a WF-validated strategy to be activated to DEMO. Separate gates for crypto (heavy-tail) and commodity (low-frequency) asset classes.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="min_sharpe" className="text-[11px]">Min Sharpe — Equity</Label>
+                        <Input id="min_sharpe" type="number" step="0.1" min="0" max="3.0" {...autonomousForm.register('min_sharpe', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Stocks, ETFs, forex, indices (0-3.0)</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_sharpe_crypto" className="text-[11px]">Min Sharpe — Crypto</Label>
+                        <Input id="min_sharpe_crypto" type="number" step="0.1" min="0" max="3.0" {...autonomousForm.register('min_sharpe_crypto', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Heavy-tail calibration (0-3.0)</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_sharpe_commodity" className="text-[11px]">Min Sharpe — Commodity</Label>
+                        <Input id="min_sharpe_commodity" type="number" step="0.1" min="0" max="3.0" {...autonomousForm.register('min_sharpe_commodity', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Low-frequency calibration (0-3.0)</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="max_drawdown" className="text-[11px]">Max Drawdown (%)</Label>
+                        <Input id="max_drawdown" type="number" step="1" min="5" max="50" {...autonomousForm.register('max_drawdown', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Reject if test DD exceeds this (5-50%)</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_win_rate" className="text-[11px]">Min Win Rate — Equity (%)</Label>
+                        <Input id="min_win_rate" type="number" step="1" min="20" max="80" {...autonomousForm.register('min_win_rate', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Soft floor — expectancy gate overrides when n≥15 trades</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_win_rate_crypto" className="text-[11px]">Min Win Rate — Crypto (%)</Label>
+                        <Input id="min_win_rate_crypto" type="number" step="1" min="15" max="70" {...autonomousForm.register('min_win_rate_crypto', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Lower floor for trend-follower profiles</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_win_rate_commodity" className="text-[11px]">Min Win Rate — Commodity (%)</Label>
+                        <Input id="min_win_rate_commodity" type="number" step="1" min="20" max="70" {...autonomousForm.register('min_win_rate_commodity', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Low-frequency floor (20-70%)</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 3 — Min Trades per asset class × interval              */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <h3 className="text-[11px] font-semibold text-gray-300">Min Trades (Statistical Significance)</h3>
+                    <p className="text-xs text-gray-500">Minimum number of test-window trades required to accept WF results. Higher intervals need fewer trades (longer holding period).</p>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades" className="text-[11px]">Min Trades (base)</Label>
+                        <Input id="min_trades" type="number" min="1" max="50" {...autonomousForm.register('min_trades', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades_dsl" className="text-[11px]">DSL daily</Label>
+                        <Input id="min_trades_dsl" type="number" min="1" max="50" {...autonomousForm.register('min_trades_dsl', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades_dsl_4h" className="text-[11px]">DSL 4H</Label>
+                        <Input id="min_trades_dsl_4h" type="number" min="1" max="50" {...autonomousForm.register('min_trades_dsl_4h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades_dsl_1h" className="text-[11px]">DSL 1H</Label>
+                        <Input id="min_trades_dsl_1h" type="number" min="1" max="100" {...autonomousForm.register('min_trades_dsl_1h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades_alpha_edge" className="text-[11px]">Alpha Edge</Label>
+                        <Input id="min_trades_alpha_edge" type="number" min="1" max="50" {...autonomousForm.register('min_trades_alpha_edge', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades_crypto_1d" className="text-[11px]">Crypto daily</Label>
+                        <Input id="min_trades_crypto_1d" type="number" min="1" max="50" {...autonomousForm.register('min_trades_crypto_1d', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades_crypto_4h" className="text-[11px]">Crypto 4H</Label>
+                        <Input id="min_trades_crypto_4h" type="number" min="1" max="50" {...autonomousForm.register('min_trades_crypto_4h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades_crypto_1h" className="text-[11px]">Crypto 1H</Label>
+                        <Input id="min_trades_crypto_1h" type="number" min="1" max="100" {...autonomousForm.register('min_trades_crypto_1h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="min_trades_commodity" className="text-[11px]">Commodity</Label>
+                        <Input id="min_trades_commodity" type="number" min="1" max="50" {...autonomousForm.register('min_trades_commodity', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 4 — Min Return Per Trade (RPT) floors                   */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <h3 className="text-[11px] font-semibold text-gray-300">Min Return Per Trade (%) — Per-Position Basis</h3>
+                    <p className="text-xs text-gray-500">Minimum net return per trade (post-cost). Gated by the activation RPT check in <code>portfolio_manager.evaluate_for_activation</code>. Values are per-position (e.g. crypto_1d = 3% means each trade must make ≥3% on the capital deployed).</p>
+                    <h4 className="text-[11px] text-gray-400 font-medium">Equity</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Stock daily</Label>
+                        <Input type="number" step="0.01" min="0" max="20" {...autonomousForm.register('min_rpt_stock', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Stock 4H</Label>
+                        <Input type="number" step="0.01" min="0" max="20" {...autonomousForm.register('min_rpt_stock_4h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Stock 1H</Label>
+                        <Input type="number" step="0.01" min="0" max="10" {...autonomousForm.register('min_rpt_stock_1h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">ETF daily</Label>
+                        <Input type="number" step="0.01" min="0" max="20" {...autonomousForm.register('min_rpt_etf', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">ETF 4H</Label>
+                        <Input type="number" step="0.01" min="0" max="20" {...autonomousForm.register('min_rpt_etf_4h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">ETF 1H</Label>
+                        <Input type="number" step="0.01" min="0" max="10" {...autonomousForm.register('min_rpt_etf_1h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Index daily</Label>
+                        <Input type="number" step="0.01" min="0" max="20" {...autonomousForm.register('min_rpt_index', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Index 1H</Label>
+                        <Input type="number" step="0.01" min="0" max="10" {...autonomousForm.register('min_rpt_index_1h', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+                    <h4 className="text-[11px] text-gray-400 font-medium pt-2 border-t border-dark-border/50">Forex</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Forex daily</Label>
+                        <Input type="number" step="0.01" min="0" max="10" {...autonomousForm.register('min_rpt_forex', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Forex 1H</Label>
+                        <Input type="number" step="0.005" min="0" max="5" {...autonomousForm.register('min_rpt_forex_1h', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+                    <h4 className="text-[11px] text-gray-400 font-medium pt-2 border-t border-dark-border/50">Crypto (2.2-3% round-trip cost on eToro)</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Crypto fallback</Label>
+                        <Input type="number" step="0.1" min="0" max="30" {...autonomousForm.register('min_rpt_crypto', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Crypto daily</Label>
+                        <Input type="number" step="0.1" min="0" max="30" {...autonomousForm.register('min_rpt_crypto_1d', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Crypto 4H</Label>
+                        <Input type="number" step="0.1" min="0" max="30" {...autonomousForm.register('min_rpt_crypto_4h', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Crypto 1H</Label>
+                        <Input type="number" step="0.1" min="0" max="20" {...autonomousForm.register('min_rpt_crypto_1h', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+                    <h4 className="text-[11px] text-gray-400 font-medium pt-2 border-t border-dark-border/50">Commodity</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Commodity daily</Label>
+                        <Input type="number" step="0.01" min="0" max="20" {...autonomousForm.register('min_rpt_commodity', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Commodity 4H</Label>
+                        <Input type="number" step="0.01" min="0" max="20" {...autonomousForm.register('min_rpt_commodity_4h', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 5 — Retirement                                          */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <h3 className="text-[11px] font-semibold text-gray-300">Retirement Thresholds + Logic</h3>
+                    <p className="text-xs text-gray-500">Conditions under which a live DEMO strategy is retired. `min_live_trades` gates evaluation so strategies aren't killed before statistical significance.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Retire if Sharpe &lt;</Label>
+                        <Input type="number" step="0.1" min="-1.0" max="2.0" {...autonomousForm.register('retirement_max_sharpe', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Live Sharpe floor (-1.0 to 2.0)</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Retire if DD &gt; (%)</Label>
+                        <Input type="number" step="1" min="5" max="50" {...autonomousForm.register('retirement_max_drawdown', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Max tolerated live DD</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Retire if WR &lt; (%)</Label>
+                        <Input type="number" step="1" min="15" max="60" {...autonomousForm.register('retirement_min_win_rate', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Live win rate floor</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min Trades for Eval</Label>
+                        <Input type="number" min="3" max="100" {...autonomousForm.register('retirement_min_trades_for_evaluation', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Statistical minimum before retirement check</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min Live Trades</Label>
+                        <Input type="number" min="1" max="50" {...autonomousForm.register('retirement_min_live_trades', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Filled trades required before retirement eligible</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Rolling Window (days)</Label>
+                        <Input type="number" min="7" max="365" {...autonomousForm.register('retirement_rolling_window_days', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Lookback for rolling retirement metrics</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Consecutive Failures</Label>
+                        <Input type="number" min="1" max="10" {...autonomousForm.register('retirement_consecutive_failures', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Failures in a row to trigger retirement</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Probation (days)</Label>
+                        <Input type="number" min="1" max="365" {...autonomousForm.register('retirement_probation_days', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Grace period after activation before retirement kicks in</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 6 — Walk-Forward + Direction-Aware thresholds          */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <h3 className="text-[11px] font-semibold text-gray-300">Walk-Forward & Direction-Aware Thresholds</h3>
+                    <p className="text-xs text-gray-500">Per-regime × per-direction relaxation so uptrend shorts and ranging longs aren't systematically rejected. Values are raw (not percentages) to match yaml convention.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">WF Train Days</Label>
+                        <Input type="number" min="30" max="1460" {...autonomousForm.register('wf_train_days', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Training window length (30-1460 days)</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">WF Test Days</Label>
+                        <Input type="number" min="30" max="1460" {...autonomousForm.register('wf_test_days', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Out-of-sample test window (30-1460 days)</p>
+                      </div>
+                    </div>
+
+                    {/* Direction-aware — default */}
+                    <div className="pt-3 border-t border-dark-border">
+                      <h4 className="text-[11px] text-gray-400 font-medium mb-2">Default (used when no regime match)</h4>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Min Return</Label>
+                          <Input type="number" step="0.01" {...autonomousForm.register('da_default_min_return', { valueAsNumber: true })} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Min Sharpe</Label>
+                          <Input type="number" step="0.05" {...autonomousForm.register('da_default_min_sharpe', { valueAsNumber: true })} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-[10px]">Min WR</Label>
+                          <Input type="number" step="0.01" {...autonomousForm.register('da_default_min_win_rate', { valueAsNumber: true })} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Direction-aware — per-regime grid */}
+                    {[
+                      { key: 'ranging', label: 'Ranging' },
+                      { key: 'trending_up', label: 'Trending Up' },
+                      { key: 'trending_down', label: 'Trending Down' },
+                      { key: 'high_vol', label: 'High Volatility' },
+                    ].map(({ key, label }) => (
+                      <div key={key} className="pt-3 border-t border-dark-border">
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">{label}</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {['long', 'short'].map((dir) => (
+                            <div key={dir} className="space-y-2 p-2 bg-dark-bg/50 rounded border border-dark-border/50">
+                              <p className="text-[10px] uppercase text-gray-500 font-semibold">{dir}</p>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="space-y-1">
+                                  <Label className="text-[10px]">Return</Label>
+                                  <Input type="number" step="0.01" {...autonomousForm.register(`da_${key}_${dir}_min_return` as any, { valueAsNumber: true })} />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-[10px]">Sharpe</Label>
+                                  <Input type="number" step="0.05" {...autonomousForm.register(`da_${key}_${dir}_min_sharpe` as any, { valueAsNumber: true })} />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label className="text-[10px]">WR</Label>
+                                  <Input type="number" step="0.01" {...autonomousForm.register(`da_${key}_${dir}_min_win_rate` as any, { valueAsNumber: true })} />
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 7 — Adaptive Risk (SL/TP bounds)                        */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-[11px]">Enable Adaptive Risk</Label>
+                        <p className="text-xs text-gray-500">Clamps strategy SL/TP into sensible bounds at proposal time</p>
+                      </div>
+                      <Switch
+                        checked={autonomousForm.watch('adaptive_risk_enabled')}
+                        onCheckedChange={(checked) => autonomousForm.setValue('adaptive_risk_enabled', checked)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min SL (%)</Label>
+                        <Input type="number" step="0.5" min="0.5" max="20" {...autonomousForm.register('adaptive_min_sl_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Max SL (%)</Label>
+                        <Input type="number" step="0.5" min="1" max="30" {...autonomousForm.register('adaptive_max_sl_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min TP (%)</Label>
+                        <Input type="number" step="0.5" min="1" max="30" {...autonomousForm.register('adaptive_min_tp_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Max TP (%)</Label>
+                        <Input type="number" step="0.5" min="2" max="50" {...autonomousForm.register('adaptive_max_tp_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min R:R Ratio</Label>
+                        <Input type="number" step="0.1" min="0.5" max="5" {...autonomousForm.register('adaptive_min_rr_ratio', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 8 — Performance Feedback                                */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <h3 className="text-[11px] font-semibold text-gray-300">Performance Feedback Loop</h3>
+                    <p className="text-xs text-gray-500">How past-trade performance weights future proposals. Recency-decayed so stale losses don't permanently lock out a symbol.</p>
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Lookback (days)</Label>
+                        <Input type="number" min="7" max="365" {...autonomousForm.register('feedback_lookback_days', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min Trades</Label>
+                        <Input type="number" min="1" max="50" {...autonomousForm.register('feedback_min_trades', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Max Weight</Label>
+                        <Input type="number" step="0.1" min="1.0" max="3.0" {...autonomousForm.register('feedback_max_weight', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min Weight</Label>
+                        <Input type="number" step="0.05" min="0.1" max="1.0" {...autonomousForm.register('feedback_min_weight', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Decay/day</Label>
+                        <Input type="number" step="0.005" min="0" max="0.1" {...autonomousForm.register('feedback_weight_decay_per_day', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 9 — Directional Balance + Per-Regime Quotas            */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <Label className="text-[11px]">Enable Directional Balance</Label>
+                        <p className="text-xs text-gray-500">Caps overall portfolio long/short exposure</p>
+                      </div>
+                      <Switch
+                        checked={autonomousForm.watch('directional_balance_enabled')}
+                        onCheckedChange={(checked) => autonomousForm.setValue('directional_balance_enabled', checked)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min Long (%)</Label>
+                        <Input type="number" min="0" max="100" {...autonomousForm.register('directional_min_long_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Max Long (%)</Label>
+                        <Input type="number" min="0" max="100" {...autonomousForm.register('directional_max_long_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Min Short (%)</Label>
+                        <Input type="number" min="0" max="100" {...autonomousForm.register('directional_min_short_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Max Short (%)</Label>
+                        <Input type="number" min="0" max="100" {...autonomousForm.register('directional_max_short_pct', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-dark-border">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="space-y-0.5">
+                          <Label className="text-[11px]">Per-Regime Directional Quotas</Label>
+                          <p className="text-xs text-gray-500">Minimum long/short % allocation by market regime</p>
+                        </div>
+                        <Switch
+                          checked={autonomousForm.watch('dq_enabled')}
+                          onCheckedChange={(checked) => autonomousForm.setValue('dq_enabled', checked)}
+                        />
+                      </div>
+                      <div className="space-y-2 mb-3">
+                        <Label className="text-[11px]">Adjacent Regime Reserve (%)</Label>
+                        <Input type="number" step="1" min="0" max="100" {...autonomousForm.register('dq_adjacent_regime_reserve_pct', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Slack when regime is at boundary (prevents whipsaw allocations)</p>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {[
+                          { key: 'ranging', label: 'Ranging' },
+                          { key: 'ranging_low_vol', label: 'Ranging (low vol)' },
+                          { key: 'trending_up', label: 'Trending Up' },
+                          { key: 'trending_up_weak', label: 'Trending Up (weak)' },
+                          { key: 'trending_up_strong', label: 'Trending Up (strong)' },
+                          { key: 'trending_down', label: 'Trending Down' },
+                          { key: 'trending_down_weak', label: 'Trending Down (weak)' },
+                          { key: 'high_volatility', label: 'High Volatility' },
+                        ].map(({ key, label }) => (
+                          <div key={key} className="p-2 bg-dark-bg/50 rounded border border-dark-border/50">
+                            <p className="text-[10px] uppercase text-gray-500 font-semibold mb-2">{label}</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[10px]">Min Long (%)</Label>
+                                <Input type="number" step="1" min="0" max="100" {...autonomousForm.register(`dq_${key}_long` as any, { valueAsNumber: true })} />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[10px]">Min Short (%)</Label>
+                                <Input type="number" step="1" min="0" max="100" {...autonomousForm.register(`dq_${key}_short` as any, { valueAsNumber: true })} />
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 10 — Portfolio Caps                                     */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <h3 className="text-[11px] font-semibold text-gray-300">Portfolio Exposure Caps</h3>
+                    <p className="text-xs text-gray-500">Upper bounds on long/short and sector exposure.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Max Long Exposure (%)</Label>
+                        <Input type="number" min="10" max="100" {...autonomousForm.register('max_long_exposure_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Max Short Exposure (%)</Label>
+                        <Input type="number" min="10" max="100" {...autonomousForm.register('max_short_exposure_pct', { valueAsNumber: true })} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Max Sector Exposure (%)</Label>
+                        <Input type="number" min="10" max="100" {...autonomousForm.register('max_sector_exposure_pct', { valueAsNumber: true })} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Save / Reset */}
                   <div className="flex gap-3">
                     <Button type="submit" disabled={autonomousForm.formState.isSubmitting} className="flex-1">
                       <Save className="h-4 w-4 mr-2" />
                       {autonomousForm.formState.isSubmitting ? 'Saving...' : 'Save Configuration'}
                     </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => autonomousForm.reset()}
-                    >
+                    <Button type="button" variant="outline" onClick={() => autonomousForm.reset()}>
                       <RotateCcw className="h-4 w-4 mr-2" />
                       Reset
                     </Button>
                   </div>
                 </form>
+
+                {/* ══════════════════════════════════════════════════════════ */}
+                {/* READ-ONLY — Advanced / System (Category 3)                   */}
+                {/* ══════════════════════════════════════════════════════════ */}
+                {autonomousAdvanced && (
+                  <div className="mt-8 p-4 bg-dark-bg/60 border border-dark-border rounded-lg space-y-3">
+                    <div className="flex items-start gap-2">
+                      <Info className="h-4 w-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <h3 className="text-[11px] font-semibold text-gray-300">Advanced / System (read-only)</h3>
+                        <p className="text-xs text-gray-500">These values are managed directly in <code className="text-[10px] bg-dark-bg px-1 rounded">config/autonomous_trading.yaml</code> by ops and reflect the actual broker cost model, validation rules, symbol universe, and data source status. Editing them from this UI is intentionally disabled because changes affect backtest correctness and historical comparability.</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-dark-border">
+                      <div>
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">Transaction Costs — Per Asset Class (%)</h4>
+                        <div className="space-y-1 text-[11px] font-mono">
+                          {(['stock','etf','forex','crypto','index','commodity'] as const).map(ac => {
+                            const c = autonomousAdvanced[`transaction_costs_${ac}`] || {};
+                            const rt = ((c.commission_percent || 0) + (c.spread_percent || 0) + (c.slippage_percent || 0)) * 2 * 100;
+                            return (
+                              <div key={ac} className="grid grid-cols-5 gap-1 text-gray-400">
+                                <span className="text-gray-300 capitalize">{ac}</span>
+                                <span>c: {((c.commission_percent || 0) * 100).toFixed(3)}%</span>
+                                <span>s: {((c.spread_percent || 0) * 100).toFixed(3)}%</span>
+                                <span>sl: {((c.slippage_percent || 0) * 100).toFixed(3)}%</span>
+                                <span className="text-gray-200">rt: {rt.toFixed(2)}%</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">Transaction Costs — Per Symbol Overrides</h4>
+                        <div className="space-y-1 text-[11px] font-mono">
+                          {Object.entries(autonomousAdvanced.transaction_costs_per_symbol || {}).map(([sym, c]: [string, any]) => {
+                            const rt = ((c.commission_percent || 0) + (c.spread_percent || 0) + (c.slippage_percent || 0)) * 2 * 100;
+                            return (
+                              <div key={sym} className="grid grid-cols-5 gap-1 text-gray-400">
+                                <span className="text-gray-300">{sym}</span>
+                                <span>c: {((c.commission_percent || 0) * 100).toFixed(3)}%</span>
+                                <span>s: {((c.spread_percent || 0) * 100).toFixed(3)}%</span>
+                                <span>sl: {((c.slippage_percent || 0) * 100).toFixed(3)}%</span>
+                                <span className="text-gray-200">rt: {rt.toFixed(2)}%</span>
+                              </div>
+                            );
+                          })}
+                          {Object.keys(autonomousAdvanced.transaction_costs_per_symbol || {}).length === 0 && (
+                            <span className="text-gray-500">(none)</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">Asset-Class Defaults (SL / TP / Hold)</h4>
+                        <div className="space-y-1 text-[11px] font-mono">
+                          {Object.entries(autonomousAdvanced.asset_class_parameters || {}).map(([ac, p]: [string, any]) => (
+                            <div key={ac} className="grid grid-cols-4 gap-1 text-gray-400">
+                              <span className="text-gray-300 capitalize">{ac}</span>
+                              <span>SL: {((p.stop_loss_pct || 0) * 100).toFixed(1)}%</span>
+                              <span>TP: {((p.take_profit_pct || 0) * 100).toFixed(1)}%</span>
+                              <span>hold: {p.holding_period_days_min}-{p.holding_period_days_max}d</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">Symbol Universe</h4>
+                        <div className="space-y-1 text-[11px] font-mono">
+                          {Object.entries(autonomousAdvanced.symbol_counts || {}).map(([cls, n]: [string, any]) => (
+                            <div key={cls} className="grid grid-cols-2 gap-1 text-gray-400">
+                              <span className="text-gray-300 capitalize">{cls}</span>
+                              <span>{n} symbols</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">Data Sources</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] font-mono">
+                          {Object.entries(autonomousAdvanced.data_sources || {}).map(([name, ds]: [string, any]) => (
+                            <div key={name} className={cn("p-1.5 rounded border", ds.enabled ? "border-green-900/50 bg-green-900/10" : "border-gray-800 bg-gray-900/30")}>
+                              <span className="text-gray-300">{name}</span>{' '}
+                              <span className={ds.enabled ? "text-green-400" : "text-gray-500"}>
+                                {ds.enabled ? 'ON' : 'OFF'}
+                              </span>
+                              {ds.cache_duration && (
+                                <span className="text-gray-500"> · {Math.round((ds.cache_duration || 0) / 3600)}h cache</span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
           </TabsContent>
 
           {/* Alpha Edge Tab */}

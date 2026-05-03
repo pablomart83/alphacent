@@ -81,6 +81,16 @@ Every change follows this exact sequence. No exceptions.
 - `ssh ... 'cp ... /home/ubuntu/alphacent/src/...'` — no copying on EC2
 - Any form of editing files directly on EC2
 
+**Narrow exception — `config/autonomous_trading.yaml` only.** The Settings page (`/config/autonomous` PUT endpoint) writes this file live on EC2 every time the user clicks Save in the UI. As a result, EC2 is the authoritative copy for this one file, and the local workspace copy drifts out of date between sessions.
+
+Before touching `config/autonomous_trading.yaml` (edit, or any code that reads its schema), sync from EC2 first:
+
+```bash
+scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent/config/autonomous_trading.yaml config/autonomous_trading.yaml
+```
+
+After syncing, diff against any local uncommitted changes before proceeding so a UI-initiated change doesn't silently overwrite a pending edit. This exception applies only to `config/autonomous_trading.yaml`. Every other file in the repository still flows local → EC2, never the other way.
+
 ---
 
 ## Infrastructure
