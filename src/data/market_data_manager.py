@@ -1231,7 +1231,7 @@ class MarketDataManager:
             "BTC", "ETH", "SOL", "AVAX", "LINK", "DOT",
             "XRP", "ADA", "NEAR", "LTC", "BCH",
         }
-        if interval in ("1h", "4h") and not _is_crypto_wire:
+        if interval in ("1h", "4h", "1d") and not _is_crypto_wire:
             try:
                 from src.api.fmp_ohlc import is_supported as _fmp_supported
                 from src.api.fmp_ohlc import fetch_klines as _fmp_fetch
@@ -1619,12 +1619,22 @@ class MarketDataManager:
                         return None
                     # else: market was closed, gap is expected — use DB data as-is
 
-                # Convert to MarketData objects
+                # Convert to MarketData objects. Read the source column
+                # correctly — previously this path defaulted to YAHOO_FINANCE
+                # for any row that wasn't explicitly "FMP", silently re-
+                # tagging Binance-sourced bars as Yahoo at read-time. That
+                # was a hidden correctness bug for consumers that read
+                # md.source downstream.
+                _source_map = {
+                    "BINANCE":       DataSource.BINANCE,
+                    "FMP":           DataSource.FMP,
+                    "YAHOO_FINANCE": DataSource.YAHOO_FINANCE,
+                    "yahoo":         DataSource.YAHOO_FINANCE,  # legacy casing
+                    "ETORO":         DataSource.ETORO,
+                }
                 data_list = []
                 for r in records:
-                    source = DataSource.YAHOO_FINANCE
-                    if r.source == "FMP":
-                        source = DataSource.FMP if hasattr(DataSource, 'FMP') else DataSource.YAHOO_FINANCE
+                    source = _source_map.get(r.source, DataSource.YAHOO_FINANCE)
 
                     md = MarketData(
                         symbol=symbol,

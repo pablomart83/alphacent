@@ -1053,10 +1053,38 @@ class MonitoringService:
                             # Anything > 1 trading day behind and not explained by weekend = stale
                             _is_stale_1d = gap_days > 1.2 and not is_weekend_gap
 
-                        if _is_stale_1d:
+                        # Depth check: even if the latest bar is fresh, if the
+                        # cache depth is less than our 5y target (with some
+                        # slack), queue for FMP backfill so consumers that
+                        # need long-horizon 1d data (5y WF windows) have it.
+                        # Query MIN(date) directly — the 220d db_data_1d window
+                        # above would always show shallow, so can't use it here.
+                        _depth_days = 0
+                        try:
+                            from sqlalchemy import text as _t_depth
+                            from src.models.database import get_database as _gd_depth
+                            _db_depth = _gd_depth()
+                            _s_depth = _db_depth.get_session()
+                            try:
+                                _min = _s_depth.execute(_t_depth(
+                                    "SELECT MIN(date) FROM historical_price_cache "
+                                    "WHERE symbol = :s AND interval = '1d'"
+                                ), {"s": symbol}).scalar()
+                                if _min is not None:
+                                    if hasattr(_min, 'tzinfo') and _min.tzinfo:
+                                        _min = _min.replace(tzinfo=None)
+                                    _depth_days = (end - _min).days
+                            finally:
+                                _s_depth.close()
+                        except Exception:
+                            pass
+                        _is_shallow_1d = _depth_days < 1460  # < 4y
+
+                        if _is_stale_1d or _is_shallow_1d:
                             logger.debug(
-                                f"[bg-full-sync] {symbol} 1d in DB is stale "
-                                f"(latest={latest_ts.date()}, gap={gap_days:.1f}d) — queuing Yahoo fetch"
+                                f"[bg-full-sync] {symbol} 1d needs backfill "
+                                f"(latest={latest_ts.date()}, gap={gap_days:.1f}d, "
+                                f"depth={_depth_days}d, stale={_is_stale_1d}, shallow={_is_shallow_1d})"
                             )
                             need_yahoo_1d.append(symbol)
                         else:
@@ -1417,6 +1445,121 @@ class MonitoringService:
                                 f"{len(_fmp_remaining)} remaining for Yahoo"
                             )
                         need_list = _fmp_remaining
+                    except ImportError:
+                        pass  # fmp_ohlc missing — stay on Yahoo
+
+                # FMP primary branch for non-crypto 1d (2026-05-03 late).
+                # Previously 1d went straight to Yahoo. But Yahoo 1d is
+                # adjusted-close (dividend-backpropagated), while FMP 1d is
+                # raw-close — so the same day's bar differs by ~0.5-1%
+                # between the two sources. That creates phantom signals at
+                # day-boundaries when an indicator computed on 1h bars
+                # (FMP) crosses into 1d context (Yahoo). Routing both
+                # through FMP keeps OHLC consistent across timeframes.
+                #
+                # FMP 1d uses /historical-price-eod/full — the /historical-
+                # chart/1day endpoint returns empty on Starter.
+                if interval == "1d":
+                    try:
+                        from src.api.fmp_ohlc import (
+                            is_supported as _fmp_supported_d,
+                            fetch_klines as _fmp_fetch_d,
+                            FMPAPIError as _FMPErr_d,
+                        )
+                        _fmp_remaining_d: list = []
+                        _fmp_syms_fetched_d = 0
+                        _fmp_bars_total_d = 0
+                        _fmp_blocked_d = 0
+                        _fmp_empty_d = 0
+                        _FMP_1D_WINDOW_DAYS = 1825  # 5 years of daily
+                        for sym in need_list:
+                            if not _fmp_supported_d(sym, "1d"):
+                                _fmp_remaining_d.append(sym)
+                                continue
+                            fetch_start = end - timedelta(days=_FMP_1D_WINDOW_DAYS)
+                            try:
+                                from src.models.database import get_database as _gd_d
+                                from sqlalchemy import text as _t_d
+                                _db_d = _gd_d()
+                                _s_d = _db_d.get_session()
+                                try:
+                                    # Query both latest timestamp AND earliest
+                                    # timestamp so we can detect a shallow FMP
+                                    # cache (e.g. 7 months worth of bars when
+                                    # we want 5 years). Shallow cache triggers
+                                    # a full backfill even if the latest bar
+                                    # is fresh.
+                                    _row_d = _s_d.execute(_t_d(
+                                        "SELECT MIN(date), MAX(date), "
+                                        "       (SELECT source FROM historical_price_cache "
+                                        "        WHERE symbol = :s AND interval = '1d' "
+                                        "        ORDER BY date DESC LIMIT 1) "
+                                        "FROM historical_price_cache "
+                                        "WHERE symbol = :s AND interval = '1d'"
+                                    ), {"s": sym}).fetchone()
+                                    if _row_d is not None and _row_d[0] is not None:
+                                        _earliest_d = _row_d[0]
+                                        _latest_d = _row_d[1]
+                                        _src_d = _row_d[2]
+                                        if hasattr(_latest_d, 'tzinfo') and _latest_d.tzinfo:
+                                            _latest_d = _latest_d.replace(tzinfo=None)
+                                        if hasattr(_earliest_d, 'tzinfo') and _earliest_d.tzinfo:
+                                            _earliest_d = _earliest_d.replace(tzinfo=None)
+                                        _gap_d = (end - _latest_d).total_seconds() / 3600
+                                        _depth_d = (end - _earliest_d).days
+                                        # Need FMP source AND fresh AND >= 4y deep
+                                        # for "cache fresh, skip". Anything less
+                                        # triggers a full 5y backfill.
+                                        if _src_d == 'FMP' and _gap_d < 28 and _depth_d >= 1460:
+                                            stats["1d"] += 1
+                                            stats["db_cached"] += 1
+                                            continue
+                                        if _src_d == 'FMP' and _depth_d >= 1460:
+                                            # Deep FMP cache but stale — incremental
+                                            fetch_start = _latest_d - timedelta(days=2)
+                                        # else (shallow FMP cache OR Yahoo legacy):
+                                        # keep full 5y backfill window
+                                finally:
+                                    _s_d.close()
+                            except Exception:
+                                pass  # best-effort incremental check
+                            try:
+                                bars = _fmp_fetch_d(sym, fetch_start, end, "1d")
+                            except _FMPErr_d as fe:
+                                if fe.reason == "premium_blocked":
+                                    _fmp_blocked_d += 1
+                                _fmp_remaining_d.append(sym)
+                                continue
+                            if not bars:
+                                # FMP-authoritative empty (closed market /
+                                # future window). Don't fall through to Yahoo.
+                                _fmp_empty_d += 1
+                                stats["1d"] += 1
+                                stats["db_cached"] += 1
+                                continue
+                            try:
+                                md._save_historical_to_db(sym, bars, "1d")
+                                stats["1d"] += 1
+                                stats.setdefault("fmp_batch", 0)
+                                stats["fmp_batch"] += 1
+                                _fmp_syms_fetched_d += 1
+                                _fmp_bars_total_d += len(bars)
+                                if sym in active_symbols:
+                                    cache_key = f"{sym}:1d:120"
+                                    hist_cache.set(cache_key, list(bars))
+                                    stats["memory_loaded"] += 1
+                            except Exception as e:
+                                logger.warning(
+                                    f"[bg-full-sync] FMP DB save failed for {sym} 1d: {e}"
+                                )
+                                _fmp_remaining_d.append(sym)
+                        if _fmp_syms_fetched_d or _fmp_blocked_d:
+                            logger.info(
+                                f"[bg-full-sync] FMP 1d: {_fmp_syms_fetched_d} symbols "
+                                f"({_fmp_bars_total_d} bars), {_fmp_blocked_d} premium-blocked, "
+                                f"{_fmp_empty_d} empty — {len(_fmp_remaining_d)} remaining for Yahoo"
+                            )
+                        need_list = _fmp_remaining_d
                     except ImportError:
                         pass  # fmp_ohlc missing — stay on Yahoo
 

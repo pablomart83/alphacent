@@ -61,6 +61,11 @@ logger = logging.getLogger(__name__)
 
 
 BASE_URL = "https://financialmodelingprep.com/stable/historical-chart"
+# Daily bars come from a different endpoint. /historical-chart/1day returns
+# empty for everything on Starter; /historical-price-eod/full is the correct
+# EOD endpoint. Returns flat list with {date, open, high, low, close, volume,
+# change, changePercent, vwap}.
+BASE_URL_EOD = "https://financialmodelingprep.com/stable/historical-price-eod/full"
 TIMEOUT_S = 30.0
 MAX_RETRIES = 3
 RETRY_BACKOFF_S = 2.0
@@ -71,10 +76,11 @@ RETRY_BACKOFF_S = 2.0
 #   1h US stocks: ~3 months returns ~441 bars (~147/month)
 #   4h stocks: ~6 months returns ~248 bars (~42/month)
 #   4h 24h assets: ~6 months returns ~900 bars (6/day × ~150 days)
+#   1d EOD: no observed page limit; 5y in a single call works fine (252 bars/yr)
 PAGE_WINDOW_DAYS: Dict[str, int] = {
     "1hour": 85,   # ~85 days (not exactly 90 to stay under FMP's cut)
     "4hour": 170,  # ~6 months, safe for US equity session bars
-    "1day": 1825,  # 5y in a single call — 1d endpoint isn't page-limited
+    "1day": 1825,  # 5y in a single call — 1d EOD endpoint isn't page-limited
 }
 
 
@@ -98,9 +104,10 @@ EXPLICIT_BLOCKED: set = {
     ("^DJI",  "4hour"),
     ("^FTSE", "4hour"),
     ("^STOXX50E", "4hour"),
-    # Commodities — oil and copper are blocked at 1h but OK at 4h
-    ("CLUSD", "1hour"),
-    ("HGUSD", "1hour"),
+    # Commodities — oil and copper are blocked at 1h AND 1d on Starter
+    # (confirmed via /historical-price-eod/full probe). 4h works.
+    ("CLUSD", "1hour"), ("CLUSD", "1day"),
+    ("HGUSD", "1hour"), ("HGUSD", "1day"),
     # Non-US / non-majors stocks in our universe known to be sparse or
     # premium (foreign listings that FMP only serves at EOD).
     # Add as they surface in logs (runtime-observed block-set below).
@@ -221,16 +228,22 @@ def _mark_blocked(fmp_sym: str, itv_fmp: str) -> None:
 def _parse_bars(payload: list, symbol: str) -> List[MarketData]:
     """Convert FMP JSON list → List[MarketData]. One item per bar.
 
+    Handles two timestamp formats:
+      - Intraday (1h/4h): "2024-03-04 09:30:00"
+      - EOD (1d):         "2024-03-04"
+
     Robust to float vs str in fields; drops any bar with non-numeric OHLC.
     """
     bars: List[MarketData] = []
     for row in payload:
         try:
             ts_str = row["date"]
-            # FMP timestamps are tz-naive local (US market time for equities,
-            # UTC for 24h assets). Parse as naive and trust downstream
-            # consumers — market_data_manager normalises tz on DB write.
-            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            # EOD format is date-only; intraday includes time
+            if len(ts_str) == 10 and ts_str.count("-") == 2:
+                # EOD: anchor at midnight UTC-naive (matches our 1d convention)
+                ts = datetime.strptime(ts_str, "%Y-%m-%d")
+            else:
+                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
             bars.append(MarketData(
                 symbol=symbol,
                 timestamp=ts,
@@ -257,7 +270,13 @@ def _fetch_page(
     page_to: datetime,
 ) -> List[MarketData]:
     """Fetch one page (up to PAGE_WINDOW_DAYS[interval] span) with retries."""
-    url = f"{BASE_URL}/{interval_fmp}"
+    # 1d uses a different endpoint — /historical-price-eod/full (not
+    # /historical-chart/1day, which returns empty on Starter for every
+    # symbol). Intraday stays on /historical-chart/{interval}.
+    if interval_fmp == "1day":
+        url = BASE_URL_EOD
+    else:
+        url = f"{BASE_URL}/{interval_fmp}"
     params = {
         "symbol": fmp_symbol,
         "from": page_from.strftime("%Y-%m-%d"),
@@ -276,8 +295,20 @@ def _fetch_page(
                     reason="premium_blocked",
                 )
             if r.status_code == 429:
+                # Rate-limited. Back off and retry rather than fail-fast —
+                # during bulk backfills the 300/min budget is easy to saturate.
+                # Exponential backoff: 2s, 4s, 8s across attempts.
+                if attempt < MAX_RETRIES - 1:
+                    backoff = RETRY_BACKOFF_S * (2 ** attempt)
+                    logger.info(
+                        f"FMP 429 on {fmp_symbol} {interval_fmp} "
+                        f"{page_from.date()}→{page_to.date()}, sleeping {backoff:.0f}s "
+                        f"(attempt {attempt+1}/{MAX_RETRIES})"
+                    )
+                    time.sleep(backoff)
+                    continue
                 raise FMPAPIError(
-                    f"FMP rate-limited (HTTP 429) for {fmp_symbol}",
+                    f"FMP rate-limited (HTTP 429) after {MAX_RETRIES} attempts for {fmp_symbol}",
                     reason="rate_limited",
                 )
             if r.status_code != 200:
@@ -388,12 +419,14 @@ def fetch_klines(
         pages.append((cursor, page_to))
         cursor = page_to
 
-    # Single page: just fetch directly. Multi-page: parallel with 4 workers.
+    # Single page: just fetch directly. Multi-page: parallel with 2 workers
+    # (was 4 — 4 × stocks × 22 pages/stock saturated FMP's 300 req/min budget
+    # during bulk backfills and triggered 429s).
     if len(pages) == 1:
         return _fetch_page(key, fmp_sym, itv_fmp, pages[0][0], pages[0][1])
 
     all_bars: List[MarketData] = []
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=2) as ex:
         futures = {
             ex.submit(_fetch_page, key, fmp_sym, itv_fmp, pf, pt): (pf, pt)
             for pf, pt in pages
