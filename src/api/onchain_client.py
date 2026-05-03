@@ -261,31 +261,30 @@ def _fetch_btc_dominance(end: datetime, lookback_days: int) -> pd.Series:
     days = max(1, min(int(lookback_days), 365))
 
     def _cg_request(url: str, params: Optional[Dict] = None) -> Dict:
-        """Wrapped CoinGecko GET with two retries on 429.
+        """Wrapped CoinGecko GET with a single 10s retry on 429.
 
-        CoinGecko free tier allows ~30 calls/min. A cycle can temporarily
-        burst above that when many crypto templates reference the same
-        on-chain metric concurrently; the module-level cache absorbs most
-        of it, but the first call per cycle can still 429 if another
-        provider also happens to ping at the same moment.
-
-        Sprint 5 S5.2 (2026-05-03): extended retry from 1 attempt (10s)
-        to 2 attempts (10s, then 30s) to absorb transient bursts without
-        the caller having to reason about retry logic.
+        CoinGecko free tier allows ~30 calls/min. With the S5.2 coverage-
+        aware module cache (one entry per metric, fetched at widest
+        provider window), the worst case per cycle is ~4-5 CoinGecko
+        calls total — well under the limit. A single 10s backoff
+        absorbs occasional transient throttling (e.g. another process
+        on the same IP pinged CoinGecko at the same moment); if it's
+        still 429 after that, the problem is a genuine rate-limit
+        exhaustion and we should fail fast, not keep sleeping. The
+        ONCHAIN primitive handles the OnChainAPIError by skipping the
+        condition — strategies without on-chain data get 0 trades in
+        backtest and fall out naturally via the WF funnel.
         """
-        backoffs = [10, 30]
-        for attempt in range(len(backoffs) + 1):
+        for attempt in (0, 1):
             try:
                 r = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SEC)
             except requests.RequestException as e:
                 raise OnChainAPIError(f"CoinGecko request failed: {e}") from e
-            if r.status_code == 429 and attempt < len(backoffs):
-                wait = backoffs[attempt]
+            if r.status_code == 429 and attempt == 0:
                 logger.info(
-                    f"CoinGecko 429 on attempt {attempt + 1} — "
-                    f"sleeping {wait}s before retry {attempt + 2}"
+                    "CoinGecko 429 on first attempt — sleeping 10s and retrying once"
                 )
-                time.sleep(wait)
+                time.sleep(10)
                 continue
             if r.status_code >= 400:
                 raise OnChainAPIError(
@@ -295,10 +294,7 @@ def _fetch_btc_dominance(end: datetime, lookback_days: int) -> pd.Series:
                 return r.json()
             except ValueError as e:
                 raise OnChainAPIError(f"CoinGecko non-JSON response: {e}") from e
-        raise OnChainAPIError(
-            f"CoinGecko still 429 after {len(backoffs) + 1} attempts "
-            f"(waited {sum(backoffs)}s total) — rate limit exhausted"
-        )
+        raise OnChainAPIError("CoinGecko still 429 after single retry — rate limit exhausted")
 
     btc_data = _cg_request(
         COINGECKO_MARKET_CHART_URL,
