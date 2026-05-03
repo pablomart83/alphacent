@@ -1266,12 +1266,15 @@ async def get_data_quality():
     """
     Get data quality scores for all tracked symbols.
     Includes price quality, FMP fundamentals coverage, and news sentiment.
-    Fixes BTC/ETH score 0 by resolving BTCUSD/ETHUSD symbol mismatch.
+    Collapses any wire-form (`BTCUSD`) or Yahoo-ticker (`BTC-USD`) legacy rows
+    into their canonical display form (`BTC`) so the UI never shows duplicate
+    entries for the same underlying asset.
     """
     from src.models.database import get_database
     from src.models.orm import DataQualityReportORM, FundamentalDataORM
     from sqlalchemy import text
     from src.data.fmp_cache_warmer import FMPCacheWarmer
+    from src.utils.symbol_mapper import get_display_symbol
 
     entries: List[DataQualityEntry] = []
     no_fundamentals = FMPCacheWarmer.SKIP_FUNDAMENTALS
@@ -1300,12 +1303,27 @@ async def get_data_quality():
         try:
             now = datetime.now()
 
-            # Quality reports (keyed by symbol, both BTC and BTCUSD forms)
+            # Canonicalise any legacy wire-form (BTCUSD) or Yahoo-ticker form
+            # (BTC-USD) to display form (BTC). Prevents duplicate rows in the
+            # UI for the same underlying asset. New writes always use display
+            # form; this collapse handles legacy residue defensively.
+            def _canon(sym: str) -> str:
+                if not sym:
+                    return sym
+                s = sym.upper().strip()
+                # Handle Yahoo-ticker hyphen form (BTC-USD, ETH-USD)
+                if s.endswith("-USD"):
+                    return get_display_symbol(s[:-4] + "USD")  # BTC-USD → BTCUSD → BTC
+                return get_display_symbol(s)
+
+            # Quality reports — canonical form, keeping the newest report if
+            # both display and legacy forms exist for the same asset.
             quality_reports: dict[str, DataQualityReportORM] = {}
             for r in session.query(DataQualityReportORM).all():
-                existing = quality_reports.get(r.symbol)
+                canon = _canon(r.symbol)
+                existing = quality_reports.get(canon)
                 if not existing or (r.validated_at and existing.validated_at and r.validated_at > existing.validated_at):
-                    quality_reports[r.symbol] = r
+                    quality_reports[canon] = r
 
             # Latest price per symbol from historical_price_cache, plus the
             # actual source that wrote the most recent bar. Without a per-
@@ -1323,25 +1341,31 @@ async def get_data_quality():
                 """
             )).fetchall():
                 sym, ts, src = row[0], row[1], row[2]
+                canon = _canon(sym)
                 if ts:
-                    latest_prices[sym] = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
-                if src:
-                    latest_source[sym] = str(src).lower()
+                    ts_parsed = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
+                    # Keep the most-recent write per canon
+                    if canon not in latest_prices or ts_parsed > latest_prices[canon]:
+                        latest_prices[canon] = ts_parsed
+                        if src:
+                            latest_source[canon] = str(src).lower()
 
-            # FMP fundamentals: latest fetch per symbol
+            # FMP fundamentals: latest fetch per canonical symbol
             fmp_data: dict[str, FundamentalDataORM] = {}
             for r in session.query(FundamentalDataORM).all():
-                existing = fmp_data.get(r.symbol)
+                canon = _canon(r.symbol)
+                existing = fmp_data.get(canon)
                 if not existing or (r.fetched_at and existing.fetched_at and r.fetched_at > existing.fetched_at):
-                    fmp_data[r.symbol] = r
+                    fmp_data[canon] = r
 
-            # News sentiment
+            # News sentiment (canonical form)
             sentiment_data: dict[str, dict] = {}
             try:
                 for row in session.execute(text(
                     "SELECT symbol, sentiment_score, fetched_at, ttl_hours FROM symbol_news_sentiment"
                 )).fetchall():
-                    sentiment_data[row[0]] = {"score": float(row[1]) if row[1] is not None else None,
+                    canon = _canon(row[0])
+                    sentiment_data[canon] = {"score": float(row[1]) if row[1] is not None else None,
                                               "fetched_at": row[2], "ttl_hours": row[3]}
             except Exception:
                 pass
@@ -1349,7 +1373,9 @@ async def get_data_quality():
             all_symbols = set(quality_reports.keys()) | set(latest_prices.keys()) | set(asset_class_map.keys())
 
             for sym in sorted(all_symbols):
-                # Resolve crypto symbol mismatch (BTC vs BTCUSD, ETH vs ETHUSD)
+                # sym is now always in canonical display form. The legacy
+                # `alt` probe (BTC ↔ BTCUSD) below stays as a belt-and-braces
+                # fallback for any table still keyed on the other form.
                 alt = (sym + "USD") if (len(sym) <= 5 and not sym.endswith("USD") and not sym.endswith("D")) else sym.replace("USD", "")
                 qr = quality_reports.get(sym) or quality_reports.get(alt)
                 last_update = latest_prices.get(sym) or latest_prices.get(alt)
