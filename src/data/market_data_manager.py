@@ -1247,10 +1247,23 @@ class MarketDataManager:
                                 f"{bars[-1].timestamp.date()})"
                             )
                             return bars
-                        logger.warning(
+                        # FMP is the authoritative source for this (symbol,
+                        # interval). A 0-bar response almost always means
+                        # "no bars in this window" — weekend for forex/equities,
+                        # requested range entirely in the future, etc. Falling
+                        # back to Yahoo here generates spurious "possibly
+                        # delisted" error spam without adding any data. Trust
+                        # the FMP response and return empty.
+                        #
+                        # (If FMP itself is unreachable we get an FMPAPIError,
+                        # not an empty list — that case DOES fall through to
+                        # Yahoo via the except branch below.)
+                        logger.info(
                             f"FMP returned 0 bars for {symbol} {interval} "
-                            f"{start.date()}→{end.date()}; falling back to Yahoo"
+                            f"{start.date()}→{end.date()} (likely closed market "
+                            f"or future window); returning empty"
                         )
+                        return []
                     except _FMPAPIError as fe:
                         if fe.reason == "premium_blocked":
                             # Blocked at the FMP level — silently fall

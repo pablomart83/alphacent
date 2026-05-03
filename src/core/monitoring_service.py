@@ -1360,7 +1360,15 @@ class MonitoringService:
                                 _fmp_remaining.append(sym)
                                 continue
                             if not bars:
-                                _fmp_remaining.append(sym)
+                                # FMP authoritatively returned 0 bars. For a
+                                # symbol FMP supports, this means "no bars in
+                                # this window" — typically a closed market
+                                # (forex/equities weekend) or the requested
+                                # range is in the future. Don't send it to
+                                # Yahoo, which can't add anything and will
+                                # spam "possibly delisted" errors.
+                                stats["1h"] += 1
+                                stats["db_cached"] += 1
                                 continue
                             try:
                                 md._save_historical_to_db(sym, bars, "1h")
@@ -1728,6 +1736,13 @@ class MonitoringService:
                         )
                         continue
                     if not bars:
+                        # FMP authoritatively returned 0 bars — supported
+                        # symbol, likely closed market / future window.
+                        # Count as cached-not-stale so the sync doesn't
+                        # retry every cycle.
+                        fmp_4h_cached += 1
+                        stats["4h"] = stats.get("4h", 0) + 1
+                        stats["db_cached"] = stats.get("db_cached", 0) + 1
                         continue
                     try:
                         md._save_historical_to_db(sym, bars, "4h")
