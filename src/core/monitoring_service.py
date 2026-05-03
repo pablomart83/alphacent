@@ -979,13 +979,22 @@ class MonitoringService:
             
             # Initialize market data manager (singleton — shared across all components)
             if not hasattr(self, '_market_data') or self._market_data is None:
-                import yaml
-                from pathlib import Path
-                config = {}
-                config_path = Path("config/autonomous_trading.yaml")
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = yaml.safe_load(f) or {}
+                # Use config_loader so api_keys.yaml overlay merges into the
+                # config passed to MarketDataManager. Raw yaml.safe_load of
+                # autonomous_trading.yaml would give us the literal
+                # "REPLACE_VIA_SECRETS_MANAGER" placeholder for FMP.
+                try:
+                    from src.core.config_loader import load_config
+                    config = load_config()
+                except Exception as _cfg_err:
+                    logger.warning(f"config_loader failed in monitoring sync init: {_cfg_err}")
+                    import yaml
+                    from pathlib import Path
+                    config = {}
+                    config_path = Path("config/autonomous_trading.yaml")
+                    if config_path.exists():
+                        with open(config_path, 'r') as f:
+                            config = yaml.safe_load(f) or {}
                 self._market_data = MarketDataManager(self.etoro_client, config=config)
                 # Register as the process-wide singleton so all other components share
                 # the same cache instead of creating empty instances

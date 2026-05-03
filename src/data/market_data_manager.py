@@ -289,18 +289,27 @@ class MarketDataManager:
         self.cache = MarketDataCache(ttl_seconds=cache_ttl)
         self.quality_validator = DataQualityValidator()
         
-        # Auto-load config from YAML if not provided
+        # Auto-load config from YAML if not provided. Uses config_loader so
+        # the api_keys.yaml overlay merges in — otherwise we'd read
+        # autonomous_trading.yaml's literal "REPLACE_VIA_SECRETS_MANAGER"
+        # placeholder for FMP and every non-forex / non-LME FMP fetch
+        # would return 401 Unauthorized.
         if config is None:
             try:
-                import yaml
-                from pathlib import Path
-                config_path = Path("config/autonomous_trading.yaml")
-                if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        config = yaml.safe_load(f) or {}
+                from src.core.config_loader import load_config
+                config = load_config()
             except Exception as e:
-                logger.warning(f"Could not auto-load config for MarketDataManager: {e}")
-                config = {}
+                logger.warning(f"config_loader failed, falling back to raw yaml: {e}")
+                try:
+                    import yaml
+                    from pathlib import Path
+                    config_path = Path("config/autonomous_trading.yaml")
+                    if config_path.exists():
+                        with open(config_path, 'r') as f:
+                            config = yaml.safe_load(f) or {}
+                except Exception as e2:
+                    logger.warning(f"Could not auto-load config for MarketDataManager: {e2}")
+                    config = {}
         
         self._config = config
         self._fmp_api_key = self._config.get('data_sources', {}).get('financial_modeling_prep', {}).get('api_key', '')
