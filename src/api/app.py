@@ -198,9 +198,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     if monitoring_service:
         try:
             import asyncio
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(monitoring_service.stop())
-            loop.close()
+            # 2026-05-03: on ASGI shutdown there's already a running event
+            # loop, so asyncio.new_event_loop()+run_until_complete raises
+            # "Cannot run the event loop while another loop is running".
+            # Use the running loop if present; fall back to a fresh loop
+            # for non-ASGI shutdown paths (e.g. pytest, CLI tools).
+            try:
+                _loop = asyncio.get_running_loop()
+                _loop.create_task(monitoring_service.stop())
+            except RuntimeError:
+                # No running loop — fresh loop path is safe
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(monitoring_service.stop())
+                finally:
+                    loop.close()
         except Exception as e:
             logger.warning(f"Error stopping monitoring service: {e}")
 

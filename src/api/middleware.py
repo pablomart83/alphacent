@@ -79,7 +79,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         session_id = request.cookies.get("session_id")
         
         if not session_id:
-            logger.warning(f"No session cookie for {request.url.path}")
+            logger.info(f"No session cookie for {request.url.path}")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Not authenticated"},
@@ -91,7 +91,13 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         
         # Validate session
         if not auth_manager.validate_session(session_id):
-            logger.warning(f"Invalid session for {request.url.path}")
+            # 2026-05-03: demoted from WARNING to INFO — this fires every time
+            # a stale browser tab polls an authenticated endpoint, which is
+            # routine during normal use (13 per 15 min in one session). The
+            # uvicorn access log already records the 401 HTTP response for
+            # audit purposes. Keep as INFO so it stays grep-able without
+            # polluting warnings.log.
+            logger.info(f"Invalid session for {request.url.path}")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={"detail": "Session expired or invalid"},

@@ -501,19 +501,30 @@ class MarketDataManager:
         return ts
 
     def _subtract_weekend_hours(self, latest: datetime, now: datetime) -> timedelta:
-        """Compute data age, subtracting weekend gaps when the latest bar is Friday close.
+        """Compute data age, subtracting weekend gaps when the latest bar is
+        from before the weekend.
 
-        Only relevant for stock/etf/index intervals. Crypto and forex aren't adjusted.
-        Conservative: if the latest bar is from Friday and `now` is Saturday/Sunday/Monday,
-        subtract the weekend (approx. 64 hours) from the raw age.
+        Applies to any market that closes over the weekend (equities, ETFs,
+        indices, commodities, and forex — all of which have a Fri evening to
+        Sun evening hiatus, approximately 48h). Crypto trades 24/7 and does
+        NOT get this adjustment.
+
+        2026-05-03: previously only applied for stock_etf_index; commodities
+        and forex were measured raw, which tripped the freshness SLA every
+        Sunday UTC cycle for GOLD/NATGAS/SILVER 1d and USDCHF/USDCAD 4h. The
+        underlying asset was correctly closed — the data was as fresh as it
+        can be until Sun 22:00 UTC / Mon 09:30 ET. Now we treat the weekend
+        as a legitimate market-closed period for these asset classes too.
         """
         raw_age = now - latest
-        # If both dates are in the same week, no weekend to subtract
-        if latest.weekday() == 4 and now.weekday() >= 5:
-            # Friday bar, now Sat or Sun — subtract remaining Friday evening + weekend
+        # If latest bar is Fri and now is Sat/Sun/Mon, we crossed the
+        # weekend — subtract ~48 hours of "market was closed anyway" time.
+        if latest.weekday() == 4 and now.weekday() in (5, 6, 0):
             return raw_age - timedelta(hours=48)
-        if latest.weekday() == 4 and now.weekday() == 0:
-            # Friday bar, now Monday — subtract full weekend
+        # If latest bar is Thu or earlier and now is Sun/Mon, only one
+        # weekend was crossed; still subtract 48h.
+        if latest.weekday() <= 4 and now.weekday() in (5, 6, 0) and raw_age > timedelta(hours=48):
+            # Only subtract if the weekend actually falls inside the age window
             return raw_age - timedelta(hours=48)
         return raw_age
 
@@ -568,8 +579,10 @@ class MarketDataManager:
             return (True, "")
 
         raw_age = as_of - latest
-        # Weekend-gap adjustment for stock/etf/index
-        if family == "stock_etf_index":
+        # Weekend-gap adjustment for any market that closes Fri evening
+        # through Sun evening (stocks, ETFs, indices, commodities, forex).
+        # Crypto is 24/7 and uses raw_age unchanged.
+        if family in ("stock_etf_index", "commodity", "forex"):
             effective_age = self._subtract_weekend_hours(latest, as_of)
             # Floor at 0 — don't report negative age if math overshoots
             if effective_age < timedelta(0):
@@ -1007,11 +1020,29 @@ class MarketDataManager:
                     f"CRITICAL - Score: {cached_report.quality_score:.1f}/100 (cached)"
                 )
             elif cached_report.has_warnings():
-                logger.warning(
-                    f"Data quality validation for {symbol}: "
-                    f"Score: {cached_report.quality_score:.1f}/100, "
-                    f"Issues: {len(cached_report.issues)} (cached)"
-                )
+                # 2026-05-03: severity should scale with the score, not just
+                # the presence of any issue. A 95/100 score with one minor
+                # issue (e.g., a weekend gap noted for crypto) is healthy
+                # data — surface at INFO. A 50-69 score is notable. Below
+                # 50 gets WARNING. Prevents warnings.log flooding for
+                # cached reports that are actually fine.
+                _score = cached_report.quality_score
+                _issues_n = len(cached_report.issues)
+                if _score >= 70:
+                    logger.info(
+                        f"Data quality validation for {symbol}: "
+                        f"Score: {_score:.1f}/100, Issues: {_issues_n} (cached)"
+                    )
+                elif _score >= 50:
+                    logger.warning(
+                        f"Data quality validation for {symbol}: "
+                        f"Score: {_score:.1f}/100, Issues: {_issues_n} (cached)"
+                    )
+                else:
+                    logger.error(
+                        f"Data quality validation for {symbol}: "
+                        f"POOR - Score: {_score:.1f}/100, Issues: {_issues_n} (cached)"
+                    )
             else:
                 logger.info(
                     f"Data quality validation for {symbol}: "

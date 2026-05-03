@@ -1445,20 +1445,71 @@ class StrategyEngine:
                 
                 logger.info(f"Fetched {actual_days} data points for {symbol} (coverage: {data_coverage:.1f}%)")
                 
+                # Listing-date awareness: if the data is gap-free but simply
+                # starts later than the requested start (recent IPO like GEV
+                # April 2024, or a symbol we only started tracking recently),
+                # the "coverage %" number is meaningless — we have 100% of
+                # what exists. Detect this case and log at INFO instead of
+                # spamming warnings.log for every WF cycle.
+                #
+                # A symbol is "listing-date-limited" when the bars we do have
+                # form a contiguous run — i.e., actual_days is consistent
+                # with the span between first and last bar at the expected
+                # cadence. We compare against the expected bar count for
+                # THAT span, not the requested window.
+                is_listing_limited = False
+                if actual_days > 0 and expected_bars > 0:
+                    actual_span_days = (df.index.max() - df.index.min()).days
+                    if actual_span_days > 0:
+                        # Expected bars for the ACTUAL span we have
+                        # (assumes ~252 trading days/year for equities; a
+                        # small misestimate is fine — we only need to
+                        # distinguish gap-free-recent-IPO from gappy-bad-data)
+                        expected_for_span = actual_span_days * (252 / 365)
+                        span_coverage = actual_days / max(expected_for_span, 1)
+                        # >= 85% coverage of its actual span = gap-free; the
+                        # missing days are pre-listing, not data problems
+                        if span_coverage >= 0.85:
+                            is_listing_limited = True
+                
                 # Warn only if coverage is genuinely poor (< 70% of expected).
                 # A 3-day shortfall on a 193-day expected count (98.4% coverage) is noise,
                 # not a data quality issue. Only flag real problems.
                 if data_coverage < 50:
-                    # Severely limited — less than half the expected data
-                    warning_msg = f"Symbol {symbol} has only {actual_days} bars of data (expected ~{expected_bars}, coverage: {data_coverage:.0f}%)"
-                    logger.warning(warning_msg)
-                    logger.warning(f"  ⚠ Very limited data for {symbol}. Consider using shorter backtest period.")
-                    data_quality_warnings.append(warning_msg)
+                    if is_listing_limited:
+                        # Newly-listed symbol — full coverage of its history.
+                        # Emit INFO not WARNING; downstream WF will decide
+                        # whether the available history is sufficient.
+                        logger.info(
+                            f"Symbol {symbol} has {actual_days} bars spanning "
+                            f"{df.index.min().date()} → {df.index.max().date()} "
+                            f"(listing-date limited; short history is the whole ticker, not a gap)"
+                        )
+                    else:
+                        # Severely limited AND gappy — genuine data quality issue
+                        warning_msg = (
+                            f"Symbol {symbol} has only {actual_days} bars of data "
+                            f"(expected ~{expected_bars}, coverage: {data_coverage:.0f}%)"
+                        )
+                        logger.warning(warning_msg)
+                        logger.warning(
+                            f"  ⚠ Very limited data for {symbol}. Consider using shorter backtest period."
+                        )
+                        data_quality_warnings.append(warning_msg)
                 elif data_coverage < 70:
-                    # Limited but usable
-                    warning_msg = f"Symbol {symbol} has {actual_days} bars (expected ~{expected_bars}, coverage: {data_coverage:.0f}%)"
-                    logger.warning(warning_msg)
-                    data_quality_warnings.append(warning_msg)
+                    if is_listing_limited:
+                        logger.info(
+                            f"Symbol {symbol} has {actual_days} bars "
+                            f"(listing-date limited, gap-free since {df.index.min().date()})"
+                        )
+                    else:
+                        # Limited but usable — and genuinely gappy
+                        warning_msg = (
+                            f"Symbol {symbol} has {actual_days} bars "
+                            f"(expected ~{expected_bars}, coverage: {data_coverage:.0f}%)"
+                        )
+                        logger.warning(warning_msg)
+                        data_quality_warnings.append(warning_msg)
             
             except Exception as e:
                 logger.error(f"Failed to fetch historical data for {symbol}: {e}")
@@ -3015,7 +3066,17 @@ class StrategyEngine:
         # WORKAROUND: If we have overlapping signals, prioritize entries over exits
         # This prevents the common issue where exit conditions are active during entry
         if overlap_days > 0:
-            logger.warning(f"Detected {overlap_days} days with conflicting entry/exit signals. Prioritizing entries.")
+            # Demoted from WARNING to INFO (2026-05-03): this is working-as-
+            # designed conflict resolution in the backtest engine, not an
+            # error condition. Volatile regimes naturally produce days where
+            # entry and exit rules fire on the same bar; we resolve by
+            # prioritizing entries. Keep the signal visible (operators tuning
+            # templates want to see if their rules are whipsaw-prone) but at
+            # INFO so warnings.log stays focused on actual problems.
+            logger.info(
+                f"Signal overlap resolved: {overlap_days} days had both entry and exit "
+                f"conditions true — prioritized entries (normal in volatile regimes)."
+            )
             # Remove exit signals on days where we have entry signals
             exits = exits & ~entries
             logger.info(f"After conflict resolution - Exit signals: {exits.sum()} days")

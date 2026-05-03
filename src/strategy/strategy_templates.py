@@ -6901,9 +6901,18 @@ class StrategyTemplateLibrary:
         # --- COMMODITY 1H MOMENTUM SURGE LONG ---
         # Hourly momentum on commodities — catch the intraday surge.
         # Price above VWAP with RSI 55-80 and volume confirming.
+        #
+        # 2026-05-03: narrowed fixed_symbols from [OIL, GOLD, SILVER, COPPER,
+        # NATGAS, PLATINUM] to [GOLD, SILVER] — FMP Starter only serves 1h
+        # data for these two (OIL/COPPER/NATGAS rely on Yahoo which caps at
+        # 730d rolling, giving only ~11 months of DB depth — insufficient
+        # for statistically meaningful 1h WF with min_trades=15). Intraday
+        # oil/copper is whipsaw-prone anyway; we trade them on 4h and 1d.
+        # Template name kept for lineage continuity with 313 historical
+        # proposals in strategy_proposals.
         templates.append(StrategyTemplate(
             name="Commodity Hourly Momentum Surge Long",
-            description="Buy when 1H price > SMA(20) with RSI 55-80 and volume > 1.5x average. Intraday commodity momentum — ride the surge.",
+            description="Buy when 1H price > SMA(20) with RSI 55-80 and volume > 1.5x average. Intraday precious-metal momentum (GOLD/SILVER only — FMP Starter depth limits the 1h scope).",
             strategy_type=StrategyType.MOMENTUM,
             market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG, MarketRegime.RANGING_HIGH_VOL],
             entry_conditions=[
@@ -6922,15 +6931,17 @@ class StrategyTemplateLibrary:
             expected_holding_period="4-24 hours",
             risk_reward_ratio=1.6,
             metadata={"direction": "long", "intraday": True, "interval": "1h", "skip_param_override": True,
-                       "fixed_symbols": ["OIL", "GOLD", "SILVER", "COPPER", "NATGAS", "PLATINUM"]}
+                       "fixed_symbols": ["GOLD", "SILVER"]}
         ))
 
         # --- COMMODITY 1H MEAN REVERSION LONG ---
         # Commodities oversold on 1H — quick bounce trade.
         # RSI < 30 on 1H with price near lower BB = snap back.
+        # Scope narrowed to [GOLD, SILVER] — see 2026-05-03 note on
+        # Commodity Hourly Momentum Surge Long above.
         templates.append(StrategyTemplate(
             name="Commodity Hourly Oversold Bounce Long",
-            description="Buy when 1H RSI < 30 with price near BB lower band. Commodity oversold bounces are violent and fast.",
+            description="Buy when 1H RSI < 30 with price near BB lower band. Precious-metal oversold bounces (GOLD/SILVER only — FMP Starter depth limits the 1h scope).",
             strategy_type=StrategyType.MEAN_REVERSION,
             market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_DOWN_WEAK],
             entry_conditions=[
@@ -6949,15 +6960,17 @@ class StrategyTemplateLibrary:
             expected_holding_period="4-16 hours",
             risk_reward_ratio=1.6,
             metadata={"direction": "long", "intraday": True, "interval": "1h", "skip_param_override": True,
-                       "fixed_symbols": ["OIL", "GOLD", "SILVER", "COPPER", "NATGAS", "PLATINUM"]}
+                       "fixed_symbols": ["GOLD", "SILVER"]}
         ))
 
         # --- COMMODITY 1H SPIKE FADE SHORT ---
         # Intraday commodity spike exhaustion — RSI > 75 on 1H with price above upper BB.
-        # Geopolitical headlines cause spikes that fade within hours.
+        # Safe-haven premium fades fast when the fear trigger resolves.
+        # Scope narrowed to [GOLD, SILVER] — see 2026-05-03 note on
+        # Commodity Hourly Momentum Surge Long above.
         templates.append(StrategyTemplate(
             name="Commodity Hourly Spike Fade Short",
-            description="Short when 1H RSI > 75 with price above BB upper band. Commodity spikes fade fast — sell the exhaustion.",
+            description="Short when 1H RSI > 75 with price above BB upper band. Precious-metal spikes fade fast (GOLD/SILVER only — FMP Starter depth limits the 1h scope).",
             strategy_type=StrategyType.MEAN_REVERSION,
             market_regimes=[MarketRegime.TRENDING_UP_STRONG, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP],
             entry_conditions=[
@@ -6976,7 +6989,7 @@ class StrategyTemplateLibrary:
             expected_holding_period="4-16 hours",
             risk_reward_ratio=1.7,
             metadata={"direction": "short", "intraday": True, "interval": "1h", "skip_param_override": True,
-                       "fixed_symbols": ["OIL", "GOLD", "SILVER", "COPPER", "NATGAS", "PLATINUM"]}
+                       "fixed_symbols": ["GOLD", "SILVER"]}
         ))
 
         # --- COMMODITY DAILY TREND RIDER LONG ---

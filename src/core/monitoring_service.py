@@ -129,7 +129,12 @@ class MonitoringService:
         self._regime_check_interval = 1800  # 30 minutes
 
         # Hourly equity snapshot — captures portfolio value every hour for
-        # intraday equity curve resolution in the UI.
+        # intraday equity curve resolution in the UI. Init to 0 so the
+        # first snapshot fires promptly after boot; the MQS compute path
+        # in _write_equity_snapshot gracefully handles the case where the
+        # shared MarketDataManager singleton isn't yet registered (boot-
+        # time snapshot saves with NULL MQS; subsequent hourly snapshots
+        # fill it in once _sync_price_data has run).
         self._last_hourly_snapshot: float = 0
         self._hourly_snapshot_interval = 3600  # 1 hour
 
@@ -532,11 +537,15 @@ class MonitoringService:
         # Hourly equity snapshot — runs every hour alongside the price sync.
         # Enables intraday equity curve resolution (1h/4h) in the UI.
         if now - self._last_hourly_snapshot >= self._hourly_snapshot_interval:
+            logger.info(
+                f"Hourly equity snapshot tick: last={self._last_hourly_snapshot}, "
+                f"interval={self._hourly_snapshot_interval}s, delta={now - self._last_hourly_snapshot:.0f}s — firing"
+            )
             try:
                 self._save_hourly_equity_snapshot()
                 self._last_hourly_snapshot = now
             except Exception as e:
-                logger.error(f"Error saving hourly equity snapshot: {e}")
+                logger.error(f"Error saving hourly equity snapshot: {e}", exc_info=True)
 
         # Log circuit breaker states if any are non-CLOSED, and actively probe half-open breakers
         try:
@@ -2156,26 +2165,68 @@ class MonitoringService:
                 date=date_key, snapshot_type=snapshot_type
             ).first()
 
-            # Compute market quality score to persist alongside equity data
+            # Compute market quality score to persist alongside equity data.
+            #
+            # Two failure modes we need to handle explicitly:
+            # 1. Shared MDM singleton not yet registered (happens in the
+            #    first few seconds after boot, before monitoring_service.
+            #    _sync_price_data has run once). Previously this silently
+            #    left _mqs_score = None — the exact reason recent snapshots
+            #    had NULL MQS for weeks. Fix: log INFO and construct a
+            #    transient MDM from config so the boot-time snapshot still
+            #    gets a score.
+            # 2. get_market_quality_score() raises (network, missing data,
+            #    etc.). Previously wrapped in `except: pass`. Fix: log
+            #    WARNING with exception class + repr so the real error is
+            #    debuggable.
             _mqs_score = None
             _mqs_grade = None
             try:
                 from src.strategy.market_analyzer import MarketStatisticsAnalyzer
                 from src.data.market_data_manager import get_market_data_manager
                 _mdm = get_market_data_manager()
-                if _mdm:
+                if _mdm is None:
+                    # Singleton unregistered — reuse the instance this
+                    # MonitoringService already owns (self._market_data)
+                    # if it's been initialized.
+                    if getattr(self, '_market_data', None) is not None:
+                        _mdm = self._market_data
+                        logger.info(
+                            f"  MQS: using MonitoringService._market_data for snapshot "
+                            f"({snapshot_type}) — shared singleton not yet registered"
+                        )
+                    else:
+                        # No MDM anywhere yet — construct a transient one
+                        # on demand so even boot-time snapshots get MQS
+                        # populated instead of writing NULL. Uses the same
+                        # config + etoro_client path as _sync_price_data's
+                        # lazy init. Registers the instance as the
+                        # singleton so subsequent callers find it too.
+                        try:
+                            from src.core.config_loader import load_config
+                            from src.data.market_data_manager import (
+                                MarketDataManager as _MDM,
+                                set_market_data_manager as _set_mdm,
+                            )
+                            _cfg = load_config()
+                            self._market_data = _MDM(self.etoro_client, config=_cfg)
+                            _set_mdm(self._market_data)
+                            _mdm = self._market_data
+                            logger.info(
+                                f"  MQS: constructed MDM on demand for snapshot "
+                                f"({snapshot_type}) — this also registers the shared singleton"
+                            )
+                        except Exception as _ctor_err:
+                            logger.info(
+                                f"  MQS: could not construct MDM on demand "
+                                f"({type(_ctor_err).__name__}: {_ctor_err!r}); "
+                                f"skipping MQS compute this tick"
+                            )
+                if _mdm is not None:
                     _mqs = MarketStatisticsAnalyzer(_mdm).get_market_quality_score()
                     _mqs_score = _mqs.get('score')
                     _mqs_grade = _mqs.get('grade')
             except Exception as _mqs_err:
-                # 2026-05-03 fix: previously `except: pass`, which silently
-                # swallowed every MQS failure and left `equity_snapshots.
-                # market_quality_score` NULL for weeks with no visible cause.
-                # Logging the exception class + repr preserves the snapshot
-                # write (MQS is non-critical — equity data still saves) while
-                # surfacing the real error signature to warnings.log so we
-                # can fix the underlying compute/ORM/import issue instead
-                # of hiding it.
                 logger.warning(
                     f"  MQS compute failed in equity snapshot ({snapshot_type}): "
                     f"{type(_mqs_err).__name__}: {_mqs_err!r}"
@@ -2206,9 +2257,10 @@ class MonitoringService:
                 session.add(snapshot)
 
             session.commit()
-            logger.debug(
-                f"  Equity snapshot ({snapshot_type}) saved: {date_key} "
-                f"equity=${equity:,.2f} positions={positions_count}"
+            _mqs_str = f" MQS={_mqs_score:.0f} ({_mqs_grade})" if _mqs_score is not None else ""
+            logger.info(
+                f"Equity snapshot ({snapshot_type}) saved: {date_key} "
+                f"equity=${equity:,.2f} positions={positions_count}{_mqs_str}"
             )
         except Exception as e:
             session.rollback()
