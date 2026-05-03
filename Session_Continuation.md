@@ -15,32 +15,134 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 2, 2026, ~18:30 UTC, mid-Sprint-3)
+## Current System State (May 3, 2026, ~12:00 UTC, post-Per-Position-Fix)
 
 - **Equity:** ~$480K (unchanged)
 - **Open positions:** 84
-- **Active strategies:** 63 DEMO + 4 newly BACKTESTED/approved (Sprint 2 activations) = **67 trading strategies**
-- **Crypto-native DEMO strategies:** 4 (all BTC Follower Daily: ETH / SOL / LINK / AVAX) — Sprint 2 F2 unblocked activation; armed but waiting on BTC +5% 2-day trigger (last fired 2026-03-16)
-- **Directional split:** ~79 LONG / ~6 SHORT (unchanged)
+- **Active strategies:** 63 DEMO + 5 BACKTESTED/approved = **68 trading strategies** (up 1 from yesterday after RPT gate fix)
+- **Crypto-native strategies:** 5 (4 BTC Follower Daily ETH/SOL/LINK/AVAX + 1 BTC Follower 4H ETH, the first non-F2-bypass crypto activation)
+- **Directional split:** ~82 LONG / ~5 SHORT (unchanged)
 - **Market regime (equity):** `STRONG UPTREND` (20d +10.83%, 50d +5.49%, ATR/price 1.08%)
-- **Market regime (crypto, new detector):** `RANGING_LOW_VOL` (BTC 20d +1.0%, 50d +9.75%, ATR 1.8%)
+- **Market regime (crypto):** `RANGING_LOW_VOL` (20d +2.3%, 50d +6.6%, ATR 1.7%)
 - **VIX:** 16.89
 - **Mode:** eToro DEMO
-- **Last cycle:** `cycle_1777743964` at 17:49 UTC, completed healthy in 199s. S3.0c deployed, then S3.0d (DSL grammar + 8 template design-bug rewrites) deployed ~18:30 UTC with a fresh crypto WF cache clear — 132 crypto WF cache entries dropped (25 validated + 107 failed). Next cycle will re-evaluate all crypto templates against the corrected DSL.
+- **Last cycle:** `cycle_1777808795` at 11:52 UTC, 333s, 1 activation (BTC Follower 4H ETH LONG), clean errors.log.
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
-**Verified healthy:** service running post S3.0d restart. errors.log clean after restart; pre-existing `CLOSE[-20]` DSL parse warnings now resolved as part of S3.0d (21W MA and Vol-Compression rewritten to native primitives). signal_decisions populating across 6 stages including `cross_validation`.
+**Three cost-math bug fixes shipped this session (commit `b10cb6c`):**
 
-**Sprint 2 + Sprint 3 partial shipped today:**
-- Sprint 2: F2 cross-symbol validation, F2.1 primary-only dedup, F10 4h cache reconciliation, +3 DSL indicators (OBV/Donchian/Keltner), +5 crypto templates (commit `c47013c`)
-- Sprint 3 S3.0: asset-class-aware MC bootstrap calibration (crypto/commodity use p10 ≥ -0.2 with min 20 trades + consistency bypass) (commit `6e5530f`)
-- Sprint 3 S3.0b: explicit DEMO loosen on crypto gates for live signal data collection (`min_sharpe_crypto` 0.5→0.3, `min_return_per_trade.crypto_*` 0.035→0.030). Reversible; header in yaml documents exact revert values for live. (commit `25c9051`)
-- Sprint 3 S3.0c: MC filter correctness — Pass 2 relaxed now honours MC verdict (prev silently bypassed); MC annualization uses actual test window (prev hardcoded 180d, wrong for long-horizon crypto). (commit `48e0c0b`)
-- Sprint 3 S3.0d: DSL grammar extension (`arith_expr CROSSOVER arith_expr`) + PRICE_CHANGE_PCT period-spec bug fix + 8 crypto template design-bug rewrites + clear-cache script JSON-format fix. See "Session shipped 2026-05-02 late evening" below.
+See the "Session shipped 2026-05-03 morning" block below for full context. The short version: the RPT activation gate was comparing a fraction-of-init_cash metric against a per-position threshold, creating a 5-10x over-demand on any strategy using fractional position sizing. Most crypto strategies that were being "rejected for not clearing the 3% min RPT floor" actually had strong per-position edge (edge_ratio 3-5× over break-even) but were rejected on the unit-mismatched math.
 
-**Diagnostic evidence why crypto activations are scarce:** cycle_1777743964 funnel was 6→5→0 (post S3.0c). 5 wf_validated rejected: 2 on net return < 0 (Cross-Sectional LINK, SMA Reversion SOL), 1 on RPT (Cross-Sectional SOL), 1 on net return < 0 (1H RSI Extreme Bounce DOT), 1 on Sharpe (Sector Rotation XLF -0.04). Crypto Weekly Trend Follow BTC/LINK/ETH now caught at WF stage (`LOW WINRATE` / `LOW SHARPE` buckets) instead of silently leaking past MC to activation — S3.0c confirmed working. Post-S3.0d cycle will reveal whether the template DSL rewrites change the overfitted/low-WR pattern on Weekly Trend Follow and the 6 other redesigned templates.
+Live verification: `Crypto BTC Follower 4H ETH LONG` — rejected in every cycle since 2026-05-02 20:04 with `Return/trade 0.831% < 1.800%`. Post-fix (cycle_1777808795, 11:52 UTC), **activated** with:
+```
+Cost check passed: net=5.53%, rpt=7.712% (per-position @ 12.0% sizing),
+  asset_class=crypto, edge_ratio=4.51
+```
+Same strategy, same test window, same WF result — different (correct) math.
 
-**BTC Follower Daily armed but waiting on trigger:** The 4 activated strategies correctly generated 0 entry signals post-activation. Entry gate is `LAG_RETURN("BTC", 2, "1d") > 0.05` — BTC's current 2-bar return is only +2.79%. Gate fires ~2x/month historically (last trigger: 2026-03-16 at +5.12%; 24 triggers in the last 12 months). Strategies will auto-fire on next qualifying BTC move.
+**BTC Follower Daily armed but waiting on trigger:** 4 of 5 strategies (activated 2026-05-02) still haven't fired. Entry gate is `LAG_RETURN("BTC", 2, "1d") > 0.05` — BTC's current 2-bar return is below threshold. Gate fires ~2x/month historically.
+
+---
+
+## Session shipped 2026-05-03 morning (per-position RPT / per_symbol cost / edge_ratio unit fix)
+
+After 10 cycles producing 0 crypto activations despite 8/8 WF passes, the user asked for a forensic audit of cost math + MC bootstrap. Investigation (INVESTIGATION_2026-05-03.md) found three interlocked bugs. **MC bootstrap math is clean.** The bugs are in the activation gate and cost-config plumbing.
+
+### Bug #1 — `per_symbol` cost overrides silently ignored in backtest engine
+
+**Code path:** `src/strategy/strategy_engine.py:1247-1249` (+ spread/overnight resolution at ~3347 and ~3398)
+
+The yaml has `transaction_costs.per_symbol.BTC` and `.ETH` blocks with tighter-than-altcoin costs (2.18% / 2.20% round-trip vs 2.96% altcoin default), plus a `cost_model.py` comment documenting precedence "per_symbol > per_asset_class > global." But only `cost_model.round_trip_cost_pct` (observability) honored that precedence. The backtest engine read `per_asset_class` only.
+
+Impact: BTC and ETH backtests paid altcoin-rate 2.96% round-trip instead of their configured 2.18-2.20%. ~0.76% phantom cost per round-trip on every BTC/ETH backtest. Verified with real log numbers: `Spread cost: $545.18` on 6 trades × $12K avg matches 0.38% spread (altcoin default), not the 0.05% per-symbol override for ETH.
+
+**Fix:** added precedence lookup (`per_symbol > per_asset_class > global`) at all three config read sites. Matches the precedence documented in cost_model.py.
+
+### Bug #2 — RPT gate unit mismatch (THE dominant killer)
+
+**Code path:** `src/strategy/portfolio_manager.py:1307`
+
+`return_per_trade = backtest_results.total_return / backtest_results.total_trades`
+
+`total_return` is vectorbt's `(final_value − init_cash) / init_cash` — a fraction of init_cash. At fractional position sizing (avg 10-30% of init_cash per trade), this understates per-position return by `1 / position_size_pct` (3-10x).
+
+But `min_return_per_trade: 0.030` was derived in Sprint 1 F3 as a **per-position** floor: "round_trip_cost (2.96%) + 50bps edge = 3.5%". The gate was comparing a per-init_cash metric against a per-position threshold.
+
+Concrete example from `cycle_1777803232` (BTC Follower 4H ETH LONG):
+- Position size: $11,956 (12% of init_cash)
+- Net return: 4.99% of init_cash, 6 trades
+- Gate computed `return_per_trade = 0.831% of init_cash` → FAIL vs 1.8% threshold
+- Real per-position net: **6.96% per position**, edge_ratio **3.35×** over cost
+
+Effective gate demand was `3% / 0.12 = 25% gross per position` — 8-10x the real round-trip cost, which is why legitimate swing templates with comfortable per-position edge (BTC Follower 4H ETH, Cross-Sectional Momentum) were being silently rejected.
+
+**Fix:** Extended `BacktestResults` with `avg_trade_value` + `init_cash` fields (populated by strategy_engine `_run_vectorbt_backtest`). At activation, RPT gate divides raw metric by `avg_trade_value / init_cash` to get per-position return before comparison. AE path writes `avg_trade_value == init_cash` so no scaling (AE already stores per-position returns directly). Legacy cached entries with `avg_trade_value == 0` fall through to the old math so we never silently pass a bad strategy.
+
+### Bug #3 — `cost_model.edge_ratio` same unit mismatch (observability-only)
+
+**Code path:** `src/strategy/cost_model.py:225-260`
+
+Same numerator/denominator-on-different-bases shape as Bug #2. Reported `edge_ratio=0.54` for BTC Follower 4H ETH when real per-position edge_ratio was 3.35. Observability metric, didn't gate — but misleading on the Data Page.
+
+**Fix:** `edge_ratio(...)` now accepts optional `avg_trade_value` + `init_cash` and scales the numerator to per-position before dividing by `round_trip_cost`. Both callers (portfolio_manager activation path, strategy_proposer WF audit) pass these from BacktestResults.
+
+### Monte Carlo bootstrap — clean
+
+Walked through `src/strategy/strategy_proposer.py:2002-2103`. Uses vectorbt's `records_readable.Return` which is per-position return (verified against vectorbt GitHub discussion #264 — `Return = PnL / (size × entry_price)`). Annualization factor is `sqrt(trades_per_year)` which is textbook. Asset-class-aware percentiles (p5 for equity, p10 for crypto, post-S3.0c) are defensible against Efron-Tibshirani heavy-tail guidance. **MC is not part of the problem.**
+
+### WF cache schema version bump
+
+Bumped `rpt_per_position_2026_05_03` marker and added `per_symbol` costs to the schema version hash. Stale cached WF entries from pre-fix math are invalidated on next cycle so the corrected numbers are used everywhere. Also ran `scripts/clear_crypto_wf_cache.py` at deploy time to force a cold cycle — 138 crypto entries dropped (23 validated + 115 failed).
+
+### Files changed
+
+- `src/models/dataclasses.py` — `BacktestResults.avg_trade_value` + `.init_cash` added with safe defaults
+- `src/strategy/strategy_engine.py` — per_symbol cost precedence at 3 call sites; `avg_trade_value` hoisted + persisted on BacktestResults return; to_dict / from_dict serialize/deserialize the new fields; AE backtest writes `avg_trade_value == init_cash` as no-op marker
+- `src/strategy/portfolio_manager.py` — RPT gate per-position normalization with legacy fallback; pass through avg_trade_value + init_cash to edge_ratio; rejection reason now includes `basis=per-position @ X.X% sizing`; cost-check-passed log shows the per-position RPT
+- `src/strategy/cost_model.py` — `edge_ratio` takes optional avg_trade_value + init_cash and scales accordingly
+- `src/strategy/strategy_proposer.py` — edge_ratio call at WF audit passes the new params; WF cache schema version bumped with `per_symbol` included
+
+Added: `INVESTIGATION_2026-05-03.md` (full audit write-up), `scripts/investigate_2026_05_03_cost_math.py` (log-number arithmetic reproduction), `scripts/investigate_2026_05_03_verify_fix.py` (unit tests).
+
+### Post-deploy verification (cycle_1777808795, 2026-05-03 11:52 UTC)
+
+**Activation funnel:** 8 proposals → 8/8 WF passed → 1 activated + 7 rejected.
+
+```
+[ACTIVATION] 1 activated:
+    + [DSL] Crypto BTC Follower 4H ETH LONG    ETH  S=1.44 wr=67% dd=-1.8% t=6
+
+[ACTIVATION REJECTED] 7:
+  x Crypto Weekly Trend Follow ETH LONG  S=0.57 wr=30%
+    Return/trade 0.809% < 2.500% min (crypto_1d+template_override, 10 trades,
+                                       gross 0.8%, basis=per-position @ 9.6% sizing)
+  x Sector Rotation XLF LONG             S=0.17 wr=40% -- Sharpe 0.17 < 0.5
+  x Crypto EMA Ribbon BTC LONG           S=-0.01 wr=33% -- Sharpe -0.01 < 0.201
+  x Crypto SMA Reversion DOT LONG        S=-0.12 wr=46% -- Sharpe -0.12 < 0.201
+  x Crypto SMA Reversion LINK LONG       S=-0.23 wr=50% -- Sharpe -0.23 < 0.201
+  x Crypto EMA Ribbon ETH LONG           S=-0.78 wr=25% -- Sharpe -0.78 < 0.201
+  x Crypto Keltner Range Trade LINK LONG S=-0.61 wr=33% -- Sharpe -0.61 < 0.201
+```
+
+**Fix verification:**
+- ✅ `basis=per-position @ X.X% sizing` label appears in RPT rejection messages
+- ✅ `rpt=7.712% (per-position @ 12.0% sizing)` on pass path — matches the fixed math
+- ✅ `edge_ratio=4.51` at activation log — Fix #3 producing correct per-position edge
+- ✅ First non-F2-bypass crypto activation since 2026-05-02 20:04 (BTC Follower 4H ETH LONG)
+- ✅ Weekly Trend Follow ETH honestly rejected: 0.8% gross over 10 trades = genuinely no edge
+- ✅ Non-crypto (Sector Rotation XLF) unchanged on the Sharpe gate
+- ✅ Negative-Sharpe strategies still correctly rejected
+- ✅ errors.log clean since deploy (last error at 11:45 was pre-existing forex-weekend yfinance)
+
+**What this means strategically:**
+
+The Phase 6 verdict from the original investigation was wrong. The correct ranking:
+1. **(b) STRUCTURAL BUG — dominant driver** (now fixed)
+2. **(a) HONEST OUTPUT — meaningful secondary** — even after fix, Weekly Trend Follow and other genuinely-thin strategies correctly fail
+3. **(c) LIBRARY DESIGN — minor** — some templates are still structurally uneconomic on alts at 2.96% round-trip (1h mean-reversion templates firing 180×/year at 1% commission can't work)
+4. **(d) REGIME MISMATCH — minor**
+
+Expected activation rate going forward: 1-3 additional crypto activations per cycle where the rejected strategy has strong per-position edge but was being mis-rejected on the unit-mismatched RPT. Templates with genuinely thin edge still correctly reject.
 
 ---
 
