@@ -1217,6 +1217,61 @@ class MarketDataManager:
                 # fall through to Yahoo so the primary path keeps working.
                 pass
 
+        # FMP primary path for non-crypto 1h/4h (2026-05-03).
+        # We pay for FMP Starter; it has 5y+ of intraday history for US
+        # stocks, ETFs, forex, and some commodities, which dodges Yahoo's
+        # ~7-month 1h rolling cap. Per-(symbol, interval) support matrix
+        # lives in src/api/fmp_ohlc.SUPPORT — unsupported combos fall
+        # through cleanly (is_supported returns False, no wasted roundtrip).
+        # Crypto stays on Binance; we don't need FMP crypto given Binance
+        # depth and FMP's 300 req/min budget is better spent on stocks.
+        _is_crypto_wire = symbol.upper().strip() in {
+            "BTCUSD", "ETHUSD", "SOLUSD", "AVAXUSD", "LINKUSD", "DOTUSD",
+            "XRPUSD", "ADAUSD", "NEARUSD", "LTCUSD", "BCHUSD",
+            "BTC", "ETH", "SOL", "AVAX", "LINK", "DOT",
+            "XRP", "ADA", "NEAR", "LTC", "BCH",
+        }
+        if interval in ("1h", "4h") and not _is_crypto_wire:
+            try:
+                from src.api.fmp_ohlc import is_supported as _fmp_supported
+                from src.api.fmp_ohlc import fetch_klines as _fmp_fetch
+                from src.api.fmp_ohlc import FMPAPIError as _FMPAPIError
+
+                if _fmp_supported(symbol, interval):
+                    try:
+                        bars = _fmp_fetch(symbol, start, end, interval)
+                        if bars:
+                            logger.info(
+                                f"FMP (primary non-crypto {interval}): {len(bars)} bars "
+                                f"for {symbol} ({bars[0].timestamp.date()} → "
+                                f"{bars[-1].timestamp.date()})"
+                            )
+                            return bars
+                        logger.warning(
+                            f"FMP returned 0 bars for {symbol} {interval} "
+                            f"{start.date()}→{end.date()}; falling back to Yahoo"
+                        )
+                    except _FMPAPIError as fe:
+                        if fe.reason == "premium_blocked":
+                            # Blocked at the FMP level — silently fall
+                            # through to Yahoo without retry. This is a
+                            # static property of the Starter plan.
+                            logger.debug(
+                                f"FMP premium-blocked for {symbol} {interval}; "
+                                f"falling back to Yahoo"
+                            )
+                        else:
+                            # Network/quota/parse — log at INFO since the
+                            # fallback is designed behaviour.
+                            logger.info(
+                                f"FMP unavailable for {symbol} {interval} "
+                                f"({fe.reason}: {fe}); falling back to Yahoo"
+                            )
+            except ImportError:
+                # FMP adapter absent (e.g. stale deploy). Silently fall
+                # through to Yahoo so the primary path keeps working.
+                pass
+
         yf_symbol = to_yahoo_ticker(symbol)
         ensure_yfinance_cache()
         ticker = yf.Ticker(yf_symbol)

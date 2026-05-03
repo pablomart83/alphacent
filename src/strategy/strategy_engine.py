@@ -1624,18 +1624,28 @@ class StrategyEngine:
             if is_intraday_template:
                 backtest_interval = "1h"
                 if not _primary_crypto:
-                    # Yahoo's 1h data has a hard ~7-month cap. Keep the
-                    # historical window to stay within what the data source
-                    # can serve.
-                    _orig_train, _orig_test = train_days, test_days
-                    train_days = min(train_days, 180)
-                    test_days = min(test_days, 90)
-                    if train_days < _orig_train or test_days < _orig_test:
-                        logger.info(
-                            f"WF window capped by data-source limit (Yahoo 1h, non-crypto): "
-                            f"requested train={_orig_train}d test={_orig_test}d → "
-                            f"truncated to train={train_days}d test={test_days}d"
-                        )
+                    # Yahoo's 1h data has a hard ~7-month cap. The cap
+                    # only applies if this symbol will fall through to
+                    # Yahoo — FMP-served non-crypto 1h (stocks/ETFs/forex/
+                    # gold/silver) has 5+ years of depth and shouldn't
+                    # be capped.
+                    _fmp_serves_1h = False
+                    try:
+                        from src.api.fmp_ohlc import is_supported as _fmp_is_supported
+                        _primary_sym = strategy.symbols[0] if getattr(strategy, 'symbols', None) else ''
+                        _fmp_serves_1h = _fmp_is_supported(_primary_sym, "1h")
+                    except Exception:
+                        _fmp_serves_1h = False
+                    if not _fmp_serves_1h:
+                        _orig_train, _orig_test = train_days, test_days
+                        train_days = min(train_days, 180)
+                        test_days = min(test_days, 90)
+                        if train_days < _orig_train or test_days < _orig_test:
+                            logger.info(
+                                f"WF window capped by data-source limit (Yahoo 1h, non-crypto, FMP-unsupported): "
+                                f"requested train={_orig_train}d test={_orig_test}d → "
+                                f"truncated to train={train_days}d test={test_days}d"
+                            )
                 # Whether capped (Yahoo) or pass-through (Binance), anchor
                 # start so train + test fit exactly in the requested window.
                 start = end - timedelta(days=train_days + test_days)
@@ -1647,16 +1657,27 @@ class StrategyEngine:
             else:  # is_4h_template
                 backtest_interval = "4h"
                 if not _primary_crypto:
-                    # Non-crypto 4h is resampled from Yahoo 1h — same 180d source cap.
-                    _orig_train, _orig_test = train_days, test_days
-                    train_days = min(train_days, 240)
-                    test_days = min(test_days, 120)
-                    if train_days < _orig_train or test_days < _orig_test:
-                        logger.info(
-                            f"WF window capped by data-source limit (Yahoo 4h resampled, non-crypto): "
-                            f"requested train={_orig_train}d test={_orig_test}d → "
-                            f"truncated to train={train_days}d test={test_days}d"
-                        )
+                    # Non-crypto 4h cap only applies when the symbol falls
+                    # through to the Yahoo 1h→4h resample path. FMP-served
+                    # non-crypto 4h (stocks/ETFs/forex/gold/silver/oil/copper)
+                    # returns native 4h bars with 5+ years depth.
+                    _fmp_serves_4h = False
+                    try:
+                        from src.api.fmp_ohlc import is_supported as _fmp_is_supported
+                        _primary_sym = strategy.symbols[0] if getattr(strategy, 'symbols', None) else ''
+                        _fmp_serves_4h = _fmp_is_supported(_primary_sym, "4h")
+                    except Exception:
+                        _fmp_serves_4h = False
+                    if not _fmp_serves_4h:
+                        _orig_train, _orig_test = train_days, test_days
+                        train_days = min(train_days, 240)
+                        test_days = min(test_days, 120)
+                        if train_days < _orig_train or test_days < _orig_test:
+                            logger.info(
+                                f"WF window capped by data-source limit (Yahoo 4h resampled, non-crypto, FMP-unsupported): "
+                                f"requested train={_orig_train}d test={_orig_test}d → "
+                                f"truncated to train={train_days}d test={test_days}d"
+                            )
                 start = end - timedelta(days=train_days + test_days)
                 _src = "Binance" if _primary_crypto else "Yahoo(resampled)"
                 logger.info(

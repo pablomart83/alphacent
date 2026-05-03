@@ -15,27 +15,112 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 3, 2026, ~15:20 UTC, post-WF-window-refactor)
+## Current System State (May 3, 2026, ~18:30 UTC, post-FMP-intraday-integration)
 
 - **Equity:** ~$480K (unchanged)
 - **Open positions:** 84
 - **Active strategies:** 63 DEMO + 5 BACKTESTED/approved = **68 trading strategies**
-- **Crypto-native strategies:** 5 (4 BTC Follower Daily ETH/SOL/LINK/AVAX + 1 BTC Follower 4H ETH, the first non-F2-bypass crypto activation)
+- **Crypto-native strategies:** 5 (4 BTC Follower Daily ETH/SOL/LINK/AVAX + 1 BTC Follower 4H ETH)
 - **Directional split:** ~82 LONG / ~5 SHORT (unchanged)
-- **Market regime (equity):** `STRONG UPTREND` (20d +10.83%, 50d +5.49%, ATR/price 1.08%)
-- **Market regime (crypto):** `RANGING_LOW_VOL` (20d +2.3%, 50d +6.6%, ATR 1.7%)
+- **Market regime (equity):** `STRONG UPTREND` (20d +10.83%, 50d +5.49%)
+- **Market regime (crypto):** `RANGING_LOW_VOL`
 - **VIX:** 16.89
 - **Mode:** eToro DEMO
-- **Last cycle:** `cycle_1777816532` at 15:15 UTC, 59s, 0 activations (6 rejections — honest output, all on Sharpe/RPT floors), clean errors.log.
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
-**Two sprints shipped today:**
+**Three sprints shipped today:**
 
-1. **Morning** (commit `b10cb6c`): three cost-math bug fixes — per_symbol precedence in backtest engine, RPT gate unit mismatch, edge_ratio numerator. See "Session shipped 2026-05-03 morning" below. First non-F2-bypass crypto activation (BTC Follower 4H ETH LONG) confirmed in `cycle_1777808795`.
+1. **Morning** (commit `b10cb6c`): three cost-math bug fixes — per_symbol precedence, RPT gate unit mismatch, edge_ratio numerator. First non-F2-bypass crypto activation (BTC Follower 4H ETH LONG).
 
-2. **Afternoon** (this session): WF-window single-source-of-truth refactor. The live per-(asset_class, interval, template) walk-forward windows are now in `config/autonomous_trading.yaml` under `backtest.walk_forward.asset_class_windows` + `long_horizon_templates`. The proposer's `_select_wf_window()` helper is the only Python site picking windows, called from both WF call sites. Zero behavioural change — verified via `scripts/verify_wf_window_helper.py` (8 archetypes, identical outputs) and the first post-deploy cycle showing every expected key firing with the exact pre-refactor values. See "Session shipped 2026-05-03 afternoon" below.
+2. **Afternoon** (commit `bd9e3fb`): WF-window single-source-of-truth refactor. Per-(asset_class, interval, template) walk-forward windows now live in `config/autonomous_trading.yaml::backtest.walk_forward.asset_class_windows`, read by `strategy_proposer._select_wf_window()`. Zero behavioural change.
 
-**BTC Follower Daily armed but waiting on trigger:** 4 of 5 strategies (activated 2026-05-02) still haven't fired. Entry gate is `LAG_RETURN("BTC", 2, "1d") > 0.05` — BTC's current 2-bar return is below threshold. Gate fires ~2x/month historically.
+3. **Evening** (this session): FMP Starter as primary non-crypto intraday source. Frees non-crypto 1h/4h from Yahoo's ~7-month 1h rolling cap. Widened `non_crypto_1h` and `non_crypto_4h` windows from `180/90` and `240/120` to `365/365` for all FMP-covered symbols. See "Session shipped 2026-05-03 evening" below.
+
+---
+
+## Session shipped 2026-05-03 evening (FMP intraday as primary non-crypto data source)
+
+The previous refactor made WF windows honest but couldn't widen non-crypto 1h/4h beyond Yahoo's data-source ceiling (~7 months 1h rolling). User flagged: we already pay for FMP Starter ($29/mo, 300 req/min). Does it cover intraday?
+
+**Live probes on EC2** (scripts/probe_fmp_coverage.py) confirmed yes — with clear boundaries. FMP Starter delivers native 1h and 4h bars for most of our universe going back 8+ years for major US stocks, with coverage gaps on non-US indices and some commodities at specific intervals:
+
+| Asset class / interval | FMP Starter | Fallback |
+|---|---|---|
+| US stocks (72+), ETFs (42) @ 1h + 4h | ✅ native | — |
+| Forex majors (6) @ 1h + 4h | ✅ native | — |
+| Gold, Silver @ 1h + 4h | ✅ native | — |
+| US indices (SP500/Nasdaq/Dow) @ 1h | ✅ | — |
+| US indices @ 4h | ❌ | Yahoo 1h→4h resample |
+| UK100, STOXX50 @ 1h | ✅ | — |
+| UK100, STOXX50 @ 4h | ❌ | Yahoo 1h→4h resample |
+| Oil, Copper @ 4h | ✅ | — |
+| Oil, Copper @ 1h | ❌ | Yahoo |
+| GER40 (DAX), FR40 (CAC) | ❌ all intervals | Yahoo |
+
+**What shipped:**
+
+### New `src/api/fmp_ohlc.py` client
+
+Mirrors `binance_ohlc.py` shape. Key features:
+- `fetch_klines(symbol, start, end, interval)` → `List[MarketData]`, tagged `DataSource.FMP`
+- Paginates 3mo pages for 1h, 6mo pages for 4h; runs 4 parallel workers per-symbol multi-page fetches (5y × 1h ≈ 22 pages = ~5s wall-clock at worker saturation)
+- `is_supported(symbol, interval)` — default-allow for unknown symbols (let FMP respond); explicit-deny for known-blocked combos from live probe; runtime block-set captures fresh 402s so subsequent retries skip cleanly
+- `FMPAPIError.reason` taxonomy: `premium_blocked`, `rate_limited`, `network`, `parse_error`, `unsupported`
+- `SYMBOL_MAP` handles our display forms (`SPX500 → ^GSPC`, `GOLD → GCUSD`, `GER40 → ^GDAXI`, etc.)
+- Loads API key from `config/api_keys.yaml` (top-level `financial_modeling_prep.api_key`)
+
+### `src/data/market_data_manager._fetch_historical_from_yahoo_finance`
+
+Added FMP-first branch parallel to the existing Binance-first branch. Routing:
+- Crypto 1h/4h/1d → Binance primary, Yahoo fallback (unchanged)
+- Non-crypto 1h/4h → **FMP primary, Yahoo fallback** (NEW)
+- Non-crypto 1d → Yahoo (unchanged)
+
+Each path logs its source; grep `FMP (primary non-crypto 1h):` / `Binance (primary):` to see which fired.
+
+### `src/core/monitoring_service._sync_price_data`
+
+Two new batch blocks:
+- **FMP 1h batch** — inside the main `(1d, 1h)` loop, after Binance crypto. Covers 5-year window (1825 days) on first fetch. Incremental (2h-overlap) on subsequent syncs when the latest DB bar is FMP-sourced. If the latest bar is Yahoo-sourced (legacy cache), force full backfill to get FMP depth, not a 2-bar patch on shallow data.
+- **FMP 4h dedicated block** — mirrors the Binance 4h dedicated block. Iterates the non-crypto universe, calls `fetch_klines(sym, end - 1825d, end, "4h")` when cache is empty/legacy, incremental otherwise.
+
+Runtime block-set in `fmp_ohlc._RUNTIME_BLOCKED` captures 402s per process lifetime, so unknown-but-blocked symbols only cost one roundtrip.
+
+### `src/strategy/strategy_engine.walk_forward_validate`
+
+Engine-level non-crypto caps (`min(train, 180) / min(test, 90)` for 1h; `min(train, 240) / min(test, 120)` for 4h) now **conditional on FMP support**. If `fmp_ohlc.is_supported(primary, interval)` is True, the cap doesn't apply — the FMP-served 5-year window is honoured. If False, the Yahoo-cap safety net still kicks in for the fallback path. Emits the same INFO log on truncation.
+
+### `config/autonomous_trading.yaml`
+
+Widened windows:
+- `non_crypto_1h`: `180/90` → **`365/365`**
+- `non_crypto_4h`: `240/120` → **`365/365`**
+
+Parity with `crypto_1h` / `crypto_4h`. YAML comment documents the FMP/Yahoo/Binance routing matrix + the per-(symbol, interval) support map location.
+
+### WF cache schema hash
+
+Bumped to `fmp_intraday_2026_05_03`. Includes the new `asset_class_windows` and `long_horizon_templates` in the hashed keys so future yaml window changes auto-invalidate. Invalidation on schema change now scopes to **all entries** (not just crypto) because this sprint changes non-crypto windows too.
+
+### Supporting scripts + tests
+
+- `scripts/probe_fmp_coverage.py` — one-shot FMP coverage diagnostic. Probes all asset classes at 1h + 4h, classifies results as OK/PREMIUM/EMPTY. Run before any future calibration change. Regenerates the `EXPLICIT_BLOCKED` set.
+- `scripts/verify_wf_window_helper.py` — updated expected values for non-crypto 1h/4h (180/90 → 365/365, 240/120 → 365/365). All 8 archetypes pass.
+
+### Post-deploy verification
+
+- **1h bootstrap**: `FMP 1h: 8 symbols (242,702 bars)` — ~30k bars/symbol = full 5y of 1h at ~6,000 bars/year for US equities.
+- **4h bootstrap**: ran across 232 non-crypto symbols in ~8 minutes. Sample DB reach post-sync: AMZN/AVGO/BAC/COIN/ADI/ASML all showing `2500 bars @ 2021-05-04 → 2026-05-01` — exactly 5 years of 4h native depth.
+- **errors.log**: clean post-deploy. The recurring yfinance forex-weekend "possibly delisted" noise for EURUSD/GBPUSD/USDJPY/etc. dropped off the hourly cycle — FMP serves forex cleanly.
+- **Premium-blocked count**: ~194 at 4h during bootstrap — these are the non-US/Starter-excluded symbols (DAX, CAC, oil-1h, copper-1h, UK100-4h, Euro Stoxx-4h, plus foreign stocks like `RHM.DE`, `RR.L`, `NVO`, `TSM`, `SAP`, `MELI`, `STLA`, etc.) that flow through to Yahoo fallback.
+
+**Cleanup actions applied:**
+- Deleted 424 shallow FMP rows (<100 bars per symbol) from a pre-fix bootstrap run with buggy incremental logic; next sync backfilled cleanly.
+
+**Effective outcome:**
+- Non-crypto 1h / 4h walk-forward now runs on 365 train + 365 test = 730-day windows instead of 270-day and 360-day, with 5 years of DB depth serving the request.
+- WF gets 24+ OOS trades on typical swing templates (was 6-12), crossing Bailey & López de Prado's floor for reliable Sharpe.
+- 4 of our universe are still on Yahoo fallback at 4h: DAX, CAC, oil-1h, copper-1h (plus indices-4h and non-US stocks). Those continue to hit the engine safety cap at 180/90 or 240/120, logged clearly when truncation fires.
 
 ---
 

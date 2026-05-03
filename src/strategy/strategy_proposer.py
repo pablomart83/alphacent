@@ -696,10 +696,15 @@ class StrategyProposer:
                 # — bump the schema version when they change so cached WF results
                 # get refreshed against the new per-instrument costs.
                 "tx_per_symbol": cfg.get("backtest", {}).get("transaction_costs", {}).get("per_symbol", {}),
+                # Window values (2026-05-03 afternoon refactor + widening): when
+                # per-asset-class windows change in yaml, invalidate cached WF
+                # results so the new window math runs fresh on next cycle.
+                "asset_class_windows": cfg.get("backtest", {}).get("walk_forward", {}).get("asset_class_windows", {}),
+                "long_horizon_templates": cfg.get("backtest", {}).get("walk_forward", {}).get("long_horizon_templates", []),
                 # Bump marker — ensures the RPT/edge_ratio per-position fix
                 # invalidates all cached crypto WF results at deploy time,
                 # forcing a fresh re-eval with the corrected math.
-                "schema_rev": "rpt_per_position_2026_05_03",
+                "schema_rev": "fmp_intraday_2026_05_03",
             }
             s = str(sorted(keys.items()))
             return hashlib.md5(s.encode()).hexdigest()[:8]
@@ -730,14 +735,14 @@ class StrategyProposer:
             current = self._wf_cache_schema_version
             if persisted == current:
                 return  # nothing to do
-            # Version mismatch — clear crypto entries from both caches
-            in_mem_removed = 0
-            for key in list(self._wf_results_cache.keys()):
-                if len(key) >= 2 and key[1].upper() in _CRYPTO:
-                    del self._wf_results_cache[key]
-                    in_mem_removed += 1
-            # Clear persisted crypto entries in .wf_validated_combos.json /
-            # .wf_failed_cache.json (mirror scripts/clear_crypto_wf_cache.py)
+            # Version mismatch — this sprint (fmp_intraday_2026_05_03)
+            # changes both crypto and non-crypto window values, so clear
+            # ALL entries from both caches. Prior schema bumps only cleared
+            # crypto because they only touched crypto-relevant keys.
+            in_mem_removed = len(self._wf_results_cache)
+            self._wf_results_cache.clear()
+            # Clear persisted entries in .wf_validated_combos.json /
+            # .wf_failed_cache.json — not scoped to crypto anymore.
             for cache_file in ["config/.wf_validated_combos.json", "config/.wf_failed_cache.json"]:
                 p = Path(cache_file)
                 if not p.exists():
@@ -745,15 +750,9 @@ class StrategyProposer:
                 try:
                     with open(p) as f:
                         data = json.load(f)
-                    entries = data.get("entries", [])
-                    kept = [e for e in entries if not (
-                        len((e.get("key") or [None, None])) > 1
-                        and (e["key"][1] or "").upper() in _CRYPTO
-                    )]
-                    if len(kept) != len(entries):
-                        data["entries"] = kept
-                        with open(p, "w") as f:
-                            json.dump(data, f, indent=2)
+                    data["entries"] = []
+                    with open(p, "w") as f:
+                        json.dump(data, f, indent=2)
                 except Exception:
                     pass
             # Persist new version
@@ -761,7 +760,7 @@ class StrategyProposer:
             version_path.write_text(current)
             logger.info(
                 f"WF cache schema version changed ({persisted} → {current}): "
-                f"cleared {in_mem_removed} in-memory crypto entries + persisted caches"
+                f"cleared {in_mem_removed} in-memory entries + all persisted cache entries"
             )
         except Exception as e:
             logger.debug(f"WF schema version check failed: {e}")

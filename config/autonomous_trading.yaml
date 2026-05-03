@@ -129,12 +129,20 @@ backtest:
     # per (asset_class, interval, template). Single source of truth;
     # strategy_proposer._select_wf_window() reads these at cycle time.
     #
-    # Non-crypto 1h and 4h are bounded by Yahoo's ~7-month 1h data cap
-    # (4h is resampled from 1h, same limit). Widening non_crypto_1h /
-    # non_crypto_4h beyond the values below will silently truncate at
-    # the engine level (strategy_engine.walk_forward_validate), which is
-    # the correct behaviour — the data source, not the gate, is the
-    # limit. See logs for "WF window capped by data-source limit".
+    # Data sources per (asset_class, interval):
+    #   crypto 1h/4h/1d        → Binance primary (years of history)
+    #   non-crypto 1h/4h       → FMP Starter primary, Yahoo fallback
+    #   non-crypto 1d          → Yahoo (decades of daily history)
+    #
+    # FMP Starter covers most US stocks + ETFs + forex + gold/silver at 1h
+    # and 4h with 5+ years of intraday history. The per-(symbol, interval)
+    # support map lives in src/api/fmp_ohlc.SUPPORT. For the handful of
+    # symbols FMP Starter does NOT cover at the requested interval
+    # (^GDAXI, ^FCHI fully blocked; indices at 4h; OIL/COPPER at 1h)
+    # the Yahoo 1h → 4h resample fallback still applies — which inherits
+    # Yahoo's ~7-month 1h cap. The engine-level safety cap at
+    # strategy_engine.walk_forward_validate truncates those fallback
+    # requests and emits an INFO log.
     # ──────────────────────────────────────────────────────────────────
     asset_class_windows:
       crypto_1h:             { train: 365, test: 365 }
@@ -142,8 +150,8 @@ backtest:
       crypto_1d:             { train: 365, test: 365 }
       crypto_1d_longhorizon: { train: 730, test: 730 }
       non_crypto_1d:         { train: 730, test: 365 }
-      non_crypto_1h:         { train: 180, test: 90  }
-      non_crypto_4h:         { train: 240, test: 120 }
+      non_crypto_1h:         { train: 365, test: 365 }   # widened from 180/90 — FMP serves 5y of 1h
+      non_crypto_4h:         { train: 365, test: 365 }   # widened from 240/120 — FMP serves 5y of 4h
     # Templates that get the longhorizon crypto_1d window (previously a
     # hardcoded set inside strategy_proposer.py). Add / remove by name.
     long_horizon_templates:

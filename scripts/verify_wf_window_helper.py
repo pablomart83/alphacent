@@ -67,8 +67,9 @@ def main() -> int:
     proposer = _build_proposer()
     end_date = datetime(2026, 5, 3, 12, 0, 0)
 
-    # Expected (train, test) per archetype. These MUST match the pre-refactor
-    # hardcoded branch outputs — this is a refactor, not a calibration change.
+    # Expected (train, test) per archetype. Updated for fmp_intraday_2026_05_03:
+    # non_crypto_1h and non_crypto_4h widened to 365/365 now that FMP Starter
+    # serves 5y of intraday history for covered symbols.
     cases: List[Tuple[str, int, int]] = [
         # name, expected_train, expected_test
         ("Crypto BTC Follower 4H ETH LONG",          365, 365),  # crypto 4h
@@ -76,17 +77,15 @@ def main() -> int:
         ("Crypto BTC Follower Daily ETH LONG",       365, 365),  # crypto 1d non-long-horizon
         ("Crypto Hourly RSI Bounce SOL LONG",        365, 365),  # crypto 1h
         ("Fast EMA Crossover AAPL LONG",             730, 365),  # non-crypto 1d (stock)
-        ("RSI Dip Buy EURUSD 1h LONG",               180, 90),   # non-crypto 1h — yaml fallback
-        ("4H Bollinger SPY LONG",                    240, 120),  # non-crypto 4h — yaml fallback
+        ("RSI Dip Buy EURUSD 1h LONG",               365, 365),  # non-crypto 1h — widened
+        ("4H Bollinger SPY LONG",                    365, 365),  # non-crypto 4h — widened
     ]
 
-    # But wait — non-crypto 1h / 4h in this refactor have explicit keys
-    # (non_crypto_1h: 180/90, non_crypto_4h: 240/120) that match what the
-    # engine cap would have produced. Pre-refactor, those combos hit no
-    # proposer override, used yaml 365/180, then engine capped to 180/90
-    # and 240/120 respectively. The helper now returns the final (capped)
-    # values directly — IDENTICAL observable outcome at the walk_forward
-    # call site. The engine cap is a no-op when values already match.
+    # non_crypto_1h and non_crypto_4h used to be 180/90 and 240/120 respectively,
+    # matching the engine cap for Yahoo. Post-FMP-integration, FMP-served symbols
+    # get the full 365/365 window (FMP Starter serves 5y of both). The engine
+    # cap stays in place for symbols FMP Starter does NOT cover (premium-blocked
+    # indices at 4h, GER40/FR40 at both, OIL/COPPER at 1h).
 
     strategies = [
         ("Crypto BTC Follower 4H ETH LONG",

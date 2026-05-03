@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import yaml
 
@@ -1295,6 +1295,102 @@ class MonitoringService:
                 if not need_list:
                     continue
 
+                # FMP primary branch for non-crypto 1h (2026-05-03).
+                # We pay for FMP Starter; it has 5+ years of 1h history for
+                # most US stocks/ETFs/forex/gold/silver. Handles symbols
+                # Binance didn't pick up and offloads them from Yahoo (which
+                # has a ~7-month 1h cap and weekend-forex delisted-error noise).
+                # Per-(symbol, interval) support is hardcoded in fmp_ohlc.SUPPORT;
+                # unsupported combos stay in need_list and flow to Yahoo below.
+                if interval == "1h":
+                    try:
+                        from src.api.fmp_ohlc import (
+                            is_supported as _fmp_supported,
+                            fetch_klines as _fmp_fetch,
+                            FMPAPIError as _FMPErr,
+                        )
+                        _fmp_remaining: list = []
+                        _fmp_syms_fetched = 0
+                        _fmp_bars_total = 0
+                        _fmp_blocked = 0
+                        _FMP_1H_WINDOW_DAYS = 1825  # 5 years of 1h history
+                        for sym in need_list:
+                            if not _fmp_supported(sym, "1h"):
+                                _fmp_remaining.append(sym)
+                                continue
+                            # Incremental fetch — only pull what we don't have,
+                            # AND only when the latest DB bar is already FMP-
+                            # sourced. If the latest bar is Yahoo (legacy cache),
+                            # we want a full FMP backfill for 5y of depth, not a
+                            # 2-bar patch on top of a shallow Yahoo cache.
+                            fetch_start = end - timedelta(days=_FMP_1H_WINDOW_DAYS)
+                            try:
+                                from src.models.database import get_database as _gd
+                                from sqlalchemy import text as _t
+                                _db = _gd()
+                                _s = _db.get_session()
+                                try:
+                                    _row = _s.execute(_t(
+                                        "SELECT date, source FROM historical_price_cache "
+                                        "WHERE symbol = :s AND interval = '1h' "
+                                        "ORDER BY date DESC LIMIT 1"
+                                    ), {"s": sym}).fetchone()
+                                    if _row is not None:
+                                        _latest = _row[0]
+                                        _src = _row[1]
+                                        if hasattr(_latest, 'tzinfo') and _latest.tzinfo:
+                                            _latest = _latest.replace(tzinfo=None)
+                                        _gap_h = (end - _latest).total_seconds() / 3600
+                                        if _src == 'FMP' and _gap_h < 1.5:
+                                            stats["1h"] += 1
+                                            stats["db_cached"] += 1
+                                            continue
+                                        if _src == 'FMP':
+                                            fetch_start = _latest - timedelta(hours=2)
+                                        # else: legacy Yahoo cache — keep full backfill window
+                                finally:
+                                    _s.close()
+                            except Exception:
+                                pass  # best-effort incremental check
+                            try:
+                                bars = _fmp_fetch(sym, fetch_start, end, "1h")
+                            except _FMPErr as fe:
+                                if fe.reason == "premium_blocked":
+                                    _fmp_blocked += 1
+                                _fmp_remaining.append(sym)
+                                continue
+                            if not bars:
+                                _fmp_remaining.append(sym)
+                                continue
+                            try:
+                                md._save_historical_to_db(sym, bars, "1h")
+                                stats["1h"] += 1
+                                stats.setdefault("fmp_batch", 0)
+                                stats["fmp_batch"] += 1
+                                _fmp_syms_fetched += 1
+                                _fmp_bars_total += len(bars)
+                                if sym in active_symbols:
+                                    cache_key = f"{sym}:1h:25"
+                                    hist_cache.set(cache_key, list(bars))
+                                    stats["memory_loaded"] += 1
+                            except Exception as e:
+                                logger.warning(
+                                    f"[bg-full-sync] FMP DB save failed for {sym} 1h: {e}"
+                                )
+                                _fmp_remaining.append(sym)
+                        if _fmp_syms_fetched or _fmp_blocked:
+                            logger.info(
+                                f"[bg-full-sync] FMP 1h: {_fmp_syms_fetched} symbols "
+                                f"({_fmp_bars_total} bars), {_fmp_blocked} premium-blocked — "
+                                f"{len(_fmp_remaining)} remaining for Yahoo"
+                            )
+                        need_list = _fmp_remaining
+                    except ImportError:
+                        pass  # fmp_ohlc missing — stay on Yahoo
+
+                if not need_list:
+                    continue
+
                 # Convert to Yahoo tickers
                 sym_to_yf = {sym: to_yahoo_ticker(sym) for sym in need_list}
                 yf_tickers = list(set(sym_to_yf.values()))
@@ -1552,6 +1648,104 @@ class MonitoringService:
                         f"({bn_4h_bars} bars), {bn_4h_db_cached} DB-cached "
                         f"(crypto, incremental)"
                     )
+
+            # FMP 4h pass for non-crypto symbols (2026-05-03).
+            # Mirrors the Binance 4h block above but for stocks/ETFs/forex/
+            # gold/silver/oil/copper. FMP delivers native 4h bars — no
+            # 1h→4h resampling needed — for every symbol in SUPPORT.
+            # US indices (^GSPC/^IXIC/^DJI) are blocked at 4h on Starter,
+            # plus GER40/FR40/UK100/STOXX50 at 4h — those fall through to
+            # the on-demand Yahoo 1h-resample path used by WF only.
+            #
+            # Window: 1825 days (5 years) on fresh fetch, incremental (gap
+            # only) thereafter. FMP Starter rate limit is 300/min; with
+            # ~80 non-crypto syms × 11 pages each (5y at 170-day pages)
+            # the bootstrap burns ~880 requests = ~3 min. Incremental
+            # daily sync is 80 requests = trivial.
+            try:
+                from src.api.fmp_ohlc import (
+                    is_supported as _fmp_supported_4h,
+                    fetch_klines as _fmp_fetch_4h,
+                    FMPAPIError as _FMP_Err_4h,
+                )
+                # Build non-crypto universe for 4h (anything not in crypto_set)
+                non_crypto_syms = [s for s in all_symbols if s.upper() not in crypto_set]
+                # Pre-query latest 4h bar per symbol for incremental fetch.
+                # Include `source` so we can distinguish FMP-sourced (incremental
+                # OK) from legacy Yahoo-resampled bars (force full backfill).
+                fmp_4h_latest: Dict[str, Tuple[Optional[datetime], Optional[str]]] = {}
+                try:
+                    from src.models.database import get_database as _gd_4h_fmp
+                    from sqlalchemy import text as _sa_t
+                    _db = _gd_4h_fmp()
+                    _s = _db.get_session()
+                    try:
+                        rows = _s.execute(_sa_t(
+                            "SELECT DISTINCT ON (symbol) symbol, date, source "
+                            "FROM historical_price_cache "
+                            "WHERE interval = '4h' AND symbol = ANY(:syms) "
+                            "ORDER BY symbol, date DESC"
+                        ), {"syms": non_crypto_syms}).fetchall()
+                        for row in rows:
+                            ts = row[1]
+                            src = row[2]
+                            if ts and hasattr(ts, 'tzinfo') and ts.tzinfo:
+                                ts = ts.replace(tzinfo=None)
+                            fmp_4h_latest[row[0]] = (ts, src)
+                    finally:
+                        _s.close()
+                except Exception as _le:
+                    logger.debug(f"[bg-full-sync] FMP 4h latest-ts lookup failed: {_le}")
+
+                _FMP_4H_WINDOW_DAYS = 1825  # 5y initial; incremental after
+                fmp_4h_fetched = 0
+                fmp_4h_bars = 0
+                fmp_4h_cached = 0
+                fmp_4h_blocked = 0
+                for sym in non_crypto_syms:
+                    if not _fmp_supported_4h(sym, "4h"):
+                        fmp_4h_blocked += 1
+                        continue
+                    fetch_start = end - timedelta(days=_FMP_4H_WINDOW_DAYS)
+                    latest_info = fmp_4h_latest.get(sym)
+                    if latest_info is not None:
+                        latest_ts, latest_src = latest_info
+                        gap_hours = (end - latest_ts).total_seconds() / 3600
+                        if latest_src == 'FMP' and gap_hours < 4.5:
+                            fmp_4h_cached += 1
+                            stats["4h"] = stats.get("4h", 0) + 1
+                            stats["db_cached"] = stats.get("db_cached", 0) + 1
+                            continue
+                        if latest_src == 'FMP':
+                            # FMP-sourced stale — incremental (back 8h for overlap)
+                            fetch_start = latest_ts - timedelta(hours=8)
+                        # else: legacy Yahoo-resampled — keep full 5y backfill window
+                    try:
+                        bars = _fmp_fetch_4h(sym, fetch_start, end, "4h")
+                    except _FMP_Err_4h as fe:
+                        logger.debug(
+                            f"[bg-full-sync] FMP 4h failed for {sym} ({fe.reason}): {fe}"
+                        )
+                        continue
+                    if not bars:
+                        continue
+                    try:
+                        md._save_historical_to_db(sym, bars, "4h")
+                        stats["4h"] = stats.get("4h", 0) + 1
+                        fmp_4h_fetched += 1
+                        fmp_4h_bars += len(bars)
+                    except Exception as e:
+                        logger.warning(
+                            f"[bg-full-sync] FMP 4h DB save failed for {sym}: {e}"
+                        )
+                if fmp_4h_fetched or fmp_4h_cached or fmp_4h_blocked:
+                    logger.info(
+                        f"[bg-full-sync] FMP 4h: {fmp_4h_fetched} fetched "
+                        f"({fmp_4h_bars} bars), {fmp_4h_cached} DB-cached, "
+                        f"{fmp_4h_blocked} premium-blocked (non-crypto)"
+                    )
+            except ImportError:
+                pass  # fmp_ohlc missing — 4h non-crypto stays on-demand via Yahoo
 
             elapsed = _time.time() - t0
             logger.info(
