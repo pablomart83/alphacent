@@ -774,7 +774,25 @@ class MonitoringService:
             errors = 0
             now_dt = datetime.now()
             current_hour = now_dt.replace(minute=0, second=0, microsecond=0)
-            
+
+            # Synthetic bars built from live eToro ticks get tagged with the
+            # source that would have written them in the next full sync. This
+            # keeps the invariant "crypto 1h bars are tagged BINANCE, non-
+            # crypto 1h bars are tagged FMP (Starter-covered) or YAHOO". The
+            # previous version inherited source from the previous bar, which
+            # silently propagated stale sources forward (Data Page showed
+            # crypto as 'yahoo' when a legacy Yahoo bar was in the cache).
+            def _tick_source_for(sym: str) -> DataSource:
+                if sym.upper() in crypto_set:
+                    return DataSource.BINANCE
+                try:
+                    from src.api.fmp_ohlc import is_supported as _fmp_sup
+                    if _fmp_sup(sym, "1h"):
+                        return DataSource.FMP
+                except Exception:
+                    pass
+                return DataSource.YAHOO_FINANCE
+
             for symbol, price in live_prices.items():
                 try:
                     # Quick updates only touch 1h bars. 1d bars are only refreshed by the
@@ -792,11 +810,14 @@ class MonitoringService:
                         last_bar_hour = last_bar_ts.replace(minute=0, second=0, microsecond=0)
 
                         if current_hour > last_bar_hour:
-                            # New hour — append fresh bar
+                            # New hour — append fresh bar, tagged with the
+                            # source the next full sync would use (crypto →
+                            # BINANCE, FMP-supported non-crypto → FMP, else
+                            # YAHOO). Prevents legacy-source propagation.
                             new_bar = MarketData(
                                 symbol=last_bar.symbol, timestamp=current_hour,
                                 open=price, high=price, low=price, close=price,
-                                volume=0, source=last_bar.source,
+                                volume=0, source=_tick_source_for(symbol),
                             )
                             cached_data.append(new_bar)
                             hist_cache.set(cache_key, cached_data)
@@ -806,12 +827,15 @@ class MonitoringService:
                             except Exception:
                                 pass
                         else:
-                            # Same hour — update OHLC of current bar with tick
+                            # Same hour — update OHLC of current bar with
+                            # tick. Re-stamp source using the asset-class
+                            # rule so ongoing intra-hour ticks don't carry
+                            # a stale source from the bar's first write.
                             updated_bar = MarketData(
                                 symbol=last_bar.symbol, timestamp=last_bar.timestamp,
                                 open=last_bar.open, high=max(last_bar.high, price),
                                 low=min(last_bar.low, price), close=price,
-                                volume=last_bar.volume, source=last_bar.source,
+                                volume=last_bar.volume, source=_tick_source_for(symbol),
                             )
                             cached_data[-1] = updated_bar
                             hist_cache.set(cache_key, cached_data)
