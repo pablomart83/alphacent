@@ -2167,8 +2167,19 @@ class MonitoringService:
                     _mqs = MarketStatisticsAnalyzer(_mdm).get_market_quality_score()
                     _mqs_score = _mqs.get('score')
                     _mqs_grade = _mqs.get('grade')
-            except Exception:
-                pass  # Non-critical — snapshot still saves without quality score
+            except Exception as _mqs_err:
+                # 2026-05-03 fix: previously `except: pass`, which silently
+                # swallowed every MQS failure and left `equity_snapshots.
+                # market_quality_score` NULL for weeks with no visible cause.
+                # Logging the exception class + repr preserves the snapshot
+                # write (MQS is non-critical — equity data still saves) while
+                # surfacing the real error signature to warnings.log so we
+                # can fix the underlying compute/ORM/import issue instead
+                # of hiding it.
+                logger.warning(
+                    f"  MQS compute failed in equity snapshot ({snapshot_type}): "
+                    f"{type(_mqs_err).__name__}: {_mqs_err!r}"
+                )
 
             if existing:
                 existing.equity = equity

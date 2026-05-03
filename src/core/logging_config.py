@@ -210,6 +210,24 @@ class LoggingConfig:
             component_logger.setLevel(log_level.value)
             cls._loggers[component] = ContextLogger(component, component_logger)
 
+        # ── Quiet noisy third-party loggers ──────────────────────────────────
+        # yfinance writes ERROR-level lines directly to the root logger for
+        # every empty-response case (e.g. "$HG=F: possibly delisted; no price
+        # data found …"). Our wrapper in market_data_manager already catches
+        # empty returns and re-logs with full context (symbol, interval,
+        # reason) at the appropriate level — the raw yfinance ERRORs add
+        # noise to errors.log without telling an operator anything new.
+        #
+        # Pin yfinance to WARNING so that genuinely-broken behaviour (HTTP
+        # 5xx, parse errors) still surfaces but the empty-response chorus
+        # stops flooding errors.log. If we need to debug a yfinance issue
+        # we lift this to DEBUG temporarily.
+        logging.getLogger("yfinance").setLevel(logging.WARNING)
+        # urllib3 retries / connection pool warnings — keep at WARNING by
+        # default (useful signal when Yahoo blacklists us or we have DNS
+        # issues).
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
+
         cls._initialized = True
 
     @classmethod

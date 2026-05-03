@@ -793,6 +793,7 @@ class AutonomousStrategyManager:
                     wf_passed=bt_passed,
                     wf_total=bt_passed + bt_failed,
                     pass_rate=(bt_passed / max(bt_passed + bt_failed, 1)) * 100,
+                    pre_wf_total=stats.get('proposals_pre_wf'),
                 )
 
                 # Log detailed walk-forward results
@@ -926,6 +927,7 @@ class AutonomousStrategyManager:
 
                 cl.end_cycle(cycle_duration, {
                     "proposals_generated": stats['proposals_generated'],
+                    "proposals_pre_wf": stats.get('proposals_pre_wf'),
                     "template_count": template_count,
                     "alpha_edge_count": alpha_edge_count,
                     "bt_passed": bt_passed,

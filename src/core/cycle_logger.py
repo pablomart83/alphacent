@@ -174,8 +174,18 @@ class CycleLogger:
             self._handler = None
         self._write(f"\n  {'~'*70}")
         self._write(f"  CYCLE COMPLETE in {duration_seconds:.0f}s")
-        self._write(f"  Proposals: {stats.get('proposals_generated', 0)} "
-                     f"(DSL={stats.get('template_count', '?')}, AE={stats.get('alpha_edge_count', '?')})")
+        # 2026-05-03: include pre-WF count if present so the footer matches
+        # the [PROPOSALS] line at the top of the cycle.
+        _pre_wf = stats.get('proposals_pre_wf')
+        _generated = stats.get('proposals_generated', 0)
+        if _pre_wf is not None and _pre_wf > _generated:
+            self._write(
+                f"  Proposals: {_pre_wf} candidates → {_generated} fresh "
+                f"(DSL={stats.get('template_count', '?')}, AE={stats.get('alpha_edge_count', '?')})"
+            )
+        else:
+            self._write(f"  Proposals: {_generated} "
+                         f"(DSL={stats.get('template_count', '?')}, AE={stats.get('alpha_edge_count', '?')})")
         self._write(f"  Walk-forward: {stats.get('bt_passed', '?')}/{stats.get('bt_total', '?')} passed")
         self._write(f"  Activated: {stats.get('strategies_activated', 0)} | "
                      f"Retired: {stats.get('strategies_retired', 0)} | "
@@ -207,8 +217,22 @@ class CycleLogger:
 
     def log_proposals(self, total: int, dsl: int, alpha_edge: int,
                       wf_passed: int, wf_total: int, pass_rate: float,
-                      regime: str = "", direction_split: str = ""):
-        self._write(f"\n  [PROPOSALS] {total} generated (DSL={dsl}, AE={alpha_edge})")
+                      regime: str = "", direction_split: str = "",
+                      pre_wf_total: Optional[int] = None):
+        # 2026-05-03: when pre_wf_total is provided (from proposer's
+        # _last_pre_wf_count), show it alongside the post-WF `total` so
+        # "I asked for 400 and only 28 show up" ambiguity disappears.
+        # pre_wf_total = raw proposer output (all candidates entering WF,
+        # including cache-hit rejections). total = candidates that survived
+        # WF and entered backtest/activation. cached = the delta.
+        if pre_wf_total is not None and pre_wf_total > total:
+            cached = pre_wf_total - total
+            self._write(
+                f"\n  [PROPOSALS] {pre_wf_total} candidates → {total} fresh "
+                f"(DSL={dsl}, AE={alpha_edge}), {cached} cached from earlier cycles"
+            )
+        else:
+            self._write(f"\n  [PROPOSALS] {total} generated (DSL={dsl}, AE={alpha_edge})")
         if direction_split:
             self._write(f"    Direction: {direction_split}")
         self._write(f"  [WALK-FORWARD] {wf_passed}/{wf_total} passed ({pass_rate:.1f}%)")

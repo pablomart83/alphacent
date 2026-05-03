@@ -108,6 +108,13 @@ EXPLICIT_BLOCKED: set = {
     # (confirmed via /historical-price-eod/full probe). 4h works.
     ("CLUSD", "1hour"), ("CLUSD", "1day"),
     ("HGUSD", "1hour"), ("HGUSD", "1day"),
+    # Foreign listings (German, UK stocks) — Starter US-coverage clause
+    # blocks all intraday intervals. 1d works through the EOD endpoint.
+    # Without these entries, every WF cycle wasted 10-20 FMP calls per
+    # symbol hitting 402s before the runtime block-set caught up.
+    # Confirmed via log observation 2026-05-03.
+    ("RHM.DE", "1hour"), ("RHM.DE", "4hour"),
+    ("RR.L",   "1hour"), ("RR.L",   "4hour"),
     # Non-US / non-majors stocks in our universe known to be sparse or
     # premium (foreign listings that FMP only serves at EOD).
     # Add as they surface in logs (runtime-observed block-set below).
@@ -217,8 +224,20 @@ def is_supported(symbol: str, interval: str) -> bool:
 
 def _mark_blocked(fmp_sym: str, itv_fmp: str) -> None:
     """Runtime record that (fmp_sym, itv_fmp) responded 402. Prevents
-    future retries for this process lifetime."""
-    _RUNTIME_BLOCKED.add((fmp_sym, itv_fmp))
+    future retries for this process lifetime.
+
+    Dedupe on log emission — during a multi-page parallel fetch, several
+    worker threads can see 402 on the same (symbol, interval) before any
+    of them has updated the set. Without this check we'd emit the same
+    "runtime block-set updated" INFO line 10+ times per cycle for every
+    blocked symbol (one per page × N workers), flooding alphacent.log.
+    `.add()` is idempotent on the set itself; the dedup is purely for
+    the log line.
+    """
+    key = (fmp_sym, itv_fmp)
+    if key in _RUNTIME_BLOCKED:
+        return  # Already recorded — don't re-log
+    _RUNTIME_BLOCKED.add(key)
     logger.info(
         f"FMP runtime block-set updated: {fmp_sym} @ {itv_fmp} "
         f"(Starter plan does not cover this combo)"
@@ -270,6 +289,18 @@ def _fetch_page(
     page_to: datetime,
 ) -> List[MarketData]:
     """Fetch one page (up to PAGE_WINDOW_DAYS[interval] span) with retries."""
+    # Concurrent-page short-circuit: if a sibling worker thread already hit
+    # 402 for this (symbol, interval) and added it to the runtime block set,
+    # skip this page's HTTP call. Without this check, every page in the
+    # batch fires its own 402 before any of them can update the set, which
+    # wasted FMP quota and produced cascading exceptions in fetch_klines.
+    # Races are OK (worst case: one wasted request before the next page
+    # checks). The set is a dedupe guard, not a lock.
+    if (fmp_symbol, interval_fmp) in _RUNTIME_BLOCKED:
+        raise FMPAPIError(
+            f"FMP premium-blocked (sibling worker): {fmp_symbol} {interval_fmp}",
+            reason="premium_blocked",
+        )
     # 1d uses a different endpoint — /historical-price-eod/full (not
     # /historical-chart/1day, which returns empty on Starter for every
     # symbol). Intraday stays on /historical-chart/{interval}.

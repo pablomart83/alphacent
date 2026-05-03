@@ -696,6 +696,27 @@ class MarketDataManager:
                         needs_incremental = gap_hours > threshold_hours
                         gap_days = int(gap_hours // 24)
 
+                    # 2026-05-03 guard: an incremental fetch only makes sense
+                    # when the caller is asking for "up to now" data. For a
+                    # backtest window ending in the past (WF test windows,
+                    # historical analysis, etc.), the DB already has every
+                    # bar that will ever exist for that window — there is
+                    # nothing to incrementally fetch. Firing a live data-
+                    # source call here hits yfinance's 730d rolling cap on
+                    # 1h data and generated thousands of "possibly delisted"
+                    # ERROR lines per day for OIL/COPPER/GER40/FR40 1h WF
+                    # windows. Skip incremental when `end` is already in
+                    # the past; the DB-cache path below returns as-is.
+                    _now_naive = datetime.utcnow().replace(tzinfo=None)
+                    if needs_incremental and (_now_naive - end_naive).total_seconds() > 86400:
+                        logger.debug(
+                            f"DB cache for {db_symbol} {interval} covers to "
+                            f"{latest_db_naive}; requested end {end_naive} is "
+                            f"{(_now_naive - end_naive).days}d in the past "
+                            f"— skipping incremental fetch (no live data needed)"
+                        )
+                        needs_incremental = False
+
                     if needs_incremental:
                         # Skip incremental fetch if the gap is just a weekend/holiday
                         # For stocks/ETFs: no data on Sat/Sun. A gap of 2-3 days ending on
@@ -1293,6 +1314,48 @@ class MarketDataManager:
                 # FMP adapter absent (e.g. stale deploy). Silently fall
                 # through to Yahoo so the primary path keeps working.
                 pass
+
+        # Yahoo 1h rolling-cap guard (2026-05-03).
+        #
+        # Yahoo Finance's /v8 1h endpoint only serves bars where BOTH
+        #   start >= now - 730 days  AND  end <= now
+        # Any request whose `start` falls outside this rolling window
+        # returns empty AND yfinance's own root logger writes an ERROR line:
+        #   "$HG=F: possibly delisted; no price data found (1h YYYY-MM-DD
+        #    → YYYY-MM-DD) Yahoo error = '1h data not available. The
+        #    requested range must be within the last 730 days.'"
+        # That ERROR hits our errors.log (yfinance uses the root logger)
+        # regardless of what we do with the return value.
+        #
+        # This fires on every WF backtest for symbols where FMP is premium-
+        # blocked at 1h (OIL/COPPER/GER40/FR40) because proposer WF test
+        # windows span a year+ of history — the `start` is always outside
+        # Yahoo's 730d window. The call was always going to return empty;
+        # the ERROR is pure noise that masks real errors.
+        #
+        # Proper fix: never call Yahoo 1h for a window whose `start` is
+        # outside the rolling cap. Return [] so the caller's existing DB-
+        # cache fallback path serves from the 5y of bars we already have.
+        # Same logic applies to 4h synthesized from 1h (source 1h call
+        # would fail identically).
+        if interval in ("1h", "4h"):
+            _now = datetime.utcnow()
+            # Use 720d (not 730d) as a safety margin — Yahoo's cap drifts
+            # slightly and empirically starts returning empty a few days
+            # before the nominal 730d boundary.
+            _yahoo_1h_cap_days = 720
+            _start_naive = start.replace(tzinfo=None) if hasattr(start, 'tzinfo') and start.tzinfo else start
+            _start_age_days = (_now - _start_naive).total_seconds() / 86400
+            if _start_age_days > _yahoo_1h_cap_days:
+                logger.info(
+                    f"Yahoo 1h cap: skipping fetch for {symbol} {interval} "
+                    f"{start.date() if hasattr(start, 'date') else start}→"
+                    f"{end.date() if hasattr(end, 'date') else end} — "
+                    f"start is {_start_age_days:.0f}d ago, outside Yahoo's "
+                    f"{_yahoo_1h_cap_days}d rolling window. Caller's DB cache "
+                    f"fallback will serve."
+                )
+                return []
 
         yf_symbol = to_yahoo_ticker(symbol)
         ensure_yfinance_cache()
