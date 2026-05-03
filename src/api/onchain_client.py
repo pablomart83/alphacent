@@ -92,45 +92,67 @@ class _CacheEntry:
 
 
 # Process-local cache keyed on (metric_name, end_date_iso).
-# Lookback is NOT part of the cache key: if a caller asks for 7d but we
-# have 90d cached (well in excess), we serve from cache and let the caller
-# slice to their needed window. This avoids duplicate HTTP calls when
-# different rules reference the same metric at different lookbacks, which
-# is critical on CoinGecko free tier (~30 req/min).
-_CACHE: Dict[Tuple[str, str], _CacheEntry] = {}
+# Single entry per metric. Stores the widest series we've fetched so far.
+# A request for any `end` and `lookback` that fits inside the cached
+# series's [min_date, max_date] span can be served from cache — we just
+# slice the series to [end - lookback, end].
+#
+# Previous design keyed on (metric, end.date()) which broke every WF run
+# because train (end=365d ago) and test (end=now) hit different cache
+# buckets, forcing 2x HTTP calls per template. Sprint 5 S5.2 (2026-05-03):
+# one entry per metric, coverage-checked, sliced on read. Reduces the
+# per-cycle CoinGecko request count from ~12 to ~2 for the full 6-symbol
+# × 3-template B3 proposal set.
+_CACHE: Dict[str, _CacheEntry] = {}
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _cache_key(metric: str, end: datetime) -> Tuple[str, str]:
-    # Round end to date — caching at second-granularity wastes the cache.
-    return (metric, end.date().isoformat())
-
-
 def _cache_get(metric: str, end: datetime, lookback_days: int) -> Optional[pd.Series]:
-    key = _cache_key(metric, end)
-    entry = _CACHE.get(key)
+    """Return a slice of the cached series if it fully covers the request."""
+    entry = _CACHE.get(metric)
     if entry is None:
         return None
     if time.time() - entry.fetched_at > CACHE_TTL_SECONDS:
-        _CACHE.pop(key, None)
+        _CACHE.pop(metric, None)
         return None
-    # Check coverage — if cached series doesn't go far enough back for
-    # this caller's lookback, miss and refetch with the wider window.
-    if not entry.data.empty:
-        cached_span = (
-            entry.data.index.max() - entry.data.index.min()
-        ).days
-        if cached_span < lookback_days:
-            return None
-    return entry.data
+    if entry.data.empty:
+        return None
+    # Coverage check: cached series must span from (end - lookback) to end.
+    end_ts = pd.Timestamp(end.date())
+    start_ts = end_ts - pd.Timedelta(days=int(lookback_days))
+    cached_min = entry.data.index.min()
+    cached_max = entry.data.index.max()
+    # Allow 2-day tolerance on the end (cached data is daily and we may
+    # be called mid-day before the day's data posts).
+    if cached_max < end_ts - pd.Timedelta(days=2):
+        return None
+    if cached_min > start_ts:
+        return None
+    # Slice to the requested window. The caller reindexes to its own bar
+    # index via compute_onchain_indicators; this slice just avoids
+    # returning data outside the request (memory hygiene).
+    sliced = entry.data.loc[start_ts:end_ts]
+    if sliced.empty:
+        return None
+    return sliced
 
 
-def _cache_put(metric: str, end: datetime, series: pd.Series) -> None:
-    key = _cache_key(metric, end)
-    _CACHE[key] = _CacheEntry(data=series.copy(), fetched_at=time.time())
+def _cache_put(metric: str, series: pd.Series) -> None:
+    """Cache the series. If an entry already exists, keep whichever has
+    the wider span (merging would require date alignment per provider
+    quirks; simpler to just keep the widest single pull).
+    """
+    existing = _CACHE.get(metric)
+    if existing is not None and not existing.data.empty and not series.empty:
+        existing_span = (existing.data.index.max() - existing.data.index.min()).days
+        new_span = (series.index.max() - series.index.min()).days
+        if existing_span > new_span and time.time() - existing.fetched_at < CACHE_TTL_SECONDS:
+            # Existing cache is wider and still fresh — keep it.
+            return
+    _CACHE[metric] = _CacheEntry(data=series.copy(), fetched_at=time.time())
 
 
 def is_supported(metric: str) -> bool:
@@ -174,13 +196,30 @@ def get_metric(metric: str, end: datetime, lookback_days: int) -> pd.Series:
     if cached is not None:
         return cached
 
+    # Sprint 5 S5.2 (2026-05-03): on cache miss, fetch the widest
+    # possible window the provider supports, so subsequent calls in the
+    # same cycle (train vs test windows for the same metric, or different
+    # templates referencing the same metric at different lookbacks) all
+    # hit the cache. Eliminates the 429 storm we saw on 2026-05-03.
+    #
+    # Provider ceilings:
+    #   CoinGecko free tier: 365d daily history
+    #   DeFi Llama stablecoins: full history (no practical cap)
+    # We fetch max(caller_requested, CEILING) so we never shrink the cache.
+    _WIDEST_FETCH = {
+        "btc_dominance": 365,
+        "stablecoin_supply": 1095,         # 3y — enough for any WF window
+        "stablecoin_supply_pct": 1095,
+    }
+    widest = max(int(lookback_days), _WIDEST_FETCH.get(m, int(lookback_days)))
+
     if m == "btc_dominance":
-        series = _fetch_btc_dominance(end, lookback_days)
+        series = _fetch_btc_dominance(end, widest)
     elif m == "stablecoin_supply":
-        series = _fetch_stablecoin_supply(end, lookback_days)
+        series = _fetch_stablecoin_supply(end, widest)
     elif m == "stablecoin_supply_pct":
         # Derived: 7-day % change of stablecoin supply.
-        raw = _fetch_stablecoin_supply(end, lookback_days + 7)
+        raw = _fetch_stablecoin_supply(end, widest + 7)
         series = raw.pct_change(periods=7).dropna()
     else:
         raise OnChainAPIError(f"No fetcher wired for metric '{m}'")
@@ -188,7 +227,14 @@ def get_metric(metric: str, end: datetime, lookback_days: int) -> pd.Series:
     if series.empty:
         raise OnChainAPIError(f"Provider returned empty series for '{m}'")
 
-    _cache_put(m, end, series)
+    _cache_put(m, series)
+
+    # Slice the result to the caller's requested window. Cache has the
+    # wide series for future use.
+    end_ts = pd.Timestamp(end.date())
+    start_ts = end_ts - pd.Timedelta(days=int(lookback_days))
+    if not series.empty and series.index.max() >= start_ts:
+        return series.loc[start_ts:end_ts]
     return series
 
 
@@ -215,22 +261,31 @@ def _fetch_btc_dominance(end: datetime, lookback_days: int) -> pd.Series:
     days = max(1, min(int(lookback_days), 365))
 
     def _cg_request(url: str, params: Optional[Dict] = None) -> Dict:
-        """Wrapped CoinGecko GET with a single retry on 429.
+        """Wrapped CoinGecko GET with two retries on 429.
 
-        The free tier allows ~30 calls/min; bursts can push us over.
-        A single 10s backoff+retry absorbs transient throttling without
-        masking a genuine outage (on second 429 we raise as expected).
+        CoinGecko free tier allows ~30 calls/min. A cycle can temporarily
+        burst above that when many crypto templates reference the same
+        on-chain metric concurrently; the module-level cache absorbs most
+        of it, but the first call per cycle can still 429 if another
+        provider also happens to ping at the same moment.
+
+        Sprint 5 S5.2 (2026-05-03): extended retry from 1 attempt (10s)
+        to 2 attempts (10s, then 30s) to absorb transient bursts without
+        the caller having to reason about retry logic.
         """
-        for attempt in (0, 1):
+        backoffs = [10, 30]
+        for attempt in range(len(backoffs) + 1):
             try:
                 r = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SEC)
             except requests.RequestException as e:
                 raise OnChainAPIError(f"CoinGecko request failed: {e}") from e
-            if r.status_code == 429 and attempt == 0:
+            if r.status_code == 429 and attempt < len(backoffs):
+                wait = backoffs[attempt]
                 logger.info(
-                    "CoinGecko 429 on first attempt — sleeping 10s and retrying once"
+                    f"CoinGecko 429 on attempt {attempt + 1} — "
+                    f"sleeping {wait}s before retry {attempt + 2}"
                 )
-                time.sleep(10)
+                time.sleep(wait)
                 continue
             if r.status_code >= 400:
                 raise OnChainAPIError(
@@ -240,7 +295,10 @@ def _fetch_btc_dominance(end: datetime, lookback_days: int) -> pd.Series:
                 return r.json()
             except ValueError as e:
                 raise OnChainAPIError(f"CoinGecko non-JSON response: {e}") from e
-        raise OnChainAPIError("CoinGecko still 429 after retry")
+        raise OnChainAPIError(
+            f"CoinGecko still 429 after {len(backoffs) + 1} attempts "
+            f"(waited {sum(backoffs)}s total) — rate limit exhausted"
+        )
 
     btc_data = _cg_request(
         COINGECKO_MARKET_CHART_URL,
