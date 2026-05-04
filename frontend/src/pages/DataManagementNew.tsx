@@ -437,8 +437,50 @@ export const DataManagementNew: FC<DataManagementNewProps> = ({ onLogout }) => {
                           </span>
                         )}
                       </td>
-                      <td className="py-1 px-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{row.last_price_update ? formatAge(row.last_price_update) : '—'}</td>
-                      <td className="py-1 px-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>{row.data_source || '—'}</td>
+                      {/* Updated — per-interval freshness. Shows each interval
+                          with its own last-bar age, so e.g. ALUMINUM 1d being
+                          19h stale doesn't imply the 1h/4h paths are broken
+                          (they just don't exist for LME metals). Falls back
+                          to legacy single timestamp when intervals is empty. */}
+                      <td className="py-1 px-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        {row.intervals && row.intervals.length > 0 ? (
+                          <div className="flex flex-col gap-0.5">
+                            {row.intervals.map((iv: any) => {
+                              const ageColor = iv.intervals_behind < 2 ? 'var(--color-text-secondary)'
+                                : iv.intervals_behind < 3 ? '#eab308'
+                                : '#ef4444';
+                              return (
+                                <div key={iv.interval} className="flex gap-1 items-baseline">
+                                  <span className="text-gray-500 w-6">{iv.interval}</span>
+                                  <span style={{ color: ageColor }}>
+                                    {iv.last_bar ? formatAge(iv.last_bar) : '—'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          row.last_price_update ? formatAge(row.last_price_update) : '—'
+                        )}
+                      </td>
+                      {/* Source — per-interval. Crypto uses Binance for 1h/4h/1d;
+                          stocks use FMP/Yahoo; commodities mix. Showing one
+                          source per row collapsed these into a single value
+                          (typically the one from the freshest interval's
+                          write). Now each interval's actual source is shown. */}
+                      <td className="py-1 px-2 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        {row.intervals && row.intervals.length > 0 ? (
+                          <div className="flex flex-col gap-0.5">
+                            {row.intervals.map((iv: any) => (
+                              <div key={iv.interval} className="text-[10px]">
+                                {iv.source}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          row.data_source || '—'
+                        )}
+                      </td>
                       <td className="py-1 px-2" style={{ color: (row.active_issues ?? 0) > 0 ? '#eab308' : 'var(--color-text-secondary)' }}>{row.active_issues ?? 0}</td>
                     </tr>
                   ))}

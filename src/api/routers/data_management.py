@@ -1270,15 +1270,31 @@ async def get_monitoring_status():
 # Data Quality Models (Req 19)
 # ============================================================================
 
+class IntervalInfo(BaseModel):
+    """Per-interval freshness + source for a symbol."""
+    interval: str
+    source: str  # binance / yahoo / fmp / etoro
+    bars: int
+    last_bar: Optional[str] = None      # ISO timestamp of the most recent bar
+    last_fetch: Optional[str] = None    # ISO timestamp of the most recent write
+    last_bar_age_seconds: float = 0.0   # now - last_bar (clamped ≥ 0)
+    intervals_behind: float = 0.0       # (now - last_bar) / interval_length
+
+
 class DataQualityEntry(BaseModel):
     """Single symbol data quality entry."""
     symbol: str
     asset_class: str = "stock"
     quality_score: float = 0.0
-    last_price_update: Optional[str] = None
-    data_source: str = "yahoo"
+    last_price_update: Optional[str] = None  # freshest interval's last fetch (legacy)
+    data_source: str = "yahoo"               # freshest interval's source (legacy)
     active_issues: int = 0
     staleness_seconds: float = 0.0
+    # Per-interval breakdown — UI should prefer this over the legacy single-column
+    # last_price_update/data_source, because freshness is interval-specific. Daily
+    # LME metals are naturally "hours stale" between EOD closes; that doesn't
+    # mean 1h bars are missing.
+    intervals: List[IntervalInfo] = []
     # Fundamentals (FMP)
     fmp_score: Optional[float] = None        # 0-100, None = not applicable
     fmp_age_days: Optional[float] = None     # days since last FMP fetch
@@ -1358,30 +1374,45 @@ async def get_data_quality():
                 if not existing or (r.validated_at and existing.validated_at and r.validated_at > existing.validated_at):
                     quality_reports[canon] = r
 
-            # Latest price per symbol from historical_price_cache, plus the
-            # actual source that wrote the most recent bar. Without a per-
-            # source max, the UI shows "yahoo" for every symbol even after
-            # Binance takes over crypto. Use a LATERAL/window-style query to
-            # get the source of the bar whose fetched_at is the max.
-            latest_prices: dict[str, datetime] = {}
-            latest_source: dict[str, str] = {}
+            # Latest bar + fetch + source per (symbol, interval). Rich enough
+            # for the UI to render a per-interval breakdown — the single-column
+            # "last updated" view masked the fact that e.g. ALUMINUM 1d is
+            # naturally 19h stale every Monday morning (Fri EOD → Mon open on
+            # an LME metal) while the 1h cache for the same symbol would be
+            # much fresher. With intervals broken out, the UI can show the
+            # actual cadence per source.
+            per_interval_data: dict[str, list[dict]] = {}
             for row in session.execute(text(
                 """
-                SELECT DISTINCT ON (symbol) symbol, fetched_at, source
+                SELECT symbol, interval, source,
+                       MAX(date) AS last_bar,
+                       MAX(fetched_at) AS last_fetch,
+                       COUNT(*) AS bars
                 FROM historical_price_cache
-                WHERE fetched_at IS NOT NULL
-                ORDER BY symbol, fetched_at DESC
+                GROUP BY symbol, interval, source
                 """
             )).fetchall():
-                sym, ts, src = row[0], row[1], row[2]
+                sym, iv, src, last_bar, last_fetch, bars = row
                 canon = _canon(sym)
-                if ts:
-                    ts_parsed = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
-                    # Keep the most-recent write per canon
-                    if canon not in latest_prices or ts_parsed > latest_prices[canon]:
-                        latest_prices[canon] = ts_parsed
-                        if src:
-                            latest_source[canon] = str(src).lower()
+                per_interval_data.setdefault(canon, []).append({
+                    "interval": iv,
+                    "source": str(src).lower() if src else "unknown",
+                    "bars": int(bars or 0),
+                    "last_bar": last_bar if isinstance(last_bar, datetime) else None,
+                    "last_fetch": last_fetch if isinstance(last_fetch, datetime) else None,
+                })
+
+            # Legacy single-column view: freshest interval's last_fetch +
+            # source, kept for backward-compat until the UI is fully migrated
+            # to per-interval rendering.
+            latest_prices: dict[str, datetime] = {}
+            latest_source: dict[str, str] = {}
+            for canon, ivs in per_interval_data.items():
+                # Pick interval with the most recent fetch
+                best = max(ivs, key=lambda x: x["last_fetch"] or datetime.min)
+                if best["last_fetch"]:
+                    latest_prices[canon] = best["last_fetch"]
+                    latest_source[canon] = best["source"]
 
             # FMP fundamentals: latest fetch per canonical symbol
             fmp_data: dict[str, FundamentalDataORM] = {}
@@ -1404,6 +1435,25 @@ async def get_data_quality():
                 pass
 
             all_symbols = set(quality_reports.keys()) | set(latest_prices.keys()) | set(asset_class_map.keys())
+
+            # Filter out dead legacy rows: symbols that are NOT in the current
+            # yaml universe AND have zero rows in historical_price_cache. They
+            # exist only as stale data_quality_reports entries from delisted /
+            # retired symbols. Showing them as source="unknown" confused the
+            # UI — they should just not be there. (The 2026-05-04 audit found
+            # RUBBER + UPS as the only two offenders.)
+            dead_symbols = {
+                s for s in all_symbols
+                if s not in asset_class_map and s not in latest_prices
+            }
+            if dead_symbols:
+                logger.debug(
+                    f"Data quality: filtering {len(dead_symbols)} dead legacy symbols "
+                    f"(not in yaml + no price cache): {sorted(dead_symbols)[:5]}..."
+                )
+                all_symbols -= dead_symbols
+
+            _INTERVAL_HOURS = {"1h": 1.0, "4h": 4.0, "1d": 24.0}
 
             for sym in sorted(all_symbols):
                 # sym is now always in canonical display form. The legacy
@@ -1474,6 +1524,45 @@ async def get_data_quality():
                 else:
                     ui_source = raw_src
 
+                # Build per-interval breakdown — the canonical freshness view.
+                # UI should prefer this over the single last_price_update field
+                # which collapses multi-interval state into one timestamp.
+                ivs_list: List[IntervalInfo] = []
+                for iv_data in per_interval_data.get(sym, []) or per_interval_data.get(alt, []):
+                    iv = iv_data["interval"]
+                    iv_src_lc = (iv_data["source"] or "unknown").lower()
+                    if "binance" in iv_src_lc:
+                        iv_ui_src = "binance"
+                    elif "yahoo" in iv_src_lc:
+                        iv_ui_src = "yahoo"
+                    elif "fmp" in iv_src_lc:
+                        iv_ui_src = "fmp"
+                    elif "etoro" in iv_src_lc:
+                        iv_ui_src = "etoro"
+                    else:
+                        iv_ui_src = iv_src_lc
+                    last_bar_dt = iv_data["last_bar"]
+                    last_fetch_dt = iv_data["last_fetch"]
+                    age_s = 0.0
+                    intervals_behind = 0.0
+                    if last_bar_dt:
+                        last_bar_naive = last_bar_dt.replace(tzinfo=None) if last_bar_dt.tzinfo else last_bar_dt
+                        age_s = max(0.0, (now - last_bar_naive).total_seconds())
+                        iv_hours = _INTERVAL_HOURS.get(iv, 1.0)
+                        intervals_behind = round(age_s / 3600.0 / iv_hours, 2) if iv_hours else 0.0
+                    ivs_list.append(IntervalInfo(
+                        interval=iv,
+                        source=iv_ui_src,
+                        bars=iv_data["bars"],
+                        last_bar=last_bar_dt.isoformat() if last_bar_dt else None,
+                        last_fetch=last_fetch_dt.isoformat() if last_fetch_dt else None,
+                        last_bar_age_seconds=round(age_s, 1),
+                        intervals_behind=intervals_behind,
+                    ))
+                # Stable order for the UI: 1d, 1h, 4h (most-common first)
+                _iv_order = {"1d": 0, "1h": 1, "4h": 2}
+                ivs_list.sort(key=lambda x: (_iv_order.get(x.interval, 99), x.interval))
+
                 entries.append(DataQualityEntry(
                     symbol=sym,
                     asset_class=asset_class_map.get(sym, "stock"),
@@ -1482,6 +1571,7 @@ async def get_data_quality():
                     data_source=ui_source,
                     active_issues=active_issues,
                     staleness_seconds=round(staleness_seconds, 1),
+                    intervals=ivs_list,
                     fmp_score=fmp_score,
                     fmp_age_days=fmp_age_days,
                     fmp_has_data=fmp_has_data,
