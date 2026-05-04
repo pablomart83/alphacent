@@ -299,17 +299,18 @@ data_management:
   cleanup_enabled: true
 alpha_edge:
   max_active_strategies: 10
-  # 2026-05-04 paper-trading data-collection adjustment: lowered from 65 → 62.
-  # Rationale: live validation data (post conviction_score backfill) showed:
-  #   - scorer IS monotonic at the top (≥75 bucket: +$53/trade, 65% WR, n=20)
-  #   - bottom buckets 60-75 are noise (flat to slightly negative, similar
-  #     magnitudes — no material step function at the 65 threshold)
-  #   - multiple documented edge cases (MU × Keltner 64.6, UNH × 4H ADX 64.6,
-  #     ROST × 4H VWAP 64.8) clipped by 0.2-0.5 points despite strong WF edge
-  # Temporary relaxation to accumulate validation data ahead of regression-fit
-  # restructure planned for next session. Revert to 65 (or recalibrated weights)
-  # once 2-3 weeks of conviction-column-populated trades are available.
-  min_conviction_score: 62
+  # 2026-05-04 paper-trading threshold analysis (revision post deep-dive):
+  # Initial 65 → 62 relaxation was based on incomplete data. Re-analysis
+  # after full conviction backfill (661 trades) shows:
+  #   - Scorer works at the top: ≥75 bucket has 2.28 RR, +$42/trade avg,
+  #     +$11,639 total (100% of our net alpha + some)
+  #   - 60-65 buckets are net-negative with 40-54% WR and RR < 0.5
+  #   - Pearson corr(conv, pnl) = +0.18 — weak but positive
+  # Reverted to 65. A proper "accept edge cases" solution comes via
+  # position-sizing tiers (next session) — size ≥75 trades at 1.25-1.5x
+  # rather than lowering the activation floor. That captures the alpha
+  # without admitting the noise.
+  min_conviction_score: 65
   min_holding_period_days: 3
   max_holding_period_days: 30
   max_trades_per_strategy_per_month: 4
