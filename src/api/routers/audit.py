@@ -79,11 +79,17 @@ def _build_audit_entries(
     search: Optional[str],
 ) -> list[AuditLogEntry]:
     """
-    Query SignalDecisionLogORM, OrderORM, PositionORM, StrategyORM
-    and compose a unified list of AuditLogEntry objects.
+    Query the unified decision funnel, orders, positions, strategies,
+    strategy_retirements, and rejected_signals tables and compose a
+    unified list of AuditLogEntry objects.
+
+    2026-05-04: Signal events read from `signal_decisions` (unified funnel),
+    filtered to the decision-representing stages (gate_blocked /
+    order_submitted / order_filled). Legacy `signal_decision_log` reads
+    have been removed.
     """
     from src.models.orm import (
-        SignalDecisionLogORM, OrderORM, PositionORM,
+        SignalDecisionORM, OrderORM, PositionORM,
         StrategyORM, StrategyRetirementORM, RejectedSignalORM,
     )
 
@@ -91,32 +97,44 @@ def _build_audit_entries(
     want_all = event_types is None or len(event_types) == 0
 
     # --- Signal decision events ---
+    # Scope to decision-boundary stages so the audit log doesn't get flooded
+    # with proposer/WF upstream rows (which would drown out operational signal
+    # events in the user-facing audit log).
     if want_all or "signal" in event_types:
-        q = session.query(SignalDecisionLogORM)
+        DECISION_STAGES = ("gate_blocked", "order_submitted", "order_filled")
+        q = session.query(SignalDecisionORM).filter(
+            SignalDecisionORM.stage.in_(DECISION_STAGES)
+        )
         if start_date:
-            q = q.filter(SignalDecisionLogORM.created_at >= start_date)
+            q = q.filter(SignalDecisionORM.timestamp >= start_date)
         if end_date:
-            q = q.filter(SignalDecisionLogORM.created_at <= end_date)
+            q = q.filter(SignalDecisionORM.timestamp <= end_date)
         if symbol:
-            q = q.filter(SignalDecisionLogORM.symbol == symbol)
-        for row in q.order_by(SignalDecisionLogORM.created_at.desc()).limit(500).all():
-            sev = "info" if row.decision == "ACCEPTED" else "warning"
+            q = q.filter(SignalDecisionORM.symbol == symbol)
+        for row in q.order_by(SignalDecisionORM.timestamp.desc()).limit(500).all():
+            # Map unified decision to legacy ACCEPTED/REJECTED for the audit
+            # feed, preserving the existing description format.
+            accepted = row.stage in ("order_submitted", "order_filled")
+            sev = "info" if accepted else "warning"
             if severity and sev != severity:
                 continue
-            desc = f"Signal {row.decision}: {row.symbol} {row.side} ({row.signal_type})"
-            if row.rejection_reason:
-                desc += f" — {row.rejection_reason}"
+            # Derive side from direction
+            _side = "BUY" if row.direction == "long" else "SELL" if row.direction == "short" else ""
+            _decision_label = "ACCEPTED" if accepted else "REJECTED"
+            desc = f"Signal {_decision_label}: {row.symbol or ''} {_side}".strip()
+            if row.reason:
+                desc += f" — {row.reason}"
             if search and search.lower() not in desc.lower():
                 continue
             entries.append(AuditLogEntry(
                 id=f"sig-{row.id}",
-                timestamp=row.created_at.isoformat() if row.created_at else "",
+                timestamp=row.timestamp.isoformat() if row.timestamp else "",
                 event_type="signal",
                 symbol=row.symbol,
-                strategy_name=row.strategy_id,
+                strategy_name=row.template_name or row.strategy_id,
                 severity=sev,
                 description=desc,
-                metadata=row.metadata_json,
+                metadata=row.decision_metadata,
             ))
 
     # --- Order events ---
@@ -276,8 +294,9 @@ async def get_audit_log(
     """
     Get filterable, paginated audit log.
 
-    Composes entries from signal_decision_log, orders, positions, strategies,
-    strategy_retirements, and rejected_signals tables.
+    Composes entries from signal_decisions (unified funnel), orders,
+    positions, strategies, strategy_retirements, and rejected_signals
+    tables.
 
     Validates: Requirements 21.1, 21.2, 21.3, 21.4, 21.10
     """
@@ -315,7 +334,7 @@ async def get_trade_lifecycle(
     Validates: Requirements 21.4, 21.9
     """
     from src.models.orm import (
-        SignalDecisionLogORM, OrderORM, PositionORM, StrategyORM,
+        SignalDecisionORM, OrderORM, PositionORM, StrategyORM,
     )
 
     result = TradeLifecycleData(trade_id=trade_id)
@@ -348,21 +367,28 @@ async def get_trade_lifecycle(
         if strat:
             result.strategy_name = strat.name
 
-    # Step 1: Signal
+    # Step 1: Signal — read from unified funnel, decision-boundary stages only
     if strategy_id and symbol:
-        sig = session.query(SignalDecisionLogORM).filter(
-            SignalDecisionLogORM.strategy_id == strategy_id,
-            SignalDecisionLogORM.symbol == symbol,
-        ).order_by(SignalDecisionLogORM.created_at.desc()).first()
+        DECISION_STAGES = ("gate_blocked", "order_submitted", "order_filled")
+        sig = session.query(SignalDecisionORM).filter(
+            SignalDecisionORM.strategy_id == strategy_id,
+            SignalDecisionORM.symbol == symbol,
+            SignalDecisionORM.stage.in_(DECISION_STAGES),
+        ).order_by(SignalDecisionORM.timestamp.desc()).first()
         if sig:
+            accepted = sig.stage in ("order_submitted", "order_filled")
+            meta = sig.decision_metadata or {}
+            _side = "BUY" if sig.direction == "long" else "SELL" if sig.direction == "short" else None
             steps.append(TradeLifecycleStep(
                 step="signal",
-                timestamp=sig.created_at.isoformat() if sig.created_at else None,
+                timestamp=sig.timestamp.isoformat() if sig.timestamp else None,
                 details={
-                    "decision": sig.decision,
-                    "signal_type": sig.signal_type,
-                    "side": sig.side,
-                    "conviction": sig.metadata_json.get("conviction_score") if sig.metadata_json else None,
+                    "decision": "ACCEPTED" if accepted else "REJECTED",
+                    "stage": sig.stage,
+                    "signal_type": "EXIT" if "EXIT" in str(meta.get("action", "")) else "ENTRY",
+                    "side": _side,
+                    "conviction": meta.get("conviction_score") or sig.score,
+                    "reason": sig.reason,
                 },
             ))
 

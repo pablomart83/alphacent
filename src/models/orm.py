@@ -795,7 +795,23 @@ class CacheMetadataORM(Base):
 
 
 class SignalDecisionLogORM(Base):
-    """Signal decision log for tracking accepted/rejected signals with reasons."""
+    """[DEPRECATED 2026-05-04] Legacy signal-decision table.
+
+    WRITERS: `trading_scheduler._log_signal_decision` still writes here for
+    backward compatibility during the deprecation window. All other paths
+    use `SignalDecisionORM` (the unified funnel).
+
+    READERS: All application code now reads from `SignalDecisionORM`. This
+    table is retained read-only for historical data lookups until the
+    next clean-up pass.
+
+    Do NOT add new writers. Do NOT add new readers. Use `SignalDecisionORM`
+    and `src.analytics.decision_log.record_decision()` for any new code.
+
+    Retirement plan: after 30 days of the unified funnel serving all
+    endpoints cleanly, drop the dual-write in `_log_signal_decision` and
+    then drop this table.
+    """
     __tablename__ = "signal_decision_log"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

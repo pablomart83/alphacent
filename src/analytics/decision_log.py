@@ -12,6 +12,39 @@ Design goals:
   scheduled yet, the table grows ~10k rows/cycle × 2 cycles/day = 20k/day =
   600k/month. Acceptable short-term given we're the only DB user.
 
+Stage taxonomy — single source of truth for the funnel. Every downstream
+reader (UI widgets, analytics endpoints, cycle-history views) agrees on
+this vocabulary so "what happened to this signal?" has one answer.
+
+    Upstream (strategy lifecycle — before a signal exists):
+      proposed              — proposer emitted a strategy
+      wf_validated          — walk-forward test passed
+      wf_rejected           — walk-forward test failed
+      cross_validation      — family-level cross-validation verdict
+      activated             — passed activation criteria → BACKTESTED
+      rejected_act          — failed activation criteria
+
+    Signal lifecycle (a signal exists, moving toward an order):
+      signal_emitted        — strategy_engine emitted a signal
+      gate_blocked          — blocked at coordination OR risk validation
+                              (this replaces the legacy `signal_decision_log`
+                              REJECTED rows from trading_scheduler)
+      order_submitted       — validation passed, order sent to eToro
+                              (this replaces the legacy `signal_decision_log`
+                              ACCEPTED rows)
+      order_filled          — eToro confirmed fill
+      order_failed          — eToro rejected the order
+
+The signal-to-order half of the funnel (gate_blocked → order_submitted →
+order_filled) is what the "Signals" and "Orders" UI tabs display. The
+upstream half is what the "Walk-Forward" and "Activation" cards display.
+A cycle_id ties both halves together for per-cycle drill-down.
+
+2026-05-04 unification: the legacy `signal_decision_log` table is being
+retired. `trading_scheduler._log_signal_decision` now dual-writes to both
+tables during the deprecation window (see SignalDecisionLogORM docstring
+in src/models/orm.py). All readers have been migrated.
+
 Observability:
 - On write failure we still don't raise (trading must not break), but we
   surface the error at WARNING level with a 5-minute cooldown per error

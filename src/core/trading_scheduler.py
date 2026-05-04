@@ -2504,7 +2504,32 @@ class TradingScheduler:
         decision: str,
         rejection_reason: str = None,
     ):
-        """Persist a signal decision (accepted/rejected) to the database and broadcast via WebSocket."""
+        """Persist a signal decision (accepted/rejected) to the database and broadcast via WebSocket.
+
+        Observability unification (2026-05-04):
+          The AlphaCent observability layer had TWO parallel decision tables
+          that did not know about each other:
+            - `signal_decisions` (SignalDecisionORM) — the funnel, written
+              by `decision_log.record_decision` from proposer, portfolio
+              manager, and order executor.
+            - `signal_decision_log` (SignalDecisionLogORM) — legacy, written
+              ONLY by this function (and `_log_coordination_rejection`).
+          Result: coordinator + validator rejections never appeared in the
+          funnel. The UI, analytics endpoints, and diagnostic queries had
+          to union the two tables OR miss half the decisions.
+
+          Fix: dual-write. Every call here also emits a row to the unified
+          `signal_decisions` table via `decision_log.record_decision`.
+          The legacy write is kept for the audit trail / signals widget
+          read compatibility until those readers are migrated (same commit).
+          After a deprecation window the legacy write + table will be
+          dropped.
+
+          Mapping from legacy → unified:
+            decision=ACCEPTED → stage='order_submitted', decision='accepted'
+            decision=REJECTED → stage='gate_blocked',   decision='rejected'
+        """
+        # ─── Legacy write (kept temporarily — see docstring) ───────────────
         try:
             from src.models.orm import SignalDecisionLogORM
             from src.models.enums import SignalAction
@@ -2560,6 +2585,70 @@ class TradingScheduler:
 
         except Exception as e:
             logger.debug(f"Failed to log signal decision: {e}")
+
+        # ─── Unified write to the canonical funnel table ──────────────────
+        # This is the table the rest of the system (proposer, WF, portfolio
+        # manager, order executor, analytics) writes to. Without this second
+        # write, coordinator/validator rejections were invisible to the
+        # funnel — the screen your user sees was reconciling 3 tables that
+        # didn't agree. See docstring for full context.
+        try:
+            from src.analytics.decision_log import record_decision
+
+            action_val = signal.action.value if hasattr(signal.action, 'value') else str(signal.action)
+            direction = (
+                "long"
+                if ('LONG' in action_val or 'BUY' in action_val)
+                else "short"
+                if ('SHORT' in action_val or 'SELL' in action_val)
+                else None
+            )
+            # Decision taxonomy in the unified table:
+            #   'gate_blocked'    — any block between signal emission and
+            #                        order submission (coordination dedup,
+            #                        symbol cap, risk validation failure)
+            #   'order_submitted' — signal passed validation and made it
+            #                        onto the order-submit queue
+            # The unified funnel reader aggregates these plus the
+            # upstream stages (proposed / wf_validated / activated /
+            # signal_emitted / order_filled) for complete visibility.
+            if str(decision).upper() == "ACCEPTED":
+                unified_stage = "order_submitted"
+                unified_decision = "accepted"
+            else:
+                unified_stage = "gate_blocked"
+                unified_decision = "rejected"
+
+            _template_name = None
+            _confidence = None
+            try:
+                _confidence = float(signal.confidence) if signal.confidence is not None else None
+            except (TypeError, ValueError):
+                _confidence = None
+            # Template name from signal metadata when available
+            _sig_meta = getattr(signal, 'metadata', None)
+            if isinstance(_sig_meta, dict):
+                _template_name = _sig_meta.get('template_name')
+
+            record_decision(
+                stage=unified_stage,
+                decision=unified_decision,
+                strategy_id=signal.strategy_id,
+                template=_template_name or strategy_name,
+                symbol=signal.symbol,
+                direction=direction,
+                score=_confidence,
+                reason=rejection_reason,
+                metadata={
+                    "strategy_name": strategy_name,
+                    "confidence": _confidence,
+                    "action": action_val,
+                    "source": "trading_scheduler._log_signal_decision",
+                },
+            )
+        except Exception as e:
+            # Never raise — analytics writes must not break trading.
+            logger.debug(f"Failed to mirror signal decision to unified funnel: {e}")
 
     def _log_coordination_rejection(
         self,
