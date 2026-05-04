@@ -515,10 +515,10 @@ System state at session close:
   duplicate, etc.), not generic categories
 
 Last 4 commits on main (newest first):
-- <hash> docs: Session_Continuation — 2026-05-04 session + next kickoff
-- <hash> refactor: observability unification on signal_decisions
-- <hash> fix: risk-manager rejection reasons + cycle footer + eToro 404
-- <hash> fix: activation pipeline — backtest purity + VWAP DSL + pending cap
+- 0f29f38 docs: Session_Continuation — 2026-05-04 session + loser-pair P0 kickoff
+- a0b972c refactor: observability unification on signal_decisions
+- 1af9069 feat: risk-manager observability reasons + cycle footer + eToro 404 handler
+- a50bb6e fix: activation pipeline — backtest purity + VWAP DSL + WF cache invalidation
 
 ==========================================================================
 MISSION — P0: LOSER-PAIR PENALTY DATA-INTEGRITY FIX
