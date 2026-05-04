@@ -932,7 +932,23 @@ class AutonomousStrategyManager:
                     "alpha_edge_count": alpha_edge_count,
                     "bt_passed": bt_passed,
                     "bt_total": bt_passed + bt_failed,
-                    "strategies_activated": promoted_to_demo,
+                    # 2026-05-04 footer fix: report strategies that passed
+                    # activation criteria (BACKTESTED) — matches the inline
+                    # `[ACTIVATION] N activated` line emitted earlier in the
+                    # same cycle. The previous value `promoted_to_demo`
+                    # counts strategies that GOT A FIRST ORDER THIS CYCLE,
+                    # which is a strict subset (every BACKTESTED strategy
+                    # enters DEMO only on its first fill). In cycles where
+                    # signals defer (market closed, gate-blocked, pending
+                    # state), `promoted_to_demo` was 0 even when 4 strategies
+                    # were successfully activated. Creates false "nothing
+                    # happened" impression that costs investigation time.
+                    # Also include promoted_to_demo as an explicit separate
+                    # field for callers that care about fill-through (DB
+                    # already tracks both as `activated` and
+                    # `promoted_to_demo`).
+                    "strategies_activated": stats['strategies_activated'],
+                    "strategies_promoted_to_demo": promoted_to_demo,
                     "strategies_retired": stats['strategies_retired'],
                     "total_active": total_active,
                     "signals_generated": signals_generated,

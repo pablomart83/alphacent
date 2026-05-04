@@ -46,7 +46,7 @@ from typing import List, Optional, Dict
 
 from sqlalchemy.orm import Session
 
-from src.api.etoro_client import EToroAPIClient, EToroAPIError
+from src.api.etoro_client import EToroAPIClient, EToroAPIError, EToroOrderNotFoundError
 from src.models.database import Database
 from src.models.enums import OrderStatus, TradingMode
 from src.models.orm import OrderORM, PositionORM
@@ -149,7 +149,10 @@ class OrderMonitor:
             order_id: eToro order ID
             
         Returns:
-            Order status data or None if not available
+            Order status data, None on transient failure, or a sentinel
+            dict `{"_not_found": True}` if eToro returned 404 (order is
+            gone server-side). Callers should check for the sentinel and
+            mark their local order CANCELLED instead of retrying.
         """
         import time
         
@@ -166,6 +169,18 @@ class OrderMonitor:
             self._order_status_cache[order_id] = (status_data, time.time())
             logger.debug(f"Order {order_id} status from eToro API (cached for {self._cache_ttl}s)")
             return status_data
+        except EToroOrderNotFoundError:
+            # 404 — order gone server-side (user cancelled on eToro, or
+            # never-accepted). Cache the sentinel for the full TTL so we
+            # don't hit the API again for this doomed ID, and return it
+            # so the caller can transition the local order to CANCELLED.
+            sentinel = {"_not_found": True}
+            self._order_status_cache[order_id] = (sentinel, time.time())
+            logger.info(
+                f"Order {order_id}: eToro returned 404 — "
+                f"flagging as not-found (caller should mark CANCELLED)"
+            )
+            return sentinel
         except Exception as e:
             logger.error(f"Failed to get order status for {order_id}: {e}")
             return None
@@ -751,6 +766,24 @@ class OrderMonitor:
                             
                             if not status_data:
                                 # Failed to get status, skip this order
+                                continue
+
+                            # 404 sentinel: eToro has no record of this
+                            # order any more. Could be user-cancelled in the
+                            # eToro UI, expired server-side, or never
+                            # accepted. Mark our local row CANCELLED so we
+                            # stop polling. Bug trace 2026-05-04: without
+                            # this, order 348195217 (URI cancel) produced
+                            # hundreds of "Failed to get order status"
+                            # ERROR entries while we retried indefinitely.
+                            if status_data.get("_not_found"):
+                                logger.info(
+                                    f"Order {order.id} (eToro: {order.etoro_order_id}) — "
+                                    f"404 from eToro → marking CANCELLED"
+                                )
+                                order.status = OrderStatus.CANCELLED
+                                failed_count += 1
+                                self.invalidate_order_cache(order.etoro_order_id)
                                 continue
                             
                             # Parse status from response

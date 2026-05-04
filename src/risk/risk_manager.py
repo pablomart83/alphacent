@@ -245,7 +245,13 @@ class RiskManager:
         self._kill_switch_active = False
         self._circuit_breaker_activated_at: Optional[datetime] = None
         self._kill_switch_activated_at: Optional[datetime] = None
-        
+
+        # Last sizing decision — populated by calculate_position_size on
+        # every call, read by validate_signal for observability (decision-log
+        # writes when a signal dies in sizing). Key is used as the `reason`
+        # field in the gate_blocked decision row.
+        self._last_sizing_reason: str = ""
+
         logger.info(
             f"RiskManager initialized with config: "
             f"max_position_size={config.max_position_size_pct:.1%}, "
@@ -274,6 +280,121 @@ class RiskManager:
         # For eToro demo, quantity = amount (dollars invested)
         # This works for both external and autonomous positions
         return pos.quantity
+
+    def _get_pending_entry_exposure(
+        self,
+        symbol: str,
+    ) -> tuple[float, set, int]:
+        """Return pending (not-yet-filled) entry exposure for a symbol.
+
+        Returns:
+            (pending_exposure_dollars, strategies_with_pending_entry, pending_entry_count)
+
+        Why this exists (2026-05-04 audit):
+            The symbol concentration cap used to scan only `positions`
+            (filled, closed_at IS NULL). Between signal-time and
+            fill-time (minutes to hours on a market-closed deferral),
+            two distinct strategies with different primary symbols but
+            overlapping watchlists could both fire entries on the same
+            watchlist symbol. Each strategy's cap check saw
+            existing_exposure = $0 (no fills yet) and sized to the full
+            5% budget. When both filled, combined exposure hit ~7.3%
+            of equity — cap breached. Observed live: URI 2×$17.5K
+            orders from '4H ADX Trend Swing CAT LONG' + '...NXPI LONG'
+            at 09:34 and 09:43 UTC.
+
+            The proper fix is to make the cap check read the same world
+            the next cycle will read: filled positions PLUS pending
+            entries. This helper is the bridge.
+
+        Why only 'entry' orders:
+            - entry orders add exposure
+            - close orders reduce an existing position that is already
+              counted in `positions`; counting them would double-count
+              the reduction
+            - retirement orders are position-closures with a different
+              origin; same net-zero on current-exposure reasoning
+            - NULL order_action (legacy rows pre-2026-05-02): treat as
+              entry to be conservative (any remaining ambiguity leans
+              toward NOT over-sizing)
+
+        Fail-open: DB errors return (0, set(), 0) and log a warning.
+        A broken DB read must not cause the risk manager to crash the
+        signal path; the worst case is this check reverts to the
+        previous (positions-only) behaviour for the single failure.
+
+        Args:
+            symbol: Symbol to check. Case-insensitive — normalized
+                    to the form stored in orders.symbol via upper().
+
+        Returns:
+            Tuple of (pending_dollars, pending_strategy_id_set, count).
+        """
+        try:
+            from src.models.database import get_database
+            from src.models.orm import OrderORM
+            from src.models.enums import OrderStatus
+            db = get_database()
+            session = db.get_session()
+            try:
+                # PENDING + PARTIALLY_FILLED cover the in-flight states.
+                # Entries in these states WILL consume symbol budget once
+                # they fill (or have already consumed part of it via the
+                # filled leg of a PARTIALLY_FILLED order — which is why
+                # we count the full notional; the filled leg is already
+                # in `positions` but the still-pending leg is not).
+                rows = (
+                    session.query(
+                        OrderORM.strategy_id,
+                        OrderORM.quantity,
+                        OrderORM.order_action,
+                    )
+                    .filter(
+                        OrderORM.symbol == symbol.upper(),
+                        OrderORM.status.in_([
+                            OrderStatus.PENDING.value,
+                            OrderStatus.PARTIALLY_FILLED.value,
+                        ]),
+                    )
+                    .all()
+                )
+            finally:
+                session.close()
+        except Exception as e:
+            logger.warning(
+                f"Pending-order exposure query failed for {symbol}: {e} — "
+                f"cap check will use positions-only exposure (fail-open)"
+            )
+            return 0.0, set(), 0
+
+        pending_exposure = 0.0
+        pending_strategies: set = set()
+        pending_count = 0
+        for strategy_id, quantity, order_action in rows:
+            # Treat NULL order_action as 'entry' (conservative default
+            # for legacy rows — counting them can only tighten the cap,
+            # which is the safe direction).
+            if order_action in ('close', 'retirement'):
+                continue
+            try:
+                q = float(quantity or 0.0)
+            except (TypeError, ValueError):
+                q = 0.0
+            if q <= 0:
+                continue
+            pending_exposure += q
+            if strategy_id:
+                pending_strategies.add(strategy_id)
+            pending_count += 1
+
+        if pending_count > 0:
+            logger.debug(
+                f"Pending-entry exposure for {symbol}: "
+                f"${pending_exposure:.0f} across {pending_count} order(s) "
+                f"from {len(pending_strategies)} strategy/ies"
+            )
+
+        return pending_exposure, pending_strategies, pending_count
 
     @staticmethod
     def _filter_autonomous_positions(positions: List[Position]) -> List[Position]:
@@ -503,10 +624,18 @@ class RiskManager:
             base_position_size = self.calculate_position_size(signal, account, positions, strategy_allocation_pct)
             
             if base_position_size <= 0:
+                # Use the detailed rejection reason stashed by
+                # calculate_position_size — otherwise we'd write a useless
+                # "zero or negative" reason to signal_decisions and have to
+                # grep risk.log to find the real cause. The sentinel is
+                # reset at the top of every calculate_position_size call.
+                _rej_reason = getattr(self, "_last_sizing_reason", "") or (
+                    "Calculated position size is zero or negative"
+                )
                 return ValidationResult(
                     is_valid=False,
                     position_size=0.0,
-                    reason="Calculated position size is zero or negative"
+                    reason=_rej_reason,
                 )
 
             # Apply correlation adjustment if enabled
@@ -639,6 +768,12 @@ class RiskManager:
         """
         symbol = getattr(signal, 'symbol', '?')
 
+        # Reset the rejection-reason sentinel at the start of every call so
+        # stale reasons from a previous (0-returning) call don't bleed into
+        # this one if this call succeeds and skips the explicit clear at
+        # the bottom of the function.
+        self._last_sizing_reason = ""
+
         # ── Account state ────────────────────────────────────────────────────
         # Re-read balance live from DB for every order — the account object passed
         # in was fetched once at the start of the signal cycle and is stale by the
@@ -673,6 +808,10 @@ class RiskManager:
                 f"Insufficient balance for {symbol}: ${available_balance:.0f} available "
                 f"(minimum order ${MINIMUM_ORDER_SIZE:.0f}) — skipping"
             )
+            self._last_sizing_reason = (
+                f"insufficient_balance (${available_balance:.0f} < "
+                f"${MINIMUM_ORDER_SIZE:.0f} minimum)"
+            )
             return 0.0
 
         # Track whether any risk-reducing penalty fired. When True, the
@@ -701,6 +840,9 @@ class RiskManager:
         confidence = signal.confidence if signal.confidence and signal.confidence > 0 else 0.5
         if confidence < CONFIDENCE_FLOOR:
             logger.info(f"Signal confidence {confidence:.2f} below floor {CONFIDENCE_FLOOR} for {symbol} — skipping")
+            self._last_sizing_reason = (
+                f"confidence_below_floor ({confidence:.2f} < {CONFIDENCE_FLOOR})"
+            )
             return 0.0
         confidence_scalar = 0.5 + 0.5 * (confidence - CONFIDENCE_FLOOR) / (1.0 - CONFIDENCE_FLOOR)
         risk_pct = BASE_RISK_PCT * confidence_scalar  # 0.30%–0.60%
@@ -785,6 +927,10 @@ class RiskManager:
                 f"Strategy concurrent cap: {symbol} — {strategy_open_count}/{max_concurrent} "
                 f"positions open (allocation={strategy_allocation_pct:.1f}%)"
             )
+            self._last_sizing_reason = (
+                f"strategy_concurrent_cap ({strategy_open_count}/{max_concurrent} "
+                f"positions already open for this strategy)"
+            )
             return 0.0
 
         # ── Step 6: Symbol concentration cap ────────────────────────────────
@@ -794,18 +940,36 @@ class RiskManager:
         # ~$480K equity the cap is ~$24K per symbol, which lets a 2-3 position
         # conviction stack build on winners like NVDA without every new signal
         # being room-capped to near-zero.
+        #
+        # 2026-05-04: now also accounts for pending (unfilled) entry orders
+        # on this symbol. Without this, two strategies signalling the same
+        # watchlist symbol during market-closed hours each sized to the
+        # full 5% budget (each saw filled_exposure=0) and combined to
+        # breach the cap on market open. See `_get_pending_entry_exposure`.
         symbol_cap = equity * 0.05
-        existing_symbol_exposure = sum(
+        filled_symbol_exposure = sum(
             self._get_position_value(pos)
             for pos in positions
             if pos.closed_at is None
             and not getattr(pos, 'pending_closure', False)
             and pos.symbol == symbol
         )
+        pending_symbol_exposure, _pending_strats, _pending_count = (
+            self._get_pending_entry_exposure(symbol)
+        )
+        existing_symbol_exposure = filled_symbol_exposure + pending_symbol_exposure
         if existing_symbol_exposure >= symbol_cap:
             logger.info(
-                f"Symbol cap exhausted: {symbol} existing=${existing_symbol_exposure:.0f} "
+                f"Symbol cap exhausted: {symbol} "
+                f"filled=${filled_symbol_exposure:.0f} + "
+                f"pending=${pending_symbol_exposure:.0f} "
+                f"({_pending_count} order(s)) = ${existing_symbol_exposure:.0f} "
                 f">= cap=${symbol_cap:.0f}"
+            )
+            self._last_sizing_reason = (
+                f"symbol_cap_exhausted ({symbol} at "
+                f"${existing_symbol_exposure:.0f}/${symbol_cap:.0f}, "
+                f"${pending_symbol_exposure:.0f} pending)"
             )
             return 0.0
         position_size = min(position_size, symbol_cap - existing_symbol_exposure)
@@ -855,6 +1019,10 @@ class RiskManager:
                 logger.info(
                     f"Portfolio heat cap reached: current=${current_heat:.0f}, "
                     f"max=${max_heat:.0f} ({MAX_PORTFOLIO_HEAT_PCT:.0%} of equity)"
+                )
+                self._last_sizing_reason = (
+                    f"portfolio_heat_cap_reached (current=${current_heat:.0f}, "
+                    f"max=${max_heat:.0f})"
                 )
                 return 0.0
             # Scale down to fit within remaining heat budget
@@ -965,6 +1133,11 @@ class RiskManager:
         # penalty) fired, DO NOT bump — bumping would defeat the penalty. Return
         # 0 instead so the trade is skipped.
         if position_size <= 0:
+            # Earlier caps brought size to 0 without explicit early return
+            # (shouldn't happen in practice but defensive). Reason was
+            # already set by the cap that trimmed it, or fallback below.
+            if not self._last_sizing_reason:
+                self._last_sizing_reason = "size_collapsed_after_all_caps"
             return 0.0
         if position_size < MINIMUM_ORDER_SIZE:
             if penalty_applied:
@@ -972,6 +1145,10 @@ class RiskManager:
                     f"Size ${position_size:.0f} below minimum ${MINIMUM_ORDER_SIZE:.0f} "
                     f"for {symbol} AND penalty applied — skipping trade "
                     f"(penalty mechanisms would be defeated by floor bump)"
+                )
+                self._last_sizing_reason = (
+                    f"below_min_with_penalty (size=${position_size:.0f} < "
+                    f"${MINIMUM_ORDER_SIZE:.0f}, penalty_applied=True)"
                 )
                 return 0.0
             if available_balance >= MINIMUM_ORDER_SIZE:
@@ -985,8 +1162,15 @@ class RiskManager:
                     f"Size ${position_size:.0f} below minimum and insufficient balance "
                     f"(${available_balance:.0f}) for {symbol}"
                 )
+                self._last_sizing_reason = (
+                    f"insufficient_balance_for_min (size=${position_size:.0f}, "
+                    f"available=${available_balance:.0f}, min=${MINIMUM_ORDER_SIZE:.0f})"
+                )
                 return 0.0
 
+        # Successful sizing — clear the reason so a subsequent call doesn't
+        # inherit the last-call's rejection reason by mistake.
+        self._last_sizing_reason = ""
         logger.info(
             f"Position size: {symbol} ${position_size:.0f} "
             f"(equity=${equity:.0f}, risk={risk_pct:.3%}, sl={stop_loss_pct:.1%}, "
@@ -1117,6 +1301,12 @@ class RiskManager:
             Tuple of (is_valid, reason)
         """
         # Calculate existing exposure to this symbol (all positions including external)
+        #
+        # 2026-05-04: extended to include pending (unfilled) entry orders.
+        # See `_get_pending_entry_exposure` for rationale. Without this,
+        # two strategies firing on the same symbol during market-closed
+        # hours each passed this check (filled-only exposure = 0) and
+        # combined to breach the cap on fill.
         existing_symbol_exposure = 0.0
         strategies_holding_symbol = set()
 
@@ -1124,6 +1314,15 @@ class RiskManager:
             if pos.symbol == symbol and pos.closed_at is None and not getattr(pos, 'pending_closure', False):
                 existing_symbol_exposure += self._get_position_value(pos)
                 strategies_holding_symbol.add(pos.strategy_id)
+
+        # Pending entry orders (PENDING / PARTIALLY_FILLED, order_action='entry'
+        # or NULL). Contribute to exposure, strategy-count, and position-count
+        # budgets so the cap check sees the same world the next cycle will see.
+        pending_exposure, pending_strategies, pending_count = (
+            self._get_pending_entry_exposure(symbol)
+        )
+        existing_symbol_exposure += pending_exposure
+        strategies_holding_symbol |= pending_strategies
 
         # Check 1: Symbol exposure limit (based on equity)
         total_symbol_exposure = existing_symbol_exposure + position_size
@@ -1134,12 +1333,16 @@ class RiskManager:
             logger.warning(
                 f"Symbol concentration limit exceeded for {symbol}: "
                 f"total={total_symbol_exposure:.2f} > max={max_symbol_exposure:.2f} "
-                f"({self.config.max_symbol_exposure_pct:.1%} of portfolio)"
+                f"({self.config.max_symbol_exposure_pct:.1%} of portfolio) "
+                f"[filled+positions=${existing_symbol_exposure - pending_exposure:.0f}, "
+                f"pending=${pending_exposure:.0f} ({pending_count} order(s)), "
+                f"new=${position_size:.0f}]"
             )
             return False, (
                 f"Symbol concentration limit: {symbol} exposure would be "
                 f"${total_symbol_exposure:.2f} (max ${max_symbol_exposure:.2f}, "
-                f"{self.config.max_symbol_exposure_pct:.1%} of portfolio)"
+                f"{self.config.max_symbol_exposure_pct:.1%} of portfolio; "
+                f"includes ${pending_exposure:.0f} from {pending_count} pending order(s))"
             )
 
         # Check 2: Max strategies per symbol limit
@@ -1155,11 +1358,13 @@ class RiskManager:
             )
 
         # Check 3: Max positions per symbol limit (count-based, not just strategy-based)
+        # Includes pending entry orders — each will become a position once filled.
         position_count_for_symbol = sum(
             1 for pos in positions
             if pos.symbol == symbol and pos.closed_at is None
             and not getattr(pos, 'pending_closure', False)
         )
+        position_count_for_symbol += pending_count
         max_positions = getattr(self.config, 'max_positions_per_symbol', 3)
         if position_count_for_symbol >= max_positions:
             logger.warning(

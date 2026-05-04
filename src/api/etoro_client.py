@@ -38,6 +38,26 @@ class EToroAPIError(Exception):
     pass
 
 
+class EToroOrderNotFoundError(EToroAPIError):
+    """Raised when an order or position endpoint returns 404.
+
+    Distinct from generic EToroAPIError so callers (`order_monitor`,
+    `trading_scheduler`) can react specifically — e.g. mark the
+    local record CANCELLED and stop polling — instead of retrying
+    forever and flooding errors.log.
+
+    Triggered when we have a local order row pointing at an eToro
+    order_id that eToro no longer recognises:
+      - User cancelled from eToro UI (happened 2026-05-04 with
+        URI 348195217 which produced hundreds of ERROR entries
+        until manual intervention)
+      - Order expired server-side without propagation to us
+      - Order was never accepted by eToro but we persisted the
+        stub locally
+    """
+    pass
+
+
 class CircuitBreakerOpen(EToroAPIError):
     """Raised when circuit breaker is open and request is rejected."""
     def __init__(self, category: str, message: str = ""):
@@ -317,6 +337,15 @@ class EToroAPIClient:
                 except (ValueError, requests.exceptions.JSONDecodeError):
                     # Non-JSON error body — fall back to raw text
                     logger.error(f"{error_msg}, Response: {response.text}")
+                # 404 on an order/position endpoint is distinct: the entity
+                # is gone server-side. Raise a typed exception so callers
+                # can handle it (mark CANCELLED + stop polling) rather than
+                # retrying forever. Detect by status code + endpoint path
+                # pattern so we don't mis-classify a 404 on a symbol lookup.
+                if response.status_code == 404 and (
+                    "/orders/" in endpoint or "/positions/" in endpoint
+                ):
+                    raise EToroOrderNotFoundError(error_msg)
                 raise EToroAPIError(error_msg)
 
             # Parse response
@@ -1452,6 +1481,17 @@ class EToroAPIClient:
             self._record_success("orders")
             return data
 
+        except EToroOrderNotFoundError:
+            # 404: eToro doesn't know this order any more. This is a real
+            # state ("order gone") not a transient failure — don't log as
+            # ERROR, don't record as circuit-breaker failure, and re-raise
+            # the typed exception so the caller can mark the local order
+            # CANCELLED and stop polling.
+            logger.info(
+                f"Order {order_id} not found on eToro (404) — "
+                f"treating as CANCELLED/EXPIRED server-side"
+            )
+            raise
         except Exception as e:
             self._record_failure("orders")
             logger.error(f"Failed to fetch order status for {order_id}: {e}")

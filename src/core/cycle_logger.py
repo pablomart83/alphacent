@@ -187,9 +187,27 @@ class CycleLogger:
             self._write(f"  Proposals: {_generated} "
                          f"(DSL={stats.get('template_count', '?')}, AE={stats.get('alpha_edge_count', '?')})")
         self._write(f"  Walk-forward: {stats.get('bt_passed', '?')}/{stats.get('bt_total', '?')} passed")
-        self._write(f"  Activated: {stats.get('strategies_activated', 0)} | "
-                     f"Retired: {stats.get('strategies_retired', 0)} | "
-                     f"Total active: {stats.get('total_active', '?')}")
+        # 2026-05-04: report both BACKTESTED (activated) and DEMO-promoted
+        # counts when they differ. `strategies_activated` = passed activation
+        # criteria this cycle. `strategies_promoted_to_demo` = subset that
+        # got their first order this cycle. In cycles where signals defer
+        # (market closed, gate-blocked, pending) the two diverge — hiding
+        # the BACKTESTED count (as the previous implementation did) created
+        # false "nothing happened" footers.
+        _activated = stats.get('strategies_activated', 0)
+        _promoted = stats.get('strategies_promoted_to_demo', _activated)
+        if _promoted != _activated:
+            self._write(
+                f"  Activated: {_activated} (→ {_promoted} promoted to DEMO) | "
+                f"Retired: {stats.get('strategies_retired', 0)} | "
+                f"Total active: {stats.get('total_active', '?')}"
+            )
+        else:
+            self._write(
+                f"  Activated: {_activated} | "
+                f"Retired: {stats.get('strategies_retired', 0)} | "
+                f"Total active: {stats.get('total_active', '?')}"
+            )
         self._write(f"  Signals: {stats.get('signals_generated', 0)} -> "
                      f"Orders: {stats.get('orders_submitted', 0)}")
         errors = stats.get('errors', [])
