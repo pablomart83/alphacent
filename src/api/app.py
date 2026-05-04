@@ -93,6 +93,60 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     db = get_database()
     logger.info(f"Database initialized")
 
+    # Startup self-check — trade_journal write-path regression guard.
+    # The loser-pair sizing penalty (risk_manager Step 10b) keys on
+    # trade_metadata->>'template_name'. If the write path ever regresses
+    # and 0 of the last N closed trades carry the key, the penalty
+    # silently stops firing. This emits a WARNING to surface the regression
+    # within one restart instead of letting it decay for weeks.
+    try:
+        from sqlalchemy import text as _sa_text
+        _sess = db.get_session()
+        try:
+            _row = _sess.execute(
+                _sa_text(
+                    """
+                    SELECT COUNT(*) AS total,
+                           COUNT(*) FILTER (
+                             WHERE trade_metadata IS NOT NULL
+                               AND (trade_metadata::jsonb) ? 'template_name'
+                           ) AS with_template
+                    FROM (
+                      SELECT trade_metadata FROM trade_journal
+                      WHERE pnl IS NOT NULL
+                      ORDER BY exit_time DESC NULLS LAST
+                      LIMIT 1000
+                    ) recent
+                    """
+                )
+            ).fetchone()
+            _total = int(_row.total) if _row and _row.total else 0
+            _with = int(_row.with_template) if _row and _row.with_template else 0
+            if _total >= 50 and _with == 0:
+                logger.warning(
+                    "STARTUP SELF-CHECK FAILED: 0 of last %d closed trades carry "
+                    "trade_metadata.template_name. The loser-pair sizing penalty "
+                    "(risk_manager Step 10b) cannot fire without this key. "
+                    "Investigate trade_journal write path (strategy_engine signal "
+                    "enrichment + order_metadata flow).",
+                    _total,
+                )
+            elif _total >= 50:
+                _pct = (100.0 * _with) / _total
+                _lvl = logging.INFO if _pct >= 50.0 else logging.WARNING
+                logger.log(
+                    _lvl,
+                    "Startup self-check: %d of last %d closed trades carry "
+                    "template_name (%.1f%%)",
+                    _with,
+                    _total,
+                    _pct,
+                )
+        finally:
+            _sess.close()
+    except Exception as _selfcheck_err:
+        logger.debug("Trade-journal startup self-check skipped: %s", _selfcheck_err)
+
     # Connect auth manager to DB and ensure admin user exists.
     # Only creates a default admin if NO users exist at all (fresh DB).
     # The default password is intentionally weak — the operator MUST change it

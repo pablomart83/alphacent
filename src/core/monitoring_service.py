@@ -3176,6 +3176,25 @@ class MonitoringService:
                 side_str = str(pos.side).upper() if pos.side else 'LONG'
                 is_long = 'LONG' in side_str or 'BUY' in side_str
                 exit_reason = getattr(pos, 'closure_reason', None) or "pending_closure"
+
+                # Recover template_name from the strategy row so the loser-pair
+                # penalty keyed on (template, symbol) counts this trade. Without
+                # this, monitoring-service force-closes (pending_closure path)
+                # bypass the feedback loop.
+                _tname_ms = None
+                try:
+                    from src.models.orm import StrategyORM as _SORM
+                    _sess_ms = self.db.get_session()
+                    try:
+                        _s_row = _sess_ms.query(_SORM).filter(
+                            _SORM.id == (pos.strategy_id or "")
+                        ).first()
+                        if _s_row and isinstance(_s_row.strategy_metadata, dict):
+                            _tname_ms = _s_row.strategy_metadata.get('template_name') or getattr(_s_row, 'name', None)
+                    finally:
+                        _sess_ms.close()
+                except Exception:
+                    _tname_ms = None
                 
                 # Retry journal writes to handle SQLite "database is locked" errors
                 # when multiple close orders fire in rapid succession
@@ -3191,6 +3210,7 @@ class MonitoringService:
                             entry_size=getattr(pos, 'invested_amount', None) or close_dollar_amount or 0,
                             entry_reason="autonomous_signal",
                             order_side="BUY" if is_long else "SELL",
+                            metadata={"template_name": _tname_ms} if _tname_ms else None,
                         )
                         journal.log_exit(
                             trade_id=str(pos.id),

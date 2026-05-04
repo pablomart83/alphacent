@@ -1770,6 +1770,23 @@ class OrderMonitor:
                         from src.analytics.trade_journal import TradeJournal
                         journal = TradeJournal(self.db)
                         
+                        # Recover template_name from the strategy row so backfilled
+                        # entries carry the template context needed by the
+                        # (template, symbol) loser-pair feedback loop. Without this,
+                        # positions discovered via eToro sync (without an originating
+                        # DB order) write trade_journal rows with NULL template and
+                        # are invisible to the loser penalty.
+                        _tname_om = None
+                        try:
+                            from src.models.orm import StrategyORM as _SORM
+                            _s_row = session.query(_SORM).filter(
+                                _SORM.id == (db_pos.strategy_id or "")
+                            ).first()
+                            if _s_row and isinstance(_s_row.strategy_metadata, dict):
+                                _tname_om = _s_row.strategy_metadata.get('template_name') or getattr(_s_row, 'name', None)
+                        except Exception:
+                            _tname_om = None
+
                         # Ensure entry exists in journal (may be missing for sync-created positions)
                         journal.log_entry(
                             trade_id=str(db_pos.id),
@@ -1780,6 +1797,7 @@ class OrderMonitor:
                             entry_size=db_pos.invested_amount or db_pos.quantity or 0,
                             entry_reason="autonomous_signal",
                             order_side="BUY" if is_long else "SELL",
+                            metadata={"template_name": _tname_om} if _tname_om else None,
                         )
                         journal.log_exit(
                             trade_id=str(db_pos.id),

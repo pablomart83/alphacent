@@ -6,7 +6,7 @@ Validates: Requirement 11.4
 """
 
 import logging
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from uuid import uuid4
 
@@ -391,7 +391,29 @@ async def place_order(
             action = SignalAction.ENTER_LONG
         else:
             action = SignalAction.EXIT_LONG
-        
+
+        # Recover template_name from the parent strategy so manual orders still
+        # flow through the (template, symbol) loser-pair feedback loop. A manual
+        # order associated with a strategy deserves the same accounting as an
+        # autonomous order.
+        _manual_tname = None
+        try:
+            from src.models.database import get_database as _get_db
+            from src.models.orm import StrategyORM as _SORM
+            _sess_m = _get_db().get_session()
+            try:
+                _s_row = _sess_m.query(_SORM).filter(_SORM.id == request.strategy_id).first()
+                if _s_row and isinstance(_s_row.strategy_metadata, dict):
+                    _manual_tname = _s_row.strategy_metadata.get('template_name') or getattr(_s_row, 'name', None)
+            finally:
+                _sess_m.close()
+        except Exception:
+            _manual_tname = None
+
+        _manual_meta: Dict[str, Any] = {"manual": True, "user": username}
+        if _manual_tname:
+            _manual_meta["template_name"] = _manual_tname
+
         signal = TradingSignal(
             strategy_id=request.strategy_id,
             symbol=request.symbol,
@@ -399,7 +421,7 @@ async def place_order(
             confidence=1.0,  # Manual orders have full confidence
             reasoning=f"Manual order by {username}",
             generated_at=datetime.now(),
-            metadata={"manual": True, "user": username}
+            metadata=_manual_meta
         )
         
         # Execute signal

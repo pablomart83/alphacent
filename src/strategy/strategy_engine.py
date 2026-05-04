@@ -5179,6 +5179,31 @@ class StrategyEngine:
                 logger.info(f"{symbol}: signal generation ({engine_label}) took {signal_time:.2f}s")
                 
                 if signal:
+                    # Canonical metadata enrichment — single write-site for every
+                    # engine path (DSL, Alpha Edge, Pairs, future engines). Downstream
+                    # consumers rely on signal.metadata['template_name']:
+                    #   - risk_manager loser-pair penalty lookup (Step 10b)
+                    #   - trade_journal write via order_metadata spread in order_monitor
+                    #   - decision_log funnel rows
+                    # Source of truth: strategy.metadata['template_name'] set at proposal time.
+                    # Falls back to strategy.name so a strategy missing template metadata
+                    # (legacy/bootstrap) still gets a stable identifier.
+                    try:
+                        _tname = None
+                        if getattr(strategy, 'metadata', None) and isinstance(strategy.metadata, dict):
+                            _tname = strategy.metadata.get('template_name')
+                        if not _tname:
+                            _tname = getattr(strategy, 'name', None)
+                        if _tname:
+                            if not hasattr(signal, 'metadata') or signal.metadata is None:
+                                signal.metadata = {}
+                            # Preserve any template_name already set by the engine
+                            # (e.g. pairs-trading partner signals) — only fill if absent.
+                            if not signal.metadata.get('template_name'):
+                                signal.metadata['template_name'] = _tname
+                    except Exception as _enrich_err:
+                        logger.debug(f"template_name enrichment failed for {symbol}: {_enrich_err}")
+
                     # If we have an open position in this symbol, only allow exit signals
                     # Entry signals are suppressed — can't enter twice
                     from src.models.enums import SignalAction

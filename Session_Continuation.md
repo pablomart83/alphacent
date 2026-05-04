@@ -15,11 +15,11 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 4, 2026, ~11:20 UTC, post-observability-unification sprint)
+## Current System State (May 4, 2026, ~12:15 UTC, post-loser-pair-penalty fix)
 
-- **Equity:** ~$478K
-- **Open positions:** 78
-- **Active strategies:** 58 (+4 ready-to-activate from most recent cycle)
+- **Equity:** ~$479K
+- **Open positions:** 77
+- **Active strategies:** 58 (+2 ready-to-activate from most recent cycle: TSM, SILVER)
 - **Directional split:** ~78% LONG / ~6% SHORT
 - **Market regime (equity):** `TRENDING_UP_STRONG` (90% confidence)
 - **Market regime (crypto):** `RANGING_LOW_VOL`
@@ -28,10 +28,11 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
 **Health:**
-- errors.log: 0 timestamped entries since 10:47 UTC restart
-- warnings.log: clean (GER40 4h freshness only on Sunday/Monday AM)
-- MQS: 85/100 "high" persisting across hourly + daily snapshots
-- Cycle activation rate: 4-6 per cycle (up 3-5× from this morning's 0-1 baseline)
+- errors.log: 0 timestamped entries since 11:52 UTC restart
+- warnings.log: clean
+- MQS: 85/100 "high" persisting
+- Cycle activation rate: 2-4 per cycle, 15/19 WF pass (78.9%)
+- Unified funnel: all post-fix `signal_emitted` / `gate_blocked` / `order_submitted` rows carry `template_name` (45/45, 29/29, 2/2 last cycle)
 
 **Data routing matrix (unchanged from 2026-05-03 evening):**
 
@@ -48,6 +49,64 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 | OIL @ 4h, COPPER @ 4h | FMP | 5y | Yahoo |
 
 287 non-crypto symbols fully backfilled at FMP 5y. Premium-blocked set (DAX, CAC, oil-1h, copper-1h, non-US indices at 4h) flows through Yahoo with visible engine-cap truncation logs.
+
+---
+
+## Session shipped 2026-05-04 afternoon — P0 loser-pair penalty data integrity
+
+Single-sprint fix for the silent-failure rail discovered during the morning observability verification. The 2026-05-02 TSLA audit had added a per-pair sizing penalty (`risk_manager.calculate_position_size` Step 10b) that halves position size when a `(template, symbol)` pair has ≥3 closed trades with net-negative P&L. The lookup keys on `trade_journal.trade_metadata->>'template_name'` — a key that the trade-journal write path had **never populated**. Zero of 892 closed trades carried it, so the penalty never fired. Known losing combos got sized at full budget every time.
+
+### Root cause
+
+No single write site was to blame — there were five paths into `trade_journal.log_entry` and every one of them omitted `template_name`:
+
+- `order_monitor.check_submitted_orders` (the async fill path, main production path) spread `order.order_metadata` keys into the journal metadata. The spread was correct; `template_name` simply wasn't in `order.order_metadata` because it wasn't in `signal.metadata` to begin with.
+- `order_executor._handle_buy_fill` / `_handle_sell_fill` (synchronous fill) ignored order metadata.
+- `portfolio_manager._close_positions_for_retirement` and `monitoring_service` pending-closure paths (defensive "make sure an entry row exists" backfill) passed no metadata at all.
+- `api/routers/orders.py` manual-order submission had no strategy context in signal metadata.
+
+Deeper: the DSL signal path in `strategy_engine._generate_signal_for_symbol` built metadata with `strategy_name` but not `template_name`. Alpha Edge signals used `template_type` (a different key). There was no canonical write-site that guaranteed every signal carried its template identifier.
+
+### Fix
+
+Single architectural write-site in `strategy_engine.generate_signals` — right after a signal is returned from either the DSL or Alpha Edge engine, before conviction/frequency/ML filtering and before risk validation. Source: `strategy.metadata['template_name']` (populated at proposal time); fallback: `strategy.name`. This single line guarantees every signal from every current and future engine carries `template_name` into downstream stages. Since `trading_scheduler` already copies `signal.metadata → order.order_metadata` at submit and `order_monitor` spreads `order.order_metadata` into the journal write, the full chain is repaired with one enrichment.
+
+**Secondary fixes for defensive paths** (where signal metadata isn't available — force-close, sync-created position backfill, manual order submission): each recovers `template_name` via a small DB lookup on the strategy row. Pairs-trading hedge-leg order creation in `trading_scheduler` now preserves `order_metadata` too (it was dropping it previously). Files touched:
+
+- `src/strategy/strategy_engine.py` — canonical enrichment after signal emission
+- `src/core/trading_scheduler.py` — hedge-leg `order_metadata` preservation
+- `src/strategy/portfolio_manager.py` — strategy-retired force-close lookup
+- `src/core/monitoring_service.py` — pending-closure force-close lookup
+- `src/core/order_monitor.py` — sync-created-position backfill lookup
+- `src/api/routers/orders.py` — manual-order strategy lookup (+ `Any` import)
+- `src/api/app.py` — startup self-check: `WARNING` if 0 of last-1000 closed trades carry `template_name`, so a future regression surfaces within one restart
+
+### Backfill
+
+Historical rows: 216 of 892 closed trades recovered via `strategies.strategy_metadata->>'template_name'` (single SQL transaction, `scripts/backfill_trade_journal_template_name.sql`). 676 rows unrecoverable — their originating strategies have been retired and deleted from the `strategies` table, and `strategy_proposals` coverage is minimal for older trades (the proposals table is newer than most of the historical journal). Backfilled rows tagged `trade_metadata.backfill_source = 'legacy_backfill_2026_05_05'` + `backfill_template_src = 'strategies'` for auditability.
+
+### Verification
+
+Six real `(template, symbol)` loser pairs became eligible for the penalty after the backfill:
+
+| symbol | template | trades | net P&L |
+|---|---|---|---|
+| SCCO | EMA Ribbon Expansion Long | 3 | -$304 |
+| HIMS | 4H VWAP Trend Continuation | 4 | -$225 |
+| GEV | 4H EMA Ribbon Trend Long | 5 | -$220 |
+| GS | ATR Dynamic Trend Follow | 6 | -$122 |
+| PYPL | 4H ADX Trend Swing | 4 | -$91 |
+| BTC | EMA Pullback Momentum | 4 | -$7 |
+
+`scripts/verify_loser_pair_penalty.py` invokes the live `RiskManager._get_symbol_template_loser_stats` against production DB: all 6 return `would_fire_penalty=True`; control target returns `trades=0`. Standing verification tool.
+
+Live-fire cycle at 12:05 UTC post-deploy: 400 candidates → 15/19 WF pass (78.9%) → 2 activated (Keltner TSM LONG S=1.78, 4H EMA Ribbon SILVER LONG S=1.48). Funnel rows: 45 `signal_emitted`, 29 `gate_blocked`, 2 `order_submitted` — **every row carries `template_name`**. GS × `ATR Dynamic Trend Follow` entry signal surfaced and was blocked at the `Symbol limit` gate (upstream of sizing), so the `Loser penalty:` log-line didn't emit this cycle — but the path is armed and will fire the moment a loser-pair signal clears the position-limit check.
+
+errors.log: 0 entries post-restart. warnings.log: clean. Startup self-check emitted the expected `STARTUP SELF-CHECK FAILED: 0 of last 892 closed trades carry trade_metadata.template_name` WARNING on first boot after the fix; will flip to INFO on the next restart once ≥50 post-fix trades have cleared.
+
+### Ordering note
+
+The per-strategy symbol-count cap (`Symbol limit: N existing positions in SYM`) runs BEFORE sizing. If a symbol is at its per-strategy cap, the signal dies there regardless of whether the loser-pair penalty would also have caught it. That's correct — position limits are hard gates, the sizing penalty is a soft de-risker. No code change needed; just documenting the priority for future debugging.
 
 ---
 
@@ -125,19 +184,9 @@ Funnel stage counts across last 90 min:
  wf_validated     | accepted |    46
 ```
 
-### Latent bug discovered but not fixed — loser-pair penalty silently disabled
+### Latent bug discovered — loser-pair penalty silently disabled (RESOLVED 2026-05-04 afternoon, see block above)
 
-While verifying the Sprint 2 observability fix, confirmed that the loser-pair sizing penalty (added in the 2026-05-02 TSLA audit) **has never fired since it was written**. `risk_manager._get_symbol_template_loser_stats` queries `trade_journal.trade_metadata->>'template_name'` to find the (template, symbol) pair. The trade-journal write path never populates `template_name`:
-
-```
-SELECT COUNT(*), COUNT(*) FILTER (WHERE trade_metadata::text LIKE '%template_name%')
-  FROM trade_journal WHERE pnl IS NOT NULL;
- count | with_template
--------+---------------
-   891 |             0
-```
-
-Zero of 891 closed trades have template metadata. The lookup always returns `{'trades': 0, 'pnl': 0}`, so the per-pair penalty never halves size on known-losers. The penalty we DID see firing live on MU/CAT at 11:14 was vol-scaling, not loser-pair. This is a P0-next-session item — a risk rail that appears to protect against pile-up on losing combos but actually does nothing.
+While verifying the Sprint 2 observability fix, confirmed that the loser-pair sizing penalty (added in the 2026-05-02 TSLA audit) **had never fired since it was written**. `risk_manager._get_symbol_template_loser_stats` queries `trade_journal.trade_metadata->>'template_name'` — a key the write path never populated. Zero of 891 closed trades carried it. Fixed in the afternoon sprint (see "Session shipped 2026-05-04 afternoon — P0 loser-pair penalty data integrity" above).
 
 **Files changed today:**
 - Sprint 1: `src/strategy/strategy_engine.py`, `src/strategy/bootstrap_service.py`, `src/api/routers/strategies.py`, `src/strategy/trading_dsl.py`, `src/risk/risk_manager.py`
@@ -459,6 +508,7 @@ Log hygiene post-2026-05-03 evening: errors.log clean, warnings.log at signal-to
 
 ### Deferred / still open
 
+- **24/5 readiness** (P0): eToro is live 24/5 for S&P 500 + Nasdaq 100 + ~100 top ETFs. `MarketHoursManager.is_market_open` still uses NYSE regular hours; scattered ad-hoc `04:00-20:00 ET` checks live in 5+ call sites. 4H strategies that close at 00:00/04:00/20:00 ET have their signals deferred. Three-layer fix: static 24/5 symbol registry in `tradeable_instruments.py`, symbol-aware `MarketHoursManager`, eliminate scattered ad-hoc checks. 2-3 hours. Details in next-session kickoff prompt.
 - **Triple EMA Alignment DSL bug** (P1): `EMA(10) > EMA(10)` tautology from regex param collapse in `strategy_proposer.customize_template_parameters`. ~30 min fix to add explicit positional-EMA-period handling.
 - **WF bypass-path tightening for LONG** (P1): primary + test-dominant paths admit regime-luck on LONG side. Consider `(test_sharpe - train_sharpe) ≤ 1.5` consistency gate. SHORT already tightened (Sprint 1).
 - **Cross-cycle signal dedup for market-closed deferrals** (P1): entry-order 82% FAILED rate is cosmetic — market-closed deferrals re-fire each cycle. 30-min TTL map on `(strategy_id, symbol, direction)` in trading_scheduler.
@@ -503,102 +553,32 @@ The 2026-05-04 session shipped 4 commits across 3 sprints:
   truth; 27k-row legacy backfill; UI widgets re-pointed)
 - Docs refresh
 
-System state at session close:
-- Equity: ~$478K, 78 open positions, 58 active strategies
-- 4-6 activations per cycle (up 3-5× from morning baseline of 0-1)
-- errors.log: 0 timestamped entries since 10:47 UTC restart
-- warnings.log: clean
-- Unified funnel populating: gate_blocked 47, order_submitted 2,
-  signal_emitted 63 in last 90 min
-- Frontend Signal Stats + Cycle Intelligence now carry real rejection
-  strings (symbol_cap_exhausted, below_min_with_penalty, Same-template
-  duplicate, etc.), not generic categories
+The 2026-05-04 afternoon session shipped 1 commit:
+- P0 loser-pair penalty data integrity (trade_journal template_name
+  enrichment at signal emission + 216-row legacy backfill + startup
+  self-check)
 
-Last 4 commits on main (newest first):
+System state at session close:
+- Equity: ~$479K, 77 open positions, 58 active strategies
+- 2-4 activations per cycle, 15/19 WF pass rate (78.9%)
+- errors.log: 0 timestamped entries since 11:52 UTC restart
+- warnings.log: clean
+- Unified funnel: 100% template_name coverage on all new rows
+  (45/45 signal_emitted, 29/29 gate_blocked, 2/2 order_submitted last cycle)
+- Loser-pair penalty: armed; 6 backfilled pairs eligible (SCCO, HIMS, GEV,
+  GS, PYPL, BTC); path verified via scripts/verify_loser_pair_penalty.py
+- Startup self-check: live at app.py boot, warns if 0 of last-1000 closed
+  trades carry template_name
+
+Last 5 commits on main (newest first):
+- [pending] fix: loser-pair penalty data integrity — populate trade_journal template_name
 - 0f29f38 docs: Session_Continuation — 2026-05-04 session + loser-pair P0 kickoff
 - a0b972c refactor: observability unification on signal_decisions
 - 1af9069 feat: risk-manager observability reasons + cycle footer + eToro 404 handler
 - a50bb6e fix: activation pipeline — backtest purity + VWAP DSL + WF cache invalidation
 
 ==========================================================================
-MISSION — P0: LOSER-PAIR PENALTY DATA-INTEGRITY FIX
-==========================================================================
-
-During the 2026-05-04 observability verification, we confirmed that the
-loser-pair sizing penalty — added in the 2026-05-02 TSLA audit as a P1
-risk rail — has NEVER FIRED since it was written.
-
-The rail, per src/risk/risk_manager.py line ~1115, reads:
-  * lookup: self._get_symbol_template_loser_stats(symbol, template_name)
-  * trigger: pair has ≥3 trades AND net P&L < 0
-  * effect: position_size *= 0.5, penalty_applied = True
-
-The helper queries trade_journal.trade_metadata->>'template_name'. But
-the trade-journal write path never populates template_name:
-
-  SELECT COUNT(*),
-         COUNT(*) FILTER (WHERE trade_metadata::text LIKE '%template_name%')
-    FROM trade_journal WHERE pnl IS NOT NULL;
-   count | with_template
-   891   |  0
-
-Zero of 891 closed trades. The lookup always returns {'trades': 0,
-'pnl': 0}. Known-losing (template, symbol) combos get sized at full
-budget every time. In live verification (2026-05-04 11:14 UTC cycle),
-MU and CAT signals were being blocked by vol-scaling, NOT by the
-loser-pair penalty that should have been catching them weeks ago.
-
-This is a silent-failure safety rail — exactly the failure mode the
-steering file warns about. An observer would say "the risk layer is
-protecting against pile-up on losers"; the data says "it isn't".
-
-YOUR MISSION for P0:
-
-1. TRACE THE WRITE PATH. Start at src/analytics/trade_journal.py
-   (log_entry + log_exit). Identify every site that writes to
-   trade_journal. Also look at the async fill handlers in
-   src/core/order_monitor.py (check_submitted_orders) and
-   src/execution/order_executor.py. The steering file notes
-   trade_metadata.market_regime was broken the same way before the
-   signal-decision-log writer fix was added (99.9% NULL), suggesting
-   the async fill path is the likely culprit.
-
-2. POPULATE template_name AT WRITE TIME. The source is
-   strategy.metadata.get('template_name') — already set by the
-   proposer. Needs to flow through: strategy → signal → order →
-   trade-journal entry. Preserve at every hop, especially async.
-
-3. BACKFILL 891 LEGACY ROWS where possible via strategies table
-   join: trade.strategy_id → strategies.id → strategy_metadata.
-   template_name. Strategies that have since been retired or had
-   their metadata overwritten: best-effort. Mark backfilled rows
-   with a source='legacy_backfill_2026_05_0?' marker in
-   trade_metadata for auditability.
-
-4. VERIFY THE PENALTY FIRES. After the fix, pick a symbol with
-   clearly losing history (GS recently surfaced: 12 trades, -$66
-   net; not enough to trigger but good for smoke testing the
-   lookup). Force a signal through, inspect the risk.log for the
-   "Loser penalty:" log line, confirm size is halved.
-
-5. ADD A STARTUP SELF-CHECK. If 0 of the last-1000 trades have
-   template_name, log a WARNING at service start pointing at the
-   write path. This is the kind of latent bug that silently
-   decays into production; a self-check catches future regressions.
-
-Rules (same as every session):
-- Proper solutions only. No patches. If the write path needs
-  refactoring, refactor it.
-- No skip-flags, no stopgaps, no "we'll come back to it".
-- Fix at the root cause. If the async fill handler is losing
-  metadata, fix the handler, don't spray if-defaults everywhere.
-- Deploy via the scp workflow. Never edit on EC2.
-
-Estimate: 1-2 hours end to end. Budget for it — this is a real
-risk-management regression, not a feature ask.
-
-==========================================================================
-MISSION — P1: 24/5 READINESS (after P0 lands)
+MISSION — P0: 24/5 READINESS
 ==========================================================================
 
 eToro announced 24/5 trading for all S&P 500 + Nasdaq 100 stocks +
@@ -647,10 +627,10 @@ orders without the "market closed" error.
 Estimate: 2-3 hours. Budget for it.
 
 ==========================================================================
-OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE P0 AND P1
+OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE P0 (24/5 READINESS)
 ==========================================================================
 
-P1 continued:
+P1:
 - Cross-label in SIGNAL-1H log lines (ENTER_LONG TXN shown with
   template name "GOOGL LONG" — cycle_logger format bug)
 - ex-post 730d sanity capped to actual data depth per (symbol, interval)

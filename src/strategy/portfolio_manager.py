@@ -2012,6 +2012,25 @@ class PortfolioManager:
                                 journal = TradeJournal(self.strategy_engine.db)
                                 side_str = str(position.side).upper() if position.side else 'LONG'
                                 is_long = 'LONG' in side_str or 'BUY' in side_str
+                                # Recover template_name from the strategy row so the
+                                # loser-pair penalty keyed on (template, symbol) sees this
+                                # trade. Without this, force-closed positions (strategy
+                                # retired, pending_closure) create entries with no template
+                                # context and the feedback loop never counts them.
+                                _tname_pm = None
+                                try:
+                                    from src.models.orm import StrategyORM as _SORM
+                                    _sess_pm = self.strategy_engine.db.get_session()
+                                    try:
+                                        _s_row = _sess_pm.query(_SORM).filter(
+                                            _SORM.id == (position.strategy_id or "")
+                                        ).first()
+                                        if _s_row and isinstance(_s_row.strategy_metadata, dict):
+                                            _tname_pm = _s_row.strategy_metadata.get('template_name') or getattr(_s_row, 'name', None)
+                                    finally:
+                                        _sess_pm.close()
+                                except Exception:
+                                    _tname_pm = None
                                 journal.log_entry(
                                     trade_id=str(position.id),
                                     strategy_id=position.strategy_id or "unknown",
@@ -2021,6 +2040,7 @@ class PortfolioManager:
                                     entry_size=getattr(position, 'invested_amount', None) or close_qty or 0,
                                     entry_reason="autonomous_signal",
                                     order_side="BUY" if is_long else "SELL",
+                                    metadata={"template_name": _tname_pm} if _tname_pm else None,
                                 )
                                 journal.log_exit(
                                     trade_id=str(position.id),

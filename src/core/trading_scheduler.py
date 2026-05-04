@@ -1285,6 +1285,10 @@ class TradingScheduler:
                                             slippage=_hedge_order.slippage,
                                             fill_time_seconds=_hedge_order.fill_time_seconds,
                                             order_action='entry',
+                                            # Preserve signal metadata so async fill handlers
+                                            # populate trade_journal with template_name,
+                                            # market_regime, etc. Same rationale as primary leg.
+                                            order_metadata=(_hedge_signal.metadata if isinstance(getattr(_hedge_signal, 'metadata', None), dict) else None),
                                         )
                                         session.add(_hedge_orm)
                                         session.commit()
