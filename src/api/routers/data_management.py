@@ -1163,21 +1163,56 @@ async def get_monitoring_status():
                 binance_status["bars_by_interval"] = bars_by_interval
                 total_bars = sum(b["bars"] for b in bars_by_interval.values())
                 binance_status["total_bars"] = total_bars
+                # Freshness is measured against the most recent COMPLETE bar,
+                # not against the last write time. Binance writes discrete bars
+                # on hour rollovers — for a 1h interval, the gap between
+                # `MAX(date)` and `now` is naturally 0-60 min even when the
+                # cache is up to date (we've got the 15:00 bar; we'll write
+                # the 16:00 bar only after it closes at 17:00). Using fetched_at
+                # as the freshness signal made the badge flap to "degraded"
+                # for most of every hour.
+                #
+                # The right question: how many intervals behind is the cache?
+                #   n_intervals_behind = (now - MAX(date)) / interval_length
+                # 1 interval behind is normal (the just-completed bar). More
+                # than 2 = the sync loop is skipping crypto.
+                _INTERVAL_HOURS = {"1h": 1.0, "4h": 4.0, "1d": 24.0}
+                worst_lag = 0.0  # n intervals behind, per shortest-active interval
+                worst_interval = None
+                for iv, b in bars_by_interval.items():
+                    latest_bar_str = b.get("latest")
+                    if not latest_bar_str:
+                        continue
+                    try:
+                        latest_bar = datetime.fromisoformat(latest_bar_str)
+                        if latest_bar.tzinfo:
+                            latest_bar = latest_bar.replace(tzinfo=None)
+                    except Exception:
+                        continue
+                    iv_hours = _INTERVAL_HOURS.get(iv, 1.0)
+                    gap_hours = (now - latest_bar).total_seconds() / 3600.0
+                    lag = gap_hours / iv_hours
+                    if lag > worst_lag:
+                        worst_lag = lag
+                        worst_interval = iv
                 if latest_fetch_overall:
-                    age_s = (now - latest_fetch_overall).total_seconds()
                     binance_status["last_fetch"] = latest_fetch_overall.isoformat()
                     binance_status["last_fetch_age"] = _age_str(latest_fetch_overall)
-                    # Healthy if last Binance write within 15 min; otherwise degraded.
-                    # Binance itself almost never goes down — staleness means our
-                    # sync loop isn't invoking it, not that Binance is failing.
-                    if age_s < 900:
-                        binance_status["status"] = "healthy"
-                    elif age_s < 3600:
-                        binance_status["status"] = "degraded"
-                    else:
-                        binance_status["status"] = "stale"
-                else:
+                # Expose the freshness metric so operators can see what the
+                # status decision was based on.
+                binance_status["intervals_behind"] = round(worst_lag, 2)
+                binance_status["worst_interval"] = worst_interval
+                # 1 interval behind = just-completed bar, cache up to date
+                # 2 intervals behind = missed one cycle's sync (tolerable)
+                # 3+ intervals behind = sync loop not running for crypto
+                if worst_lag == 0.0:
                     binance_status["status"] = "idle"
+                elif worst_lag < 2.0:
+                    binance_status["status"] = "healthy"
+                elif worst_lag < 3.0:
+                    binance_status["status"] = "degraded"
+                else:
+                    binance_status["status"] = "stale"
                 # Coverage string for the UI (matches Yahoo/FMP convention)
                 if sym_count > 0:
                     binance_status["coverage"] = f"{sym_count} crypto symbols"
