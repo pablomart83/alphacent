@@ -5006,35 +5006,41 @@ class StrategyEngine:
             from src.utils.symbol_normalizer import normalize_symbol
             normalized_symbol = normalize_symbol(symbol)
             
-            # Per-symbol market hours check: don't generate signals for stocks/ETFs
-            # outside market hours, even if the strategy's primary symbol is crypto/forex
+            # Per-symbol market-hours check: skip signal generation for
+            # symbols whose market is currently closed on eToro. Route through
+            # MarketHoursManager.is_market_open so the 24/5 window for S&P/NDX
+            # stocks is respected (pre-fix, we used a hardcoded 04:00-20:00 ET
+            # window that missed 4H strategies closing at 00:00/04:00/20:00 ET).
             try:
-                import pytz
-                from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX
+                from src.data.market_hours_manager import get_market_hours_manager, AssetClass as _AssetClassMH
+                from src.core.tradeable_instruments import (
+                    DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                    DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+                    DEMO_ALLOWED_ETFS,
+                )
                 sym_upper = normalized_symbol.upper()
-                # Check both raw and normalized forms (DOT vs DOTUSD)
                 raw_symbol = symbol.upper()
-                is_crypto = sym_upper in set(DEMO_ALLOWED_CRYPTO) or raw_symbol in set(DEMO_ALLOWED_CRYPTO)
-                is_forex = sym_upper in set(DEMO_ALLOWED_FOREX) or raw_symbol in set(DEMO_ALLOWED_FOREX)
-                
-                if not is_crypto and not is_forex:
-                    et_tz = pytz.timezone('US/Eastern')
-                    now_et = datetime.now(et_tz)
-                    is_weekend = now_et.weekday() >= 5
-                    # eToro allows stock trading Mon-Fri ~4:00 AM to 8:00 PM ET
-                    is_market_hours = (not is_weekend and 
-                                       now_et.hour >= 4 and now_et.hour < 20)
-                    if not is_market_hours:
-                        logger.debug(f"Skipping {symbol}: market closed for stocks/ETFs")
-                        continue
-                elif is_forex:
-                    et_tz = pytz.timezone('US/Eastern')
-                    now_et = datetime.now(et_tz)
-                    if now_et.weekday() >= 5:
-                        logger.debug(f"Skipping {symbol}: forex market closed on weekends")
-                        continue
-            except Exception:
-                pass  # If pytz fails, don't block signal generation
+                if sym_upper in set(DEMO_ALLOWED_CRYPTO) or raw_symbol in set(DEMO_ALLOWED_CRYPTO):
+                    _mh_asset_class = _AssetClassMH.CRYPTOCURRENCY
+                elif sym_upper in set(DEMO_ALLOWED_FOREX) or raw_symbol in set(DEMO_ALLOWED_FOREX):
+                    _mh_asset_class = _AssetClassMH.FOREX
+                elif sym_upper in set(DEMO_ALLOWED_INDICES):
+                    _mh_asset_class = _AssetClassMH.INDEX
+                elif sym_upper in set(DEMO_ALLOWED_COMMODITIES):
+                    _mh_asset_class = _AssetClassMH.COMMODITY
+                elif sym_upper in set(DEMO_ALLOWED_ETFS):
+                    _mh_asset_class = _AssetClassMH.ETF
+                else:
+                    _mh_asset_class = _AssetClassMH.STOCK
+
+                if not get_market_hours_manager().is_market_open(_mh_asset_class, symbol=sym_upper):
+                    logger.debug(
+                        f"Skipping {symbol}: market closed ({_mh_asset_class.value})"
+                    )
+                    continue
+            except Exception as _mh_err:
+                logger.debug(f"Market hours check failed for {symbol} — proceeding: {_mh_err}")
+                # Fail-open: never block signal generation on a market-hours lookup error
             
             # Only skip ENTRY signals if THIS strategy already has a position in this symbol.
             # EXIT signals must still be evaluated — the DSL exit conditions (e.g., RSI > 60)
@@ -5268,6 +5274,34 @@ class StrategyEngine:
                     logger.info(f"Exit signal for {signal.symbol} passed through (bypasses conviction/ML filters)")
                     continue
 
+                # Funnel writer helper — ensures every filter rejection lands in
+                # signal_decisions (stage=signal_emitted, decision=rejected) so the
+                # observability funnel matches the cycle-log footer count. Prior to
+                # 2026-05-04 the filter paths only logged to alphacent.log, so the
+                # UI and audit queries saw 0 rejections even when the footer said
+                # `[SIGNALS] 2 generated → 2 rejected`.
+                def _log_filter_rejection(reason_text: str, extra_md: Optional[Dict[str, Any]] = None) -> None:
+                    try:
+                        from src.analytics.decision_log import record_decision as _rec_dec
+                        _meta_s = getattr(strategy, 'metadata', {}) or {}
+                        _tmpl = _meta_s.get('template_name') or getattr(strategy, 'name', None)
+                        _direction = _meta_s.get('direction') or (
+                            'long' if signal.action in (_SA.ENTER_LONG,) else
+                            'short' if signal.action in (_SA.ENTER_SHORT,) else None
+                        )
+                        _rec_dec(
+                            stage="signal_emitted",
+                            decision="rejected",
+                            strategy_id=getattr(strategy, 'id', None),
+                            template=_tmpl,
+                            symbol=signal.symbol,
+                            direction=_direction,
+                            reason=reason_text,
+                            metadata=extra_md,
+                        )
+                    except Exception:
+                        pass  # never let observability break signal gen
+
                 # Check frequency limits first (cheapest check)
                 freq_check = frequency_limiter.check_signal_allowed(signal, strategy)
                 if not freq_check.allowed:
@@ -5276,6 +5310,13 @@ class StrategyEngine:
                         f"Signal rejected for {signal.symbol}: {freq_check.reason} "
                         f"(trades this month: {freq_check.trades_this_month}/{freq_check.max_trades_per_month})"
                     )
+                    _log_filter_rejection(
+                        f"filter:frequency {freq_check.reason}",
+                        {
+                            "trades_this_month": freq_check.trades_this_month,
+                            "max_trades_per_month": freq_check.max_trades_per_month,
+                        },
+                    )
                     continue
                 
                 # Quick pre-check: if signal confidence is very low, skip expensive fundamental fetch
@@ -5283,6 +5324,10 @@ class StrategyEngine:
                 # which means it needs 30+ from fundamentals+regime to pass 60 threshold — unlikely.
                 if hasattr(signal, 'confidence') and signal.confidence and signal.confidence < 0.3:
                     logger.info(f"Signal skipped for {signal.symbol}: confidence {signal.confidence:.2f} too low for conviction threshold")
+                    _log_filter_rejection(
+                        f"filter:low_confidence (confidence={signal.confidence:.2f} < 0.3 — below conviction floor)",
+                        {"confidence": signal.confidence},
+                    )
                     continue
                 
                 # Apply fundamental filter (only for equity symbols with actual signals)
@@ -5324,6 +5369,17 @@ class StrategyEngine:
                                 f"need {fundamental_report.min_required}). Failed: {', '.join(failed_checks)} "
                                 f"[took {fund_time:.2f}s]"
                             )
+                            _log_filter_rejection(
+                                f"filter:fundamental ({fundamental_report.checks_passed}/"
+                                f"{fundamental_report.checks_total} passed, need {fundamental_report.min_required}; "
+                                f"failed: {', '.join(failed_checks)[:200]})",
+                                {
+                                    "checks_passed": fundamental_report.checks_passed,
+                                    "checks_total": fundamental_report.checks_total,
+                                    "min_required": fundamental_report.min_required,
+                                    "failed_checks": failed_checks,
+                                },
+                            )
                             continue
                         
                         logger.info(
@@ -5340,15 +5396,21 @@ class StrategyEngine:
                 
                 # Check conviction threshold
                 if not conviction.passes_threshold(min_conviction):
-                    logger.info(
-                        f"Signal rejected for {signal.symbol}: "
-                        f"conviction {conviction.total_score:.1f} < {min_conviction} "
-                        f"(wf_edge: {conviction.breakdown.get('walkforward_edge', {}).get('score', 0):.1f}, "
-                        f"signal: {conviction.signal_strength_score:.1f}, "
-                        f"asset: {conviction.fundamental_score:.1f}, "
-                        f"regime: {conviction.regime_alignment_score:.1f}, "
-                        f"fundamental_adj: {conviction.breakdown.get('fundamental_quality_direction', {}).get('score', 0):.1f}, "
-                        f"news: {conviction.breakdown.get('news_sentiment', {}).get('score', 0):.1f})"
+                    _conv_reason = (
+                        f"filter:conviction ({conviction.total_score:.1f} < {min_conviction}; "
+                        f"wf_edge={conviction.breakdown.get('walkforward_edge', {}).get('score', 0):.1f}, "
+                        f"signal={conviction.signal_strength_score:.1f}, "
+                        f"asset={conviction.fundamental_score:.1f}, "
+                        f"regime={conviction.regime_alignment_score:.1f})"
+                    )
+                    logger.info(f"Signal rejected for {signal.symbol}: {_conv_reason}")
+                    _log_filter_rejection(
+                        _conv_reason,
+                        {
+                            "conviction_score": conviction.total_score,
+                            "min_conviction": min_conviction,
+                            "breakdown": conviction.breakdown,
+                        },
                     )
                     continue
                 
@@ -5369,9 +5431,17 @@ class StrategyEngine:
                 # Apply ML filter
                 ml_result = ml_filter.filter_signal(signal, strategy)
                 if not ml_result.passed:
-                    logger.info(
-                        f"Signal rejected by ML filter for {signal.symbol}: "
-                        f"ML confidence {ml_result.confidence:.3f} < {ml_filter.min_confidence}"
+                    _ml_reason = (
+                        f"filter:ml (confidence={ml_result.confidence:.3f} < "
+                        f"{ml_filter.min_confidence})"
+                    )
+                    logger.info(f"Signal rejected by ML filter for {signal.symbol}: {_ml_reason}")
+                    _log_filter_rejection(
+                        _ml_reason,
+                        {
+                            "ml_confidence": ml_result.confidence,
+                            "min_confidence": ml_filter.min_confidence,
+                        },
                     )
                     continue
                 

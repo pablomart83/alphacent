@@ -322,7 +322,7 @@ async def place_order(
         # Integrate with OrderExecutor to place real order
         from src.execution.order_executor import OrderExecutor
         from src.api.etoro_client import EToroAPIClient
-        from src.data.market_hours_manager import MarketHoursManager
+        from src.data.market_hours_manager import get_market_hours_manager
         from src.core.config import get_config
         from src.models.dataclasses import Order as OrderDataclass
         
@@ -349,7 +349,7 @@ async def place_order(
             user_key=credentials["user_key"],
             mode=mode
         )
-        market_hours = MarketHoursManager()
+        market_hours = get_market_hours_manager()
         order_executor = OrderExecutor(etoro_client, market_hours)
         
         # eToro API expects dollar amounts, not units/shares

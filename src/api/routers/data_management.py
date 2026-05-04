@@ -378,17 +378,15 @@ def _run_sync_with_logging(mon) -> None:
 
         _capture_log(f"Symbol universe: {len(all_symbols)} total ({len(crypto_set)} crypto, {len(forex_set)} forex)")
 
-        # Market hours
+        # Market hours — use the primitive for a consistent display string.
+        # Global view (no symbol), reflects the 24/5 reality for S&P/NDX names.
         try:
+            from src.data.market_hours_manager import get_market_hours_manager, AssetClass as _ACMH
             et_tz = pytz.timezone('US/Eastern')
             now_et = datetime.now(et_tz)
             is_weekend = now_et.weekday() >= 5
-            is_market_hours = (
-                not is_weekend and
-                now_et.hour >= 9 and now_et.hour < 16 and
-                (now_et.hour > 9 or now_et.minute >= 30)
-            )
-            _capture_log(f"Market hours: {'open' if is_market_hours else 'closed'} (weekend={is_weekend}, ET={now_et.strftime('%H:%M')})")
+            is_market_hours = get_market_hours_manager().is_market_open(_ACMH.STOCK)
+            _capture_log(f"Market hours: {'open' if is_market_hours else 'closed'} (weekend={is_weekend}, ET={now_et.strftime('%H:%M')}, policy=eToro 24/5)")
         except Exception:
             is_weekend = False
             is_market_hours = False

@@ -428,20 +428,19 @@ async def trading_gates_status():
     except Exception as e:
         result["gates"]["vix_gate"] = {"armed": False, "error": str(e)[:80]}
 
-    # Market hours
+    # Market hours — route through MarketHoursManager so the gate reflects
+    # the real eToro 24/5 window for S&P/NDX names.
     try:
-        from src.core.monitoring_service import MonitoringService
-        # Cheap static check — doesn't instantiate the service
+        from src.data.market_hours_manager import get_market_hours_manager, AssetClass as _ACMH
         from datetime import datetime as _dt
         import pytz
         et_tz = pytz.timezone('US/Eastern')
         now_et = _dt.now(et_tz)
-        is_weekend = now_et.weekday() >= 5
-        stock_open = not is_weekend and 4 <= now_et.hour < 20
+        stock_open = get_market_hours_manager().is_market_open(_ACMH.STOCK)
         result["gates"]["market_hours"] = {
             "armed": True,
             "blocking": not stock_open,
-            "detail": f"ET={now_et.strftime('%a %H:%M')} stock_open={stock_open}",
+            "detail": f"ET={now_et.strftime('%a %H:%M')} stock_open={stock_open} (eToro 24/5)",
         }
     except Exception as e:
         result["gates"]["market_hours"] = {"armed": False, "error": str(e)[:80]}

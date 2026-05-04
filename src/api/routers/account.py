@@ -354,8 +354,8 @@ async def get_positions(
     logger.info(f"Found {pending_orders_count} pending orders (positions waiting for market open)")
     
     # Check if market is open
-    from src.data.market_hours_manager import MarketHoursManager, AssetClass
-    market_hours = MarketHoursManager()
+    from src.data.market_hours_manager import get_market_hours_manager, AssetClass
+    market_hours = get_market_hours_manager()
     market_open = market_hours.is_market_open(AssetClass.STOCK)
     
     logger.info(f"Market status: {'OPEN' if market_open else 'CLOSED'}")

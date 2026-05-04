@@ -303,45 +303,57 @@ class TradingScheduler:
 
             logger.info(f"Found {len(active_strategies)} active strategies")
 
-            # Market hours awareness: filter strategies by asset class based on current time
-            # eToro offers 24/5 trading on most US stocks (extended hours).
-            # Stocks/ETFs/Indices/Forex/Commodities: Mon-Fri (skip weekends)
-            # Crypto: 24/7
-            # If a specific instrument isn't available for extended hours,
-            # eToro will reject the order and our order monitor handles it.
-            from datetime import timezone
-            import pytz
+            # Market-hours filter — skip strategies whose primary symbol's
+            # market is currently closed on eToro. Routes through the
+            # symbol-aware MarketHoursManager so S&P/NDX stocks are correctly
+            # treated as tradeable during the 24/5 overnight window.
             try:
-                et_tz = pytz.timezone('US/Eastern')
-                now_et = datetime.now(et_tz)
-                is_weekend = now_et.weekday() >= 5  # Saturday=5, Sunday=6
-                
+                from src.data.market_hours_manager import (
+                    get_market_hours_manager, AssetClass as _ACMH,
+                )
+                from src.core.tradeable_instruments import (
+                    DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                    DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+                    DEMO_ALLOWED_ETFS,
+                )
+                _mhm_ts = get_market_hours_manager()
+
                 filtered_strategies = []
                 for s in active_strategies:
-                    # Determine asset class from strategy symbols
                     primary_symbol = s.symbols[0] if s.symbols else ''
                     sym_upper = primary_symbol.upper()
-                    
-                    from src.core.tradeable_instruments import (
-                        DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX
-                    )
-                    
-                    if sym_upper in DEMO_ALLOWED_CRYPTO:
-                        # Crypto: always scan (24/7)
+                    if not sym_upper:
+                        # Strategies without symbols can't be filtered; let them through.
                         filtered_strategies.append(s)
-                    elif is_weekend:
-                        # Everything else: skip weekends
-                        logger.debug(f"Skipping {s.name} (weekend)")
+                        continue
+
+                    if sym_upper in set(DEMO_ALLOWED_CRYPTO):
+                        _ac_ts = _ACMH.CRYPTOCURRENCY
+                    elif sym_upper in set(DEMO_ALLOWED_FOREX):
+                        _ac_ts = _ACMH.FOREX
+                    elif sym_upper in set(DEMO_ALLOWED_INDICES):
+                        _ac_ts = _ACMH.INDEX
+                    elif sym_upper in set(DEMO_ALLOWED_COMMODITIES):
+                        _ac_ts = _ACMH.COMMODITY
+                    elif sym_upper in set(DEMO_ALLOWED_ETFS):
+                        _ac_ts = _ACMH.ETF
                     else:
-                        # Stocks, ETFs, indices, forex, commodities: 24/5 on eToro
+                        _ac_ts = _ACMH.STOCK
+
+                    if _mhm_ts.is_market_open(_ac_ts, symbol=sym_upper):
                         filtered_strategies.append(s)
-                
+                    else:
+                        logger.debug(
+                            f"Skipping {s.name} ({sym_upper} / {_ac_ts.value}): market closed"
+                        )
+
                 skipped = len(active_strategies) - len(filtered_strategies)
                 if skipped > 0:
-                    logger.info(f"Market hours filter: {skipped} strategies skipped (market {'closed' if not is_market_hours else 'weekend'}), {len(filtered_strategies)} active")
+                    logger.info(
+                        f"Market hours filter: {skipped} strategies skipped "
+                        f"(market closed), {len(filtered_strategies)} active"
+                    )
                 active_strategies = filtered_strategies
-            except ImportError:
-                logger.debug("pytz not available, skipping market hours filter")
             except Exception as e:
                 logger.debug(f"Market hours filter skipped: {e}")
             
@@ -2686,7 +2698,7 @@ class TradingScheduler:
             from src.risk.risk_manager import RiskManager
             from src.execution.order_executor import OrderExecutor
             from src.api.etoro_client import EToroAPIClient
-            from src.data.market_hours_manager import MarketHoursManager
+            from src.data.market_hours_manager import get_market_hours_manager
             from src.models.enums import TradingMode
             from src.core.config import get_config
             from src.api.websocket_manager import get_websocket_manager
@@ -2713,7 +2725,7 @@ class TradingScheduler:
             risk_config = config.load_risk_config(TradingMode.DEMO)
             self._risk_manager = RiskManager(risk_config)
             
-            market_hours = MarketHoursManager()
+            market_hours = get_market_hours_manager()
             self._order_executor = OrderExecutor(self._etoro_client, market_hours)
             
             self._components_initialized = True

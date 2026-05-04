@@ -1,361 +1,484 @@
-"""Market hours manager with exchange schedules and holiday handling."""
+"""Market hours manager — symbol-aware trading-window resolver.
+
+2026-05-04: rewrite for eToro 24/5 reality.
+
+eToro now offers 24/5 trading on all S&P 500 + Nasdaq 100 stocks + a broad
+basket of top ETFs (Sun 20:05 ET → Fri 16:00 ET). Our older logic only knew
+NYSE regular hours (9:30-16:00 ET), which meant 4H strategies closing at
+00:00/04:00/20:00 ET got their signals deferred by the system even though
+eToro would happily accept the order.
+
+This module is the single primitive every trading-path caller uses to ask
+"is this symbol tradeable right now?". Callers no longer reproduce the
+logic inline — the old scattered `now_et.hour >= 4 and now_et.hour < 20`
+pattern has been deleted.
+
+Six schedule regimes, selected by `(asset_class, symbol)`:
+
+| Regime              | Window (ET)                                  | Applies to |
+|---------------------|----------------------------------------------|------------|
+| CRYPTO_24_7         | always open                                  | crypto     |
+| ETORO_24_5          | Sun 20:05 → Fri 16:00, holidays closed       | S&P/NDX stocks + top ETFs (default for STOCK/ETF) |
+| US_EXTENDED         | Mon-Fri 04:00-20:00, holidays closed         | non-24/5 US stocks/ETFs (explicit opt-out) |
+| FOREX_24_5          | Sun 17:00 → Fri 17:00, continuous            | forex      |
+| US_INDEX_FUTURES    | Sun 18:00 → Fri 17:00 with 17:00-18:00 break | SPX500, NSDQ100, DJ30 (CME E-mini) |
+| NON_US_INDEX        | local exchange hours                         | UK100, GER40, FR40, STOXX50 |
+| COMMODITY_FUTURES   | Sun 18:00 → Fri 17:00 with daily 17:00-18:00 | GOLD/SILVER/OIL/COPPER (CME) |
+
+The 24/5 window on eToro is platform policy, not exchange-driven — confirmed
+from eToro's 2025-11-17 press release.
+
+Schedule selection precedence:
+  1. symbols.yaml `market_schedule:` field (explicit override, e.g. opt a
+     specific stock out of 24/5 if eToro excludes it)
+  2. asset_class default (STOCK/ETF → ETORO_24_5, FOREX → FOREX_24_5, ...)
+  3. fallback: treat as closed (safest)
+"""
 
 import logging
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
 
 
 class AssetClass(str, Enum):
-    """Asset class types with different market hours."""
+    """Asset class types with different market hours.
+
+    Extended 2026-05-04 to include FOREX/INDEX/COMMODITY — previously only
+    STOCK/ETF/CRYPTOCURRENCY existed on this enum while callers (order_executor
+    `_determine_asset_class`) returned FOREX/COMMODITY/INDEX values. Python
+    resolved those at runtime via `AttributeError` → swallowed by a try/except
+    → silent fallback to STOCK. Now they're first-class.
+    """
     STOCK = "STOCK"
     ETF = "ETF"
+    FOREX = "FOREX"
+    INDEX = "INDEX"
+    COMMODITY = "COMMODITY"
     CRYPTOCURRENCY = "CRYPTOCURRENCY"
 
 
+class MarketSchedule(str, Enum):
+    """The six trading-window regimes. See module docstring."""
+    CRYPTO_24_7 = "crypto_24_7"
+    ETORO_24_5 = "etoro_24_5"
+    US_EXTENDED = "us_extended"
+    FOREX_24_5 = "forex_24_5"
+    US_INDEX_FUTURES = "us_index_futures"
+    COMMODITY_FUTURES = "commodity_futures"
+    NON_US_INDEX = "non_us_index"
+
+
 class Exchange(str, Enum):
-    """Supported exchanges."""
-    NYSE = "NYSE"  # New York Stock Exchange
-    NASDAQ = "NASDAQ"  # NASDAQ
-    LSE = "LSE"  # London Stock Exchange
-    CRYPTO = "CRYPTO"  # Cryptocurrency (24/7)
+    """Supported exchanges — retained for backward compatibility with older
+    callers that reasoned about exchanges directly. New code uses MarketSchedule."""
+    NYSE = "NYSE"
+    NASDAQ = "NASDAQ"
+    LSE = "LSE"
+    CRYPTO = "CRYPTO"
 
 
-class MarketHours:
-    """Market hours definition for an exchange."""
+# ---------------------------------------------------------------------------
+# Holiday calendar — US markets. Holidays close ETORO_24_5, US_EXTENDED, and
+# (per CME rules) US_INDEX_FUTURES and COMMODITY_FUTURES too.
+# ---------------------------------------------------------------------------
+US_HOLIDAYS: Set[datetime] = {
+    # 2024
+    datetime(2024, 1, 1), datetime(2024, 1, 15), datetime(2024, 2, 19),
+    datetime(2024, 3, 29), datetime(2024, 5, 27), datetime(2024, 6, 19),
+    datetime(2024, 7, 4), datetime(2024, 9, 2), datetime(2024, 11, 28),
+    datetime(2024, 12, 25),
+    # 2025
+    datetime(2025, 1, 1), datetime(2025, 1, 20), datetime(2025, 2, 17),
+    datetime(2025, 4, 18), datetime(2025, 5, 26), datetime(2025, 6, 19),
+    datetime(2025, 7, 4), datetime(2025, 9, 1), datetime(2025, 11, 27),
+    datetime(2025, 12, 25),
+    # 2026
+    datetime(2026, 1, 1), datetime(2026, 1, 19), datetime(2026, 2, 16),
+    datetime(2026, 4, 3), datetime(2026, 5, 25), datetime(2026, 6, 19),
+    datetime(2026, 7, 3), datetime(2026, 9, 7), datetime(2026, 11, 26),
+    datetime(2026, 12, 25),
+}
 
-    def __init__(
-        self,
-        exchange: Exchange,
-        open_time: time,
-        close_time: time,
-        timezone: str = "America/New_York",
-        days_open: Optional[Set[int]] = None
-    ):
-        """Initialize market hours.
-        
-        Args:
-            exchange: Exchange identifier
-            open_time: Market open time
-            close_time: Market close time
-            timezone: Timezone for the exchange
-            days_open: Set of weekday numbers (0=Monday, 6=Sunday) when market is open
-        """
-        self.exchange = exchange
-        self.open_time = open_time
-        self.close_time = close_time
-        self.timezone = timezone
-        # Default to Monday-Friday (0-4) if not specified
-        self.days_open = days_open if days_open is not None else {0, 1, 2, 3, 4}
+# Early close days — 1:00 PM ET close for US stock markets.
+US_EARLY_CLOSE: Set[datetime] = {
+    datetime(2024, 7, 3), datetime(2024, 11, 29), datetime(2024, 12, 24),
+    datetime(2025, 7, 3), datetime(2025, 11, 28), datetime(2025, 12, 24),
+    datetime(2026, 11, 27), datetime(2026, 12, 24),
+}
+
+
+def _is_us_holiday(check_time: datetime) -> bool:
+    d = check_time.date()
+    return datetime(d.year, d.month, d.day) in US_HOLIDAYS
+
+
+def _is_us_early_close(check_time: datetime) -> bool:
+    d = check_time.date()
+    return datetime(d.year, d.month, d.day) in US_EARLY_CLOSE
+
+
+# ---------------------------------------------------------------------------
+# Schedule check implementations. Each takes an ET-localized datetime and
+# returns True if eToro will accept an order for a symbol on this schedule.
+# ---------------------------------------------------------------------------
+
+def _check_crypto_24_7(now_et: datetime) -> bool:
+    return True
+
+
+def _check_etoro_24_5(now_et: datetime) -> bool:
+    """eToro 24/5: Sun 20:05 ET → Fri 16:00 ET. Closed on US holidays.
+    Respects early-close days (1:00 PM ET).
+    """
+    weekday = now_et.weekday()  # Mon=0, Sun=6
+    hhmm = now_et.time()
+
+    # US holiday → closed
+    if _is_us_holiday(now_et):
+        return False
+
+    # Early close day → closed from 13:00 ET
+    if _is_us_early_close(now_et) and hhmm >= time(13, 0):
+        return False
+
+    # Saturday: closed all day
+    if weekday == 5:
+        return False
+
+    # Sunday: open from 20:05 ET only
+    if weekday == 6:
+        return hhmm >= time(20, 5)
+
+    # Friday: closed from 16:00 ET
+    if weekday == 4:
+        return hhmm < time(16, 0)
+
+    # Mon/Tue/Wed/Thu: always open during these days (24h)
+    return True
+
+
+def _check_us_extended(now_et: datetime) -> bool:
+    """Pre + regular + post US market hours: Mon-Fri 04:00-20:00 ET.
+    Closed on holidays. Respects early-close days (1:00 PM ET).
+    """
+    weekday = now_et.weekday()
+    hhmm = now_et.time()
+
+    if weekday >= 5:  # Sat/Sun
+        return False
+
+    if _is_us_holiday(now_et):
+        return False
+
+    if _is_us_early_close(now_et) and hhmm >= time(13, 0):
+        return False
+
+    return time(4, 0) <= hhmm < time(20, 0)
+
+
+def _check_forex_24_5(now_et: datetime) -> bool:
+    """Forex: Sun 17:00 ET → Fri 17:00 ET, continuous. eToro follows this
+    standard FX-market window. US holidays have reduced liquidity but don't
+    close FX; we keep it open.
+    """
+    weekday = now_et.weekday()
+    hhmm = now_et.time()
+
+    # Saturday closed all day
+    if weekday == 5:
+        return False
+
+    # Sunday: open from 17:00 ET
+    if weekday == 6:
+        return hhmm >= time(17, 0)
+
+    # Friday: closed from 17:00 ET
+    if weekday == 4:
+        return hhmm < time(17, 0)
+
+    # Mon-Thu: 24h
+    return True
+
+
+def _check_us_index_futures(now_et: datetime) -> bool:
+    """CME E-mini index futures (SPX500/NSDQ100/DJ30 CFDs on eToro):
+    Sun 18:00 ET → Fri 17:00 ET, with a daily maintenance break 17:00-18:00 ET
+    Mon-Thu. Closed on US holidays.
+    """
+    weekday = now_et.weekday()
+    hhmm = now_et.time()
+
+    if _is_us_holiday(now_et):
+        return False
+
+    # Saturday: closed
+    if weekday == 5:
+        return False
+
+    # Sunday: open from 18:00 ET
+    if weekday == 6:
+        return hhmm >= time(18, 0)
+
+    # Friday: closed from 17:00 ET (no reopen Sunday in this check)
+    if weekday == 4:
+        return hhmm < time(17, 0)
+
+    # Mon-Thu: open except for 17:00-18:00 ET daily break
+    return not (time(17, 0) <= hhmm < time(18, 0))
+
+
+def _check_commodity_futures(now_et: datetime) -> bool:
+    """CME commodity futures schedule (gold/silver/oil/copper CFDs on eToro):
+    Sun 18:00 ET → Fri 17:00 ET, with 17:00-18:00 ET daily break Mon-Thu.
+    Matches US_INDEX_FUTURES structurally. Closed on US holidays.
+    """
+    return _check_us_index_futures(now_et)
+
+
+def _check_non_us_index(now_et: datetime) -> bool:
+    """Non-US indices (UK100/GER40/FR40/STOXX50): local exchange hours
+    approximated as 02:00-11:30 ET (≈ 07:00-16:30 London, 08:00-17:30 CET).
+    Closed weekends. Holidays follow local calendar — we don't encode those;
+    a holiday-closed venue will return empty data from eToro, which surfaces
+    separately via the FAILED-order path.
+    """
+    weekday = now_et.weekday()
+    hhmm = now_et.time()
+
+    if weekday >= 5:
+        return False
+
+    return time(2, 0) <= hhmm < time(11, 30)
+
+
+_SCHEDULE_CHECKS = {
+    MarketSchedule.CRYPTO_24_7: _check_crypto_24_7,
+    MarketSchedule.ETORO_24_5: _check_etoro_24_5,
+    MarketSchedule.US_EXTENDED: _check_us_extended,
+    MarketSchedule.FOREX_24_5: _check_forex_24_5,
+    MarketSchedule.US_INDEX_FUTURES: _check_us_index_futures,
+    MarketSchedule.COMMODITY_FUTURES: _check_commodity_futures,
+    MarketSchedule.NON_US_INDEX: _check_non_us_index,
+}
+
+
+# ---------------------------------------------------------------------------
+# Asset-class → default schedule. Every stock/ETF in our DEMO universe is a
+# curated US large-cap (S&P 500 or Nasdaq 100 constituent, or top-tier ETF)
+# that eToro trades 24/5. So the default for STOCK and ETF is ETORO_24_5.
+# Exceptions are declared per-symbol in config/symbols.yaml via the
+# `market_schedule:` key (e.g. `market_schedule: us_extended` for a non-24/5
+# name). Non-US indices are opt-in via explicit annotation because our
+# indices list mixes US index-CFDs (SPX500/NSDQ100/DJ30) with EU indices
+# (UK100/GER40/FR40/STOXX50).
+# ---------------------------------------------------------------------------
+_DEFAULT_SCHEDULE_BY_ASSET_CLASS: Dict[AssetClass, MarketSchedule] = {
+    AssetClass.STOCK: MarketSchedule.ETORO_24_5,
+    AssetClass.ETF: MarketSchedule.ETORO_24_5,
+    AssetClass.FOREX: MarketSchedule.FOREX_24_5,
+    AssetClass.CRYPTOCURRENCY: MarketSchedule.CRYPTO_24_7,
+    AssetClass.COMMODITY: MarketSchedule.COMMODITY_FUTURES,
+    AssetClass.INDEX: MarketSchedule.US_INDEX_FUTURES,  # default; overridden per-symbol for non-US indices
+}
+
+
+# Hardcoded non-US index symbols — override the INDEX default.
+_NON_US_INDEX_SYMBOLS: Set[str] = {"UK100", "GER40", "FR40", "STOXX50", "DAX", "CAC"}
 
 
 class MarketHoursManager:
-    """Manages market hours for different asset classes and exchanges."""
+    """Resolves (asset_class, symbol, time) → is market open for orders.
 
-    # US market holidays for 2024-2026 (simplified - would need annual updates)
-    US_HOLIDAYS = {
-        # 2024
-        datetime(2024, 1, 1),   # New Year's Day
-        datetime(2024, 1, 15),  # MLK Day
-        datetime(2024, 2, 19),  # Presidents Day
-        datetime(2024, 3, 29),  # Good Friday
-        datetime(2024, 5, 27),  # Memorial Day
-        datetime(2024, 6, 19),  # Juneteenth
-        datetime(2024, 7, 4),   # Independence Day
-        datetime(2024, 9, 2),   # Labor Day
-        datetime(2024, 11, 28), # Thanksgiving
-        datetime(2024, 12, 25), # Christmas
-        # 2025
-        datetime(2025, 1, 1),   # New Year's Day
-        datetime(2025, 1, 20),  # MLK Day
-        datetime(2025, 2, 17),  # Presidents Day
-        datetime(2025, 4, 18),  # Good Friday
-        datetime(2025, 5, 26),  # Memorial Day
-        datetime(2025, 6, 19),  # Juneteenth
-        datetime(2025, 7, 4),   # Independence Day
-        datetime(2025, 9, 1),   # Labor Day
-        datetime(2025, 11, 27), # Thanksgiving
-        datetime(2025, 12, 25), # Christmas
-        # 2026
-        datetime(2026, 1, 1),   # New Year's Day
-        datetime(2026, 1, 19),  # MLK Day
-        datetime(2026, 2, 16),  # Presidents Day
-        datetime(2026, 4, 3),   # Good Friday
-        datetime(2026, 5, 25),  # Memorial Day
-        datetime(2026, 6, 19),  # Juneteenth
-        datetime(2026, 7, 3),   # Independence Day (observed)
-        datetime(2026, 9, 7),   # Labor Day
-        datetime(2026, 11, 26), # Thanksgiving
-        datetime(2026, 12, 25), # Christmas
-    }
+    Thread-safe (all state is immutable or per-call). Exchange and
+    market_hours dicts are retained for backward-compatibility callers that
+    still reason about exchanges rather than schedules.
+    """
 
-    # Early close days (day before major holidays, typically 1pm ET close)
-    US_EARLY_CLOSE = {
-        datetime(2024, 7, 3),   # Day before Independence Day
-        datetime(2024, 11, 29), # Day after Thanksgiving
-        datetime(2024, 12, 24), # Christmas Eve
-        datetime(2025, 7, 3),   # Day before Independence Day
-        datetime(2025, 11, 28), # Day after Thanksgiving
-        datetime(2025, 12, 24), # Christmas Eve
-        datetime(2026, 11, 27), # Day after Thanksgiving
-        datetime(2026, 12, 24), # Christmas Eve
-    }
+    US_HOLIDAYS = US_HOLIDAYS  # back-compat alias
+    US_EARLY_CLOSE = US_EARLY_CLOSE  # back-compat alias
 
     def __init__(self):
-        """Initialize market hours manager with exchange schedules."""
-        self.market_hours: Dict[Exchange, MarketHours] = {
-            # US Stock Exchanges (9:30 AM - 4:00 PM ET, Monday-Friday)
-            Exchange.NYSE: MarketHours(
-                exchange=Exchange.NYSE,
-                open_time=time(9, 30),
-                close_time=time(16, 0),
-                timezone="America/New_York"
-            ),
-            Exchange.NASDAQ: MarketHours(
-                exchange=Exchange.NASDAQ,
-                open_time=time(9, 30),
-                close_time=time(16, 0),
-                timezone="America/New_York"
-            ),
-            # London Stock Exchange (8:00 AM - 4:30 PM GMT, Monday-Friday)
-            Exchange.LSE: MarketHours(
-                exchange=Exchange.LSE,
-                open_time=time(8, 0),
-                close_time=time(16, 30),
-                timezone="Europe/London"
-            ),
-            # Cryptocurrency (24/7)
-            Exchange.CRYPTO: MarketHours(
-                exchange=Exchange.CRYPTO,
-                open_time=time(0, 0),
-                close_time=time(23, 59),
-                timezone="UTC",
-                days_open={0, 1, 2, 3, 4, 5, 6}  # All days
-            ),
+        # Kept for older callers that still inspect these attributes. New
+        # code should use MarketSchedule / get_schedule().
+        self.market_hours = {
+            Exchange.NYSE: {"open": time(9, 30), "close": time(16, 0)},
+            Exchange.NASDAQ: {"open": time(9, 30), "close": time(16, 0)},
+            Exchange.LSE: {"open": time(8, 0), "close": time(16, 30)},
+            Exchange.CRYPTO: {"open": time(0, 0), "close": time(23, 59)},
         }
-
-        # Map asset classes to exchanges
-        self.asset_class_exchange: Dict[AssetClass, Exchange] = {
+        self.asset_class_exchange = {
             AssetClass.STOCK: Exchange.NYSE,
             AssetClass.ETF: Exchange.NYSE,
+            AssetClass.INDEX: Exchange.NYSE,
+            AssetClass.COMMODITY: Exchange.NYSE,
+            AssetClass.FOREX: Exchange.NYSE,
             AssetClass.CRYPTOCURRENCY: Exchange.CRYPTO,
         }
+        logger.debug("Initialized MarketHoursManager (symbol-aware, 24/5 capable)")
 
-        logger.info("Initialized MarketHoursManager with exchange schedules")
+    # --- Schedule resolution ----------------------------------------------
+
+    def get_schedule(
+        self,
+        asset_class: AssetClass,
+        symbol: Optional[str] = None,
+    ) -> MarketSchedule:
+        """Pick the right MarketSchedule for (asset_class, symbol).
+
+        Precedence:
+          1. SymbolRegistry market_schedule override (from symbols.yaml)
+          2. Non-US index symbols override INDEX default
+          3. Asset-class default
+          4. Safest fallback: ETORO_24_5 (matches most US equities)
+        """
+        # 1. Per-symbol override from symbols.yaml
+        if symbol:
+            override = _get_registry_market_schedule(symbol)
+            if override:
+                try:
+                    return MarketSchedule(override)
+                except ValueError:
+                    logger.warning(
+                        f"Invalid market_schedule '{override}' for {symbol} "
+                        f"in symbols.yaml — falling through to defaults"
+                    )
+
+            # 2. Non-US index heuristic — only applies when no explicit override
+            if asset_class == AssetClass.INDEX:
+                if symbol.upper() in _NON_US_INDEX_SYMBOLS:
+                    return MarketSchedule.NON_US_INDEX
+
+        # 3. Asset-class default
+        return _DEFAULT_SCHEDULE_BY_ASSET_CLASS.get(
+            asset_class, MarketSchedule.ETORO_24_5
+        )
+
+    # --- Primary API ------------------------------------------------------
 
     def is_market_open(
         self,
         asset_class: AssetClass,
         check_time: Optional[datetime] = None,
-        symbol: Optional[str] = None
+        symbol: Optional[str] = None,
     ) -> bool:
-        """Check if market is open for given asset class.
-        
-        Args:
-            asset_class: Asset class to check (STOCK, ETF, CRYPTOCURRENCY)
-            check_time: Time to check (defaults to now)
-            symbol: Optional symbol for exchange-specific logic
-            
-        Returns:
-            True if market is open
-        """
-        if check_time is None:
-            check_time = datetime.now()
+        """True if eToro will accept an order for `symbol` (of `asset_class`) now.
 
-        # Cryptocurrencies are always open (24/7)
-        if asset_class == AssetClass.CRYPTOCURRENCY:
-            logger.debug(f"Cryptocurrency market is always open")
+        Args:
+            asset_class: STOCK / ETF / FOREX / INDEX / COMMODITY / CRYPTOCURRENCY
+            check_time: UTC-aware or ET-aware datetime (defaults to now)
+            symbol: optional symbol for per-symbol schedule resolution
+
+        Returns:
+            True if within the trading window.
+
+        Fail-open behavior: any internal exception → True. A market-hours
+        primitive that throws would block every order in the system; we'd
+        rather submit during a known-edge-case window and let eToro refuse.
+        """
+        try:
+            now = self._to_et(check_time)
+            schedule = self.get_schedule(asset_class, symbol)
+            check_fn = _SCHEDULE_CHECKS.get(schedule)
+            if check_fn is None:
+                logger.warning(
+                    f"Unknown schedule {schedule} for {asset_class.value}/{symbol} — "
+                    f"defaulting to open"
+                )
+                return True
+            result = check_fn(now)
+            logger.debug(
+                f"is_market_open({asset_class.value}, {symbol}) → "
+                f"{result} (schedule={schedule.value}, ET={now.strftime('%a %H:%M')})"
+            )
+            return result
+        except Exception as e:
+            logger.warning(
+                f"is_market_open failed for {asset_class}/{symbol}: {e} — defaulting to True"
+            )
             return True
 
-        # Get exchange for asset class
-        exchange = self.asset_class_exchange.get(asset_class)
-        if exchange is None:
-            logger.warning(f"Unknown asset class: {asset_class}, assuming closed")
-            return False
+    # --- Helpers ----------------------------------------------------------
 
-        # Get market hours for exchange
-        hours = self.market_hours.get(exchange)
-        if hours is None:
-            logger.warning(f"No market hours defined for {exchange}, assuming closed")
-            return False
-
-        # Check if it's a weekday the market is open
-        weekday = check_time.weekday()
-        if weekday not in hours.days_open:
-            logger.debug(f"{exchange.value} closed on weekday {weekday}")
-            return False
-
-        # Check if it's a holiday (for US exchanges)
-        if exchange in [Exchange.NYSE, Exchange.NASDAQ]:
-            check_date = check_time.date()
-            if datetime(check_date.year, check_date.month, check_date.day) in self.US_HOLIDAYS:
-                logger.debug(f"{exchange.value} closed for holiday on {check_date}")
-                return False
-
-            # Check for early close
-            if datetime(check_date.year, check_date.month, check_date.day) in self.US_EARLY_CLOSE:
-                # Early close at 1:00 PM ET
-                early_close_time = time(13, 0)
-                current_time = check_time.time()
-                
-                if current_time >= early_close_time:
-                    logger.debug(f"{exchange.value} closed for early close at {check_time}")
-                    return False
-                # Still check if before open time
-                if current_time < hours.open_time:
-                    logger.debug(f"{exchange.value} not yet open at {check_time}")
-                    return False
-                
-                logger.debug(f"{exchange.value} open (early close day) at {check_time}")
-                return True
-
-        # Check if current time is within market hours
-        current_time = check_time.time()
-        is_open = hours.open_time <= current_time <= hours.close_time
-
-        if is_open:
-            logger.debug(f"{exchange.value} open at {check_time}")
-        else:
-            logger.debug(f"{exchange.value} closed at {check_time} (hours: {hours.open_time}-{hours.close_time})")
-
-        return is_open
+    @staticmethod
+    def _to_et(check_time: Optional[datetime]) -> datetime:
+        import pytz
+        et_tz = pytz.timezone('US/Eastern')
+        if check_time is None:
+            return datetime.now(et_tz)
+        if check_time.tzinfo is None:
+            # Naive datetime — assume UTC (that's how most of the codebase stores it).
+            check_time = pytz.UTC.localize(check_time)
+        return check_time.astimezone(et_tz)
 
     def get_next_open_time(
         self,
         asset_class: AssetClass,
-        from_time: Optional[datetime] = None
+        from_time: Optional[datetime] = None,
+        symbol: Optional[str] = None,
     ) -> datetime:
-        """Get next market open time for asset class.
-        
-        Args:
-            asset_class: Asset class to check
-            from_time: Starting time (defaults to now)
-            
-        Returns:
-            Next market open datetime
+        """Approximate next market-open time. Walks forward in 15-min steps
+        up to 10 days to find the first open moment. Used for diagnostic /
+        "next open in Nh" displays, not for scheduling correctness.
         """
-        if from_time is None:
-            from_time = datetime.now()
+        import pytz
+        et_tz = pytz.timezone('US/Eastern')
+        now = self._to_et(from_time)
 
-        # Cryptocurrencies are always open
-        if asset_class == AssetClass.CRYPTOCURRENCY:
-            return from_time
+        if self.is_market_open(asset_class, check_time=now, symbol=symbol):
+            return now
 
-        # Get exchange for asset class
-        exchange = self.asset_class_exchange.get(asset_class)
-        if exchange is None:
-            logger.warning(f"Unknown asset class: {asset_class}")
-            return from_time
+        # Walk forward 15 min at a time — coarse enough to be fast, fine enough
+        # to land within a few minutes of the true open.
+        check = now
+        max_steps = 10 * 24 * 4  # 10 days × 96 fifteen-minute steps
+        for _ in range(max_steps):
+            check = check + timedelta(minutes=15)
+            if self.is_market_open(asset_class, check_time=check, symbol=symbol):
+                return check
 
-        # Get market hours
-        hours = self.market_hours.get(exchange)
-        if hours is None:
-            logger.warning(f"No market hours defined for {exchange}")
-            return from_time
+        logger.warning(
+            f"get_next_open_time: could not find open window within 10 days "
+            f"for {asset_class.value}/{symbol}"
+        )
+        return now + timedelta(days=1)
 
-        # Start checking from the next minute
-        check_time = from_time
-        max_days_ahead = 14  # Don't check more than 2 weeks ahead
 
-        for _ in range(max_days_ahead * 24 * 60):  # Check every minute for up to 2 weeks
-            if self.is_market_open(asset_class, check_time):
-                logger.info(f"Next open time for {asset_class.value}: {check_time}")
-                return check_time
-            
-            # Move to next minute
-            from datetime import timedelta
-            check_time += timedelta(minutes=1)
-
-            # If we've moved to a new day and it's past midnight, jump to market open time
-            if check_time.time() < time(1, 0) and check_time.weekday() in hours.days_open:
-                check_time = check_time.replace(
-                    hour=hours.open_time.hour,
-                    minute=hours.open_time.minute,
-                    second=0,
-                    microsecond=0
-                )
-
-        # Fallback: return original time if we can't find next open
-        logger.warning(f"Could not find next open time for {asset_class.value} within {max_days_ahead} days")
-        return from_time
-
-    def is_holiday(self, check_date: datetime, exchange: Exchange = Exchange.NYSE) -> bool:
-        """Check if given date is a holiday for the exchange.
-        
-        Args:
-            check_date: Date to check
-            exchange: Exchange to check (defaults to NYSE)
-            
-        Returns:
-            True if it's a holiday
-        """
-        # Only US exchanges have holiday tracking
-        if exchange not in [Exchange.NYSE, Exchange.NASDAQ]:
-            return False
-
-        date_only = datetime(check_date.year, check_date.month, check_date.day)
-        is_holiday = date_only in self.US_HOLIDAYS
-
-        if is_holiday:
-            logger.debug(f"{check_date.date()} is a holiday for {exchange.value}")
-
-        return is_holiday
-
-    def is_early_close(self, check_date: datetime, exchange: Exchange = Exchange.NYSE) -> bool:
-        """Check if given date is an early close day for the exchange.
-        
-        Args:
-            check_date: Date to check
-            exchange: Exchange to check (defaults to NYSE)
-            
-        Returns:
-            True if it's an early close day
-        """
-        # Only US exchanges have early close tracking
-        if exchange not in [Exchange.NYSE, Exchange.NASDAQ]:
-            return False
-
-        date_only = datetime(check_date.year, check_date.month, check_date.day)
-        is_early = date_only in self.US_EARLY_CLOSE
-
-        if is_early:
-            logger.debug(f"{check_date.date()} is an early close day for {exchange.value}")
-
-        return is_early
-
-    def get_market_hours(self, asset_class: AssetClass) -> Optional[MarketHours]:
-        """Get market hours definition for asset class.
-        
-        Args:
-            asset_class: Asset class to query
-            
-        Returns:
-            MarketHours object or None if not found
-        """
-        exchange = self.asset_class_exchange.get(asset_class)
-        if exchange is None:
+# ---------------------------------------------------------------------------
+# Lazy symbol-registry lookup for per-symbol market_schedule override.
+# We don't import SymbolRegistry at module load because it's heavy and this
+# module is imported by low-level code (order_executor) that shouldn't pay
+# the cost until it actually needs a schedule decision.
+# ---------------------------------------------------------------------------
+def _get_registry_market_schedule(symbol: str) -> Optional[str]:
+    """Look up `market_schedule:` from symbols.yaml for `symbol`. Returns
+    None if the symbol isn't in the registry or has no override set."""
+    try:
+        from src.core.symbol_registry import get_registry
+        reg = get_registry()
+        getter = getattr(reg, "get_market_schedule", None)
+        if getter is None:
             return None
+        return getter(symbol)
+    except Exception:
+        return None
 
-        return self.market_hours.get(exchange)
 
-    def get_exchange_for_symbol(self, symbol: str) -> Exchange:
-        """Determine exchange for a given symbol.
-        
-        This is a simplified implementation. In production, you'd want
-        a more sophisticated symbol-to-exchange mapping.
-        
-        Args:
-            symbol: Instrument symbol
-            
-        Returns:
-            Exchange for the symbol
-        """
-        # Cryptocurrency detection (simplified)
-        crypto_indicators = ["BTC", "ETH", "USDT", "XRP", "ADA", "DOGE", "SOL", "-USD"]
-        if any(indicator in symbol.upper() for indicator in crypto_indicators):
-            return Exchange.CRYPTO
+# ---------------------------------------------------------------------------
+# Module-level singleton. Every caller used to do `MarketHoursManager()`
+# inline which (a) spammed the init log — one entry per TSL iteration over 75
+# positions — and (b) wasted a tiny bit of work per call. Routes through
+# get_market_hours_manager() to share one instance.
+# ---------------------------------------------------------------------------
+_singleton: Optional[MarketHoursManager] = None
 
-        # Default to NYSE for stocks/ETFs
-        return Exchange.NYSE
+
+def get_market_hours_manager() -> MarketHoursManager:
+    """Lazy-initialized module-level MarketHoursManager. Logs once."""
+    global _singleton
+    if _singleton is None:
+        _singleton = MarketHoursManager()
+        logger.info("MarketHoursManager singleton created (symbol-aware, 24/5 capable)")
+    return _singleton

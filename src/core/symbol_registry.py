@@ -45,6 +45,7 @@ class SymbolRegistry:
         self._etoro_id_to_symbol: Dict[int, str] = {}
         self._symbol_to_etoro_id: Dict[str, int] = {}
         self._asset_class_map: Dict[str, str] = {}
+        self._market_schedule_map: Dict[str, str] = {}
         self._all_symbols: List[str] = []
 
         for asset_class in self.ASSET_CLASSES:
@@ -58,10 +59,13 @@ class SymbolRegistry:
                     logger.warning(f"Symbol '{sym}' in {asset_class} was parsed as {type(entry['symbol']).__name__} — quote it in symbols.yaml")
                 etoro_id = entry.get("etoro_id")
                 sector = entry.get("sector", "Unknown")
+                market_schedule = entry.get("market_schedule")  # optional per-symbol override
 
                 symbols.append(sym)
                 self._sector_map[sym] = sector
                 self._asset_class_map[sym] = asset_class
+                if market_schedule:
+                    self._market_schedule_map[sym] = market_schedule
                 if etoro_id:
                     self._etoro_id_to_symbol[etoro_id] = sym
                     self._symbol_to_etoro_id[sym] = etoro_id
@@ -112,6 +116,15 @@ class SymbolRegistry:
 
     def get_asset_class(self, symbol: str) -> str:
         return self._asset_class_map.get(symbol.upper(), self._asset_class_map.get(symbol, "unknown"))
+
+    def get_market_schedule(self, symbol: str) -> Optional[str]:
+        """Return the per-symbol market_schedule override from symbols.yaml,
+        or None if the symbol has no explicit override. The MarketHoursManager
+        uses this to opt individual symbols out of the asset-class default
+        (e.g., a non-24/5 stock in an otherwise-24/5-default universe)."""
+        return self._market_schedule_map.get(
+            symbol.upper(), self._market_schedule_map.get(symbol)
+        )
 
     def get_etoro_id(self, symbol: str) -> Optional[int]:
         return self._symbol_to_etoro_id.get(symbol.upper(), self._symbol_to_etoro_id.get(symbol))

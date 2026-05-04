@@ -201,44 +201,53 @@ class MonitoringService:
 
     def _is_symbol_market_open(self, symbol: str) -> bool:
         """Check if the market is open for a given symbol.
-        
-        Returns True for crypto (24/7), True for forex on weekdays,
-        True for stocks/ETFs during eToro extended hours (Mon-Fri 4AM-8PM ET).
+
+        Routes through MarketHoursManager (symbol-aware) so US stocks/ETFs on
+        the 24/5 list are correctly treated as open during overnight hours.
         """
         try:
-            import pytz
-            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX
+            from src.core.tradeable_instruments import (
+                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+                DEMO_ALLOWED_ETFS,
+            )
+            from src.data.market_hours_manager import (
+                get_market_hours_manager, AssetClass as _AssetClassMH,
+            )
             from src.utils.symbol_normalizer import normalize_symbol
-            
+
             sym = normalize_symbol(symbol).upper()
-            
+
             if sym in set(DEMO_ALLOWED_CRYPTO):
-                return True  # 24/7
-            
-            et_tz = pytz.timezone('US/Eastern')
-            now_et = datetime.now(et_tz)
-            is_weekend = now_et.weekday() >= 5
-            
-            if sym in set(DEMO_ALLOWED_FOREX):
-                return not is_weekend  # Mon-Fri 24h
-            
-            # Stocks, ETFs, indices, commodities: eToro extended hours
-            return not is_weekend and 4 <= now_et.hour < 20
+                ac = _AssetClassMH.CRYPTOCURRENCY
+            elif sym in set(DEMO_ALLOWED_FOREX):
+                ac = _AssetClassMH.FOREX
+            elif sym in set(DEMO_ALLOWED_INDICES):
+                ac = _AssetClassMH.INDEX
+            elif sym in set(DEMO_ALLOWED_COMMODITIES):
+                ac = _AssetClassMH.COMMODITY
+            elif sym in set(DEMO_ALLOWED_ETFS):
+                ac = _AssetClassMH.ETF
+            else:
+                ac = _AssetClassMH.STOCK
+
+            return get_market_hours_manager().is_market_open(ac, symbol=sym)
         except Exception:
             return True  # If we can't determine, don't block
-    
+
     def _any_market_open(self) -> bool:
         """Check if ANY market is open (crypto is always open, so this always returns True).
         Used to decide if the monitoring loop should run at full speed or reduced."""
         return True  # Crypto is 24/7, so there's always something to monitor
-    
+
     def _is_stock_market_open(self) -> bool:
-        """Check if US stock market is open (eToro extended hours)."""
+        """Check if the US stock market is open for trading per eToro policy.
+        With the 24/5 rewrite, this is True Sun 20:05 ET → Fri 16:00 ET for
+        S&P/NDX names. Without a specific symbol the default ETORO_24_5
+        schedule is used."""
         try:
-            import pytz
-            et_tz = pytz.timezone('US/Eastern')
-            now_et = datetime.now(et_tz)
-            return now_et.weekday() < 5 and 4 <= now_et.hour < 20
+            from src.data.market_hours_manager import get_market_hours_manager, AssetClass as _AssetClassMH
+            return get_market_hours_manager().is_market_open(_AssetClassMH.STOCK)
         except Exception:
             return True
     

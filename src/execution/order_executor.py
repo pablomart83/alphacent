@@ -402,10 +402,10 @@ class OrderExecutor:
             # are blocked outside regular session hours.
             # The signal will re-fire on the next scheduler cycle when market is open.
             try:
-                from src.data.market_hours_manager import MarketHoursManager, AssetClass as _AssetClass
-                _mhm = MarketHoursManager()
+                from src.data.market_hours_manager import get_market_hours_manager, AssetClass as _AssetClass
+                _mhm = get_market_hours_manager()
                 _asset_cls = self._determine_asset_class(normalized_symbol)
-                if not _mhm.is_market_open(_asset_cls):
+                if not _mhm.is_market_open(_asset_cls, symbol=normalized_symbol):
                     raise OrderExecutionError(
                         f"Market closed for {normalized_symbol} ({_asset_cls.value}) — "
                         f"order not submitted to eToro. Signal will re-fire at next open."
@@ -1719,7 +1719,7 @@ class OrderExecutor:
 
         for order in self._queued_orders:
             asset_class = self._determine_asset_class(order.symbol)
-            if self.market_hours.is_market_open(asset_class):
+            if self.market_hours.is_market_open(asset_class, symbol=order.symbol):
                 try:
                     self._submit_order(order)
                     processed += 1

@@ -15,24 +15,28 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 4, 2026, ~12:15 UTC, post-loser-pair-penalty fix)
+## Current System State (May 4, 2026, ~14:15 UTC, post 24/5 + singleton + filter-funnel deploy)
 
-- **Equity:** ~$479K
-- **Open positions:** 77
-- **Active strategies:** 58 (+2 ready-to-activate from most recent cycle: TSM, SILVER)
-- **Directional split:** ~78% LONG / ~6% SHORT
-- **Market regime (equity):** `TRENDING_UP_STRONG` (90% confidence)
+- **Equity:** ~$477K
+- **Open positions:** 72
+- **Active strategies:** 56 DEMO + 116 BACKTESTED = 172 total
+- **Directional split:** ~72% LONG / ~6% SHORT
+- **Market regime (equity):** `TRENDING_UP_STRONG` (92% confidence)
 - **Market regime (crypto):** `RANGING_LOW_VOL`
 - **VIX:** 17
 - **Mode:** eToro DEMO
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
 **Health:**
-- errors.log: 0 timestamped entries since 11:52 UTC restart
+- errors.log: 0 timestamped entries since 14:07 UTC restart
 - warnings.log: clean
 - MQS: 85/100 "high" persisting
-- Cycle activation rate: 2-4 per cycle, 15/19 WF pass (78.9%)
-- Unified funnel: all post-fix `signal_emitted` / `gate_blocked` / `order_submitted` rows carry `template_name` (45/45, 29/29, 2/2 last cycle)
+- Cycle activation rate: 2-4 per cycle, 14-15/18 WF pass (78-83%)
+- Unified funnel: full rejection taxonomy now populated
+  (signal_emitted accepted + rejected, gate_blocked, activated, rejected_act, etc.)
+- Filter-rejection visibility: 89 rejections captured in last batch sweep
+  with per-row conviction breakdown (previously invisible outside raw logs)
+- Market-hours primitive: singleton, symbol-aware, 24/5 compliant (Sun 20:05 ET → Fri 16:00 ET)
 
 **Data routing matrix (unchanged from 2026-05-03 evening):**
 
@@ -49,6 +53,95 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 | OIL @ 4h, COPPER @ 4h | FMP | 5y | Yahoo |
 
 287 non-crypto symbols fully backfilled at FMP 5y. Premium-blocked set (DAX, CAC, oil-1h, copper-1h, non-US indices at 4h) flows through Yahoo with visible engine-cap truncation logs.
+
+---
+
+## Session shipped 2026-05-04 evening — 24/5 readiness + MarketHoursManager rewrite + filter-rejection funnel
+
+Three fixes in one session sprint, all solving real observability or trader-reality gaps.
+
+### Sprint 1 — 24/5 readiness (MarketHoursManager rewrite)
+
+eToro announced 24/5 trading for all S&P 500 + Nasdaq 100 stocks on 2025-11-17 with a Sun 20:05 ET → Fri 16:00 ET window. Our system still gated orders on NYSE regular hours (9:30-16:00 ET) or the older ad-hoc 04:00-20:00 ET window scattered across six call sites. 4H strategies closing at 00:00/04:00/20:00 ET had three of six daily closes fall outside the gate, silently deferring orders.
+
+Root cause: `MarketHoursManager.is_market_open(asset_class, check_time, symbol)` accepted a `symbol` parameter but ignored it. `AssetClass` enum only defined `STOCK/ETF/CRYPTOCURRENCY` while callers passed `FOREX/COMMODITY/INDEX` — those fell through a try/except and silently defaulted to `STOCK` with NYSE regular hours. Forex orders and commodity orders were being time-gated by NYSE rules, wrong for both.
+
+**Fix:** rewrite `src/data/market_hours_manager.py` around 6 schedule regimes selected by `(asset_class, symbol)`:
+- `CRYPTO_24_7` — always open
+- `ETORO_24_5` — Sun 20:05 → Fri 16:00 ET, holidays closed (default for STOCK/ETF)
+- `US_EXTENDED` — Mon-Fri 04:00-20:00 ET (opt-out for non-24/5 stocks)
+- `FOREX_24_5` — Sun 17:00 → Fri 17:00 ET, continuous
+- `US_INDEX_FUTURES` — Sun 18:00 → Fri 17:00 ET with 17:00-18:00 daily break (SPX500/NSDQ100/DJ30)
+- `COMMODITY_FUTURES` — same CME schedule (GOLD/SILVER/OIL/COPPER)
+- `NON_US_INDEX` — local exchange hours (UK100/GER40/FR40/STOXX50 → 02:00-11:30 ET)
+
+`AssetClass` enum extended to include FOREX/INDEX/COMMODITY as first-class values. `SymbolRegistry.get_market_schedule(symbol)` added for per-symbol overrides in `config/symbols.yaml` (not needed today — every stock in our universe is S&P/NDX-eligible, the asset-class default is correct).
+
+**Decision I didn't take:** no static 24/5 symbol registry. Every stock/ETF in our DEMO universe is a curated US large-cap by construction; the asset-class default is always correct. If we ever add a non-24/5 name, it gets `market_schedule: us_extended` in symbols.yaml — one line. Zero-maintenance by default.
+
+**Eliminated ad-hoc checks at 7 call sites** (all replaced with `is_market_open(asset_class, symbol=...)`):
+- `src/strategy/strategy_engine.py:5024`
+- `src/core/monitoring_service.py:206` + `:240`
+- `src/core/order_monitor.py:2052`
+- `src/core/trading_scheduler.py:318`
+- `src/api/routers/control.py:1751`
+- `src/api/routers/data_management.py:385`
+- `src/api/app.py:440`
+- Plus fixed `src/execution/order_executor.py:408` and `:1722` to pass `symbol=`
+
+**Pre-deploy verification:** `scripts/verify_market_hours_24_5.py` truth-table test (30 cases across all 6 regimes + holiday + early-close): 30/30 pass.
+
+**Post-deploy live verification:** `scripts/verify_24_5_backtested.py` walks every BACKTESTED + DEMO strategy in the library (172 total), classifies primary symbols, and calls `is_market_open` at 6 representative ET times (regular hours, post-market, overnight, pre-market, Saturday, Sunday reopen). Result: **116/116 BACKTESTED and 56/56 DEMO strategies open during all four 24/5 windows** (regular, post-market, overnight, pre-market). Saturday shows the correct closure for everything except crypto (5 crypto-primary BACKTESTED strategies). **Every existing BACKTESTED strategy benefits from 24/5 identically to DEMO strategies** — same code path, no status-specific branch.
+
+### Sprint 2 — MarketHoursManager singleton (log-spam regression fix)
+
+Post-deploy, the TSL cycle iterating 75 positions instantiated `MarketHoursManager()` 75 times and each init logged `Initialized MarketHoursManager (symbol-aware, 24/5 capable)` at INFO. Multiplied across monitoring_service, trading_scheduler, order_executor, order_monitor, strategy_engine — a same-second flood of 75+ identical lines in alphacent.log.
+
+**Fix:** module-level singleton via `get_market_hours_manager()` in `src/data/market_hours_manager.py`. Init log moved to DEBUG on class construction + one INFO line from the singleton getter on first call. All 10 call sites across 7 files migrated from `MarketHoursManager()` → `get_market_hours_manager()`. Verified post-restart: exactly 1 "singleton created" log line; 0 per-call init lines.
+
+The log spam was the visible symptom; the architectural fix (singleton for a stateless resource) is the proper solution.
+
+### Sprint 3 — Filter-rejection funnel writes (observability gap)
+
+Cycle footer said `[SIGNALS] 2 generated → 0 coordinated → 2 rejected` but `signal_decisions` showed 0 rows for that cycle. Conviction + frequency + ML + fundamental + low-confidence filter rejections in `strategy_engine.generate_signals` were only logging to alphacent.log; the funnel writer at the bottom (`record_batch` for `signal_emitted`) only fired when `filtered_signals` was non-empty. When every signal was filtered, the funnel stayed silent.
+
+**Fix:** helper `_log_filter_rejection(reason_text, extra_md)` closure inside the filter loop. Writes one `signal_decisions` row per rejection with `stage=signal_emitted`, `decision=rejected`, and a `filter:<kind>` reason prefix (`filter:conviction`, `filter:frequency`, `filter:ml`, `filter:fundamental`, `filter:low_confidence`). Structured `decision_metadata` carries the conviction score, threshold, breakdown, ML confidence, etc. Every write wrapped in try/except — analytics failures never break signal gen.
+
+**Immediate payoff in observability:** post-deploy the first batch sweep captured 89 filter rejections with precise score breakdowns. Distribution analysis (see "Observation — conviction floor clipping" below) surfaced a real design question that was invisible before.
+
+**Observation — conviction floor clipping (surfaced by the new visibility)**
+
+Of the 89 filter rejections captured, the scores clustered tight against the 65 threshold:
+- Mean 61.0, max 64.8, min 45.5
+- 18 rejections (20%) scored 64-65 — within 1 point of the floor
+- 37 rejections (42%) scored ≥62 — within 3 points
+- Only 2 rejections scored below 55
+
+Repeated rejections for the same (template, symbol) pair: XLK × Keltner Channel Breakout 9 times at avg 62.1, XLK × 4H EMA Ribbon 4 times, SPY × 4H EMA Ribbon 2 times, TQQQ × 4H EMA Ribbon 3 times. Broad-market ETFs in a trending_up_strong regime repeatedly scoring just under the 65 floor.
+
+**Trader's read:** the system is correctly rejecting low-edge broad-market entries (wf_edge 23-27/40 for those) even though regime_fit is maxed. The floor is doing its job post-TSLA audit. BUT — edge cases like MU × Keltner Breakout at 64.6, UNH × 4H ADX Trend Swing at 64.6, ROST × 4H VWAP at 64.8 suggest the binary threshold is occasionally costing us real single-stock edge. This is a design question, not an emergency — kicked to P1 next session (see Open Items).
+
+### Files changed this sprint
+
+- `src/data/market_hours_manager.py` — full rewrite (6 regimes + singleton)
+- `src/core/symbol_registry.py` — `get_market_schedule()` added
+- `src/strategy/strategy_engine.py` — ad-hoc check removed + filter-rejection funnel writes
+- `src/core/monitoring_service.py` — 2 ad-hoc sites refactored + singleton switch
+- `src/core/order_monitor.py` — ad-hoc site refactored + singleton switch
+- `src/core/trading_scheduler.py` — ad-hoc check removed + singleton switch (3 sites)
+- `src/execution/order_executor.py` — pass `symbol=` to is_market_open, singleton
+- `src/api/routers/control.py` — `market_hours` gate rewritten to use primitive
+- `src/api/routers/data_management.py` — market-open display string via primitive
+- `src/api/routers/account.py` — singleton switch
+- `src/api/routers/orders.py` — singleton switch
+- `src/api/app.py` — trading-gates endpoint rewritten to use primitive
+
+New scripts:
+- `scripts/verify_market_hours_24_5.py` — 30-case boundary truth table
+- `scripts/verify_24_5_backtested.py` — per-strategy 24/5 eligibility matrix
+- `scripts/check_market_hours_live.py` — quick live-state debug
+
+**Verification:** errors.log clean across all three restarts. Post-singleton restart the 89 filter rejections reconciled exactly with the raw `Batch signal generation: 10 signals from 151 strategies (89 rejected)` log line. Cycle footer and funnel now agree.
 
 ---
 
@@ -508,7 +601,7 @@ Log hygiene post-2026-05-03 evening: errors.log clean, warnings.log at signal-to
 
 ### Deferred / still open
 
-- **24/5 readiness** (P0): eToro is live 24/5 for S&P 500 + Nasdaq 100 + ~100 top ETFs. `MarketHoursManager.is_market_open` still uses NYSE regular hours; scattered ad-hoc `04:00-20:00 ET` checks live in 5+ call sites. 4H strategies that close at 00:00/04:00/20:00 ET have their signals deferred. Three-layer fix: static 24/5 symbol registry in `tradeable_instruments.py`, symbol-aware `MarketHoursManager`, eliminate scattered ad-hoc checks. 2-3 hours. Details in next-session kickoff prompt.
+- **Conviction-floor two-factor gate** (P0 next session): the 65 conviction floor is correctly killing low-edge broad-market entries (XLK/SPY/TQQQ repeatedly scoring 60-64 in a trending_up_strong regime with wf_edge 23-27/40 — right decision). But the same binary threshold also clips edge-case single-stock entries at 64.5-64.8 where WF quality is genuinely good (MU × Keltner 64.6, UNH × 4H ADX 64.6, ROST × 4H VWAP 64.8). These are real setups the system is missing by 0.2-0.5 points. Proper fix: two-factor gate `score ≥ 65 OR (score ≥ 62 AND wf_edge ≥ 32 AND persistence ≥ 9/10)` — lets through high-quality boundary cases without opening the door to weak-WF broad-market noise. Design session first, then implement. 2-4 hours total. Details in next-session kickoff prompt.
 - **Triple EMA Alignment DSL bug** (P1): `EMA(10) > EMA(10)` tautology from regex param collapse in `strategy_proposer.customize_template_parameters`. ~30 min fix to add explicit positional-EMA-period handling.
 - **WF bypass-path tightening for LONG** (P1): primary + test-dominant paths admit regime-luck on LONG side. Consider `(test_sharpe - train_sharpe) ≤ 1.5` consistency gate. SHORT already tightened (Sprint 1).
 - **Cross-cycle signal dedup for market-closed deferrals** (P1): entry-order 82% FAILED rate is cosmetic — market-closed deferrals re-fire each cycle. 30-min TTL map on `(strategy_id, symbol, direction)` in trading_scheduler.
@@ -553,81 +646,115 @@ The 2026-05-04 session shipped 4 commits across 3 sprints:
   truth; 27k-row legacy backfill; UI widgets re-pointed)
 - Docs refresh
 
-The 2026-05-04 afternoon session shipped 1 commit:
-- P0 loser-pair penalty data integrity (trade_journal template_name
-  enrichment at signal emission + 216-row legacy backfill + startup
-  self-check)
+The 2026-05-04 evening session shipped 1 commit across 3 sprints:
+- 24/5 readiness (MarketHoursManager rewrite — 6 schedule regimes,
+  symbol-aware, eliminated 7 scattered ad-hoc checks, AssetClass
+  enum extended with FOREX/INDEX/COMMODITY)
+- MarketHoursManager singleton (log-spam regression → architectural
+  fix via get_market_hours_manager())
+- Filter-rejection funnel writes (conviction + frequency + ML +
+  fundamental + low_confidence filter rejections now land in
+  signal_decisions with filter:<kind> reason prefix; 89 rejections
+  captured in first post-deploy batch)
 
 System state at session close:
-- Equity: ~$479K, 77 open positions, 58 active strategies
-- 2-4 activations per cycle, 15/19 WF pass rate (78.9%)
-- errors.log: 0 timestamped entries since 11:52 UTC restart
+- Equity: ~$477K, 72 open positions, 56 DEMO + 116 BACKTESTED = 172 total
+- 2-4 activations per cycle, 14-15/18 WF pass rate (78-83%)
+- errors.log: 0 timestamped entries since 14:07 UTC restart
 - warnings.log: clean
-- Unified funnel: 100% template_name coverage on all new rows
-  (45/45 signal_emitted, 29/29 gate_blocked, 2/2 order_submitted last cycle)
-- Loser-pair penalty: armed; 6 backfilled pairs eligible (SCCO, HIMS, GEV,
-  GS, PYPL, BTC); path verified via scripts/verify_loser_pair_penalty.py
-- Startup self-check: live at app.py boot, warns if 0 of last-1000 closed
-  trades carry template_name
+- Unified funnel: full rejection taxonomy populated (89 filter
+  rejections visible for first time)
+- Market-hours primitive: singleton, symbol-aware, 24/5 compliant
+  (Sun 20:05 ET → Fri 16:00 ET). Verified via 30-case truth table
+  (scripts/verify_market_hours_24_5.py) + per-strategy live check
+  (scripts/verify_24_5_backtested.py) — 172/172 strategies eligible
+  for 24/5 windows (BACKTESTED and DEMO treated identically).
+- Loser-pair penalty: armed; 6 backfilled pairs eligible; verified
+  via scripts/verify_loser_pair_penalty.py
 
-Last 5 commits on main (newest first):
-- [pending] fix: loser-pair penalty data integrity — populate trade_journal template_name
+Last 7 commits on main (newest first):
+- [pending] feat: 24/5 readiness + MarketHoursManager singleton + filter-rejection funnel writes
+- f29f23f fix: loser-pair penalty data integrity — populate trade_journal template_name
+- 87f6a6c docs: Session_Continuation — fill in commit hashes for 2026-05-04 kickoff
 - 0f29f38 docs: Session_Continuation — 2026-05-04 session + loser-pair P0 kickoff
 - a0b972c refactor: observability unification on signal_decisions
 - 1af9069 feat: risk-manager observability reasons + cycle footer + eToro 404 handler
 - a50bb6e fix: activation pipeline — backtest purity + VWAP DSL + WF cache invalidation
 
 ==========================================================================
-MISSION — P0: 24/5 READINESS
+MISSION — P0: CONVICTION-FLOOR TWO-FACTOR GATE
 ==========================================================================
 
-eToro announced 24/5 trading for all S&P 500 + Nasdaq 100 stocks +
-~100 top ETFs in November 2025, and it's live. Our system currently
-uses multiple different "is the market open?" checks:
+Surfaced by the new filter-rejection funnel visibility shipped in the
+2026-05-04 evening sprint. The 65 conviction floor is the right guard
+against low-edge broad-market entries (XLK/SPY/TQQQ repeatedly scoring
+60-64 in trending_up_strong with wf_edge 23-27/40 — correctly rejected)
+but also clips edge-case single-stock entries at 64.5-64.8 where WF
+quality is good. Concrete examples from the 89-rejection post-deploy
+batch:
 
-- MarketHoursManager.is_market_open — NYSE 9:30-16:00 ET (regular
-  session only). Used by order_executor.execute_signal.
-- Ad-hoc `now_et.hour >= 4 and now_et.hour < 20` — scattered across
-  strategy_engine.py:5024, data_management.py:385, order_monitor.py:
-  2002, control.py:1751, app.py:386. Pre+regular+post US hours.
+  MU   × Keltner Channel Breakout     64.6  (wf_edge≈28, signal=20.9)
+  UNH  × 4H ADX Trend Swing           64.6
+  ROST × 4H VWAP Trend Continuation   64.8
+  SLB  × 4H VWAP Trend Continuation   64.5
+  VTI  × ATR Dynamic Trend Follow     64.6
 
-Neither matches eToro's actual 24/5 window. During pre-market and
-post-market hours for S&P/NDX names, we're telling ourselves the
-market is closed and deferring orders. 4H strategies close at 00:00,
-04:00, 08:00, 12:00, 16:00, 20:00 ET — three of six closes fall
-outside the NYSE regular session, so signals fire at closes we
-can't act on.
+These are real setups the system is missing by 0.2-0.5 points. The
+binary cliff at 65 punishes high-quality-WF edge cases the same way
+it kills weak-WF broad-market noise. Two different signal qualities
+should not be gated by the same threshold.
 
-Three-layer fix:
+YOUR MISSION for P0:
 
-1. Static 24/5 symbol registry. Load the eToro 24/5-eligible list
-   (~700 names: SPX 500 + NDX 100 + top-100 ETFs, deduped) as
-   part of tradeable_instruments.py. Update when eToro expands.
+1. RESEARCH / DESIGN FIRST. Pull 2-4 weeks of signal_decisions data
+   from the filter-rejection funnel (now populated post-2026-05-04):
 
-2. MarketHoursManager extended to be symbol-aware:
-   - Crypto → 24/7 (existing)
-   - 24/5-eligible US equity/ETF → Mon 00:00 - Fri 23:59 ET
-     (with the Fri-evening → Sun-evening gap)
-   - Non-24/5 US equity/ETF → regular + pre/post (04:00-20:00 ET)
-   - Forex → 24/5 continuous
-   - Non-US indices / commodities / LME → their specific schedules
+     SELECT (decision_metadata::jsonb->>'conviction_score')::float AS score,
+            (decision_metadata::jsonb->'breakdown'->'walkforward_edge'->>'score')::float AS wf_edge,
+            decision_metadata::jsonb->>'breakdown'
+     FROM signal_decisions
+     WHERE reason LIKE 'filter:conviction%'
+       AND timestamp > NOW() - INTERVAL '14 days';
 
-   is_market_open(asset_class, symbol=...) already accepts symbol;
-   wire it up so per-symbol logic lives in the primitive.
+   Plot the distribution of rejected signals by (score, wf_edge)
+   and identify where the "real edge" rejections cluster vs the
+   "weak-WF broad-market" rejections. Confirm the hypothesis: that
+   a two-factor gate `score ≥ 65 OR (score ≥ 62 AND wf_edge ≥ 32
+   AND persistence ≥ 9/10)` separates them cleanly.
 
-3. Eliminate the scattered ad-hoc 04:00-20:00 checks. All routes
-   through MarketHoursManager. The steering file is explicit about
-   cross-cutting concerns belonging in primitives.
+   If the data says otherwise, redesign the gate. No cargo-culting
+   the threshold I proposed — validate first.
 
-Verification: a Monday 10:00 UTC cycle (US pre-market) should now
-submit orders to eToro for 24/5-eligible names instead of deferring
-them. 4H strategies that close at 00:00/04:00/20:00 ET should fire
-orders without the "market closed" error.
+2. IMPLEMENT THE GATE in src/strategy/conviction_scorer.py (or
+   wherever the `passes_threshold` check lives — trace the call).
+   The new gate must still reject weak-WF broad-market signals.
+   Update the filter-rejection funnel writer to record the
+   specific gate path taken (`filter:conviction_primary` vs
+   `filter:conviction_secondary_miss`).
 
-Estimate: 2-3 hours. Budget for it.
+3. VERIFY POST-DEPLOY. Re-run the same 14-day distribution query
+   after a few cycles. Confirm the pass count rose without weak-WF
+   noise getting through. Ideal outcome: ~5-10 additional signals
+   per cycle clearing the secondary gate, all with wf_edge ≥ 32.
+
+4. NO STOPGAPS. If the research in step 1 says the current 65
+   floor is actually right and the 64.5-64.8 cluster is genuine
+   noise we should eat, WALK AWAY from the change — don't ship
+   complexity that doesn't earn its keep. A two-factor gate that
+   doesn't improve trade quality is worse than the single-factor
+   one because it adds cognitive load.
+
+Rules (same as every session):
+- Proper solutions only. No patches.
+- No skip-flags, no stopgaps.
+- Research the data before redesigning a risk primitive.
+- Deploy via the scp workflow. Never edit on EC2.
+
+Estimate: 2-4 hours total (1h research + 1-2h implementation +
+verification).
 
 ==========================================================================
-OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE P0 (24/5 READINESS)
+OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE P0
 ==========================================================================
 
 P1:

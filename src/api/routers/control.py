@@ -539,7 +539,7 @@ async def activate_kill_switch(
         from src.risk.risk_manager import RiskManager
         from src.execution.order_executor import OrderExecutor
         from src.api.etoro_client import EToroAPIClient
-        from src.data.market_hours_manager import MarketHoursManager
+        from src.data.market_hours_manager import get_market_hours_manager
         from src.core.config import get_config
         from src.core.system_state_manager import get_system_state_manager
         from src.models.enums import SystemStateEnum
@@ -551,7 +551,7 @@ async def activate_kill_switch(
         # Initialize components
         risk_manager = RiskManager(risk_config)
         etoro_client = EToroAPIClient(mode=mode)
-        market_hours = MarketHoursManager()
+        market_hours = get_market_hours_manager()
         order_executor = OrderExecutor(etoro_client, market_hours)
         
         # Execute kill switch through risk manager
@@ -1741,18 +1741,20 @@ async def get_system_health(
         except Exception:
             pass
 
-        # Market hours
+        # Market hours — route through the primitive so the panel reflects
+        # the real eToro 24/5 window. No symbol context here (global view),
+        # so we use the STOCK default (ETORO_24_5).
         try:
+            from src.data.market_hours_manager import get_market_hours_manager, AssetClass as _ACMH
             import pytz
             et_tz = pytz.timezone('US/Eastern')
             now_et = datetime.now(et_tz)
-            is_weekend = now_et.weekday() >= 5
-            stock_open = not is_weekend and 4 <= now_et.hour < 20
+            stock_open = get_market_hours_manager().is_market_open(_ACMH.STOCK)
             result.trading_gates.append(TradingGate(
                 name="market_hours",
                 armed=True,
                 blocking=not stock_open,
-                detail=f"ET={now_et.strftime('%a %H:%M')} stock_open={stock_open}",
+                detail=f"ET={now_et.strftime('%a %H:%M')} stock_open={stock_open} (eToro 24/5)",
             ))
         except Exception:
             pass

@@ -2041,17 +2041,38 @@ class OrderMonitor:
                 submitted_at = order.submitted_at.replace(tzinfo=None) if order.submitted_at and order.submitted_at.tzinfo else (order.submitted_at or now)
                 age_hours = (now - submitted_at).total_seconds() / 3600
 
-                # Determine if order was submitted during market hours
+                # Determine if order was submitted during market hours (per eToro
+                # policy). Post 24/5 rewrite, this routes through MarketHoursManager
+                # so a 02:00 ET submission for an S&P/NDX stock counts as
+                # market-hours (standard timeout), not after-hours.
                 submitted_during_market_hours = True
                 if et_tz:
                     try:
-                        submitted_et = submitted_at.replace(tzinfo=pytz.utc).astimezone(et_tz)
-                        weekday = submitted_et.weekday()  # 0=Mon, 4=Fri, 5=Sat, 6=Sun
-                        hour = submitted_et.hour + submitted_et.minute / 60.0
-                        # Market hours: Mon-Fri 9:30am–4:00pm ET
-                        is_weekday = weekday < 5
-                        is_market_hours = is_weekday and 9.5 <= hour <= 16.0
-                        submitted_during_market_hours = is_market_hours
+                        from src.data.market_hours_manager import (
+                            get_market_hours_manager, AssetClass as _ACMH,
+                        )
+                        from src.core.tradeable_instruments import (
+                            DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
+                            DEMO_ALLOWED_INDICES, DEMO_ALLOWED_COMMODITIES,
+                            DEMO_ALLOWED_ETFS,
+                        )
+                        submitted_utc = submitted_at.replace(tzinfo=pytz.utc) if submitted_at.tzinfo is None else submitted_at
+                        _sym_u = (order.symbol or "").upper()
+                        if _sym_u in set(DEMO_ALLOWED_CRYPTO):
+                            _ac_om = _ACMH.CRYPTOCURRENCY
+                        elif _sym_u in set(DEMO_ALLOWED_FOREX):
+                            _ac_om = _ACMH.FOREX
+                        elif _sym_u in set(DEMO_ALLOWED_INDICES):
+                            _ac_om = _ACMH.INDEX
+                        elif _sym_u in set(DEMO_ALLOWED_COMMODITIES):
+                            _ac_om = _ACMH.COMMODITY
+                        elif _sym_u in set(DEMO_ALLOWED_ETFS):
+                            _ac_om = _ACMH.ETF
+                        else:
+                            _ac_om = _ACMH.STOCK
+                        submitted_during_market_hours = get_market_hours_manager().is_market_open(
+                            _ac_om, check_time=submitted_utc, symbol=_sym_u
+                        )
                     except Exception:
                         pass  # assume market hours if check fails
 
