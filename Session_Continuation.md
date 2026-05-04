@@ -779,89 +779,95 @@ Last commits on main (newest first):
 - f29f23f fix: loser-pair penalty data integrity — populate template_name
 
 ==========================================================================
-MISSION — P0: CONVICTION SCORER RESTRUCTURE (shipped items 2-6 of audit)
+MISSION — P0: CONVICTION-TIER POSITION SIZING + PROVEN LOSS PLUGGERS
 ==========================================================================
 
-The conviction-persist fix is live. As `conviction_score` fills in on
-closed trades over the next 2-3 weeks, we should aim for 70-80%
-population of the last 1000 trades before running a regression fit.
+The conviction-persist fix + historical backfill are live. Deep-dive
+analysis of 661 trades (logged in the session block below) revealed
+the real structure of our alpha:
 
-Meanwhile, the structural issues the audit surfaced can be tackled
-without waiting for data. In priority order:
+- >=75 conviction bucket: 277 trades, +$11,639 total, 2.28 RR, 53% WR
+  (ALL of our net alpha + some)
+- 60-75 conviction buckets: 384 trades, -$5,685 combined (loss drag)
+- Pearson corr(conv, pnl) = +0.178 — real but weak predictive signal
 
-1. BUILD THE SCORE-VS-P&L MONITOR (item #2 from audit). Daily cron
-   that groups the last N days of trades by conviction bucket,
-   computes avg_pnl + WR + total per bucket, surfaces monotonicity
-   violations (bucket N has worse P&L than bucket N-1), and alerts
-   on negative-EV buckets. Write as a scheduled endpoint or CLI,
-   surface in System page under Observability.
+The right response is NOT lowering the threshold (we tried 62 briefly
+and reverted). The right response is **size disproportionately by
+conviction tier** — more dollars on the 75+ cohort where alpha lives.
 
-   Use the join pattern from scripts/analysis/conviction_pnl_analysis.py.
+YOUR MISSION for P0:
 
-2. COLLAPSE SIGNAL_QUALITY INTO WF_EDGE (item #4). Signal_quality's
-   25-pt range effectively collapses to 4-5 pts of variance for 85%
-   of DSL signals due to the DSL floor-clamp. Redistribute the
-   25 pts: +15 to WF_edge (new max 55 pre-normalization), +10 to
-   factor_exposure (new max 16). Update theoretical max in the
-   normalization constant.
+1. IMPLEMENT CONVICTION-TIER POSITION SIZING in risk_manager. Three
+   tiers:
+     65-75: 1.0x BASE_RISK_PCT (0.6% equity)
+     75-85: 1.25x
+     85+:   1.5x (capped at per-symbol + portfolio heat)
+   Source the score from signal.metadata['conviction_score']
+   (populated since 2026-05-04 session).
 
-3. MAKE ASSET_TRADABILITY DYNAMIC (item #5). Replace hardcoded Tier 1/
-   Tier 2/crypto-dict tiers with ADV-based scaling. For stocks, use
-   trailing 30-day dollar volume normalized to SPY's 15-pt anchor.
-   For crypto, use Binance 1h volume. Current tier buckets give ~5
-   pts of dynamic range across 287 symbols — this fix widens it.
+   Expected impact (mathematically): +$2.9K/quarter on ≥75 cohort at
+   current cadence (277 trades over ~3 months × +$10/trade uplift).
 
-4. TWO-FACTOR CONVICTION GATE (item #6). Replace binary threshold
-   with `score ≥ 65 OR (wf_edge_norm ≥ 0.8 AND score ≥ 60)`. Admits
-   boundary cases where WF evidence is strong even when secondary
-   components are weak. Update filter-rejection writer to record
-   which gate path triggered (`filter:conviction_primary` vs
-   `filter:conviction_secondary_miss`).
+2. PLUG THE 4H TREND-FOLLOWING HOLE. 3 templates (4H ADX Trend Swing,
+   4H EMA Ribbon Trend Long, 4H VWAP Trend Continuation) lost $3,287
+   combined across 92 trades with RR < 0.3. This is NOT a conviction
+   problem — it's a template design problem. Winners clipped short,
+   losers run to SL. Two options:
+   (a) Retire and replace with a longer-hold template family
+   (b) Redesign exits: wider trailing (3x ATR vs current 2x),
+       profit-target at 2x risk instead of TP 10-15%
+   Decision should be made alongside a quick backtest confirmation.
 
-   Verify post-deploy: re-run the score-vs-P&L monitor 3-4 cycles
-   later; expect 5-10 additional signals per cycle clearing via the
-   secondary path, all with wf_edge ≥ 0.8.
+3. HARD-BLOCK SHORTS IN `trending_up_strong`. Current directional
+   quota (5% short in that regime) is clearly insufficient — SHORTS
+   lost $1,663 on 58 trades. Block SHORT ENTRIES outright when
+   sub_regime is trending_up_strong. Keep existing SHORT positions
+   managed normally (TSL, exits) — only block NEW entries.
 
-5. REGRESSION-FIT COMPONENT WEIGHTS (item #3). Only after 2000+ trades
-   with conviction_score populated (ETA 3 weeks). Regress realized
-   Sharpe or P&L on component scores, produce calibrated weights.
-   NOT urgent — the structural fixes above don't need it.
+4. WIDEN INTRADAY ATR STOPS. <1d hold: 164 trades, -$16/trade,
+   0.48 RR. Stops too tight — we're getting shaken out on noise.
+   Raise 1h/4h strategy ATR multiplier from 1.5x to 2.0x.
 
-Do NOT touch #5 in this session unless you've verified trade counts.
+Estimate: 2-4 hours total. All four together should save ~$5K/quarter
+on current cadence while the conviction restructure continues
+collecting data in the background.
 
-Rules (same as every session):
-- Proper solutions only. No patches.
-- Research before redesigning. Don't guess weights.
-- Deploy via the scp workflow. Never edit on EC2.
+==========================================================================
+DEFERRED (structural conviction scorer restructure) — NOT THIS SESSION
+==========================================================================
 
-Estimate: 2-4 hours for items 1-4.
+Items 2-6 of the scorer audit still stand. Queue them for a later
+session once ~3-4 weeks of clean conviction-populated data (~2000+
+trades, mixed regimes) has accumulated:
+
+- Build score-vs-P&L monitor (daily cron + alert on monotonicity
+  violations)
+- Regression-fit component weights on live P&L
+- Collapse signal_quality into WF_edge
+- Make asset_tradability dynamic (ADV-based)
+- Two-factor conviction gate (score ≥ 65 OR wf_edge ≥ 0.8)
 
 ==========================================================================
 OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE THE P0
 ==========================================================================
 
 P1:
-- Triple EMA Alignment DSL regex collapse (EMA(10) > EMA(10)
-  tautology from param-substitution collapsing positional literals)
-- WF test-dominant path admits regime-luck on LONG (add
-  (test_sharpe - train_sharpe) ≤ 1.5 consistency gate)
+- Triple EMA Alignment DSL regex collapse
+- WF test-dominant path admits regime-luck on LONG
 - Cross-cycle signal dedup for market-closed deferrals
-  (30-min TTL on (strategy_id, symbol, direction) in trading_scheduler)
-- NATGAS 1h stale (may fall out of FMP routing or need Yahoo fix)
+- NATGAS 1h stale
 
 P2:
-- trade_id convention unification (log_entry uses position.id,
-  log_exit uses order UUID — analytics join problem)
-- Sector Rotation + Pairs Trading template rewrites (structurally
-  broken — design session first)
+- trade_id convention unification
+- Sector Rotation + Pairs Trading template rewrites
 - Monday Asia Open template (needs DSL HOUR() primitive)
-- ONCHAIN DSL primitive (BTC dominance, stablecoin supply momentum)
-- Overview chart panel rewrite (3 misaligned axes)
-- CI/CD hardening (preflight.sh + safe_deploy.sh + verify.sh)
+- ONCHAIN DSL primitive
+- Overview chart panel rewrite
+- CI/CD hardening
 
 P3:
-- Commodity 1h coverage — needs FMP Starter upgrade
-- Forex 1d legacy FMP path cleanup (dead v3 endpoint)
+- Commodity 1h coverage
+- Forex 1d legacy FMP path cleanup
 - SignalDecisionLogORM table drop (T+30d after 2026-05-04)
 ```
 
