@@ -15,16 +15,15 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 3, 2026, ~21:00 UTC, post-FMP-primary-all-intervals)
+## Current System State (May 3, 2026, ~23:45 UTC, post-warnings-log-audit)
 
 - **Equity:** ~$480K
-- **Open positions:** 84
-- **Active strategies:** 63 DEMO + 5 BACKTESTED/approved = **68 trading**
-- **Crypto-native strategies:** 5 (4 BTC Follower Daily alts + 1 BTC Follower 4H ETH)
-- **Directional split:** ~82 LONG / ~5 SHORT
-- **Market regime (equity):** `STRONG UPTREND` (20d +10%, 50d +5%)
+- **Open positions:** 80
+- **Active strategies:** 60 (after late-day cycle)
+- **Directional split:** ~75% LONG / ~6% SHORT
+- **Market regime (equity):** `STRONG UPTREND` (20d +10%, 50d +5%, MQS 85/100 high)
 - **Market regime (crypto):** `RANGING_LOW_VOL`
-- **VIX:** 16.89
+- **VIX:** 17
 - **Mode:** eToro DEMO
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
@@ -43,6 +42,64 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 | OIL @ 4h, COPPER @ 4h | FMP | 5y | Yahoo |
 
 287 non-crypto symbols fully backfilled at FMP 5y. Premium-blocked set (DAX, CAC, oil-1h, copper-1h, non-US indices at 4h) flows through Yahoo with visible engine-cap truncation logs.
+
+---
+
+## Session shipped 2026-05-03 evening (log-hygiene audit + commodity 1h narrowing + MQS persistence)
+
+Two commits landed this evening after the FMP-primary overhaul was observed running in production. The mission was: "run an autonomous cycle, check errors + warnings, fix what's broken." The cycle ran 400 candidates → 10 activated (healthy). The cleanup was in observability, not trading logic.
+
+### Commit 1 — `18c3315` errors.log noise cleanup + MQS diagnostic + cycle summary clarity
+
+Six fixes targeting errors.log flood and observability gaps:
+
+1. **Yahoo 1h rolling-cap guard** (`market_data_manager._fetch_historical_from_yahoo_finance`). WF backtests for OIL/COPPER/GER40/FR40 1h (FMP premium-blocked) cascaded to Yahoo with `start` dates > 720d old, producing empty responses AND yfinance root-logger ERRORs that flooded errors.log (~80/hour). The rule: Yahoo 1h serves only where `start >= now - 730d`. If `start` is outside that cap, return `[]` immediately and let the DB cache fallback serve. Initial fix checked `end` which was wrong — Yahoo's cap is measured from now, not from the window's end. Corrected to check `start_age_days > 720`.
+2. **Incremental-fetch skip for past-dated WF windows** (`get_historical_data`). DB-cache-first path was firing live Yahoo calls when DB was 'stale' even if the requested `end` was already a year in the past. A backtest window doesn't need live data. Now only fires incremental when `end` is within 1d of now.
+3. **yfinance + urllib3 loggers pinned to WARNING** (`logging_config`). yfinance writes ERROR directly to root logger on every empty-response case. We already catch and re-log with context. Pinned to WARNING so genuine breakage still surfaces.
+4. **MQS silent-except → diagnostic WARNING** (`monitoring_service._save_hourly_equity_snapshot`). Previously `except: pass`, silently leaving `equity_snapshots.market_quality_score` NULL for weeks. Now logs exception class + repr on failure. Snapshot still saves (MQS non-critical).
+5. **Cycle summary shows pre-WF count** (`cycle_logger.log_proposals` + `autonomous_strategy_manager`). `[PROPOSALS] N generated` line now renders as `[PROPOSALS] 400 candidates → 28 fresh (DSL=20, AE=8), 372 cached from earlier cycles` when proposer's `_last_pre_wf_count` is available. Same format in `CYCLE COMPLETE` footer. Resolves "I asked for 400 and only 28 show up" ambiguity.
+6. **FMP runtime block-set dedup + concurrent-page short-circuit** (`fmp_ohlc._mark_blocked`, `_fetch_page`). Multi-page parallel fetches for blocked symbols (RHM.DE, RR.L at 4h) produced 10-20 "runtime block-set updated" INFO lines per cycle because all 4 page workers hit 402 before any could update the set. Added check-before-add dedup and sibling-aware early-out. Also added RHM.DE and RR.L to `EXPLICIT_BLOCKED` at 1h/4h (foreign listings blocked by Starter's US-coverage clause).
+
+**Verification:** HG/CL error count frozen at 80 post-restart (confirmed zero new yfinance ERRORs). RHM/RR.L block-set spam zero. Cycle summary shows the new format.
+
+### Commit 2 — `4970dae` warnings.log cascade cleanup + commodity 1h narrowing
+
+Eight fixes targeting warnings.log flood (was 55 warnings/min, ~778 per 15 min) following commit 1:
+
+1. **Commodity 1h templates narrowed to GOLD+SILVER** (`strategy_templates`). The fundamental trader-level decision of this session. DB coverage reality:
+   - GOLD, SILVER @ 1h: FMP-served, 15k+ bars, 2.5y depth. Fully WF-validateable.
+   - OIL, COPPER, NATGAS @ 1h: Yahoo fallback only, ~5.5k bars, ~11 months depth. Not enough for 365/365 WF with min_trades_dsl_1h=15.
+   - PLATINUM @ 1h: not even in DB.
+   
+   Each WF cycle fired 5 cascading warnings per OIL/COPPER strategy (~380 total per cycle): `No valid data from Yahoo` → `Refusing 275 bars as 1h` → `Data quality validation` → `Symbol has 275 bars (14% coverage)` → `Very limited data`. Narrowed `Commodity Hourly Momentum Surge Long`, `Commodity Hourly Oversold Bounce Long`, and `Commodity Hourly Spike Fade Short` from `[OIL, GOLD, SILVER, COPPER, NATGAS, PLATINUM]` → `[GOLD, SILVER]`. Template names preserved for lineage with 313 historical proposals in `strategy_proposals`. 4h/1d commodity templates unchanged — those intervals have full FMP coverage.
+
+2. **Listing-date awareness for `limited data` warnings** (`strategy_engine._run_vectorbt_backtest`). GEV (GE Vernova IPO April 2024) has 526 1d bars = 100% of its history, but 48% of 573 expected from the backtest window. 40 warnings per cycle for a symbol we can't have more data on. Added `is_listing_limited` detection via span-coverage ≥ 85% (gap-free over the period the ticker existed). Gappy data still WARNINGs; full-since-listing gets INFO.
+
+3. **Signal-overlap resolution demoted to INFO** (`strategy_engine`). `Detected N days with conflicting entry/exit signals. Prioritizing entries.` is working-as-designed backtest behavior in volatile regimes. Kept the log line (useful for whipsaw-tuning) but at INFO.
+
+4. **Data quality validation severity by score** (`market_data_manager`). Cached-report validation was always WARNING when `has_warnings()=True`. A 95/100 score with 1 minor issue is healthy data. Now: score ≥ 70 = INFO, 50-69 = WARNING, < 50 = ERROR. Matches the non-cached path semantics; drops ~44 crypto-data-quality warnings per cycle.
+
+5. **Weekend-gap adjustment for commodity + forex** (`market_data_manager._subtract_weekend_hours` + `is_data_fresh_for_signal`). Previously only applied for `stock_etf_index`. GOLD/NATGAS/SILVER 1d and USDCHF/USDCAD 4h tripped the freshness SLA every Sunday cycle with raw ages of 51h+ (Friday close + weekend). These markets close the same Fri-evening → Sun-evening hours as equities. Now all three families (stock_etf_index, commodity, forex) get the 48h weekend subtraction. Crypto stays raw (24/7).
+
+6. **MQS on-demand MDM construction** (`monitoring_service._write_equity_snapshot`). The root cause of weeks of NULL `market_quality_score` values. The shared `MarketDataManager` singleton is registered lazily by `_sync_price_data` on first run (~55 min after boot). Snapshots firing before that hit `get_market_data_manager() → None` and silently left `_mqs_score = None`. Fix cascade:
+   - If shared singleton is None, try `self._market_data` (set later in same service).
+   - If that's also None, construct a transient `MarketDataManager(etoro_client, config)` on demand and register it as the singleton so all subsequent callers find it.
+   - Added entry-INFO log for the hourly tick and upgraded success save log from DEBUG to INFO.
+   
+   Verified: `2026-05-03 23:00` hourly row went from NULL → `85.3/high` in DB after the fix landed.
+
+7. **Invalid session demoted to INFO** (`middleware.py`). Stale browser tabs polling auth endpoints fired 13 WARNINGs per 15 min from one user. Uvicorn access log already records 401s for audit. Demoted to INFO.
+
+8. **ASGI shutdown event-loop handled correctly** (`app.py`). `Cannot run the event loop while another loop is running` fired on every shutdown because we tried `asyncio.new_event_loop()` when an ASGI loop was already running. Now checks for running loop first and uses `create_task`; falls back to new loop only for non-ASGI shutdowns.
+
+**Verification post-final-restart at 23:43 UTC:**
+- errors.log: 0 new entries (zero yfinance ERRORs)
+- warnings.log: 3 warnings in 2 min (was 55/min — **95%+ reduction**)
+- 2026-05-03 23:00 hourly snapshot now has MQS=85.3 (was NULL)
+- GER40 4h freshness WARNING still fires (correct — EU index genuinely stale on Sunday)
+
+**Files changed:**
+- `src/data/market_data_manager.py`, `src/core/monitoring_service.py`, `src/core/cycle_logger.py`, `src/core/logging_config.py`, `src/strategy/autonomous_strategy_manager.py`, `src/strategy/strategy_engine.py`, `src/strategy/strategy_templates.py`, `src/api/fmp_ohlc.py`, `src/api/middleware.py`, `src/api/app.py`
 
 ---
 
@@ -277,7 +334,7 @@ ORDER BY ABS(COALESCE((s.strategy_metadata->>'wf_test_sharpe')::float, 0)) DESC;
 
 ## Open Items — Priority Order
 
-### Ready-to-run (data fully primed)
+### Ready-to-run (data fully primed, log hygiene complete)
 
 Trigger a full autonomous cycle when ready. Data is in place:
 - Crypto 1d/1h/4h on Binance, full depth.
@@ -286,25 +343,30 @@ Trigger a full autonomous cycle when ready. Data is in place:
 
 Cross-timeframe OHLC consistency guaranteed for FMP-served symbols (raw-close across 1d/1h/4h) — no more day-boundary phantom gaps from Yahoo 1d adjusted-close vs FMP intraday raw-close.
 
+Log hygiene post-2026-05-03 evening: errors.log clean, warnings.log at signal-to-noise ratio high enough that any new entry indicates something real.
+
 ### Verification after next cycle
 
-1. **FMP coverage**: grep `FMP (primary` and `Binance (primary` across all 3 intervals. No symbol should hit Yahoo unless it's in the premium-blocked set. Engine-cap truncation log (`WF window capped by data-source limit`) should only fire for those same 8-11 combos.
+1. **FMP coverage**: grep `FMP (primary` and `Binance (primary` across all 3 intervals. No symbol should hit Yahoo unless it's in the premium-blocked set.
 2. **WF window selection**: every strategy emits `WF window [<key>]:` at INFO. Expect all 7 keys to fire across the cycle.
-3. **Activation health**: crypto activations should continue at normal rate (post-per-position-RPT-fix); non-crypto at normal rate.
-4. **errors.log**: should stay near-empty. The forex weekend `possibly delisted` noise is gone. The only remaining known-noise is the `CLOSE[-20]` parse error on a template with unsupported syntax (P2).
+3. **Activation health**: crypto activations at normal rate (post-per-position-RPT-fix); non-crypto at normal rate.
+4. **errors.log**: should stay near-empty. Zero yfinance ERRORs expected (720d-cap guard blocks them at source).
+5. **warnings.log**: expect < 10 warnings per autonomous cycle. GER40 4h freshness is legitimate on Sunday/Monday mornings. OIL/COPPER 1h warnings should be zero (templates narrowed to GOLD/SILVER).
+6. **MQS persistence**: every new `equity_snapshots` row should have non-NULL `market_quality_score` and `market_quality_grade`.
+7. **Cycle summary**: should read `[PROPOSALS] N candidates → M fresh, K cached from earlier cycles` when cache has been warmed by prior cycles.
 
 ### Deferred / still open
 
 - **Triple EMA Alignment DSL bug** (P1): `EMA(10) > EMA(10)` tautology from regex param collapse in `strategy_proposer.customize_template_parameters`. ~30 min fix to add explicit positional-EMA-period handling.
-- **MQS persistence** (P1): `_save_hourly_equity_snapshot` wraps MQS compute in bare `except: pass`, hiding the real error. Recent `equity_snapshots.market_quality_score` rows are NULL. ~45 min fix to log the error signature.
 - **WF bypass-path tightening for LONG** (P1): primary + test-dominant paths admit regime-luck on LONG side. Consider `(test_sharpe - train_sharpe) ≤ 1.5` consistency gate. SHORT already tightened (Sprint 1).
 - **Cross-cycle signal dedup for market-closed deferrals** (P1): entry-order 82% FAILED rate is cosmetic — market-closed deferrals re-fire each cycle. 30-min TTL map on `(strategy_id, symbol, direction)` in trading_scheduler.
 - **trade_id convention unification** (P2): `log_entry` uses `position.id`; `log_exit` uses order UUID. Migrate `order_monitor.check_submitted_orders` to `position.id`.
 - **Sector Rotation + Pairs Trading template rewrites** (P2): both structurally broken. Design-first, then rewrite.
 - **Monday Asia Open template** (P2): needs DSL `HOUR()` primitive.
 - **On-chain metrics** (P1, Sprint 4): BTC dominance, stablecoin supply momentum. `ONCHAIN("metric", lookback_days)` DSL primitive. CoinGecko + DeFi Llama free tiers to start.
-- **Forex on-demand via new `fmp_ohlc` client**: the legacy `_fetch_historical_from_fmp` path for forex 1d still uses the dead v3 `historical-price-full` endpoint — returns empty, falls through. Not breaking anything because `_fetch_historical_from_yahoo_finance`'s new FMP-first branch now covers forex 1d too. Cleanup task only; ~15 min.
+- **Forex on-demand via new `fmp_ohlc` client**: the legacy `_fetch_historical_from_fmp` path for forex 1d still uses the dead v3 `historical-price-full` endpoint — returns empty, falls through. Not breaking anything; cleanup task only; ~15 min.
 - **Overview chart panel rewrite** (P2): 3 chart components with misaligned axes; design-first.
+- **Commodity 1h coverage expansion** (P3): if FMP Starter upgrade is ever considered, OIL/COPPER/NATGAS 1h would become WF-validateable with their full 5y history. Until then, 4h is the minimum viable intraday for commodities.
 
 ---
 
@@ -313,24 +375,140 @@ Cross-timeframe OHLC consistency guaranteed for FMP-served symbols (raw-close ac
 Copy this as-is into a new session when you're ready:
 
 ```
-Start this session by reading, in this exact order: (1) .kiro/steering/trading-system-context.md — pay special attention to "Think Like a Trader, Not a Software Engineer" and "Proper Solutions Only — No Patches, No Stopgaps". (2) Session_Continuation.md — focus on the "Current System State" and "Session shipped 2026-05-03" block. (3) AUDIT_REPORT_2026-05-02.md if the context needs the audit baseline. Confirm you've read them and begin.
+Start this session by reading, in this exact order:
+(1) .kiro/steering/trading-system-context.md — especially:
+    - "Think Like a Trader, Not a Software Engineer"
+    - "Proper Solutions Only — No Patches, No Stopgaps"
+    - "Deployment Workflow — Mandatory" (the full scp-only rule + the narrow
+      autonomous_trading.yaml exception)
+(2) Session_Continuation.md — full file, especially the two 2026-05-03 blocks
+    (FMP primary for all intervals; log-hygiene audit + commodity 1h narrowing).
+(3) AUDIT_REPORT_2026-05-02.md only if we hit something that needs the
+    pre-May-2 baseline.
 
-Context: the data pipeline is now production-grade. Crypto routes through Binance (5y+ depth). Non-crypto 1d/1h/4h routes through FMP Starter (5y depth for 286-287 symbols). Yahoo is strictly the fallback for the 8-11 premium-blocked combos (DAX, CAC, oil-1h, copper-1h, US indices at 4h, UK100/STOXX50 at 4h). Cross-timeframe OHLC consistency is guaranteed for FMP-served symbols. WF windows are yaml-managed single-source-of-truth; per-position-RPT math is correct. Non-crypto 1h/4h WF windows are widened to 365/365 (parity with crypto), giving swing templates 24+ OOS trades.
+Confirm you've read them and begin.
 
-Your mission this session: [pick the one that matches current priority]
+==========================================================================
+CONTEXT ENTERING THIS SESSION
+==========================================================================
 
-(A) RUN AUTONOMOUS CYCLE + VERIFY — Trigger a full cycle across all symbols/intervals. Grep for `FMP (primary` and `Binance (primary` log lines to confirm routing. Grep for `WF window [<key>]` to confirm all 7 asset-class windows fire. Check errors.log stays clean (no yfinance forex-weekend noise). Check activation count and rejection reasons are consistent with pre-cycle baseline.
+Two back-to-back sessions on 2026-05-03 shipped:
 
-(B) TRIPLE EMA + MQS PERSISTENCE FIXES — Two ~30 min proper fixes from the deferred queue. Triple EMA Alignment regex bug produces `EMA(10) > EMA(10)` tautology; MQS persistence silent except-pass is hiding the real NULL cause. Both fixes are scoped to their root cause with verification via SQL.
+- The full data-pipeline overhaul (FMP Starter primary for non-crypto at
+  all 3 intervals, Binance for crypto, Yahoo strictly as fallback for the
+  8-11 premium-blocked combos).
+- A log-hygiene audit that cleaned errors.log (0 new entries in 30+ min)
+  and dropped warnings.log from ~55/min to ~3/2min (95%+ reduction).
 
-(C) WF BYPASS-PATH TIGHTENING FOR LONG — Add `(test_sharpe - train_sharpe) ≤ 1.5` consistency gate to the test_dominant + excellent_oos paths for LONG. Mirror the SHORT rigor from Sprint 1. Verify via WF-live-divergence drop 2+ weeks post-deploy.
+Last 10 commits on main (newest first):
+- 4970dae fix: warnings.log cascade cleanup + MQS on-demand MDM + commodity 1h narrowing
+- 18c3315 fix: errors.log noise cleanup + MQS diagnostic + cycle summary clarity
+- 61581eb fix: MarketDataManager config loader (FMP key overlay)
+- 364e1cd docs: trim Session_Continuation
+- 7a425e6 feat: FMP primary for all non-crypto intervals + rate-limit backoff
+- cddf1f1 fix: tag quick-update synthetic bars by asset class
+- 0d3643c fix: collapse legacy wire-form symbols on Data Page
+- df8a5b0 fix: trust FMP 0-bar response instead of falling to Yahoo
+- 474c0e0 feat: FMP Starter as primary non-crypto intraday source
+- bd9e3fb refactor: single-source WF window selection
 
-(D) SPRINT 4 — BINANCE ON-CHAIN + LIBRARY REBUILD — Pull the Sprint 4 prompt from the previous Session_Continuation archive. Covers `ONCHAIN()` DSL primitive, BTC dominance + stablecoin supply signals, retire 6 redundant templates, add 3 research-backed templates.
+System state at session close:
+- Equity: ~$480K, 80 open positions, 60 active strategies
+- MQS: 85/100 "high" (equity_snapshots.market_quality_score finally
+  persisting — was NULL for weeks)
+- errors.log: 0 new entries since the Yahoo 1h cap guard landed
+- warnings.log: only legitimate warnings (GER40 4h genuinely stale on
+  Sunday; nothing else firing during cycle runs)
+
+==========================================================================
+MISSION — CI/CD + DEPLOYMENT WORKFLOW HARDENING
+==========================================================================
+
+The manual scp-restart-verify loop is the only deployment pathway today.
+Every fix is: edit local → scp file → ssh restart → curl health → tail
+logs → sometimes 2-3 iterations before the fix holds. This works but has
+three real problems:
+
+1. Deployment is a single point of failure — a forgotten scp, a typo in
+   the remote path, or a restart-during-live-cycle can brick trading
+   until someone notices. No rollback. No diff verification.
+
+2. No pre-deploy gate — we ship Python files that parse locally but the
+   actual `import` graph is only exercised at service start. A circular
+   import or missing dependency surfaces as a restart loop, not as a
+   caught build error.
+
+3. No post-deploy verification checklist. Each session we improvise
+   what to grep for. When a cycle completes badly, we notice by eye,
+   not by automated threshold.
+
+Your mission this session: design and ship a CI/CD layer that preserves
+the scp-only deployment model (local → EC2 direct, no registry, no
+Docker rebuild for a bug fix) while adding the three missing pieces:
+
+(A) PRE-DEPLOY GATE (P1) — a `deploy/preflight.sh` script that, before
+    any scp happens, runs locally:
+    - Python AST parse of every modified file (what we already do ad-hoc).
+    - `python -c "import src.<changed_module>"` for each changed module
+      to catch circular/missing imports that AST alone misses.
+    - Frontend `npm run build` if any .tsx/.ts changed.
+    - Diff preview of what's being scp'd.
+    - Dry-run summary: "will deploy N files, restart service, expect
+      downtime ~12s".
+    Fail fast and abort the scp if any step fails. This is the one
+    workflow-level fix that would have caught the N+1 misindented-block
+    bugs, the missing-import restart loops, and the "I forgot to deploy
+    that one file" incidents from the last two weeks.
+
+(B) DEPLOY WITH ROLLBACK (P1) — extend the scp+restart workflow to:
+    - Before scp: snapshot current EC2 file (scp ubuntu@... TO local
+      backup/<filename>.<timestamp>.bak). Not a "pull-from-EC2"
+      violation because the backup is never re-pushed; it's a rollback
+      artifact.
+    - After scp: systemctl restart alphacent.
+    - Health-check curl with a 30s retry window (service can take 12-25s
+      to come up fully).
+    - If health fails: scp the backup back, restart again, alert in a
+      distinct channel ("ROLLBACK FIRED: <file> reverted to <timestamp>
+      — investigate").
+    - Verify errors.log didn't grow between snapshot and +60s post-start.
+    Package as `deploy/safe_deploy.sh` taking a list of local paths.
+
+(C) POST-DEPLOY VERIFICATION CHECKLIST (P2) — a `deploy/verify.sh` that
+    runs the standard sanity checks and returns pass/fail:
+    - curl /health 3x with 5s spacing (catches partial init).
+    - errors.log line count didn't jump > N in the last minute.
+    - TSL cycle summary line emitted within last 90s.
+    - Latest autonomous_cycle_runs row is either running or completed
+      within the last hour (catches "scheduler died silently").
+    - Hourly equity snapshot created within the last 2h (catches the
+      exact bug we just fixed — hourly tick not firing).
+    - MarketDataManager singleton is registered (via a diagnostic
+      endpoint we'll add — currently there's no way to tell from
+      outside the process).
+
+What "proper" means here:
+- No new infrastructure dependencies (no Jenkins, no GitHub Actions
+  runner on EC2, no Docker). The scp-based model works; we harden it.
+- Scripts live in `deploy/` alongside the existing aws-setup.sh,
+  cloudwatch-setup.sh, patch-api-keys.sh.
+- Workflow still fits in a single terminal session. No background
+  daemons.
+- All three scripts compose: `preflight.sh file1 file2 && safe_deploy.sh
+  file1 file2 && verify.sh` is the new canonical deploy command.
 
 Rules:
 - Proper solutions only. Fix at the root cause.
-- Verify via post-deploy cycle before moving on.
-- If a proper fix takes 3+ hours, budget for it — don't ship a patch with a "fix later" note.
+- No stopgaps — the deploy scripts have to be the single deploy path,
+  not "add to the existing scp habit".
+- Test each script against a trivial change (e.g. a comment-only edit
+  to a Python file) before declaring done.
+- Preserve the steering file's "never edit files on EC2" rule. The
+  snapshot-to-local for rollback is a backup artifact, not a pull.
+
+If any of the three phases takes 3+ hours, budget for it — this is
+infrastructure, not a feature. Do not ship a patched version to "revisit
+later". Later never arrives.
 ```
 
 ---
