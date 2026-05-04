@@ -147,6 +147,59 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     except Exception as _selfcheck_err:
         logger.debug("Trade-journal startup self-check skipped: %s", _selfcheck_err)
 
+    # Second self-check — conviction_score column population. Added 2026-05-04
+    # after audit discovered the scorer-validation loop was broken: every
+    # trade in the last 10 days had conviction_score NULL on the column, so
+    # we could never answer "is conviction_score predictive of P&L?". The
+    # write path is now populated on primary fill (order_monitor) AND on
+    # all 3 force-close / sync-backfill paths (order_monitor sync, portfolio
+    # manager retirement, monitoring_service pending-closure). This guard
+    # surfaces any regression within one restart.
+    try:
+        from sqlalchemy import text as _sa_text_conv
+        _sess_conv = db.get_session()
+        try:
+            _row_c = _sess_conv.execute(
+                _sa_text_conv(
+                    """
+                    SELECT COUNT(*) AS total,
+                           COUNT(*) FILTER (WHERE conviction_score IS NOT NULL) AS with_conv
+                    FROM (
+                      SELECT conviction_score FROM trade_journal
+                      WHERE pnl IS NOT NULL
+                      ORDER BY exit_time DESC NULLS LAST
+                      LIMIT 1000
+                    ) recent
+                    """
+                )
+            ).fetchone()
+            _total_c = int(_row_c.total) if _row_c and _row_c.total else 0
+            _with_c = int(_row_c.with_conv) if _row_c and _row_c.with_conv else 0
+            if _total_c >= 50 and _with_c == 0:
+                logger.warning(
+                    "STARTUP SELF-CHECK FAILED: 0 of last %d closed trades carry "
+                    "conviction_score. The conviction validation loop (score-vs-"
+                    "realized-P&L monitor) cannot function without this column. "
+                    "Investigate trade_journal write paths (order_monitor fill + "
+                    "3 autonomous_signal backfill paths).",
+                    _total_c,
+                )
+            elif _total_c >= 50:
+                _pct_c = (100.0 * _with_c) / _total_c
+                _lvl_c = logging.INFO if _pct_c >= 50.0 else logging.WARNING
+                logger.log(
+                    _lvl_c,
+                    "Startup self-check: %d of last %d closed trades carry "
+                    "conviction_score (%.1f%%)",
+                    _with_c,
+                    _total_c,
+                    _pct_c,
+                )
+        finally:
+            _sess_conv.close()
+    except Exception as _conv_selfcheck_err:
+        logger.debug("Conviction-score startup self-check skipped: %s", _conv_selfcheck_err)
+
     # Connect auth manager to DB and ensure admin user exists.
     # Only creates a default admin if NO users exist at all (fresh DB).
     # The default password is intentionally weak — the operator MUST change it

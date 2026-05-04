@@ -3,7 +3,7 @@
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -2018,8 +2018,10 @@ class PortfolioManager:
                                 # retired, pending_closure) create entries with no template
                                 # context and the feedback loop never counts them.
                                 _tname_pm = None
+                                _recovered_meta_pm: Dict[str, Any] = {}
                                 try:
-                                    from src.models.orm import StrategyORM as _SORM
+                                    from src.models.orm import StrategyORM as _SORM, OrderORM as _OORM_pm
+                                    from datetime import timedelta as _td_pm
                                     _sess_pm = self.strategy_engine.db.get_session()
                                     try:
                                         _s_row = _sess_pm.query(_SORM).filter(
@@ -2027,10 +2029,40 @@ class PortfolioManager:
                                         ).first()
                                         if _s_row and isinstance(_s_row.strategy_metadata, dict):
                                             _tname_pm = _s_row.strategy_metadata.get('template_name') or getattr(_s_row, 'name', None)
+                                        # 2026-05-04: also recover signal-time metadata
+                                        # (conviction_score, market_regime, ml_confidence,
+                                        # fundamentals) from the originating order so the
+                                        # conviction validation loop can close on force-
+                                        # closed trades.
+                                        _anchor_pm = position.opened_at or position.closed_at
+                                        if _anchor_pm and position.strategy_id:
+                                            _an_naive = _anchor_pm.replace(tzinfo=None) if _anchor_pm.tzinfo else _anchor_pm
+                                            _o_row_pm = (
+                                                _sess_pm.query(_OORM_pm)
+                                                .filter(
+                                                    _OORM_pm.strategy_id == position.strategy_id,
+                                                    _OORM_pm.symbol == position.symbol,
+                                                    _OORM_pm.submitted_at >= _an_naive - _td_pm(minutes=10),
+                                                    _OORM_pm.submitted_at <= _an_naive + _td_pm(minutes=10),
+                                                )
+                                                .order_by(_OORM_pm.submitted_at.desc())
+                                                .first()
+                                            )
+                                            if _o_row_pm and isinstance(_o_row_pm.order_metadata, dict):
+                                                _recovered_meta_pm = _o_row_pm.order_metadata
                                     finally:
                                         _sess_pm.close()
                                 except Exception:
                                     _tname_pm = None
+
+                                _jr_meta_pm: Dict[str, Any] = {}
+                                if _tname_pm:
+                                    _jr_meta_pm["template_name"] = _tname_pm
+                                for _k, _v in _recovered_meta_pm.items():
+                                    if _k == "template_name" and "template_name" in _jr_meta_pm:
+                                        continue
+                                    _jr_meta_pm[_k] = _v
+
                                 journal.log_entry(
                                     trade_id=str(position.id),
                                     strategy_id=position.strategy_id or "unknown",
@@ -2040,7 +2072,11 @@ class PortfolioManager:
                                     entry_size=getattr(position, 'invested_amount', None) or close_qty or 0,
                                     entry_reason="autonomous_signal",
                                     order_side="BUY" if is_long else "SELL",
-                                    metadata={"template_name": _tname_pm} if _tname_pm else None,
+                                    market_regime=_recovered_meta_pm.get("market_regime"),
+                                    conviction_score=_recovered_meta_pm.get("conviction_score"),
+                                    ml_confidence=_recovered_meta_pm.get("ml_confidence"),
+                                    fundamentals=_recovered_meta_pm.get("fundamental_data") or _recovered_meta_pm.get("fundamentals"),
+                                    metadata=_jr_meta_pm or None,
                                 )
                                 journal.log_exit(
                                     trade_id=str(position.id),

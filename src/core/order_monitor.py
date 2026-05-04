@@ -42,7 +42,7 @@ OPTIMIZATION: This module implements smart caching to reduce eToro API calls:
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
@@ -1787,6 +1787,44 @@ class OrderMonitor:
                         except Exception:
                             _tname_om = None
 
+                        # 2026-05-04: also recover conviction_score / market_regime /
+                        # ml_confidence / fundamentals from the originating order's
+                        # order_metadata when available. This backfill path used to
+                        # write these as NULL, hiding live P&L from the conviction
+                        # validation loop. Match the order by (strategy_id, symbol,
+                        # submitted_at within ±10 min of the position opening).
+                        _recovered_meta: Dict[str, Any] = {}
+                        try:
+                            from src.models.orm import OrderORM as _OORM
+                            from datetime import timedelta as _td
+                            _anchor = db_pos.opened_at or db_pos.closed_at
+                            if _anchor and db_pos.strategy_id:
+                                _anchor_naive = _anchor.replace(tzinfo=None) if _anchor.tzinfo else _anchor
+                                _o_row = (
+                                    session.query(_OORM)
+                                    .filter(
+                                        _OORM.strategy_id == db_pos.strategy_id,
+                                        _OORM.symbol == db_pos.symbol,
+                                        _OORM.submitted_at >= _anchor_naive - _td(minutes=10),
+                                        _OORM.submitted_at <= _anchor_naive + _td(minutes=10),
+                                    )
+                                    .order_by(_OORM.submitted_at.desc())
+                                    .first()
+                                )
+                                if _o_row and isinstance(_o_row.order_metadata, dict):
+                                    _recovered_meta = _o_row.order_metadata
+                        except Exception:
+                            _recovered_meta = {}
+
+                        _jr_meta: Dict[str, Any] = {}
+                        if _tname_om:
+                            _jr_meta["template_name"] = _tname_om
+                        # Spread recovered keys — preserve any existing template_name
+                        for _k, _v in _recovered_meta.items():
+                            if _k == "template_name" and "template_name" in _jr_meta:
+                                continue
+                            _jr_meta[_k] = _v
+
                         # Ensure entry exists in journal (may be missing for sync-created positions)
                         journal.log_entry(
                             trade_id=str(db_pos.id),
@@ -1797,7 +1835,11 @@ class OrderMonitor:
                             entry_size=db_pos.invested_amount or db_pos.quantity or 0,
                             entry_reason="autonomous_signal",
                             order_side="BUY" if is_long else "SELL",
-                            metadata={"template_name": _tname_om} if _tname_om else None,
+                            market_regime=_recovered_meta.get("market_regime"),
+                            conviction_score=_recovered_meta.get("conviction_score"),
+                            ml_confidence=_recovered_meta.get("ml_confidence"),
+                            fundamentals=_recovered_meta.get("fundamental_data") or _recovered_meta.get("fundamentals"),
+                            metadata=_jr_meta or None,
                         )
                         journal.log_exit(
                             trade_id=str(db_pos.id),

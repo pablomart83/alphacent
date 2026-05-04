@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -3203,9 +3203,17 @@ class MonitoringService:
                 # penalty keyed on (template, symbol) counts this trade. Without
                 # this, monitoring-service force-closes (pending_closure path)
                 # bypass the feedback loop.
+                #
+                # 2026-05-04: also recover signal-time context (conviction_score,
+                # market_regime, ml_confidence, fundamentals) from the originating
+                # order so the conviction validation loop can close on force-
+                # closed trades. Match the order by (strategy_id, symbol,
+                # submitted_at within ±10 min of the position opening).
                 _tname_ms = None
+                _recovered_meta_ms: Dict[str, Any] = {}
                 try:
-                    from src.models.orm import StrategyORM as _SORM
+                    from src.models.orm import StrategyORM as _SORM, OrderORM as _OORM_ms
+                    from datetime import timedelta as _td_ms
                     _sess_ms = self.db.get_session()
                     try:
                         _s_row = _sess_ms.query(_SORM).filter(
@@ -3213,11 +3221,35 @@ class MonitoringService:
                         ).first()
                         if _s_row and isinstance(_s_row.strategy_metadata, dict):
                             _tname_ms = _s_row.strategy_metadata.get('template_name') or getattr(_s_row, 'name', None)
+                        _anchor_ms = pos.opened_at or pos.closed_at
+                        if _anchor_ms and pos.strategy_id:
+                            _an_naive = _anchor_ms.replace(tzinfo=None) if _anchor_ms.tzinfo else _anchor_ms
+                            _o_row_ms = (
+                                _sess_ms.query(_OORM_ms)
+                                .filter(
+                                    _OORM_ms.strategy_id == pos.strategy_id,
+                                    _OORM_ms.symbol == pos.symbol,
+                                    _OORM_ms.submitted_at >= _an_naive - _td_ms(minutes=10),
+                                    _OORM_ms.submitted_at <= _an_naive + _td_ms(minutes=10),
+                                )
+                                .order_by(_OORM_ms.submitted_at.desc())
+                                .first()
+                            )
+                            if _o_row_ms and isinstance(_o_row_ms.order_metadata, dict):
+                                _recovered_meta_ms = _o_row_ms.order_metadata
                     finally:
                         _sess_ms.close()
                 except Exception:
                     _tname_ms = None
-                
+
+                _jr_meta_ms: Dict[str, Any] = {}
+                if _tname_ms:
+                    _jr_meta_ms["template_name"] = _tname_ms
+                for _k, _v in _recovered_meta_ms.items():
+                    if _k == "template_name" and "template_name" in _jr_meta_ms:
+                        continue
+                    _jr_meta_ms[_k] = _v
+
                 # Retry journal writes to handle SQLite "database is locked" errors
                 # when multiple close orders fire in rapid succession
                 import time as _time
@@ -3232,7 +3264,11 @@ class MonitoringService:
                             entry_size=getattr(pos, 'invested_amount', None) or close_dollar_amount or 0,
                             entry_reason="autonomous_signal",
                             order_side="BUY" if is_long else "SELL",
-                            metadata={"template_name": _tname_ms} if _tname_ms else None,
+                            market_regime=_recovered_meta_ms.get("market_regime"),
+                            conviction_score=_recovered_meta_ms.get("conviction_score"),
+                            ml_confidence=_recovered_meta_ms.get("ml_confidence"),
+                            fundamentals=_recovered_meta_ms.get("fundamental_data") or _recovered_meta_ms.get("fundamentals"),
+                            metadata=_jr_meta_ms or None,
                         )
                         journal.log_exit(
                             trade_id=str(pos.id),

@@ -15,12 +15,12 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 4, 2026, ~14:15 UTC, post 24/5 + singleton + filter-funnel deploy)
+## Current System State (May 4, 2026, ~21:30 UTC, post FMP-timezone + conviction-persist deploy)
 
-- **Equity:** ~$477K
-- **Open positions:** 72
-- **Active strategies:** 56 DEMO + 116 BACKTESTED = 172 total
-- **Directional split:** ~72% LONG / ~6% SHORT
+- **Equity:** ~$474K
+- **Open positions:** 69
+- **Active strategies:** ~54 DEMO + BACKTESTED combined
+- **Directional split:** ~80% LONG / ~6% SHORT
 - **Market regime (equity):** `TRENDING_UP_STRONG` (92% confidence)
 - **Market regime (crypto):** `RANGING_LOW_VOL`
 - **VIX:** 17
@@ -28,15 +28,13 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
 **Health:**
-- errors.log: 0 timestamped entries since 14:07 UTC restart
-- warnings.log: clean
+- errors.log: 0 new entries since 21:25 UTC restart. Pre-existing: morning VWAP_None (known P1), eToro 404 cancellations (user-side), FRED 500 (third-party)
+- warnings.log: clean. Startup self-checks firing (template_name 25.6%, conviction_score 0.1% expected to climb post-fix)
 - MQS: 85/100 "high" persisting
-- Cycle activation rate: 2-4 per cycle, 14-15/18 WF pass (78-83%)
-- Unified funnel: full rejection taxonomy now populated
-  (signal_emitted accepted + rejected, gate_blocked, activated, rejected_act, etc.)
-- Filter-rejection visibility: 89 rejections captured in last batch sweep
-  with per-row conviction breakdown (previously invisible outside raw logs)
+- Cycle activation rate: 2-4 per cycle when post-fix data is clean; one 0-activation cycle observed at 20:29 caught by ex-post 730d gate (working as designed)
+- Unified funnel: full rejection taxonomy populated; 89-345 filter rejections per cycle visible with per-row conviction breakdown
 - Market-hours primitive: singleton, symbol-aware, 24/5 compliant (Sun 20:05 ET → Fri 16:00 ET)
+- FMP 1h ingestion: **fixed today.** 275 of 277 non-crypto symbols within 1h of current bar (was 141 stuck). Real UTC-stamped OHLCV across universe.
 
 **Data routing matrix (unchanged from 2026-05-03 evening):**
 
@@ -53,6 +51,107 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 | OIL @ 4h, COPPER @ 4h | FMP | 5y | Yahoo |
 
 287 non-crypto symbols fully backfilled at FMP 5y. Premium-blocked set (DAX, CAC, oil-1h, copper-1h, non-US indices at 4h) flows through Yahoo with visible engine-cap truncation logs.
+
+---
+
+## Session shipped 2026-05-04 late evening — P0 FMP 1h ingestion + conviction-persist fix + scorer audit
+
+Three-sprint session reacting to two discovered P0s. The FMP ingestion bug was discovered via the per-interval-freshness display shipped this morning. Halfway through the session, a conviction-scorer audit surfaced that the scoring pipeline has no validation loop because `conviction_score` was never being persisted on closed trades.
+
+### Sprint 1 — P0: FMP 1h ingestion stops at 11:30 UTC for 141 symbols
+
+Discovered 2026-05-04 ~17:00 UTC. 141 of 287 FMP-served US stocks stuck at `2026-05-04 11:30:00 UTC` while 144 others looked fresh at 16:00-17:00 UTC. Cross-tab by active-strategy coverage: all 143 active symbols fresh, 155 inactive symbols stale. Perfect split.
+
+Three stacked bugs, each hiding inside the next:
+
+1. **FMP `/stable/historical-chart/1hour` returns timestamps in US/Eastern, not UTC.** Empirically verified across stocks (CCI, AAPL), forex (EURUSD), crypto (BTCUSD), commodities (GOLD). Code stored them as naive and treated them as UTC, systematically under-reporting bar age by 4-5h. The `_gap_h < 1.5` short-circuit skipped real-5.5h-stale bars as fresh.
+
+2. **The 1h staleness gate only queued active-strategy symbols** via `(is_always_on OR is_active)`. Inactive non-crypto symbols (stocks with no DEMO/LIVE/BACKTESTED strategy targeting them) never got refreshed between full syncs. 4h already iterated over all non-crypto; 1h was the outlier.
+
+3. **`_quick_price_update` wrote synthetic single-tick bars (O=H=L=C, V=0, tagged FMP)** to `historical_price_cache` every 10 min for active symbols. Those "fresh" active symbols had real-looking freshness but their OHLC was fake — any Keltner/Donchian/BB/RSI signal computed on those bars was reading synthetic values. Explains TSLA-style late-cycle false breakouts over recent weeks.
+
+**Fixes:**
+- `src/api/fmp_ohlc.py` `_parse_bars`: convert intraday timestamps from naive ET to naive UTC at the parser boundary via `pytz.timezone("America/New_York").localize(ts, is_dst=None).astimezone(UTC)`. Single source of truth for FMP timezone downstream. EOD (date-only) preserved as midnight-naive.
+- `src/core/monitoring_service.py` `_sync_price_data` 1h staleness gate: drop the `and (is_always_on or is_active)` condition. Every stale non-crypto symbol gets refreshed (287 syms × 1 req/hour easily fits FMP Starter's 300/min budget).
+- `src/core/monitoring_service.py` `_quick_price_update`: remove DB writes of synthetic bars. Keep in-memory `hist_cache` update only (signal-gen reads current live price from the last in-memory bar). Real OHLC stays real.
+- `src/data/market_data_manager.py`: update stale log line that claimed `"Binance primary for crypto, Yahoo for the rest"` to reflect the May-3 FMP routing.
+
+**Cleanup + re-backfill** (`scripts/purge_and_rebackfill_fmp_intraday.py`):
+- Phase 1: purged 5,270 synthetic placeholder bars (O=H=L=C, V=0, any interval, any source).
+- Phase 2: purged 1,907,799 FMP-sourced 1h/4h bars (wrong-timezone convention).
+- Phase 3: rebackfilled 578 (symbol, interval) combos via the fixed adapter. Result: 2,650,953 new 1h FMP bars + 758,478 new 4h FMP bars, all UTC-stamped.
+
+**Verification post-deploy:**
+- Histogram: 275 of 277 non-crypto symbols within 1h of current bar (was 141 stuck). 2 legitimate outliers (foreign listings premium-blocked).
+- CCI 19:30 UTC real OHLC: O=89.46 H=89.87 L=89.4 C=89.76 V=190,752. Pre-fix: stuck since 11:30.
+- AAPL 17:30 UTC real OHLC: H=277.4 L=276.675 V=2,435,436. Pre-fix: O=H=L=C=276.78 V=0 (synthetic).
+- errors.log clean post-restart.
+
+### Sprint 2 — Conviction-scorer audit (hedge-fund-style P&L validation)
+
+User asked: "Make sure our conviction scorer is fair and follows top hedge-fund practice. Are we leaving money on the table?"
+
+Methodology: walk the 1,215-line scorer component by component, measure live distribution of scores across 47k recent signals, correlate with realized P&L via retroactive join on conviction_score_logs × trade_journal.
+
+**Key findings:**
+
+- **The score is NOT monotonic in P&L over the last 10 days** (549 LONG trades matched):
+  - <60 bucket: 173 trades, −$75 avg, −$12.9K total
+  - 60-65: 233 trades, +$3 avg, +$0.7K total (BEST)
+  - 65-70: 143 trades, **−$184 avg, −$26.3K total (WORST despite above-threshold)**
+- 73% win rate in the 65-70 bucket with negative avg P&L means winners are tiny and losers are catastrophic — classic "pick up pennies in front of a steamroller" signature. The scorer is actively promoting bad setups.
+- **Distribution is compressed.** 97% of all 47k signals last week score between 55 and 70. 58% cluster at 60-65, within ±5 of the 65 threshold. A well-calibrated hedge-fund conviction score needs ~3x more dynamic range.
+- **Several components are near-constants.** `signal_quality` is 20/25 for most DSL signals (floor clamped to 8 pts); `regime_fit` is saturated at 20/20 in the current trending_up_strong regime; `asset_tradability` clusters at 13-14 for ~60% of the universe. Effectively only WF_edge and fundamentals_direction drive real variance.
+- **Correlated components double-count.** Regime_fit (20 pts) measures what WF already validated — strategies that passed WF in the current regime already have regime validation baked in.
+- **Static FMP factor proxies** — beta, PE, revenue_growth are point-in-time snapshots. Crypto/forex get 0 points here. Real factor exposure requires trailing realized sigma, ADV, funding rates.
+- **Arbitrary binary thresholds** in the fundamental-quality component. Continuous logistic scaling would be cleaner.
+
+**The validation loop was broken.** `trade_journal.conviction_score` column was NULL on every closed trade over the last 10 days. Without this, we couldn't answer "is conviction_score predictive of P&L?" — the retroactive join via `conviction_score_logs` was the only way we got the 549 observations above.
+
+### Sprint 3 — P0: Conviction-score persistence fix (shipped this session)
+
+Same class of bug as yesterday's `template_name` fix — the ingestion/persist write path was broken for a specific metadata field. 
+
+**Root cause:** three `autonomous_signal` backfill paths (where positions get trade_journal entries retroactively from force-closes or sync-discovery) only populated `template_name`, not the full signal-time context:
+- `src/core/order_monitor.py` — sync-discovered position backfill
+- `src/strategy/portfolio_manager.py` — strategy-retirement force-close
+- `src/core/monitoring_service.py` — pending-closure force-close
+
+Verified via DB: 228 closed trades in the last 10 days, 0 with `conviction_score` populated, even though `order.order_metadata` DOES carry `conviction_score` (plus `market_regime`, `ml_confidence`, `fundamental_data`) for ~20% of rows. The primary fill path (`order_monitor.check_submitted_orders`) already propagates these correctly. The three backfill paths were incomplete.
+
+**Fix:** each backfill path now recovers signal-time context from the matching order via `(strategy_id, symbol, submitted_at within ±10min)`. Spreads `conviction_score`, `market_regime`, `ml_confidence`, `fundamental_data` into the `log_entry` call. Preserves `template_name` from strategy-row lookup (previously working).
+
+Added a startup self-check mirroring the template_name guard — `src/api/app.py` emits a WARNING if 0 of the last 1000 closed trades carry `conviction_score`. Post-deploy: `Startup self-check: 1 of last 910 closed trades carry conviction_score (0.1%)` — expected to climb to 70-80% within 48h as new trades flow through the fix.
+
+**Files changed this sprint:**
+- `src/core/order_monitor.py` — backfill path enrichment + `Any` import
+- `src/strategy/portfolio_manager.py` — backfill path enrichment + `Any` import  
+- `src/core/monitoring_service.py` — backfill path enrichment + `Any` import
+- `src/api/app.py` — startup self-check for conviction_score column
+
+### Noted but deferred to next session (after 2-3 weeks of data collection)
+
+The conviction-scorer audit surfaced 6 actionable items, ranked by ROI:
+
+1. ✅ **SHIPPED today**: persist `conviction_score` on trade_journal (enable validation loop)
+2. **Build score-vs-P&L monitor** — daily cron grouping trades by bucket, flagging monotonicity violations and negative-EV buckets. ~2h work, NOW that the write path is armed.
+3. **Regression-fit component weights on live P&L** — our 549 matched trades are marginal for 9 components (~3 weeks to reach 2000+ trades with regime mix). Planned after 3-4 weeks of clean data.
+4. **Collapse signal_quality into WF_edge** — signal_quality's 25-pt range collapses to ~4-5 pts of variance for 85% of DSL signals (floor-clamped). Structural dead weight.
+5. **Make asset_tradability dynamic** — replace hardcoded tiers with ADV/volume-based scaling. Static bucketing gives ~5 pts of dynamic range across 287 symbols.
+6. **Two-factor conviction gate** — `score ≥ 65 OR (wf_edge_normalized ≥ 0.8 AND score ≥ 60)` — admits high-WF-edge boundary cases (MU × Keltner 64.6, UNH × 4H ADX 64.6, ROST × 4H VWAP 64.8) without opening door to weak-WF broad-market noise.
+
+Estimated incremental P&L from items 2-6 (once backed by data): $10-20K/month at current capital base. Currently leaking ~$26K/10 days from the 65-70 bucket alone.
+
+### Files changed across the three sprints
+
+- `src/api/fmp_ohlc.py` — ET→UTC parser-boundary conversion
+- `src/core/monitoring_service.py` — is_active gate drop + synthetic-bar DB-write removal + conviction backfill path + Any import
+- `src/data/market_data_manager.py` — stale routing log line
+- `src/core/order_monitor.py` — conviction backfill path + Any import
+- `src/strategy/portfolio_manager.py` — conviction backfill path + Any import
+- `src/api/app.py` — conviction_score startup self-check
+- NEW `scripts/purge_and_rebackfill_fmp_intraday.py` — one-shot cleanup + 5y rebackfill
+- NEW `scripts/analysis/conviction_pnl_analysis.py` — retroactive conviction-vs-P&L validator
 
 ---
 
@@ -624,12 +723,11 @@ Start this session by reading, in this exact order:
 (1) .kiro/steering/trading-system-context.md — especially:
     - "Think Like a Trader, Not a Software Engineer"
     - "Proper Solutions Only — No Patches, No Stopgaps"
-    - "Deployment Workflow — Mandatory" (the full scp-only rule + the narrow
-      autonomous_trading.yaml exception)
+    - "Deployment Workflow — Mandatory" (the full scp-only rule +
+      the narrow autonomous_trading.yaml exception)
 (2) Session_Continuation.md — full file, especially the 2026-05-04
-    session block (activation pipeline + P0 observability + unification).
-(3) AUDIT_REPORT_2026-05-02.md only if we hit something that needs the
-    pre-May-2 baseline.
+    late evening session block (FMP 1h ingestion + conviction-persist
+    + scorer audit) and the Open Items section below.
 
 Confirm you've read them and begin.
 
@@ -637,140 +735,121 @@ Confirm you've read them and begin.
 CONTEXT ENTERING THIS SESSION
 ==========================================================================
 
-The 2026-05-04 session shipped 4 commits across 3 sprints:
-- Activation pipeline (backtest_strategy purity + VWAP DSL + pending-
-  order symbol cap)
-- P0 observability batch (risk-manager rejection reasons + cycle
-  footer honesty + eToro 404 handler)
-- Observability unification (signal_decisions as single source of
-  truth; 27k-row legacy backfill; UI widgets re-pointed)
-- Docs refresh
+The 2026-05-04 late evening session shipped 3 sprints in one session:
 
-The 2026-05-04 evening session shipped 1 commit across 3 sprints:
-- 24/5 readiness (MarketHoursManager rewrite — 6 schedule regimes,
-  symbol-aware, eliminated 7 scattered ad-hoc checks, AssetClass
-  enum extended with FOREX/INDEX/COMMODITY)
-- MarketHoursManager singleton (log-spam regression → architectural
-  fix via get_market_hours_manager())
-- Filter-rejection funnel writes (conviction + frequency + ML +
-  fundamental + low_confidence filter rejections now land in
-  signal_decisions with filter:<kind> reason prefix; 89 rejections
-  captured in first post-deploy batch)
+- P0 FMP 1h ingestion fix (3 stacked bugs: ET→UTC timezone, active-only
+  gate dropping 141 stocks, synthetic O=H=L=C placeholder bars in DB).
+  Purged 1.9M corrupted bars, rebackfilled 3.4M clean UTC-stamped bars.
+  275/277 non-crypto symbols now fresh within 1h.
+
+- Conviction-scorer audit. Walked the 1215-line scorer component by
+  component. Key discovery: over the last 10 days, avg P&L is NON-
+  MONOTONIC in conviction bucket — 65-70 bucket (above threshold) loses
+  $184/trade on avg with 73% WR (fat-tailed losers); 60-65 bucket (just
+  below threshold) is +$3/trade. Scorer is actively promoting bad setups.
+  Distribution compressed (97% of 47k signals between 55-70). Multiple
+  components (signal_quality, regime_fit, asset_tradability) are near-
+  constants. Several components double-count what WF already validated.
+
+- P0 conviction-score persistence fix. Same class as yesterday's
+  template_name bug — 3 backfill paths (order_monitor sync, portfolio
+  manager retirement, monitoring_service pending-closure) only populated
+  template_name, not conviction_score/market_regime/ml_confidence/
+  fundamentals. Fixed via (strategy_id, symbol, ±10min) order lookup
+  + spread into log_entry. Startup self-check armed; expected to climb
+  from 0.1% to 70-80% within 48h.
 
 System state at session close:
-- Equity: ~$477K, 72 open positions, 56 DEMO + 116 BACKTESTED = 172 total
-- 2-4 activations per cycle, 14-15/18 WF pass rate (78-83%)
-- errors.log: 0 timestamped entries since 14:07 UTC restart
-- warnings.log: clean
-- Unified funnel: full rejection taxonomy populated (89 filter
-  rejections visible for first time)
-- Market-hours primitive: singleton, symbol-aware, 24/5 compliant
-  (Sun 20:05 ET → Fri 16:00 ET). Verified via 30-case truth table
-  (scripts/verify_market_hours_24_5.py) + per-strategy live check
-  (scripts/verify_24_5_backtested.py) — 172/172 strategies eligible
-  for 24/5 windows (BACKTESTED and DEMO treated identically).
-- Loser-pair penalty: armed; 6 backfilled pairs eligible; verified
-  via scripts/verify_loser_pair_penalty.py
+- Equity: ~$474K, 69 open positions
+- 275/277 non-crypto 1h bars fresh (was 141 stuck at 11:30)
+- All 1h/4h FMP bars are real UTC-stamped OHLCV (no synthetic)
+- conviction_score column now armed on write path; validation loop
+  functional once ~2-3 weeks of data accumulates
+- errors.log clean post-restart
+- Cycle activation rate: normal pattern (2-4/cycle) with occasional
+  0-cycle when WF-pass candidates all fail the ex-post 730d gate
+  — working as intended on cleaner post-fix data
 
-Last 7 commits on main (newest first):
-- [pending] feat: 24/5 readiness + MarketHoursManager singleton + filter-rejection funnel writes
-- f29f23f fix: loser-pair penalty data integrity — populate trade_journal template_name
-- 87f6a6c docs: Session_Continuation — fill in commit hashes for 2026-05-04 kickoff
-- 0f29f38 docs: Session_Continuation — 2026-05-04 session + loser-pair P0 kickoff
-- a0b972c refactor: observability unification on signal_decisions
-- 1af9069 feat: risk-manager observability reasons + cycle footer + eToro 404 handler
-- a50bb6e fix: activation pipeline — backtest purity + VWAP DSL + WF cache invalidation
+Last commits on main (newest first):
+- [pending] P0 conviction-persist + scorer audit notes
+- 905908d fix: FMP 1h ingestion — ET→UTC + drop active-only gate + stop synthetic-bar DB writes
+- b8aeab6 fix: Data-page quality table — per-interval freshness
+- 9b8142a fix: Binance status — measure freshness as intervals-behind
+- 27ee374 feat: 24/5 readiness + MarketHoursManager singleton + filter-funnel
+- f29f23f fix: loser-pair penalty data integrity — populate template_name
 
 ==========================================================================
-MISSION — P0: CONVICTION-FLOOR TWO-FACTOR GATE
+MISSION — P0: CONVICTION SCORER RESTRUCTURE (shipped items 2-6 of audit)
 ==========================================================================
 
-Surfaced by the new filter-rejection funnel visibility shipped in the
-2026-05-04 evening sprint. The 65 conviction floor is the right guard
-against low-edge broad-market entries (XLK/SPY/TQQQ repeatedly scoring
-60-64 in trending_up_strong with wf_edge 23-27/40 — correctly rejected)
-but also clips edge-case single-stock entries at 64.5-64.8 where WF
-quality is good. Concrete examples from the 89-rejection post-deploy
-batch:
+The conviction-persist fix is live. As `conviction_score` fills in on
+closed trades over the next 2-3 weeks, we should aim for 70-80%
+population of the last 1000 trades before running a regression fit.
 
-  MU   × Keltner Channel Breakout     64.6  (wf_edge≈28, signal=20.9)
-  UNH  × 4H ADX Trend Swing           64.6
-  ROST × 4H VWAP Trend Continuation   64.8
-  SLB  × 4H VWAP Trend Continuation   64.5
-  VTI  × ATR Dynamic Trend Follow     64.6
+Meanwhile, the structural issues the audit surfaced can be tackled
+without waiting for data. In priority order:
 
-These are real setups the system is missing by 0.2-0.5 points. The
-binary cliff at 65 punishes high-quality-WF edge cases the same way
-it kills weak-WF broad-market noise. Two different signal qualities
-should not be gated by the same threshold.
+1. BUILD THE SCORE-VS-P&L MONITOR (item #2 from audit). Daily cron
+   that groups the last N days of trades by conviction bucket,
+   computes avg_pnl + WR + total per bucket, surfaces monotonicity
+   violations (bucket N has worse P&L than bucket N-1), and alerts
+   on negative-EV buckets. Write as a scheduled endpoint or CLI,
+   surface in System page under Observability.
 
-YOUR MISSION for P0:
+   Use the join pattern from scripts/analysis/conviction_pnl_analysis.py.
 
-1. RESEARCH / DESIGN FIRST. Pull 2-4 weeks of signal_decisions data
-   from the filter-rejection funnel (now populated post-2026-05-04):
+2. COLLAPSE SIGNAL_QUALITY INTO WF_EDGE (item #4). Signal_quality's
+   25-pt range effectively collapses to 4-5 pts of variance for 85%
+   of DSL signals due to the DSL floor-clamp. Redistribute the
+   25 pts: +15 to WF_edge (new max 55 pre-normalization), +10 to
+   factor_exposure (new max 16). Update theoretical max in the
+   normalization constant.
 
-     SELECT (decision_metadata::jsonb->>'conviction_score')::float AS score,
-            (decision_metadata::jsonb->'breakdown'->'walkforward_edge'->>'score')::float AS wf_edge,
-            decision_metadata::jsonb->>'breakdown'
-     FROM signal_decisions
-     WHERE reason LIKE 'filter:conviction%'
-       AND timestamp > NOW() - INTERVAL '14 days';
+3. MAKE ASSET_TRADABILITY DYNAMIC (item #5). Replace hardcoded Tier 1/
+   Tier 2/crypto-dict tiers with ADV-based scaling. For stocks, use
+   trailing 30-day dollar volume normalized to SPY's 15-pt anchor.
+   For crypto, use Binance 1h volume. Current tier buckets give ~5
+   pts of dynamic range across 287 symbols — this fix widens it.
 
-   Plot the distribution of rejected signals by (score, wf_edge)
-   and identify where the "real edge" rejections cluster vs the
-   "weak-WF broad-market" rejections. Confirm the hypothesis: that
-   a two-factor gate `score ≥ 65 OR (score ≥ 62 AND wf_edge ≥ 32
-   AND persistence ≥ 9/10)` separates them cleanly.
-
-   If the data says otherwise, redesign the gate. No cargo-culting
-   the threshold I proposed — validate first.
-
-2. IMPLEMENT THE GATE in src/strategy/conviction_scorer.py (or
-   wherever the `passes_threshold` check lives — trace the call).
-   The new gate must still reject weak-WF broad-market signals.
-   Update the filter-rejection funnel writer to record the
-   specific gate path taken (`filter:conviction_primary` vs
+4. TWO-FACTOR CONVICTION GATE (item #6). Replace binary threshold
+   with `score ≥ 65 OR (wf_edge_norm ≥ 0.8 AND score ≥ 60)`. Admits
+   boundary cases where WF evidence is strong even when secondary
+   components are weak. Update filter-rejection writer to record
+   which gate path triggered (`filter:conviction_primary` vs
    `filter:conviction_secondary_miss`).
 
-3. VERIFY POST-DEPLOY. Re-run the same 14-day distribution query
-   after a few cycles. Confirm the pass count rose without weak-WF
-   noise getting through. Ideal outcome: ~5-10 additional signals
-   per cycle clearing the secondary gate, all with wf_edge ≥ 32.
+   Verify post-deploy: re-run the score-vs-P&L monitor 3-4 cycles
+   later; expect 5-10 additional signals per cycle clearing via the
+   secondary path, all with wf_edge ≥ 0.8.
 
-4. NO STOPGAPS. If the research in step 1 says the current 65
-   floor is actually right and the 64.5-64.8 cluster is genuine
-   noise we should eat, WALK AWAY from the change — don't ship
-   complexity that doesn't earn its keep. A two-factor gate that
-   doesn't improve trade quality is worse than the single-factor
-   one because it adds cognitive load.
+5. REGRESSION-FIT COMPONENT WEIGHTS (item #3). Only after 2000+ trades
+   with conviction_score populated (ETA 3 weeks). Regress realized
+   Sharpe or P&L on component scores, produce calibrated weights.
+   NOT urgent — the structural fixes above don't need it.
+
+Do NOT touch #5 in this session unless you've verified trade counts.
 
 Rules (same as every session):
 - Proper solutions only. No patches.
-- No skip-flags, no stopgaps.
-- Research the data before redesigning a risk primitive.
+- Research before redesigning. Don't guess weights.
 - Deploy via the scp workflow. Never edit on EC2.
 
-Estimate: 2-4 hours total (1h research + 1-2h implementation +
-verification).
+Estimate: 2-4 hours for items 1-4.
 
 ==========================================================================
-OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE P0
+OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE THE P0
 ==========================================================================
 
 P1:
-- Cross-label in SIGNAL-1H log lines (ENTER_LONG TXN shown with
-  template name "GOOGL LONG" — cycle_logger format bug)
-- ex-post 730d sanity capped to actual data depth per (symbol, interval)
-  (for 1h non-crypto FMP Starter only has 365d, ex-post asks for 730d
-  and gets starved data)
-- Triple EMA Alignment DSL regex collapse (EMA(10) > EMA(10) tautology;
-  same bug family as VWAP_None just fixed)
-- Cross-cycle signal dedup for market-closed deferrals (30-min TTL on
-  (strategy_id, symbol, direction) in trading_scheduler)
-
-P2:
+- Triple EMA Alignment DSL regex collapse (EMA(10) > EMA(10)
+  tautology from param-substitution collapsing positional literals)
 - WF test-dominant path admits regime-luck on LONG (add
   (test_sharpe - train_sharpe) ≤ 1.5 consistency gate)
+- Cross-cycle signal dedup for market-closed deferrals
+  (30-min TTL on (strategy_id, symbol, direction) in trading_scheduler)
+- NATGAS 1h stale (may fall out of FMP routing or need Yahoo fix)
+
+P2:
 - trade_id convention unification (log_entry uses position.id,
   log_exit uses order UUID — analytics join problem)
 - Sector Rotation + Pairs Trading template rewrites (structurally
@@ -778,17 +857,12 @@ P2:
 - Monday Asia Open template (needs DSL HOUR() primitive)
 - ONCHAIN DSL primitive (BTC dominance, stablecoin supply momentum)
 - Overview chart panel rewrite (3 misaligned axes)
-- Cycle-log signals_generated/orders_submitted only set when
-  newly_approved > 0 — miss cycles where only cached strategies
-  fire signals
-- CI/CD hardening (preflight.sh + safe_deploy.sh + verify.sh) —
-  3-phase infra sprint, separate budget
+- CI/CD hardening (preflight.sh + safe_deploy.sh + verify.sh)
 
 P3:
 - Commodity 1h coverage — needs FMP Starter upgrade
 - Forex 1d legacy FMP path cleanup (dead v3 endpoint)
-- SignalDecisionLogORM table drop (T+30d after 2026-05-04, once
-  dual-write has stabilised)
+- SignalDecisionLogORM table drop (T+30d after 2026-05-04)
 ```
 
 ---
