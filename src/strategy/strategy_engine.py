@@ -1545,39 +1545,41 @@ class StrategyEngine:
         # Run backtest using vectorbt
         try:
             results = self._run_vectorbt_backtest(strategy, all_data, start, end, commission, slippage_bps, interval=interval)
-            
-            # Update strategy status and performance
-            strategy.status = StrategyStatus.BACKTESTED
-            strategy.performance = PerformanceMetrics(
-                total_return=results.total_return,
-                sharpe_ratio=results.sharpe_ratio,
-                sortino_ratio=results.sortino_ratio,
-                max_drawdown=results.max_drawdown,
-                win_rate=results.win_rate,
-                avg_win=results.avg_win,
-                avg_loss=results.avg_loss,
-                total_trades=results.total_trades
-            )
-            
-            # Store detailed backtest results
-            strategy.backtest_results = results
-            
-            # Don't save to DB here — strategy will be saved only if it passes
-            # activation in _evaluate_and_activate. Saving every backtested strategy
-            # pollutes the DB with strategies that fail activation thresholds.
-            
+
+            # IMPORTANT — this function is a pure compute primitive as of
+            # 2026-05-04. It must NOT mutate strategy.status /
+            # strategy.performance / strategy.backtest_results.
+            #
+            # Why: walk_forward_validate() calls backtest_strategy() twice
+            # (train + test), and the ex-post 730d sanity veto in
+            # autonomous_strategy_manager calls it a third time. Before
+            # this change, each call silently overwrote strategy.backtest_results,
+            # so by the time portfolio_manager.evaluate_for_activation ran,
+            # strategy.backtest_results held the LAST backtest (the 730d
+            # full-period one) instead of the WF test-period result that
+            # proved OOS generalization. That caused 3 full cycles of 0
+            # activations on 2026-05-04 morning — strategies with WF
+            # test_S=1.8-2.7 were being rejected as "Sharpe 0.95 < 1.0"
+            # because the Sharpe being checked was the blended full-period
+            # one, not the WF test-period one.
+            #
+            # Callers that want to persist results on the strategy object
+            # must do so explicitly after calling this function. See:
+            #   - src/strategy/strategy_proposer.py (sets to wf['test_results'])
+            #   - src/strategy/autonomous_strategy_manager.py (sets to WF or
+            #     full-period fallback)
+            #   - src/strategy/bootstrap_service.py (CLI path)
+            #   - src/api/routers/strategies.py (manual backtest endpoint)
+
             logger.info(
                 f"Backtest complete for {strategy.name}: "
                 f"return={results.total_return:.2%}, "
                 f"sharpe={results.sharpe_ratio:.2f}, "
                 f"trades={results.total_trades}"
             )
-            
-            # Broadcast backtest completion
-            self._broadcast_strategy_update_sync(strategy)
-            
+
             return results
-        
+
         except Exception as e:
             logger.error(f"Backtest failed for {strategy.name}: {e}")
             raise ValueError(f"Backtest failed: {e}")

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from sqlalchemy import func as sa_func
+from src.models.dataclasses import PerformanceMetrics
 from src.models.enums import StrategyStatus, TradingMode, OrderStatus
 from src.api.dependencies import get_current_user, get_db_session
 from src.api.websocket_manager import get_websocket_manager
@@ -2421,6 +2422,24 @@ async def backtest_strategy(
         
         # Execute backtest
         results = strategy_engine.backtest_strategy(strategy, start_date, end_date)
+
+        # Explicit strategy-state persistence (2026-05-04). backtest_strategy()
+        # is now a pure compute primitive — the manual-backtest API endpoint
+        # treats this run as the strategy's official backtest (the endpoint
+        # is explicitly "move this strategy to BACKTESTED with these results")
+        # so we persist status + performance + backtest_results here.
+        strategy.status = StrategyStatus.BACKTESTED
+        strategy.performance = PerformanceMetrics(
+            total_return=results.total_return,
+            sharpe_ratio=results.sharpe_ratio,
+            sortino_ratio=results.sortino_ratio,
+            max_drawdown=results.max_drawdown,
+            win_rate=results.win_rate,
+            avg_win=results.avg_win,
+            avg_loss=results.avg_loss,
+            total_trades=results.total_trades,
+        )
+        strategy.backtest_results = results
         
         # Build response with sanitized float values
         response = BacktestResultsResponse(

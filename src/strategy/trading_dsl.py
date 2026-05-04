@@ -629,13 +629,31 @@ class DSLCodeGenerator:
 
         Sprint 1 F1: parameters can now be numbers, strings (for cross-asset
         symbol/interval args), or lists (for RANK_IN_UNIVERSE).
+
+        2026-05-04 bugfix: the Lark grammar rule
+        `INDICATOR_NAME "(" [arg ("," arg)*] ")"` uses an optional group
+        with `[...]`, and Lark materialises an empty optional as a single
+        `None` entry in the Tree's children list. For a call like `VWAP()`
+        (valid syntax — indicator takes no arg and caller wanted to
+        explicitly say so) this produced `node.children = [Token('VWAP'),
+        None]`, and the old arg-extraction loop pulled that `None` into
+        `params`, generating the key `VWAP_None` at codegen time instead
+        of `VWAP_0`. Every template using `VWAP()` (e.g. Crypto Hourly
+        VWAP Trend, Crypto Hourly VWAP Reversion) then failed codegen
+        with `Missing indicators: VWAP_None` — the DSL rule was silently
+        dropped and the strategy backtested as zero-trade. Filtering out
+        `None` children is the proper structural fix: the grammar's
+        optional-empty is not a value, it's the absence of one.
         """
         indicator_name = str(node.children[0])
 
         # Extract parameters. Children after the indicator name are arg nodes
-        # wrapping either NUMBER, STRING, or SYMBOL_LIST tokens.
+        # wrapping either NUMBER, STRING, or SYMBOL_LIST tokens — or None
+        # when the grammar's optional arg group is empty (VWAP() / FOO()).
         params = []
         for child in node.children[1:]:
+            if child is None:
+                continue
             params.append(self._extract_arg_value(child))
 
         # Map indicator name to actual key

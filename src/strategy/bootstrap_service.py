@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 
 from src.data.market_data_manager import MarketDataManager
 from src.llm.llm_service import LLMService
-from src.models.dataclasses import Strategy
+from src.models.dataclasses import PerformanceMetrics, Strategy
 from src.models.enums import StrategyStatus, TradingMode
 from src.strategy.strategy_engine import BacktestResults, StrategyEngine
 
@@ -144,7 +144,26 @@ class BootstrapService:
                         strategy, start_date, end_date
                     )
                     backtest_results[strategy.id] = results
-                    
+
+                    # Explicit strategy-state persistence (2026-05-04).
+                    # backtest_strategy() is now a pure compute primitive —
+                    # callers that want to persist results on the strategy
+                    # object must do so explicitly. For the CLI bootstrap
+                    # path we treat this backtest as the strategy's official
+                    # backtest (it IS the only one run in this codepath).
+                    strategy.status = StrategyStatus.BACKTESTED
+                    strategy.performance = PerformanceMetrics(
+                        total_return=results.total_return,
+                        sharpe_ratio=results.sharpe_ratio,
+                        sortino_ratio=results.sortino_ratio,
+                        max_drawdown=results.max_drawdown,
+                        win_rate=results.win_rate,
+                        avg_win=results.avg_win,
+                        avg_loss=results.avg_loss,
+                        total_trades=results.total_trades,
+                    )
+                    strategy.backtest_results = results
+
                     logger.info(
                         f"Backtest complete for {strategy.name}: "
                         f"return={results.total_return:.2%}, "
