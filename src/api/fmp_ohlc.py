@@ -251,8 +251,34 @@ def _parse_bars(payload: list, symbol: str) -> List[MarketData]:
       - Intraday (1h/4h): "2024-03-04 09:30:00"
       - EOD (1d):         "2024-03-04"
 
+    Timezone convention (critical — empirically verified 2026-05-04):
+      FMP returns intraday timestamps in US/Eastern local time for every
+      symbol, every interval, every asset class (stocks, ETFs, forex, crypto,
+      commodities). The API documentation does not state this explicitly.
+      Verified by observing:
+        - EURUSD 1hour latest bar at "13:00" while current wall clock is
+          17:05 UTC (= 13:05 ET, summer EDT). So "13:00" == 13:00 ET.
+        - BTCUSD 1hour latest bar at "13:00" at the same instant — a 24/7
+          instrument stops at ET local hour, confirming ET not UTC.
+        - NYSE stocks (CCI/AAPL) return session-aligned 09:30-15:30 bars
+          matching NYSE regular session in ET.
+
+    We convert ET → UTC at this boundary so every downstream consumer
+    (DB write, freshness math, indicator computation) sees UTC uniformly
+    and matches the convention used by Binance (UTC) and our internal
+    `datetime.now()` (EC2 is UTC-system). Without this conversion, a
+    "09:30" bar from FMP would be stored as naive "09:30" and treated
+    as UTC — systematically under-reporting bar age by 4-5h during EDT
+    (5h during EST), which is how the 2026-05-04 141-symbol staleness
+    regression surfaced.
+
+    EOD (1d) is date-only; timezone irrelevant at day granularity.
+
     Robust to float vs str in fields; drops any bar with non-numeric OHLC.
     """
+    import pytz
+    _ET = pytz.timezone("America/New_York")
+
     bars: List[MarketData] = []
     for row in payload:
         try:
@@ -262,7 +288,17 @@ def _parse_bars(payload: list, symbol: str) -> List[MarketData]:
                 # EOD: anchor at midnight UTC-naive (matches our 1d convention)
                 ts = datetime.strptime(ts_str, "%Y-%m-%d")
             else:
-                ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                # Intraday: parse as naive ET, localize, convert to UTC,
+                # drop tzinfo to stay naive-UTC (DB convention).
+                # `is_dst=None` raises on DST-ambiguous hours (once per fall
+                # on 01:00-02:00 ET); FMP never returns bars in the phantom
+                # spring-forward hour and is well-behaved across the fall
+                # fold — in practice we'll never hit the raise path, but
+                # surfacing it as an error is better than silently choosing
+                # either side of the fold.
+                naive_et = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                aware_et = _ET.localize(naive_et, is_dst=None)
+                ts = aware_et.astimezone(timezone.utc).replace(tzinfo=None)
             bars.append(MarketData(
                 symbol=symbol,
                 timestamp=ts,

@@ -883,11 +883,13 @@ class MarketDataManager:
                             )
 
             # The wrapper method _fetch_historical_from_yahoo_finance internally
-            # tries Binance first for crypto 1h/4h/1d and falls back to Yahoo.
-            # Log accordingly so operators see the real source. S4.0.6.
+            # routes based on asset class / interval: Binance primary for
+            # crypto 1h/4h/1d, FMP primary for non-crypto 1h/4h/1d, Yahoo as
+            # a last-resort fallback for premium-blocked combos (OIL/COPPER 1h,
+            # GER40/FR40, US indices at 4h, UK/EU listings). Log accordingly.
             logger.info(
                 f"Fetching historical data for {db_symbol} {interval} "
-                f"(Binance primary for crypto, Yahoo for the rest)"
+                f"(routing: crypto→Binance, non-crypto→FMP, fallback→Yahoo)"
             )
             data_list = self._fetch_historical_from_yahoo_finance(normalized_symbol, start, end, interval)
             valid_data = [d for d in data_list if self.validate_data(d)]

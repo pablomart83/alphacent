@@ -813,11 +813,24 @@ class MonitoringService:
 
             for symbol, price in live_prices.items():
                 try:
-                    # Quick updates only touch 1h bars. 1d bars are only refreshed by the
-                    # full hourly sync, which pulls proper end-of-day data from Yahoo.
-                    # Building an incomplete "today" 1d bar from intraday ticks would
-                    # mislead daily indicators: RSI(14) treats it as a full bar even if
-                    # only 2 hours of data are baked in — no quant would trade on that.
+                    # Quick updates only touch the in-memory 1h cache. 1d bars
+                    # are refreshed by the full hourly sync; an intraday-
+                    # provisional "today" 1d would mislead daily indicators
+                    # (RSI(14) treats it as complete even mid-session).
+                    #
+                    # 2026-05-04: in-memory-only. The DB write of synthetic
+                    # O=H=L=C V=0 placeholder bars was actively corrupting
+                    # the historical OHLC table — chart rendering, indicator
+                    # math, and quality validation all saw fake bars mixed
+                    # with real ones. Live-tick updates are a signal-gen
+                    # concern (need a fresh price for the active bar);
+                    # persistence is a historical-data concern (needs real
+                    # OHLCV from FMP's hourly sync). Keep them separate.
+                    #
+                    # The in-memory bar gets overwritten cleanly on the next
+                    # full sync when FMP delivers the real OHLCV for the
+                    # hour that just closed. No DB write here means no
+                    # corruption crossing that boundary.
                     cache_key = f"{symbol}:1h:25"
                     cached_data = hist_cache.get(cache_key)
                     if cached_data and len(cached_data) > 0:
@@ -828,10 +841,10 @@ class MonitoringService:
                         last_bar_hour = last_bar_ts.replace(minute=0, second=0, microsecond=0)
 
                         if current_hour > last_bar_hour:
-                            # New hour — append fresh bar, tagged with the
-                            # source the next full sync would use (crypto →
-                            # BINANCE, FMP-supported non-crypto → FMP, else
-                            # YAHOO). Prevents legacy-source propagation.
+                            # New hour — append a provisional in-memory bar
+                            # built from the live tick. Volume stays 0 so
+                            # any accidental leak of this bar to downstream
+                            # consumers is identifiable as synthetic.
                             new_bar = MarketData(
                                 symbol=last_bar.symbol, timestamp=current_hour,
                                 open=price, high=price, low=price, close=price,
@@ -839,34 +852,26 @@ class MonitoringService:
                             )
                             cached_data.append(new_bar)
                             hist_cache.set(cache_key, cached_data)
-                            try:
-                                if hasattr(self, '_market_data') and self._market_data:
-                                    self._market_data._save_historical_to_db(symbol, [new_bar], "1h")
-                            except Exception:
-                                pass
                         else:
                             # Same hour — update OHLC of current bar with
-                            # tick. Re-stamp source using the asset-class
-                            # rule so ongoing intra-hour ticks don't carry
-                            # a stale source from the bar's first write.
+                            # the tick. If the current bar is real FMP data
+                            # (Volume > 0), preserve its real OHLC and only
+                            # ratchet the high/low extremes and the close —
+                            # the tick IS within the bar's real range even
+                            # if it wasn't yet captured by FMP's last poll.
                             updated_bar = MarketData(
                                 symbol=last_bar.symbol, timestamp=last_bar.timestamp,
                                 open=last_bar.open, high=max(last_bar.high, price),
                                 low=min(last_bar.low, price), close=price,
-                                volume=last_bar.volume, source=_tick_source_for(symbol),
+                                volume=last_bar.volume, source=last_bar.source,
                             )
                             cached_data[-1] = updated_bar
                             hist_cache.set(cache_key, cached_data)
-                            try:
-                                if hasattr(self, '_market_data') and self._market_data:
-                                    self._market_data._save_historical_to_db(symbol, [updated_bar], "1h")
-                            except Exception:
-                                pass
                     updated += 1
-                    
+
                     # Broadcast price tick via WebSocket (fire-and-forget)
                     self._sync_broadcast_market_data(symbol, price)
-                    
+
                 except Exception as e:
                     logger.debug(f"Cache update failed for {symbol}: {e}")
                     errors += 1
@@ -1169,7 +1174,15 @@ class MonitoringService:
                             _is_stale_1h = gap_hours > 2.0
                         else:
                             _is_stale_1h = False  # weekend, stocks don't trade
-                    if _is_stale_1h and (is_always_on or is_active):
+                    # 2026-05-04 fix: every stale non-crypto 1h cache needs
+                    # refreshing, not just active-strategy symbols. Previously
+                    # gated on `(is_always_on or is_active)`, which left 141
+                    # of 287 US stocks stuck at a pre-market bar for 5+ hours
+                    # on a trading day — the proposer uses this cache to
+                    # shortlist candidates every cycle, so stale data
+                    # distorted shortlist decisions. FMP Starter's 300/min
+                    # budget easily covers 287 symbols/hour.
+                    if _is_stale_1h:
                         need_yahoo_1h.append(symbol)
                     elif _has_any_1h:
                         # Fresh enough — count as cached hit. Promote to
