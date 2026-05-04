@@ -15,19 +15,25 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 3, 2026, ~23:45 UTC, post-warnings-log-audit)
+## Current System State (May 4, 2026, ~11:20 UTC, post-observability-unification sprint)
 
-- **Equity:** ~$480K
-- **Open positions:** 80
-- **Active strategies:** 60 (after late-day cycle)
-- **Directional split:** ~75% LONG / ~6% SHORT
-- **Market regime (equity):** `STRONG UPTREND` (20d +10%, 50d +5%, MQS 85/100 high)
+- **Equity:** ~$478K
+- **Open positions:** 78
+- **Active strategies:** 58 (+4 ready-to-activate from most recent cycle)
+- **Directional split:** ~78% LONG / ~6% SHORT
+- **Market regime (equity):** `TRENDING_UP_STRONG` (90% confidence)
 - **Market regime (crypto):** `RANGING_LOW_VOL`
 - **VIX:** 17
 - **Mode:** eToro DEMO
 - **Scheduled cycles:** daily 15:15 UTC + weekdays 19:00 UTC
 
-**Data routing matrix (final state after today):**
+**Health:**
+- errors.log: 0 timestamped entries since 10:47 UTC restart
+- warnings.log: clean (GER40 4h freshness only on Sunday/Monday AM)
+- MQS: 85/100 "high" persisting across hourly + daily snapshots
+- Cycle activation rate: 4-6 per cycle (up 3-5× from this morning's 0-1 baseline)
+
+**Data routing matrix (unchanged from 2026-05-03 evening):**
 
 | Asset class / interval | Primary source | Cache depth | Fallback |
 |---|---|---|---|
@@ -42,6 +48,102 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 | OIL @ 4h, COPPER @ 4h | FMP | 5y | Yahoo |
 
 287 non-crypto symbols fully backfilled at FMP 5y. Premium-blocked set (DAX, CAC, oil-1h, copper-1h, non-US indices at 4h) flows through Yahoo with visible engine-cap truncation logs.
+
+---
+
+## Session shipped 2026-05-04 — cycle-health audit + observability unification
+
+Four sprints across a single-day session. Mission: "I just ran a few autonomous cycles. Check logs, results, rejections, calculations, data fetching, WF window, everything." What started as a check-in surfaced a chain of silent failures in activation, sizing, and observability.
+
+### Sprint 1 — Activation pipeline (morning, commit S1)
+
+Autonomous cycles this morning were producing **0 activations** despite 13-20 WF-passed candidates per cycle. Walked the funnel end-to-end and found three root causes.
+
+1. **`backtest_strategy()` silent strategy mutation.** Root cause of the 0 activations. `strategy_engine.backtest_strategy()` had always silently run `strategy.backtest_results = results` at the end of every call — a side effect the signature didn't advertise. This was fine until Sprint 5 F2 (2026-05-02) added a 730d ex-post sanity backtest *after* WF passes. The ex-post call ignored its return value but its side effect overwrote `strategy.backtest_results` with the 730d full-period results (mostly the training-leg flavour). Activation then compared that Sharpe to the threshold instead of the WF test Sharpe that had just proven generalization. Pattern: WF test_S=2.20 → overwritten by 730d S=0.97 → rejected as `Sharpe 0.97 < 1.0`. Happened on every strategy whose train Sharpe was mediocre but test Sharpe was strong — which is the most valuable signal pattern. **Fix**: `backtest_strategy()` is now a pure function; the 2 callers that want to persist results (CLI bootstrap, manual-backtest API endpoint) do so explicitly. Verified live: MU activated at S=2.20 (WF test), CAT at S=2.46, SHOP SHORT at S=3.33.
+
+2. **DSL `VWAP()` codegen produced `VWAP_None` keys.** ~1,224 errors.log entries in 24h. Lark grammar rule `INDICATOR_NAME "(" [arg ("," arg)*] ")"` materializes an empty optional group as a single `None` child in the Tree. `_handle_indicator_with_params` then called `_extract_arg_value(None)` which returned `None`, and `INDICATOR_MAPPING['VWAP']([None])` produced `VWAP_None`. Every template using `VWAP()` silently dropped all conditions in codegen → WF reported 0 trades → strategy looked untradable. **Fix**: filter `None` children at the arg-extraction loop. Clean at the primitive level, applies to any future indicator with optional args.
+
+3. **Symbol concentration cap ignored pending unfilled orders.** Detected live: 2× $17.5K URI BUY orders from different strategies (CAT LONG watchlist hit + NXPI LONG watchlist hit) submitted 9 minutes apart pre-market. Each sizer checked `positions` (filled only), saw $0 existing URI exposure, and sized to the full 5% budget. When market opened both would have filled at 7.3% of equity — cap breached. **Fix**: new `_get_pending_entry_exposure` helper queries `orders` for PENDING / PARTIALLY_FILLED + order_action=entry rows. Both cap-check sites (`calculate_position_size` Step 6 + `check_symbol_concentration`) include pending exposure. Safe on fail: DB error returns (0, set(), 0) so a broken query degrades to the previous positions-only behaviour, never crashes the risk path. Also fixed the `backtest_strategy` side effect in the same sprint because they compounded.
+
+### Sprint 2 — P0 batch: observability reasons + footer honesty + eToro 404 (commit S2)
+
+Three independent observability bugs that compounded to hide what the system was doing.
+
+4. **In-risk-manager rejections wrote useless reasons to the funnel.** `risk_manager.calculate_position_size` has 8 early-zero paths (symbol cap, portfolio heat, drawdown sizing, below-min-with-penalty, insufficient balance, etc.). All of them fed `ValidationResult(reason="Calculated position size is zero or negative")` to the decision-log writer. Ten rejections in a row looked like ten copies of the same vague string. **Fix**: new `self._last_sizing_reason` sentinel is populated at every early-zero path with a specific string (`symbol_cap_exhausted (CAT at $21675/$24050, $17554 pending)`, `below_min_with_penalty (size=$2260 < $5000, penalty_applied=True)`, etc.). `validate_signal` reads it and threads it into the ValidationResult. The existing `trading_scheduler._log_signal_decision` writer persists it. Grepping `risk.log` to understand why a signal died is no longer necessary.
+
+5. **Cycle footer lied about activations.** `[ACTIVATION] N activated` inline line vs `Activated: 0` footer. The footer received `promoted_to_demo` (count of strategies that got a first fill this cycle) while the inline heading reported `strategies_activated` (count that passed activation criteria → BACKTESTED). In any cycle where signals defer (market-closed, gate-blocked, pending), the two diverge and the footer prints 0 despite 4-6 successful activations. **Fix**: footer reports `strategies_activated` directly, with optional `(→ M promoted to DEMO)` annotation when M ≠ N. Matches inline headline one-for-one. Also exposed `strategies_promoted_to_demo` as a distinct stats field for callers that care about live-fill-through vs library-graduation.
+
+6. **eToro 404 on cancelled orders produced infinite error spam.** When a user cancels an order in the eToro UI, the next `order_monitor.check_submitted_orders` poll hits the order-status endpoint, gets 404, logs ERROR, and retries every 30s forever. Observed live: URI order 348195217 cancelled by user → 100+ `Failed to get order status: API request failed: 404` ERROR lines in errors.log across 30 min. **Fix**: new typed exception `EToroOrderNotFoundError(EToroAPIError)` raised specifically on 404 for `/orders/*` and `/positions/*` endpoints. `_get_order_status_cached` catches it distinctly and returns a `{"_not_found": True}` sentinel (cached for TTL so we don't re-query). `check_submitted_orders` sees the sentinel → transitions the local order row to CANCELLED and stops polling. Clean convergence within 30s of a user-side cancel.
+
+### Sprint 3 — Observability unification (commit S3)
+
+Discovered during P0-1 verification: the system had **TWO parallel decision tables** that didn't know about each other.
+
+- `signal_decisions` (SignalDecisionORM) — the 2026-05-02 "audit log of every template × symbol × decision" funnel. Written by proposer, walk-forward, MC bootstrap, cross-validation, activation gate, ex-post veto, order executor.
+- `signal_decision_log` (SignalDecisionLogORM) — legacy. Written ONLY by `trading_scheduler._log_signal_decision` at coordination and validation time. Not connected to the funnel.
+
+Result: coordinator dedup rejections (same-template duplicates, symbol limits) and risk-manager rejections (the ones Sprint 2 just fixed to carry useful reasons) were invisible to the funnel. The UI was reading 3-4 different sources and reconciling badly. Cycle Intelligence panel said `Signals: 0`, Signal Stats widget said `Total 50 Exec'd 4 Rejected 46`, top bar said `Signal 8m ago - 20 → exec`. Nothing agreed.
+
+**Fix**: unified on `signal_decisions` as the single source of truth.
+- `trading_scheduler._log_signal_decision` dual-writes: legacy table + new `gate_blocked` / `order_submitted` rows in `signal_decisions`
+- `/api/signals/recent` migrated to read `SignalDecisionORM`, response schema preserved so frontend widgets work unchanged
+- `/api/audit/log` and `/api/audit/trade-lifecycle/{id}` migrated identically
+- Stage taxonomy documented at the top of `decision_log.py` — 10 stages split into strategy-lifecycle (proposed, wf_*, activated, rejected_act, cross_validation) and signal-lifecycle (signal_emitted, gate_blocked, order_submitted, order_filled, order_failed)
+- One-time backfill: 27,424 legacy rows from last 7 days copied to unified table with `source=legacy_backfill_2026_05_04` marker so the UI stays populated seamlessly post-deploy
+- `SignalDecisionLogORM` model marked `[DEPRECATED 2026-05-04]` with migration plan — dual-write retained for deprecation window, table drop scheduled for T+30d
+
+### Cycle verification post-deploy (cycle_1777893312, 11:15 UTC)
+
+```
+[PROPOSALS]    200 candidates → 19 fresh (DSL=11, AE=8), 181 cached
+[WALK-FORWARD] 12/19 passed (63.2%)
+[ACTIVATION]   4 activated:
+   + BB Squeeze Reversal Short Uptrend SHOP SHORT   S=3.33 wr=100% t=6
+   + Keltner Channel Breakout CCJ LONG              S=2.63 wr=62%  t=8
+   + 4H EMA Ribbon Trend Long C LONG                S=2.07 wr=45%  t=11
+   + Strong Uptrend MACD BHP LONG MA(12/26)         S=1.53 wr=50%  t=8
+[SIGNALS] 3 generated → 1 coordinated → 2 rejected
+[ORDERS]  0 submitted, 0 filled
+Footer: Activated: 4 (→ 0 promoted to DEMO) | Retired: 0 | Total active: 58
+```
+
+All 3 signals killed by risk rails with clear reasons in the unified funnel:
+- MU: `below_min_with_penalty (size=$4845 < $5000, penalty_applied=True)` — vol-scaling penalty
+- CAT: `below_min_with_penalty (size=$2260 < $5000)` — vol-scaling penalty
+- TXN: `Same-template duplicate: 4H EMA Ribbon Trend Long already queued for TXN`
+
+Funnel stage counts across last 90 min:
+```
+ activated        | accepted |    14
+ cross_validation | rejected |     3
+ gate_blocked     | rejected |    47    ← previously 0 (unified with legacy)
+ order_submitted  | accepted |     2
+ proposed         | accepted |  1000
+ rejected_act     | rejected |    41
+ signal_emitted   | emitted  |    63
+ wf_rejected      | rejected |   767
+ wf_validated     | accepted |    46
+```
+
+### Latent bug discovered but not fixed — loser-pair penalty silently disabled
+
+While verifying the Sprint 2 observability fix, confirmed that the loser-pair sizing penalty (added in the 2026-05-02 TSLA audit) **has never fired since it was written**. `risk_manager._get_symbol_template_loser_stats` queries `trade_journal.trade_metadata->>'template_name'` to find the (template, symbol) pair. The trade-journal write path never populates `template_name`:
+
+```
+SELECT COUNT(*), COUNT(*) FILTER (WHERE trade_metadata::text LIKE '%template_name%')
+  FROM trade_journal WHERE pnl IS NOT NULL;
+ count | with_template
+-------+---------------
+   891 |             0
+```
+
+Zero of 891 closed trades have template metadata. The lookup always returns `{'trades': 0, 'pnl': 0}`, so the per-pair penalty never halves size on known-losers. The penalty we DID see firing live on MU/CAT at 11:14 was vol-scaling, not loser-pair. This is a P0-next-session item — a risk rail that appears to protect against pile-up on losing combos but actually does nothing.
+
+**Files changed today:**
+- Sprint 1: `src/strategy/strategy_engine.py`, `src/strategy/bootstrap_service.py`, `src/api/routers/strategies.py`, `src/strategy/trading_dsl.py`, `src/risk/risk_manager.py`
+- Sprint 2: `src/risk/risk_manager.py` (observability reasons), `src/core/cycle_logger.py`, `src/strategy/autonomous_strategy_manager.py` (footer), `src/api/etoro_client.py`, `src/core/order_monitor.py` (404 handler)
+- Sprint 3: `src/core/trading_scheduler.py`, `src/api/routers/signals.py`, `src/api/routers/audit.py`, `src/models/orm.py`, `src/analytics/decision_log.py` (unification)
+- DB: 27,424-row legacy→unified backfill; signal_decisions stage counts populating correctly
 
 ---
 
@@ -381,8 +483,8 @@ Start this session by reading, in this exact order:
     - "Proper Solutions Only — No Patches, No Stopgaps"
     - "Deployment Workflow — Mandatory" (the full scp-only rule + the narrow
       autonomous_trading.yaml exception)
-(2) Session_Continuation.md — full file, especially the two 2026-05-03 blocks
-    (FMP primary for all intervals; log-hygiene audit + commodity 1h narrowing).
+(2) Session_Continuation.md — full file, especially the 2026-05-04
+    session block (activation pipeline + P0 observability + unification).
 (3) AUDIT_REPORT_2026-05-02.md only if we hit something that needs the
     pre-May-2 baseline.
 
@@ -392,124 +494,197 @@ Confirm you've read them and begin.
 CONTEXT ENTERING THIS SESSION
 ==========================================================================
 
-Two back-to-back sessions on 2026-05-03 shipped:
-
-- The full data-pipeline overhaul (FMP Starter primary for non-crypto at
-  all 3 intervals, Binance for crypto, Yahoo strictly as fallback for the
-  8-11 premium-blocked combos).
-- A log-hygiene audit that cleaned errors.log (0 new entries in 30+ min)
-  and dropped warnings.log from ~55/min to ~3/2min (95%+ reduction).
-
-Last 10 commits on main (newest first):
-- 4970dae fix: warnings.log cascade cleanup + MQS on-demand MDM + commodity 1h narrowing
-- 18c3315 fix: errors.log noise cleanup + MQS diagnostic + cycle summary clarity
-- 61581eb fix: MarketDataManager config loader (FMP key overlay)
-- 364e1cd docs: trim Session_Continuation
-- 7a425e6 feat: FMP primary for all non-crypto intervals + rate-limit backoff
-- cddf1f1 fix: tag quick-update synthetic bars by asset class
-- 0d3643c fix: collapse legacy wire-form symbols on Data Page
-- df8a5b0 fix: trust FMP 0-bar response instead of falling to Yahoo
-- 474c0e0 feat: FMP Starter as primary non-crypto intraday source
-- bd9e3fb refactor: single-source WF window selection
+The 2026-05-04 session shipped 4 commits across 3 sprints:
+- Activation pipeline (backtest_strategy purity + VWAP DSL + pending-
+  order symbol cap)
+- P0 observability batch (risk-manager rejection reasons + cycle
+  footer honesty + eToro 404 handler)
+- Observability unification (signal_decisions as single source of
+  truth; 27k-row legacy backfill; UI widgets re-pointed)
+- Docs refresh
 
 System state at session close:
-- Equity: ~$480K, 80 open positions, 60 active strategies
-- MQS: 85/100 "high" (equity_snapshots.market_quality_score finally
-  persisting — was NULL for weeks)
-- errors.log: 0 new entries since the Yahoo 1h cap guard landed
-- warnings.log: only legitimate warnings (GER40 4h genuinely stale on
-  Sunday; nothing else firing during cycle runs)
+- Equity: ~$478K, 78 open positions, 58 active strategies
+- 4-6 activations per cycle (up 3-5× from morning baseline of 0-1)
+- errors.log: 0 timestamped entries since 10:47 UTC restart
+- warnings.log: clean
+- Unified funnel populating: gate_blocked 47, order_submitted 2,
+  signal_emitted 63 in last 90 min
+- Frontend Signal Stats + Cycle Intelligence now carry real rejection
+  strings (symbol_cap_exhausted, below_min_with_penalty, Same-template
+  duplicate, etc.), not generic categories
+
+Last 4 commits on main (newest first):
+- <hash> docs: Session_Continuation — 2026-05-04 session + next kickoff
+- <hash> refactor: observability unification on signal_decisions
+- <hash> fix: risk-manager rejection reasons + cycle footer + eToro 404
+- <hash> fix: activation pipeline — backtest purity + VWAP DSL + pending cap
 
 ==========================================================================
-MISSION — CI/CD + DEPLOYMENT WORKFLOW HARDENING
+MISSION — P0: LOSER-PAIR PENALTY DATA-INTEGRITY FIX
 ==========================================================================
 
-The manual scp-restart-verify loop is the only deployment pathway today.
-Every fix is: edit local → scp file → ssh restart → curl health → tail
-logs → sometimes 2-3 iterations before the fix holds. This works but has
-three real problems:
+During the 2026-05-04 observability verification, we confirmed that the
+loser-pair sizing penalty — added in the 2026-05-02 TSLA audit as a P1
+risk rail — has NEVER FIRED since it was written.
 
-1. Deployment is a single point of failure — a forgotten scp, a typo in
-   the remote path, or a restart-during-live-cycle can brick trading
-   until someone notices. No rollback. No diff verification.
+The rail, per src/risk/risk_manager.py line ~1115, reads:
+  * lookup: self._get_symbol_template_loser_stats(symbol, template_name)
+  * trigger: pair has ≥3 trades AND net P&L < 0
+  * effect: position_size *= 0.5, penalty_applied = True
 
-2. No pre-deploy gate — we ship Python files that parse locally but the
-   actual `import` graph is only exercised at service start. A circular
-   import or missing dependency surfaces as a restart loop, not as a
-   caught build error.
+The helper queries trade_journal.trade_metadata->>'template_name'. But
+the trade-journal write path never populates template_name:
 
-3. No post-deploy verification checklist. Each session we improvise
-   what to grep for. When a cycle completes badly, we notice by eye,
-   not by automated threshold.
+  SELECT COUNT(*),
+         COUNT(*) FILTER (WHERE trade_metadata::text LIKE '%template_name%')
+    FROM trade_journal WHERE pnl IS NOT NULL;
+   count | with_template
+   891   |  0
 
-Your mission this session: design and ship a CI/CD layer that preserves
-the scp-only deployment model (local → EC2 direct, no registry, no
-Docker rebuild for a bug fix) while adding the three missing pieces:
+Zero of 891 closed trades. The lookup always returns {'trades': 0,
+'pnl': 0}. Known-losing (template, symbol) combos get sized at full
+budget every time. In live verification (2026-05-04 11:14 UTC cycle),
+MU and CAT signals were being blocked by vol-scaling, NOT by the
+loser-pair penalty that should have been catching them weeks ago.
 
-(A) PRE-DEPLOY GATE (P1) — a `deploy/preflight.sh` script that, before
-    any scp happens, runs locally:
-    - Python AST parse of every modified file (what we already do ad-hoc).
-    - `python -c "import src.<changed_module>"` for each changed module
-      to catch circular/missing imports that AST alone misses.
-    - Frontend `npm run build` if any .tsx/.ts changed.
-    - Diff preview of what's being scp'd.
-    - Dry-run summary: "will deploy N files, restart service, expect
-      downtime ~12s".
-    Fail fast and abort the scp if any step fails. This is the one
-    workflow-level fix that would have caught the N+1 misindented-block
-    bugs, the missing-import restart loops, and the "I forgot to deploy
-    that one file" incidents from the last two weeks.
+This is a silent-failure safety rail — exactly the failure mode the
+steering file warns about. An observer would say "the risk layer is
+protecting against pile-up on losers"; the data says "it isn't".
 
-(B) DEPLOY WITH ROLLBACK (P1) — extend the scp+restart workflow to:
-    - Before scp: snapshot current EC2 file (scp ubuntu@... TO local
-      backup/<filename>.<timestamp>.bak). Not a "pull-from-EC2"
-      violation because the backup is never re-pushed; it's a rollback
-      artifact.
-    - After scp: systemctl restart alphacent.
-    - Health-check curl with a 30s retry window (service can take 12-25s
-      to come up fully).
-    - If health fails: scp the backup back, restart again, alert in a
-      distinct channel ("ROLLBACK FIRED: <file> reverted to <timestamp>
-      — investigate").
-    - Verify errors.log didn't grow between snapshot and +60s post-start.
-    Package as `deploy/safe_deploy.sh` taking a list of local paths.
+YOUR MISSION for P0:
 
-(C) POST-DEPLOY VERIFICATION CHECKLIST (P2) — a `deploy/verify.sh` that
-    runs the standard sanity checks and returns pass/fail:
-    - curl /health 3x with 5s spacing (catches partial init).
-    - errors.log line count didn't jump > N in the last minute.
-    - TSL cycle summary line emitted within last 90s.
-    - Latest autonomous_cycle_runs row is either running or completed
-      within the last hour (catches "scheduler died silently").
-    - Hourly equity snapshot created within the last 2h (catches the
-      exact bug we just fixed — hourly tick not firing).
-    - MarketDataManager singleton is registered (via a diagnostic
-      endpoint we'll add — currently there's no way to tell from
-      outside the process).
+1. TRACE THE WRITE PATH. Start at src/analytics/trade_journal.py
+   (log_entry + log_exit). Identify every site that writes to
+   trade_journal. Also look at the async fill handlers in
+   src/core/order_monitor.py (check_submitted_orders) and
+   src/execution/order_executor.py. The steering file notes
+   trade_metadata.market_regime was broken the same way before the
+   signal-decision-log writer fix was added (99.9% NULL), suggesting
+   the async fill path is the likely culprit.
 
-What "proper" means here:
-- No new infrastructure dependencies (no Jenkins, no GitHub Actions
-  runner on EC2, no Docker). The scp-based model works; we harden it.
-- Scripts live in `deploy/` alongside the existing aws-setup.sh,
-  cloudwatch-setup.sh, patch-api-keys.sh.
-- Workflow still fits in a single terminal session. No background
-  daemons.
-- All three scripts compose: `preflight.sh file1 file2 && safe_deploy.sh
-  file1 file2 && verify.sh` is the new canonical deploy command.
+2. POPULATE template_name AT WRITE TIME. The source is
+   strategy.metadata.get('template_name') — already set by the
+   proposer. Needs to flow through: strategy → signal → order →
+   trade-journal entry. Preserve at every hop, especially async.
 
-Rules:
-- Proper solutions only. Fix at the root cause.
-- No stopgaps — the deploy scripts have to be the single deploy path,
-  not "add to the existing scp habit".
-- Test each script against a trivial change (e.g. a comment-only edit
-  to a Python file) before declaring done.
-- Preserve the steering file's "never edit files on EC2" rule. The
-  snapshot-to-local for rollback is a backup artifact, not a pull.
+3. BACKFILL 891 LEGACY ROWS where possible via strategies table
+   join: trade.strategy_id → strategies.id → strategy_metadata.
+   template_name. Strategies that have since been retired or had
+   their metadata overwritten: best-effort. Mark backfilled rows
+   with a source='legacy_backfill_2026_05_0?' marker in
+   trade_metadata for auditability.
 
-If any of the three phases takes 3+ hours, budget for it — this is
-infrastructure, not a feature. Do not ship a patched version to "revisit
-later". Later never arrives.
+4. VERIFY THE PENALTY FIRES. After the fix, pick a symbol with
+   clearly losing history (GS recently surfaced: 12 trades, -$66
+   net; not enough to trigger but good for smoke testing the
+   lookup). Force a signal through, inspect the risk.log for the
+   "Loser penalty:" log line, confirm size is halved.
+
+5. ADD A STARTUP SELF-CHECK. If 0 of the last-1000 trades have
+   template_name, log a WARNING at service start pointing at the
+   write path. This is the kind of latent bug that silently
+   decays into production; a self-check catches future regressions.
+
+Rules (same as every session):
+- Proper solutions only. No patches. If the write path needs
+  refactoring, refactor it.
+- No skip-flags, no stopgaps, no "we'll come back to it".
+- Fix at the root cause. If the async fill handler is losing
+  metadata, fix the handler, don't spray if-defaults everywhere.
+- Deploy via the scp workflow. Never edit on EC2.
+
+Estimate: 1-2 hours end to end. Budget for it — this is a real
+risk-management regression, not a feature ask.
+
+==========================================================================
+MISSION — P1: 24/5 READINESS (after P0 lands)
+==========================================================================
+
+eToro announced 24/5 trading for all S&P 500 + Nasdaq 100 stocks +
+~100 top ETFs in November 2025, and it's live. Our system currently
+uses multiple different "is the market open?" checks:
+
+- MarketHoursManager.is_market_open — NYSE 9:30-16:00 ET (regular
+  session only). Used by order_executor.execute_signal.
+- Ad-hoc `now_et.hour >= 4 and now_et.hour < 20` — scattered across
+  strategy_engine.py:5024, data_management.py:385, order_monitor.py:
+  2002, control.py:1751, app.py:386. Pre+regular+post US hours.
+
+Neither matches eToro's actual 24/5 window. During pre-market and
+post-market hours for S&P/NDX names, we're telling ourselves the
+market is closed and deferring orders. 4H strategies close at 00:00,
+04:00, 08:00, 12:00, 16:00, 20:00 ET — three of six closes fall
+outside the NYSE regular session, so signals fire at closes we
+can't act on.
+
+Three-layer fix:
+
+1. Static 24/5 symbol registry. Load the eToro 24/5-eligible list
+   (~700 names: SPX 500 + NDX 100 + top-100 ETFs, deduped) as
+   part of tradeable_instruments.py. Update when eToro expands.
+
+2. MarketHoursManager extended to be symbol-aware:
+   - Crypto → 24/7 (existing)
+   - 24/5-eligible US equity/ETF → Mon 00:00 - Fri 23:59 ET
+     (with the Fri-evening → Sun-evening gap)
+   - Non-24/5 US equity/ETF → regular + pre/post (04:00-20:00 ET)
+   - Forex → 24/5 continuous
+   - Non-US indices / commodities / LME → their specific schedules
+
+   is_market_open(asset_class, symbol=...) already accepts symbol;
+   wire it up so per-symbol logic lives in the primitive.
+
+3. Eliminate the scattered ad-hoc 04:00-20:00 checks. All routes
+   through MarketHoursManager. The steering file is explicit about
+   cross-cutting concerns belonging in primitives.
+
+Verification: a Monday 10:00 UTC cycle (US pre-market) should now
+submit orders to eToro for 24/5-eligible names instead of deferring
+them. 4H strategies that close at 00:00/04:00/20:00 ET should fire
+orders without the "market closed" error.
+
+Estimate: 2-3 hours. Budget for it.
+
+==========================================================================
+OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE P0 AND P1
+==========================================================================
+
+P1 continued:
+- Cross-label in SIGNAL-1H log lines (ENTER_LONG TXN shown with
+  template name "GOOGL LONG" — cycle_logger format bug)
+- ex-post 730d sanity capped to actual data depth per (symbol, interval)
+  (for 1h non-crypto FMP Starter only has 365d, ex-post asks for 730d
+  and gets starved data)
+- Triple EMA Alignment DSL regex collapse (EMA(10) > EMA(10) tautology;
+  same bug family as VWAP_None just fixed)
+- Cross-cycle signal dedup for market-closed deferrals (30-min TTL on
+  (strategy_id, symbol, direction) in trading_scheduler)
+
+P2:
+- WF test-dominant path admits regime-luck on LONG (add
+  (test_sharpe - train_sharpe) ≤ 1.5 consistency gate)
+- trade_id convention unification (log_entry uses position.id,
+  log_exit uses order UUID — analytics join problem)
+- Sector Rotation + Pairs Trading template rewrites (structurally
+  broken — design session first)
+- Monday Asia Open template (needs DSL HOUR() primitive)
+- ONCHAIN DSL primitive (BTC dominance, stablecoin supply momentum)
+- Overview chart panel rewrite (3 misaligned axes)
+- Cycle-log signals_generated/orders_submitted only set when
+  newly_approved > 0 — miss cycles where only cached strategies
+  fire signals
+- CI/CD hardening (preflight.sh + safe_deploy.sh + verify.sh) —
+  3-phase infra sprint, separate budget
+
+P3:
+- Commodity 1h coverage — needs FMP Starter upgrade
+- Forex 1d legacy FMP path cleanup (dead v3 endpoint)
+- SignalDecisionLogORM table drop (T+30d after 2026-05-04, once
+  dual-write has stabilised)
 ```
+
+---
 
 ---
 
