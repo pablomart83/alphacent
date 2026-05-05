@@ -100,7 +100,7 @@ class CancelOrderResponse(BaseModel):
 async def get_orders(
     mode: TradingMode,
     status_filter: Optional[OrderStatus] = None,
-    limit: int = 1000,
+    limit: int = 0,
     username: str = Depends(get_current_user),
     session: Session = Depends(get_db_session),
     config: Configuration = Depends(get_configuration)
@@ -135,9 +135,10 @@ async def get_orders(
     
     # Get total count before applying limit
     total_count = query.count()
-    
-    # Apply limit and order by most recent first
-    orders = query.order_by(OrderORM.submitted_at.desc()).limit(limit).all()
+
+    # Apply ordering; only apply limit when explicitly requested
+    orders_query = query.order_by(OrderORM.submitted_at.desc())
+    orders = (orders_query.limit(limit).all() if limit and limit > 0 else orders_query.all())
     
     # Convert ORM models to response models
     order_responses = []

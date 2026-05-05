@@ -198,11 +198,12 @@ class ApiClient {
     }));
   }
 
-  async getClosedPositions(mode: TradingMode, limit: number = 100): Promise<Position[]> {
+  async getClosedPositions(mode: TradingMode, limit: number = 0): Promise<Position[]> {
     return this.withRetry(async () => {
-      const response = await this.client.get<ApiResponse<Position[]>>(
-        `/account/positions/closed?mode=${mode}&limit=${limit}`
-      );
+      const url = limit > 0
+        ? `/account/positions/closed?mode=${mode}&limit=${limit}`
+        : `/account/positions/closed?mode=${mode}`;
+      const response = await this.client.get<ApiResponse<Position[]>>(url);
       return this.extractArrayFromResponse<Position>(response, 'positions');
     });
   }
@@ -317,10 +318,11 @@ class ApiClient {
   // Order Endpoints
   // ============================================================================
 
-  async getOrders(mode: TradingMode, limit: number = 200): Promise<Order[]> {
-    const response = await this.client.get<ApiResponse<Order[]>>(
-      `/orders?mode=${mode}&limit=${limit}`
-    );
+  async getOrders(mode: TradingMode, limit: number = 0): Promise<Order[]> {
+    const url = limit > 0
+      ? `/orders?mode=${mode}&limit=${limit}`
+      : `/orders?mode=${mode}`;
+    const response = await this.client.get<ApiResponse<Order[]>>(url);
     return this.extractArrayFromResponse<Order>(response, 'orders');
   }
 
@@ -398,7 +400,7 @@ class ApiClient {
   // Signal Activity Endpoints
   // ============================================================================
 
-  async getRecentSignals(mode: TradingMode, limit: number = 100): Promise<{
+  async getRecentSignals(mode: TradingMode, limit: number = 0): Promise<{
     signals: Array<{
       id: number;
       signal_id: string;
@@ -420,7 +422,7 @@ class ApiClient {
     };
   }> {
     const response = await this.client.get<ApiResponse<any>>(
-      `/signals/recent?mode=${mode}&limit=${limit}`
+      `/signals/recent?mode=${mode}${limit > 0 ? `&limit=${limit}` : ''}`
     );
     return this.handleResponse(response);
   }

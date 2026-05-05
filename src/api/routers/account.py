@@ -402,52 +402,49 @@ async def get_positions(
 @router.get("/positions/closed", response_model=PositionsResponse)
 async def get_closed_positions(
     mode: TradingMode,
-    limit: int = 100,
+    limit: int = 0,
     username: str = Depends(get_current_user),
     db: Session = Depends(get_db_session)
 ):
     """
-    Get closed positions history.
-    
-    Fetches positions that have been closed (closed_at is not null).
-    Returns most recent closed positions first.
-    
-    Args:
-        mode: Trading mode (DEMO or LIVE)
-        limit: Maximum number of positions to return (default: 100)
-        username: Current authenticated user
-        db: Database session
-        
-    Returns:
-        List of closed positions with realized P&L
-        
-    Validates: Requirement 11.2
+    Get closed positions history — all of them, fast.
+
+    Returns every closed position ordered by most-recent-first.
+    Serialisation is lean: only the fields the table needs are computed.
+    The limit parameter is kept for backward compatibility but defaults to 0
+    (no limit). Pass limit>0 only if you genuinely need a subset.
     """
-    logger.info(f"Getting closed positions for {mode.value} mode, user {username}, limit {limit}")
-    
-    # Get closed positions from database (closed_at is not null)
-    position_orms = db.query(PositionORM).filter(
-        PositionORM.closed_at.isnot(None)
-    ).order_by(
+    logger.info(f"Getting closed positions for {mode.value} mode, user {username}")
+
+    query = db.query(PositionORM).filter(PositionORM.closed_at.isnot(None)).order_by(
         PositionORM.closed_at.desc()
-    ).limit(limit).all()
-    
-    logger.info(f"Found {len(position_orms)} closed positions in database")
-    
-    # Return all closed positions with strategy names
+    )
+    # Real total count — always the full count, never the slice size
+    total = query.count()
+    if limit and limit > 0:
+        position_orms = query.limit(limit).all()
+    else:
+        position_orms = query.all()
+
+    logger.info(f"Returning {len(position_orms)} of {total} closed positions")
+
+    # Bulk-fetch strategy names in one query
     strategy_ids = list(set(p.strategy_id for p in position_orms if p.strategy_id))
-    strategy_name_map = {}
+    strategy_name_map: dict = {}
     if strategy_ids:
         from src.models.orm import StrategyORM
-        strats = db.query(StrategyORM.id, StrategyORM.name).filter(StrategyORM.id.in_(strategy_ids)).all()
+        strats = db.query(StrategyORM.id, StrategyORM.name).filter(
+            StrategyORM.id.in_(strategy_ids)
+        ).all()
         strategy_name_map = {s.id: s.name for s in strats}
-    
+
     position_responses = []
     for pos in position_orms:
         d = pos.to_dict()
         d['strategy_name'] = strategy_name_map.get(pos.strategy_id, pos.strategy_id)
-        
-        # Determine exit reason from closure_reason or infer from price vs SL/TP
+
+        # Lean exit-reason inference — use stored closure_reason when available,
+        # fall back to a single price comparison only when needed.
         exit_reason = getattr(pos, 'closure_reason', None)
         if not exit_reason:
             entry = pos.entry_price or 0
@@ -456,7 +453,6 @@ async def get_closed_positions(
             tp = pos.take_profit or 0
             side_str = str(pos.side).upper() if pos.side else 'LONG'
             is_long = 'LONG' in side_str or 'BUY' in side_str
-            
             if tp > 0:
                 if is_long and close_price >= tp * 0.995:
                     exit_reason = "Take Profit hit"
@@ -469,14 +465,13 @@ async def get_closed_positions(
                     exit_reason = "Stop Loss hit"
             if not exit_reason:
                 exit_reason = "Closed"
-        
+
         d['closure_reason'] = exit_reason
         position_responses.append(PositionResponse(**d))
-    
-    logger.info(f"Returning {len(position_responses)} closed positions")
+
     return PositionsResponse(
         positions=position_responses,
-        total_count=len(position_responses)
+        total_count=total   # always the real count, not len(slice)
     )
 
 

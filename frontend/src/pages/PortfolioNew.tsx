@@ -232,7 +232,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
   // Polling
   const { refresh, isRefreshing: pollingRefreshing } = usePolling({
     fetchFn: fetchData,
-    intervalMs: 15000,
+    intervalMs: 30000,  // was 15s — positions update via WS; 30s is sufficient for REST fallback
     enabled: !!tradingMode && !tradingModeLoading,
     skipWhenWsConnected: true,
   });
@@ -286,16 +286,16 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       .filter(Boolean)
   ));
 
-  // Filter positions
-  const filteredPositions = positions.filter(position => {
+  // Filter positions — memoized so they don't recompute on every render
+  const filteredPositions = useMemo(() => positions.filter(position => {
     const matchesSearch = position.symbol.toLowerCase().includes(positionSearch.toLowerCase());
     const matchesStrategy = positionStrategyFilter === 'all' || position.strategy_id === positionStrategyFilter;
     const matchesSide = positionSideFilter === 'all' || position.side === positionSideFilter;
     return matchesSearch && matchesStrategy && matchesSide;
-  });
+  }), [positions, positionSearch, positionStrategyFilter, positionSideFilter]);
 
-  // Filter closed positions
-  const filteredClosedPositions = closedPositions.filter(position => {
+  // Filter closed positions — memoized
+  const filteredClosedPositions = useMemo(() => closedPositions.filter(position => {
     const matchesSearch = position.symbol.toLowerCase().includes(closedSearch.toLowerCase());
     const matchesStrategy = closedStrategyFilter === 'all' || position.strategy_id === closedStrategyFilter;
     
@@ -313,7 +313,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
     
     return matchesSearch && matchesStrategy && matchesDate;
-  });
+  }), [closedPositions, closedSearch, closedStrategyFilter, closedDateFilter]);
 
   // Prepare allocation chart data
   const pieChartData = positions.reduce((acc, position) => {
@@ -1066,13 +1066,20 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     }
 
     if (activeTab === 'closed') {
+      const hasFilters = closedSearch || closedStrategyFilter !== 'all' || closedDateFilter !== 'all';
       return filteredClosedPositions.length > 0 ? (
         <div className="flex-1 overflow-auto min-h-0">
-          <DataTable columns={closedPositionColumns} data={filteredClosedPositions} pageSize={50} showPagination={filteredClosedPositions.length > 50} className="[&_table]:table-dense [&_td]:py-1 [&_th]:py-1" />
+          <DataTable
+            columns={closedPositionColumns}
+            data={filteredClosedPositions}
+            virtualise={true}
+            estimatedRowHeight={36}
+            className="h-[calc(100vh-320px)] min-h-[400px]"
+          />
         </div>
       ) : (
         <div className="flex items-center justify-center h-32 text-muted-foreground text-xs">
-          {closedSearch || closedStrategyFilter !== 'all' || closedDateFilter !== 'all' ? 'No closed positions match filters' : 'No closed positions'}
+          {hasFilters ? 'No closed positions match filters' : 'No closed positions'}
         </div>
       );
     }

@@ -1,4 +1,5 @@
 import { type FC, useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { motion } from 'framer-motion';
 import { 
   TrendingUp, Activity, Download, FileText,
@@ -184,6 +185,105 @@ const MaeMfeScatter: FC<{
           return <circle key={i} cx={x} cy={y} r={4} fill={isWin ? '#10b981' : '#ef4444'} fillOpacity={0.6} />;
         })}
       </svg>
+    </div>
+  );
+};
+
+// ── TradeJournalTable — virtualised sub-component ─────────────────────────
+// Defined as a proper named component (not an IIFE) so hooks are valid.
+interface TradeJournalTableProps {
+  entries: TradeJournalEntry[];
+  journalSortBy: string;
+  journalSortOrder: 'asc' | 'desc';
+  setJournalSortBy: (v: string) => void;
+  setJournalSortOrder: (v: 'asc' | 'desc') => void;
+}
+
+const TradeJournalTable: FC<TradeJournalTableProps> = ({
+  entries, journalSortBy, journalSortOrder, setJournalSortBy, setJournalSortOrder,
+}) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualiser = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 36,
+    overscan: 15,
+  });
+  const virtualItems = virtualiser.getVirtualItems();
+  const totalHeight = virtualiser.getTotalSize();
+
+  const sortCol = (col: string, defaultOrder: 'asc' | 'desc' = 'desc') => () => {
+    if (journalSortBy === col) {
+      setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setJournalSortBy(col);
+      setJournalSortOrder(defaultOrder);
+    }
+  };
+  const sortIcon = (col: string) =>
+    journalSortBy === col ? (journalSortOrder === 'asc' ? ' ↑' : ' ↓') : '';
+
+  if (entries.length === 0) {
+    return <div className="text-center py-12 text-gray-500 text-xs">No trades match your filters</div>;
+  }
+
+  return (
+    <div
+      ref={scrollRef}
+      className="overflow-auto rounded-md border border-[var(--color-dark-border)]"
+      style={{ height: 'calc(100vh - 420px)', minHeight: '400px' }}
+    >
+      <table className="w-full text-xs">
+        <thead className="sticky top-0 z-10 bg-[var(--color-dark-surface)] border-b border-[var(--color-dark-border)]">
+          <tr>
+            <th className="text-left p-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={sortCol('entry_time')}>Date{sortIcon('entry_time')}</th>
+            <th className="text-left p-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={sortCol('symbol', 'asc')}>Symbol{sortIcon('symbol')}</th>
+            <th className="text-left p-2 font-mono text-xs text-gray-500">Strategy</th>
+            <th className="text-right p-2 font-mono text-xs text-gray-500">Entry</th>
+            <th className="text-right p-2 font-mono text-xs text-gray-500">Exit</th>
+            <th className="text-right p-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={sortCol('pnl')}>P&amp;L{sortIcon('pnl')}</th>
+            <th className="text-right p-2 font-mono text-xs text-gray-500 cursor-pointer" onClick={sortCol('hold_time_hours')}>Hold{sortIcon('hold_time_hours')}</th>
+            <th className="text-left p-2 font-mono text-xs text-gray-500">Regime</th>
+            <th className="text-left p-2 font-mono text-xs text-gray-500">Exit Reason</th>
+            <th className="text-right p-2 font-mono text-xs text-gray-500">Conv.</th>
+          </tr>
+        </thead>
+        <tbody style={{ height: `${totalHeight}px`, display: 'block', position: 'relative' }}>
+          {virtualItems.map((vr) => {
+            const trade = entries[vr.index];
+            return (
+              <tr
+                key={trade.id}
+                data-index={vr.index}
+                ref={virtualiser.measureElement}
+                className="border-b border-[var(--color-dark-border)]/50 hover:bg-[var(--color-dark-surface)] absolute w-full"
+                style={{ transform: `translateY(${vr.start}px)` }}
+              >
+                <td className="p-2 font-mono text-xs">{formatTimestamp(trade.entry_time, { includeTime: false })}</td>
+                <td className="p-2 font-mono text-xs font-semibold">{trade.symbol}</td>
+                <td className="p-2 font-mono text-xs text-gray-500 truncate max-w-[150px]" title={trade.strategy_name || trade.strategy_id}>
+                  {trade.strategy_name || trade.strategy_id}
+                </td>
+                <td className="p-2 font-mono text-xs text-right">{formatCurrency(trade.entry_price)}</td>
+                <td className="p-2 font-mono text-xs text-right">{trade.exit_price ? formatCurrency(trade.exit_price) : '-'}</td>
+                <td className={cn('p-2 font-mono text-xs text-right font-semibold', (trade.pnl || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
+                  {trade.pnl ? formatCurrency(trade.pnl) : '-'}
+                  {trade.pnl_percent && <span className="text-xs ml-1">({formatPercentage(trade.pnl_percent)})</span>}
+                </td>
+                <td className="p-2 font-mono text-xs text-right">{trade.hold_time_hours ? `${(trade.hold_time_hours / 24).toFixed(1)}d` : '-'}</td>
+                <td className="p-2 text-xs">
+                  {trade.market_regime && <Badge variant="outline" className="text-xs">{trade.market_regime}</Badge>}
+                </td>
+                <td className="p-2 text-xs text-gray-500">{trade.exit_reason || '-'}</td>
+                <td className="p-2 font-mono text-xs text-right">{trade.conviction_score ? trade.conviction_score.toFixed(0) : '-'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="px-2 py-1 text-xs text-gray-500 font-mono border-t border-[var(--color-dark-border)]">
+        {entries.length.toLocaleString()} trades
+      </div>
     </div>
   );
 };
@@ -1613,114 +1713,13 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = memo(({ onLogout }) => {
             </div>
 
             {/* Trade Table */}
-            {tradeJournalEntries.length > 0 ? (
-              <div className="overflow-x-auto max-h-[600px] overflow-y-auto rounded-md border border-[var(--color-dark-border)]">
-                <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-[var(--color-dark-surface)] border-b border-[var(--color-dark-border)]">
-                    <tr>
-                      <th className="text-left p-2 font-mono text-xs text-gray-500 cursor-pointer"
-                        onClick={() => {
-                          if (journalSortBy === 'entry_time') {
-                            setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setJournalSortBy('entry_time');
-                            setJournalSortOrder('desc');
-                          }
-                        }}>
-                        Date {journalSortBy === 'entry_time' && (journalSortOrder === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th className="text-left p-2 font-mono text-xs text-gray-500 cursor-pointer"
-                        onClick={() => {
-                          if (journalSortBy === 'symbol') {
-                            setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setJournalSortBy('symbol');
-                            setJournalSortOrder('asc');
-                          }
-                        }}>
-                        Symbol {journalSortBy === 'symbol' && (journalSortOrder === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th className="text-left p-2 font-mono text-xs text-gray-500">Strategy</th>
-                      <th className="text-right p-2 font-mono text-xs text-gray-500">Entry</th>
-                      <th className="text-right p-2 font-mono text-xs text-gray-500">Exit</th>
-                      <th className="text-right p-2 font-mono text-xs text-gray-500 cursor-pointer"
-                        onClick={() => {
-                          if (journalSortBy === 'pnl') {
-                            setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setJournalSortBy('pnl');
-                            setJournalSortOrder('desc');
-                          }
-                        }}>
-                        P&L {journalSortBy === 'pnl' && (journalSortOrder === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th className="text-right p-2 font-mono text-xs text-gray-500 cursor-pointer"
-                        onClick={() => {
-                          if (journalSortBy === 'hold_time_hours') {
-                            setJournalSortOrder(journalSortOrder === 'asc' ? 'desc' : 'asc');
-                          } else {
-                            setJournalSortBy('hold_time_hours');
-                            setJournalSortOrder('desc');
-                          }
-                        }}>
-                        Hold Time {journalSortBy === 'hold_time_hours' && (journalSortOrder === 'asc' ? '↑' : '↓')}
-                      </th>
-                      <th className="text-left p-2 font-mono text-xs text-gray-500">Regime</th>
-                      <th className="text-left p-2 font-mono text-xs text-gray-500">Exit Reason</th>
-                      <th className="text-right p-2 font-mono text-xs text-gray-500">Conviction</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tradeJournalEntries.map((trade) => (
-                      <tr key={trade.id} className="border-b border-[var(--color-dark-border)]/50 hover:bg-[var(--color-dark-surface)]">
-                        <td className="p-2 font-mono text-xs">
-                          {formatTimestamp(trade.entry_time, { includeTime: false })}
-                        </td>
-                        <td className="p-2 font-mono text-xs font-semibold">{trade.symbol}</td>
-                        <td className="p-2 font-mono text-xs text-gray-500 truncate max-w-[150px]" title={trade.strategy_name || trade.strategy_id}>
-                          {trade.strategy_name || trade.strategy_id}
-                        </td>
-                        <td className="p-2 font-mono text-xs text-right">
-                          {formatCurrency(trade.entry_price)}
-                        </td>
-                        <td className="p-2 font-mono text-xs text-right">
-                          {trade.exit_price ? formatCurrency(trade.exit_price) : '-'}
-                        </td>
-                        <td className={cn('p-2 font-mono text-xs text-right font-semibold',
-                          (trade.pnl || 0) >= 0 ? 'text-accent-green' : 'text-accent-red')}>
-                          {trade.pnl ? formatCurrency(trade.pnl) : '-'}
-                          {trade.pnl_percent && (
-                            <span className="text-xs ml-1">
-                              ({formatPercentage(trade.pnl_percent)})
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-2 font-mono text-xs text-right">
-                          {trade.hold_time_hours ? `${(trade.hold_time_hours / 24).toFixed(1)}d` : '-'}
-                        </td>
-                        <td className="p-2 text-xs">
-                          {trade.market_regime && (
-                            <Badge variant="outline" className="text-xs">
-                              {trade.market_regime}
-                            </Badge>
-                          )}
-                        </td>
-                        <td className="p-2 text-xs text-gray-500">
-                          {trade.exit_reason || '-'}
-                        </td>
-                        <td className="p-2 font-mono text-xs text-right">
-                          {trade.conviction_score ? trade.conviction_score.toFixed(0) : '-'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="text-center py-12 text-gray-500 text-xs">
-                No trades match your filters
-              </div>
-            )}
+            <TradeJournalTable
+              entries={tradeJournalEntries}
+              journalSortBy={journalSortBy}
+              journalSortOrder={journalSortOrder}
+              setJournalSortBy={setJournalSortBy}
+              setJournalSortOrder={setJournalSortOrder}
+            />
 
             {/* MAE vs MFE Analysis */}
             <SectionLabel>MAE vs MFE Analysis</SectionLabel>

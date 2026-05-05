@@ -1235,8 +1235,9 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                       <DataTable
                         columns={orderColumns}
                         data={filteredOrders}
-                        pageSize={20}
-                        showPagination={true}
+                        virtualise={true}
+                        estimatedRowHeight={36}
+                        className="h-[calc(100vh-300px)] min-h-[400px] [&_table]:table-dense [&_td]:py-1 [&_th]:py-1"
                         getRowId={(row) => row.id}
                         rowSelection={Object.fromEntries(
                           Array.from(selectedOrders).map(id => [id, true])
