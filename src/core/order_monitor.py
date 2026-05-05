@@ -1372,13 +1372,15 @@ class OrderMonitor:
                     # When multiple strategies trade the same symbol, symbol-only matching picks the wrong one.
                     matched_strategy_id = pos.strategy_id  # Default: "etoro_position"
                     matched_order_id = None
+                    match_reason = None
                     try:
                         from src.models.enums import OrderSide
                         
                         # First: try to match by eToro order ID if available on the position
                         etoro_pos_id = pos.etoro_position_id
                         
-                        # Look for a recently filled order matching this symbol
+                        # Pass 1: Look for a recently FILLED order matching this symbol.
+                        # This is the normal happy-path (order filled → position created).
                         recent_cutoff = datetime.now() - timedelta(hours=2)
                         matching_orders = session.query(OrderORM).filter(
                             OrderORM.status == OrderStatus.FILLED,
@@ -1405,6 +1407,7 @@ class OrderMonitor:
                                     if not already_has:
                                         matched_strategy_id = order.strategy_id
                                         matched_order_id = order.id
+                                        match_reason = f"filled_order:{order.id}"
                                         logger.info(
                                             f"Matched new eToro position {pos.etoro_position_id} ({normalized_symbol}) "
                                             f"to order {order.id} (strategy: {order.strategy_id})"
@@ -1415,6 +1418,61 @@ class OrderMonitor:
                                             f"Skipping order {order.id} for {normalized_symbol} — "
                                             f"strategy {order.strategy_id} already has open position"
                                         )
+
+                        # Pass 2 (defence-in-depth): if no FILLED match, look for a
+                        # CANCELLED or FAILED order within ±24h of position.opened_at.
+                        # This catches the orphan-creation bug where a cancel-sweep
+                        # mis-classified a queued order as dead before eToro executed it.
+                        # Match criteria:
+                        #   (a) etoro_order_id numerically closest to etoro_position_id
+                        #   (b) symbol + time window fallback
+                        if matched_strategy_id == pos.strategy_id:  # still default
+                            pos_opened = pos.opened_at
+                            if pos_opened and pos_opened.tzinfo:
+                                pos_opened = pos_opened.replace(tzinfo=None)
+                            if pos_opened:
+                                window_lo = pos_opened - timedelta(hours=24)
+                                window_hi = pos_opened + timedelta(hours=24)
+                                cancelled_candidates = session.query(OrderORM).filter(
+                                    OrderORM.symbol == normalized_symbol,
+                                    OrderORM.submitted_at >= window_lo,
+                                    OrderORM.submitted_at <= window_hi,
+                                    OrderORM.status.in_([OrderStatus.CANCELLED, OrderStatus.FAILED]),
+                                    OrderORM.order_metadata.isnot(None),
+                                ).all()
+                                # Filter to entry orders only.
+                                cancelled_candidates = [
+                                    o for o in cancelled_candidates
+                                    if (getattr(o, 'order_action', None) or 'entry') in ('entry', None, '')
+                                ]
+                                if cancelled_candidates:
+                                    # Pick the order whose etoro_order_id is numerically
+                                    # closest to the position's etoro_position_id.
+                                    def _num_dist(a, b):
+                                        try:
+                                            return abs(int(a) - int(b))
+                                        except (TypeError, ValueError):
+                                            return float('inf')
+                                    best = min(
+                                        cancelled_candidates,
+                                        key=lambda o: (
+                                            _num_dist(o.etoro_order_id, pos.etoro_position_id),
+                                            -(o.submitted_at.timestamp() if o.submitted_at else 0),
+                                        )
+                                    )
+                                    matched_strategy_id = best.strategy_id
+                                    matched_order_id = best.id
+                                    match_reason = (
+                                        f"cancelled_order_relink:{best.id} "
+                                        f"(etoro_order_id={best.etoro_order_id})"
+                                    )
+                                    logger.warning(
+                                        f"ORPHAN RELINK: eToro position {pos.etoro_position_id} "
+                                        f"({normalized_symbol}) matched to CANCELLED/FAILED order "
+                                        f"{best.id} (strategy: {best.strategy_id}, "
+                                        f"etoro_order_id={best.etoro_order_id}). "
+                                        f"This indicates a cancel-sweep mis-classified a queued order."
+                                    )
                     except Exception as e:
                         logger.warning(f"Could not match position to order: {e}")
                     
@@ -1594,6 +1652,15 @@ class OrderMonitor:
                         take_profit=pos.take_profit,
                         closed_at=pos.closed_at,
                         invested_amount=pos.invested_amount,
+                        # Record the match reason temporarily in closure_reason so we
+                        # can audit how the strategy was resolved.  Cleared once the
+                        # position closes normally.  Only set when a non-default match
+                        # was used (i.e. not the FILLED-order happy path).
+                        closure_reason=(
+                            f"sync_relink:{match_reason}"
+                            if match_reason and "cancelled_order_relink" in (match_reason or "")
+                            else None
+                        ),
                     )
                     session.add(new_pos)
                     created_count += 1
@@ -2169,9 +2236,23 @@ class OrderMonitor:
                             else:
                                 logger.warning(f"Failed to cancel stale order {order.id}: eToro API returned False")
                                 failed_count += 1
+                        except EToroOrderNotFoundError:
+                            # 404 on the cancel endpoint: order is queued on eToro
+                            # (e.g. waiting for market open) and cannot be cancelled
+                            # via this route.  Leave as PENDING — the status-poll
+                            # path in check_submitted_orders will establish ground
+                            # truth when the order fills or expires.
+                            logger.warning(
+                                f"cancel_order 404 for stale order {order.id} "
+                                f"({order.symbol}, eToro: {order.etoro_order_id}) "
+                                f"— order may be queued for market open. "
+                                f"Leaving as PENDING; status-poll will resolve."
+                            )
+                            failed_count += 1
                         except Exception as e:
                             logger.error(f"Failed to cancel stale order {order.id} via eToro API: {e}")
-                            # Still mark as cancelled in our system
+                            # Non-404 error: mark cancelled so the stale order
+                            # doesn't accumulate indefinitely.
                             order.status = OrderStatus.CANCELLED
                             cancelled_pending += 1
                             logger.info(f"Marked stale order {order.id} as cancelled despite API error")

@@ -342,8 +342,18 @@ class EToroAPIClient:
                 # can handle it (mark CANCELLED + stop polling) rather than
                 # retrying forever. Detect by status code + endpoint path
                 # pattern so we don't mis-classify a 404 on a symbol lookup.
+                #
+                # Also covers the cancel endpoint (/market-cancel-orders/).
+                # A 404 on cancel means eToro doesn't recognise the order ID
+                # on the cancel route — this does NOT mean the order is dead.
+                # The order may be queued for market open (legitimately PENDING).
+                # Callers MUST NOT transition to CANCELLED on this exception;
+                # they should leave the row as-is and let order_monitor's
+                # status-poll establish ground truth.
                 if response.status_code == 404 and (
-                    "/orders/" in endpoint or "/positions/" in endpoint
+                    "/orders/" in endpoint
+                    or "/positions/" in endpoint
+                    or "/market-cancel-orders/" in endpoint
                 ):
                     raise EToroOrderNotFoundError(error_msg)
                 raise EToroAPIError(error_msg)
@@ -1675,6 +1685,19 @@ class EToroAPIClient:
             return True
 
         except CircuitBreakerOpen:
+            raise
+        except EToroOrderNotFoundError:
+            # 404 on the cancel endpoint — eToro doesn't recognise this order
+            # ID on the cancel route.  This does NOT mean the order is dead:
+            # the order may be queued for market open (legitimately PENDING).
+            # Re-raise so callers can leave the local row as PENDING and let
+            # order_monitor's status-poll establish ground truth.
+            self._record_failure("orders")
+            logger.warning(
+                f"cancel_order({order_id}): eToro returned 404 — order may be "
+                f"queued for market open. NOT marking as cancelled. "
+                f"order_monitor status-poll will establish ground truth."
+            )
             raise
         except Exception as e:
             self._record_failure("orders")

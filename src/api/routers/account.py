@@ -1103,9 +1103,21 @@ async def close_positions(
             for order in pending_orders:
                 try:
                     if order.etoro_order_id:
-                        etoro_client.cancel_order(order.etoro_order_id)
-                    order.status = OrderStatus.CANCELLED
-                    logger.info(f"Cancelled pending order {order.id} for position {position_id}")
+                        from src.api.etoro_client import EToroOrderNotFoundError as _EONFE_ACC
+                        try:
+                            etoro_client.cancel_order(order.etoro_order_id)
+                            order.status = OrderStatus.CANCELLED
+                            logger.info(f"Cancelled pending order {order.id} for position {position_id}")
+                        except _EONFE_ACC:
+                            # 404 on cancel: order may be queued for market open.
+                            # Leave as PENDING — order_monitor will resolve.
+                            logger.warning(
+                                f"cancel_order 404 for order {order.id} "
+                                f"({order.symbol}) — leaving as PENDING"
+                            )
+                    else:
+                        order.status = OrderStatus.CANCELLED
+                        logger.info(f"Cancelled pending order {order.id} for position {position_id}")
                 except Exception as cancel_err:
                     logger.warning(f"Failed to cancel order {order.id}: {cancel_err}")
             
@@ -1203,9 +1215,21 @@ async def close_all_positions(
     for order in pending_orders:
         try:
             if order.etoro_order_id:
-                etoro_client.cancel_order(order.etoro_order_id)
-            order.status = OrderStatus.CANCELLED
-            cancelled_orders += 1
+                from src.api.etoro_client import EToroOrderNotFoundError as _EONFE_CA
+                try:
+                    etoro_client.cancel_order(order.etoro_order_id)
+                    order.status = OrderStatus.CANCELLED
+                    cancelled_orders += 1
+                except _EONFE_CA:
+                    # 404 on cancel: order may be queued for market open.
+                    # Leave as PENDING — order_monitor will resolve.
+                    logger.warning(
+                        f"cancel_order 404 for order {order.id} "
+                        f"({order.symbol}) — leaving as PENDING"
+                    )
+            else:
+                order.status = OrderStatus.CANCELLED
+                cancelled_orders += 1
         except Exception as e:
             logger.warning(f"Failed to cancel order {order.id}: {e}")
     

@@ -1777,13 +1777,24 @@ class OrderExecutor:
         try:
             # If order has eToro order ID, cancel via API
             if order.etoro_order_id:
-                success = self.etoro_client.cancel_order(order.etoro_order_id)
-                if success:
-                    order.status = OrderStatus.CANCELLED
-                    logger.info(f"Order {order_id} cancelled successfully via eToro API")
-                    return True
-                else:
-                    logger.warning(f"eToro API returned success=False for order {order_id}")
+                from src.api.etoro_client import EToroOrderNotFoundError as _EONFE_OE
+                try:
+                    success = self.etoro_client.cancel_order(order.etoro_order_id)
+                    if success:
+                        order.status = OrderStatus.CANCELLED
+                        logger.info(f"Order {order_id} cancelled successfully via eToro API")
+                        return True
+                    else:
+                        logger.warning(f"eToro API returned success=False for order {order_id}")
+                        return False
+                except _EONFE_OE:
+                    # 404 on cancel: order may be queued for market open.
+                    # Leave as PENDING — order_monitor will resolve.
+                    logger.warning(
+                        f"cancel_order 404 for order {order_id} "
+                        f"(eToro: {order.etoro_order_id}) — order may be queued "
+                        f"for market open. Leaving as PENDING."
+                    )
                     return False
             else:
                 # Order not yet submitted to eToro, just mark as cancelled

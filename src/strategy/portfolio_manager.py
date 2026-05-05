@@ -1896,16 +1896,43 @@ class PortfolioManager:
                     try:
                         if order.etoro_order_id and self.etoro_client:
                             try:
+                                from src.api.etoro_client import EToroOrderNotFoundError as _EONFE
                                 self.etoro_client.cancel_order(order.etoro_order_id)
+                                # Cancel succeeded — safe to mark locally.
+                                order.status = OrderStatus.CANCELLED
+                                logger.info(
+                                    f"Cancelled order {order.id} ({order.symbol} {order.side.value}) "
+                                    f"— strategy retiring"
+                                )
+                            except _EONFE:
+                                # 404 on the cancel endpoint: order is queued on eToro
+                                # (e.g. waiting for market open) and cannot be cancelled
+                                # via this route.  Leave as PENDING — order_monitor's
+                                # status-poll will establish ground truth.
+                                logger.warning(
+                                    f"cancel_order 404 for order {order.id} "
+                                    f"({order.symbol}, eToro: {order.etoro_order_id}) "
+                                    f"— order may be queued for market open. "
+                                    f"Leaving as PENDING; order_monitor will resolve."
+                                )
                             except Exception as api_err:
                                 logger.warning(
                                     f"Failed to cancel order {order.id} via eToro API: {api_err}"
                                 )
-                        order.status = OrderStatus.CANCELLED
-                        logger.info(
-                            f"Cancelled order {order.id} ({order.symbol} {order.side.value}) "
-                            f"— strategy retiring"
-                        )
+                                # Non-404 API error: mark cancelled locally so the
+                                # retirement doesn't stall, but log clearly.
+                                order.status = OrderStatus.CANCELLED
+                                logger.info(
+                                    f"Marked order {order.id} ({order.symbol}) CANCELLED "
+                                    f"locally after API error — strategy retiring"
+                                )
+                        else:
+                            # No eToro ID yet — order never reached eToro, safe to cancel.
+                            order.status = OrderStatus.CANCELLED
+                            logger.info(
+                                f"Cancelled order {order.id} ({order.symbol} {order.side.value}) "
+                                f"— strategy retiring"
+                            )
                     except Exception as e:
                         logger.error(f"Error cancelling order {order.id}: {e}")
                 session.commit()

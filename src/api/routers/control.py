@@ -567,7 +567,20 @@ async def activate_kill_switch(
         for order in pending_orders:
             try:
                 if order.etoro_order_id:
-                    etoro_client.cancel_order(order.etoro_order_id)
+                    from src.api.etoro_client import EToroOrderNotFoundError as _EONFE_KS
+                    try:
+                        etoro_client.cancel_order(order.etoro_order_id)
+                    except _EONFE_KS:
+                        # 404 on cancel: order may be queued for market open.
+                        # Kill switch is an explicit emergency action — log the
+                        # 404 but still mark cancelled locally so the order
+                        # doesn't re-fire after the halt is lifted.
+                        logger.warning(
+                            f"Kill switch: cancel_order 404 for order {order.id} "
+                            f"({getattr(order, 'symbol', '?')}, eToro: {order.etoro_order_id}) "
+                            f"— order may be queued for market open. "
+                            f"Marking CANCELLED locally per kill-switch intent."
+                        )
                 orders_cancelled += 1
             except Exception as e:
                 logger.error(f"Failed to cancel order {order.id}: {e}")

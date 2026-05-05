@@ -1888,20 +1888,31 @@ async def permanently_delete_strategy(
                 try:
                     # Cancel via eToro API if order has eToro ID
                     if order.etoro_order_id:
-                        success = etoro_client.cancel_order(order.etoro_order_id)
-                        if success:
-                            order.status = OrderStatus.CANCELLED
-                            logger.info(f"Cancelled order {order.id} (eToro: {order.etoro_order_id}) on eToro")
-                        else:
-                            logger.warning(f"Failed to cancel order {order.id} on eToro, marking as cancelled locally")
-                            order.status = OrderStatus.CANCELLED
+                        from src.api.etoro_client import EToroOrderNotFoundError as _EONFE_STR
+                        try:
+                            success = etoro_client.cancel_order(order.etoro_order_id)
+                            if success:
+                                order.status = OrderStatus.CANCELLED
+                                logger.info(f"Cancelled order {order.id} (eToro: {order.etoro_order_id}) on eToro")
+                            else:
+                                logger.warning(f"Failed to cancel order {order.id} on eToro, marking as cancelled locally")
+                                order.status = OrderStatus.CANCELLED
+                        except _EONFE_STR:
+                            # 404 on cancel: order may be queued for market open.
+                            # Leave as PENDING — order_monitor will resolve.
+                            logger.warning(
+                                f"cancel_order 404 for order {order.id} "
+                                f"({order.symbol}, eToro: {order.etoro_order_id}) "
+                                f"— order may be queued for market open. "
+                                f"Leaving as PENDING; order_monitor will resolve."
+                            )
                     else:
                         # Order not yet submitted to eToro, just mark as cancelled
                         order.status = OrderStatus.CANCELLED
                         logger.info(f"Cancelled order {order.id} (not yet submitted to eToro)")
                 except Exception as e:
                     logger.error(f"Error cancelling order {order.id}: {e}")
-                    # Still mark as cancelled locally
+                    # Still mark as cancelled locally for non-404 errors
                     order.status = OrderStatus.CANCELLED
         
         # Delete the strategy from the database
