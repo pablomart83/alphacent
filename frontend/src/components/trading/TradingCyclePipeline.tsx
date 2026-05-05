@@ -6,10 +6,12 @@ import {
 import { toast } from 'sonner';
 import { Button } from '../ui/Button';
 import { SectionLabel } from '../ui/SectionLabel';
+import { DataTable } from './DataTable';
 import { cn } from '../../lib/utils';
 import { utcToLocal } from '../../lib/date-utils';
 import { wsManager } from '../../services/websocket';
 import { apiClient } from '../../services/api';
+import type { ColumnDef } from '@tanstack/react-table';
 
 // Stage definitions matching backend CYCLE_STAGES
 const STAGES = [
@@ -212,7 +214,7 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
   // Fetch cycle history on mount
   const fetchHistory = useCallback(async () => {
     try {
-      const result = await apiClient.getAutonomousCycles(20);
+      const result = await apiClient.getAutonomousCycles();
       const runs = Array.isArray(result) ? result : (result.data || []);
       setCycleHistory(runs);
     } catch {
@@ -240,6 +242,163 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
   const getStageStatus = (stageKey: string): StageStatus => {
     return displayStages[stageKey]?.status || 'pending';
   };
+
+  // ── Cycle history table columns ──────────────────────────────────────
+  const cycleColumns: ColumnDef<CycleRun>[] = [
+    {
+      id: 'select',
+      enableSorting: false,
+      size: 32,
+      header: () => (
+        <input
+          type="checkbox"
+          checked={cycleHistory.length > 0 && selectedCycles.size === cycleHistory.length}
+          onChange={() => {
+            if (selectedCycles.size === cycleHistory.length) setSelectedCycles(new Set());
+            else setSelectedCycles(new Set(cycleHistory.map(r => r.cycle_id)));
+          }}
+          className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer"
+        />
+      ),
+      cell: ({ row }) => (
+        <input
+          type="checkbox"
+          checked={selectedCycles.has(row.original.cycle_id)}
+          onChange={() => {
+            setSelectedCycles(prev => {
+              const next = new Set(prev);
+              if (next.has(row.original.cycle_id)) next.delete(row.original.cycle_id);
+              else next.add(row.original.cycle_id);
+              return next;
+            });
+          }}
+          className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 cursor-pointer"
+        />
+      ),
+    },
+    {
+      accessorKey: 'started_at',
+      header: 'When',
+      size: 80,
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-gray-400">
+          {getTimeAgo(utcToLocal(row.original.started_at))}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'duration_seconds',
+      header: 'Dur',
+      size: 60,
+      cell: ({ row }) => {
+        const s = row.original.duration_seconds;
+        if (!s) return <span className="text-gray-600 text-xs">—</span>;
+        const mins = Math.floor(s / 60);
+        const secs = Math.floor(s % 60);
+        return <span className="font-mono text-xs text-gray-400">{mins}m {secs}s</span>;
+      },
+    },
+    {
+      accessorKey: 'proposals_generated',
+      header: () => <div className="text-right">Prop</div>,
+      size: 48,
+      cell: ({ row }) => (
+        <div className="text-right font-mono text-xs text-[#3b82f6]">
+          {row.original.proposals_generated}
+        </div>
+      ),
+    },
+    {
+      id: 'bt',
+      header: () => <div className="text-right">BT</div>,
+      size: 56,
+      cell: ({ row }) => {
+        const r = row.original;
+        const passRate = r.backtested > 0 ? (r.backtest_passed / r.backtested) * 100 : 0;
+        return (
+          <div className={cn('text-right font-mono text-xs font-semibold',
+            r.backtested === 0 ? 'text-gray-600' :
+            passRate >= 70 ? 'text-[#22c55e]' : passRate >= 40 ? 'text-[#eab308]' : 'text-[#ef4444]'
+          )}>
+            {r.backtested > 0 ? `${r.backtest_passed}/${r.backtested}` : '—'}
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: 'activated',
+      header: () => <div className="text-right">Act</div>,
+      size: 40,
+      cell: ({ row }) => (
+        <div className={cn('text-right font-mono text-xs font-semibold',
+          row.original.activated > 0 ? 'text-[#22c55e]' : 'text-gray-600'
+        )}>
+          {row.original.activated > 0 ? `+${row.original.activated}` : '—'}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'strategies_retired',
+      header: () => <div className="text-right">Ret</div>,
+      size: 40,
+      cell: ({ row }) => (
+        <div className={cn('text-right font-mono text-xs',
+          row.original.strategies_retired > 0 ? 'text-[#ef4444]' : 'text-gray-600'
+        )}>
+          {row.original.strategies_retired > 0 ? row.original.strategies_retired : '—'}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'avg_sharpe',
+      header: () => <div className="text-right">Sharpe</div>,
+      size: 56,
+      cell: ({ row }) => {
+        const v = row.original.avg_sharpe;
+        return (
+          <div className={cn('text-right font-mono text-xs',
+            v == null ? 'text-gray-600' : v >= 1.5 ? 'text-[#22c55e]' : v >= 1.0 ? 'text-[#eab308]' : 'text-gray-300'
+          )}>
+            {v != null && v > 0 ? v.toFixed(2) : '—'}
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: 'avg_win_rate',
+      header: () => <div className="text-right">WR%</div>,
+      size: 48,
+      cell: ({ row }) => {
+        const v = row.original.avg_win_rate;
+        return (
+          <div className={cn('text-right font-mono text-xs',
+            v == null ? 'text-gray-600' : v >= 0.6 ? 'text-[#22c55e]' : v >= 0.45 ? 'text-[#eab308]' : 'text-[#ef4444]'
+          )}>
+            {v != null && v > 0 ? `${(v * 100).toFixed(0)}%` : '—'}
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: 'status',
+      header: 'Status',
+      size: 80,
+      cell: ({ row }) => {
+        const s = row.original.status;
+        const isOk = s === 'completed';
+        const isErr = s === 'error';
+        return (
+          <span className={cn('text-xs font-mono px-1.5 py-0.5 rounded',
+            isOk ? 'bg-[#22c55e]/10 text-[#22c55e]' :
+            isErr ? 'bg-[#ef4444]/10 text-[#ef4444]' :
+            'bg-blue-500/10 text-blue-400'
+          )}>
+            {s.toUpperCase()}
+          </span>
+        );
+      },
+    },
+  ];
 
   const buildMetricsSummary = (): { label: string; value: string; color: string }[] => {
     const items: { label: string; value: string; color: string }[] = [];
@@ -422,42 +581,18 @@ export const TradingCyclePipeline: FC<TradingCyclePipelineProps> = ({ cycleRunni
             No cycle history yet
           </div>
         ) : (
-          <div className="max-h-[400px] overflow-y-auto space-y-2">
-            {/* Select All */}
-            <div className="flex items-center gap-2 pb-2 border-b border-border">
-              <input
-                type="checkbox"
-                checked={cycleHistory.length > 0 && selectedCycles.size === cycleHistory.length}
-                onChange={() => {
-                  if (selectedCycles.size === cycleHistory.length) {
-                    setSelectedCycles(new Set());
-                  } else {
-                    setSelectedCycles(new Set(cycleHistory.map(r => r.cycle_id)));
-                  }
-                }}
-                className="h-4 w-4 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
-              />
-              <span className="text-xs text-muted-foreground">Select All</span>
-            </div>
-            {cycleHistory.map((run) => (
-              <CycleHistoryRow
-                key={run.cycle_id}
-                run={run}
-                selected={selectedCycles.has(run.cycle_id)}
-                onToggle={() => {
-                  setSelectedCycles(prev => {
-                    const next = new Set(prev);
-                    if (next.has(run.cycle_id)) {
-                      next.delete(run.cycle_id);
-                    } else {
-                      next.add(run.cycle_id);
-                    }
-                    return next;
-                  });
-                }}
-              />
-            ))}
-          </div>
+          <DataTable
+            columns={cycleColumns}
+            data={cycleHistory}
+            virtualise={cycleHistory.length > 30}
+            estimatedRowHeight={36}
+            className={cn(
+              '[&_table]:table-dense [&_td]:py-1 [&_th]:py-1',
+              cycleHistory.length > 30 ? 'h-[400px]' : undefined
+            )}
+            pageSize={20}
+            showPagination={cycleHistory.length > 20 && cycleHistory.length <= 30}
+          />
         )}
       </div>
     </div>

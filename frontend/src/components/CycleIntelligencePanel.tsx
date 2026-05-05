@@ -273,9 +273,9 @@ export const CycleIntelligencePanel: FC<CycleIntelligencePanelProps> = ({
     [cycleHistory]
   );
 
-  // Last 8 completed cycles for history table
+  // Last 20 completed cycles for history table
   const recentCycles = useMemo(() =>
-    cycleHistory.filter(c => c.status === 'COMPLETED' || c.status === 'completed').slice(0, 8),
+    cycleHistory.filter(c => c.status === 'COMPLETED' || c.status === 'completed').slice(0, 20),
     [cycleHistory]
   );
 
@@ -405,7 +405,7 @@ export const CycleIntelligencePanel: FC<CycleIntelligencePanelProps> = ({
       {recentCycles.length > 0 && (
         <div>
           <SectionTitle>Cycle History ({recentCycles.length})</SectionTitle>
-          {/* Pass rate sparkline — simple SVG, no axis labels */}
+          {/* Pass rate sparkline */}
           {passRateHistory.length > 2 && (
             <div className="mb-1.5 h-10 w-full">
               <MiniSparkline
@@ -415,35 +415,61 @@ export const CycleIntelligencePanel: FC<CycleIntelligencePanelProps> = ({
               />
             </div>
           )}
-          {/* Table header */}
-          <div className="grid grid-cols-6 gap-1 text-[9px] text-gray-600 uppercase tracking-wide px-1 mb-0.5">
-            <span className="col-span-2">When</span>
-            <span className="text-right">Gen</span>
-            <span className="text-right">WF%</span>
-            <span className="text-right">Act</span>
-            <span className="text-right">Dur</span>
+          <div className="overflow-y-auto max-h-[220px] rounded border border-gray-800">
+            <table className="w-full text-[10px] font-mono" style={{ tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: '34%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '14%' }} />
+              </colgroup>
+              <thead className="sticky top-0 bg-[#0a0e1a]">
+                <tr className="border-b border-gray-800">
+                  <th className="py-1 px-1.5 text-left text-[9px] text-gray-600 uppercase tracking-wide font-medium">When</th>
+                  <th className="py-1 px-1 text-right text-[9px] text-gray-600 uppercase tracking-wide font-medium">Gen</th>
+                  <th className="py-1 px-1 text-right text-[9px] text-gray-600 uppercase tracking-wide font-medium">WF%</th>
+                  <th className="py-1 px-1 text-right text-[9px] text-gray-600 uppercase tracking-wide font-medium">Act</th>
+                  <th className="py-1 px-1 text-right text-[9px] text-gray-600 uppercase tracking-wide font-medium">Ret</th>
+                  <th className="py-1 px-1 text-right text-[9px] text-gray-600 uppercase tracking-wide font-medium">Dur</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentCycles.map((c, i) => {
+                  const passRate = c.backtested > 0 ? (c.backtest_passed / c.backtested) * 100 : 0;
+                  const net = c.activated - c.strategies_retired;
+                  return (
+                    <tr
+                      key={c.cycle_id}
+                      className="border-b border-gray-800/50 hover:bg-gray-800/40 transition-colors"
+                      style={{ background: i % 2 === 1 ? 'rgba(31,41,55,0.3)' : undefined }}
+                    >
+                      <td className="py-1 px-1.5 text-gray-500 truncate">{relDate(c.started_at)}</td>
+                      <td className="py-1 px-1 text-right text-[#3b82f6]">{c.proposals_generated}</td>
+                      <td className={cn('py-1 px-1 text-right font-semibold',
+                        c.backtested === 0 ? 'text-gray-600' :
+                        passRate >= 70 ? 'text-[#22c55e]' : passRate >= 40 ? 'text-[#eab308]' : 'text-[#ef4444]'
+                      )}>
+                        {c.backtested > 0 ? `${passRate.toFixed(0)}%` : '—'}
+                      </td>
+                      <td className={cn('py-1 px-1 text-right font-semibold',
+                        net > 0 ? 'text-[#22c55e]' : net < 0 ? 'text-[#ef4444]' : 'text-gray-600'
+                      )}>
+                        {net > 0 ? `+${net}` : net !== 0 ? net : '—'}
+                      </td>
+                      <td className={cn('py-1 px-1 text-right',
+                        c.strategies_retired > 0 ? 'text-[#ef4444]' : 'text-gray-600'
+                      )}>
+                        {c.strategies_retired > 0 ? c.strategies_retired : '—'}
+                      </td>
+                      <td className="py-1 px-1 text-right text-gray-500">{fmtDuration(c.duration_seconds)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-          {recentCycles.map(c => {
-            const passRate = c.backtested > 0 ? (c.backtest_passed / c.backtested) * 100 : 0;
-            const net = c.activated - c.strategies_retired;
-            return (
-              <div key={c.cycle_id} className="grid grid-cols-6 gap-1 px-1 py-0.5 rounded hover:bg-gray-800/40 text-[10px]">
-                <span className="text-gray-500 col-span-2">{relDate(c.started_at)}</span>
-                <span className="text-right text-[#3b82f6]">{c.proposals_generated}</span>
-                <span className={cn('text-right font-semibold',
-                  passRate >= 70 ? 'text-[#22c55e]' : passRate >= 40 ? 'text-[#eab308]' : 'text-[#ef4444]'
-                )}>
-                  {c.backtested > 0 ? `${passRate.toFixed(0)}%` : '—'}
-                </span>
-                <span className={cn('text-right font-semibold',
-                  net > 0 ? 'text-[#22c55e]' : net < 0 ? 'text-[#ef4444]' : 'text-gray-500'
-                )}>
-                  {net > 0 ? '+' : ''}{net !== 0 ? net : '—'}
-                </span>
-                <span className="text-right text-gray-500">{fmtDuration(c.duration_seconds)}</span>
-              </div>
-            );
-          })}
         </div>
       )}
 
