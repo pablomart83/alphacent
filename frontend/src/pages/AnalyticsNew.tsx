@@ -248,7 +248,10 @@ const TradeJournalTable: FC<TradeJournalTableProps> = ({
             <th className="text-right p-2 font-mono text-xs text-gray-500">Conv.</th>
           </tr>
         </thead>
-        <tbody style={{ height: `${totalHeight}px`, display: 'block', position: 'relative' }}>
+        <tbody>
+          {virtualItems.length > 0 && virtualItems[0].start > 0 && (
+            <tr style={{ height: `${virtualItems[0].start}px` }} />
+          )}
           {virtualItems.map((vr) => {
             const trade = entries[vr.index];
             return (
@@ -256,8 +259,7 @@ const TradeJournalTable: FC<TradeJournalTableProps> = ({
                 key={trade.id}
                 data-index={vr.index}
                 ref={virtualiser.measureElement}
-                className="border-b border-[var(--color-dark-border)]/50 hover:bg-[var(--color-dark-surface)] absolute w-full"
-                style={{ transform: `translateY(${vr.start}px)` }}
+                className="border-b border-[var(--color-dark-border)]/50 hover:bg-[var(--color-dark-surface)]"
               >
                 <td className="p-2 font-mono text-xs">{formatTimestamp(trade.entry_time, { includeTime: false })}</td>
                 <td className="p-2 font-mono text-xs font-semibold">{trade.symbol}</td>
@@ -279,6 +281,11 @@ const TradeJournalTable: FC<TradeJournalTableProps> = ({
               </tr>
             );
           })}
+          {virtualItems.length > 0 && (() => {
+            const last = virtualItems[virtualItems.length - 1];
+            const remaining = totalHeight - last.end;
+            return remaining > 0 ? <tr style={{ height: `${remaining}px` }} /> : null;
+          })()}
         </tbody>
       </table>
       <div className="px-2 py-1 text-xs text-gray-500 font-mono border-t border-[var(--color-dark-border)]">

@@ -312,7 +312,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
         apiClient.getOrders(tradingMode),
         apiClient.getRecentSignals(tradingMode, 100).catch(() => null),
         apiClient.getScheduleSlots().catch(() => null),
-        apiClient.getAutonomousCycles(10).catch(() => null),
+        apiClient.getAutonomousCycles().catch(() => null),
         apiClient.getAutonomousConfig().catch(() => null),
       ]);
 
@@ -1231,7 +1231,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
             <TabsContent value="activity" className="space-y-2 p-2">
               {/* Filters — flat inline row */}
               <div className="flex items-center gap-2 py-1">
-                <span className="text-xs text-gray-500">Last 50 orders · {filteredOrders.length} of {orders.length}</span>
+                <span className="text-xs text-gray-500">{filteredOrders.length} of {orders.length} orders</span>
                 <div className="relative ml-auto">
                   <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-500" />
                   <Input placeholder="Search symbol..." value={orderSearch}
@@ -1346,7 +1346,6 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                       <tbody>
                         {(signalData?.signals ?? [])
                           .filter(s => signalFilter === 'all' || s.decision === signalFilter)
-                          .slice(0, 50)
                           .map((s) => (
                           <tr key={s.id} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/30">
                             <td className="py-1 pr-2 text-xs text-gray-500 whitespace-nowrap">
@@ -1465,36 +1464,71 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {/* Cycle History Table */}
                 <div>
-                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Cycle History</div>
+                  <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                    Cycle History {walkForwardData?.cycles?.length ? `(${walkForwardData.cycles.length})` : ''}
+                  </div>
                   {walkForwardLoading ? (
                     <div className="flex items-center justify-center h-24 text-xs text-gray-500">Loading...</div>
                   ) : walkForwardData?.cycles && walkForwardData.cycles.length > 0 ? (
-                    <div className="overflow-x-auto max-h-[300px]">
-                      <table className="w-full text-xs font-mono">
-                        <thead className="sticky top-0 bg-[var(--color-dark-bg)]">
-                          <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
-                            <th className="py-1 px-2 text-left">Cycle</th>
-                            <th className="py-1 px-2 text-right">Proposals</th>
-                            <th className="py-1 px-2 text-right">BTs</th>
-                            <th className="py-1 px-2 text-right">Pass Rate</th>
-                            <th className="py-1 px-2 text-right">Avg Sharpe</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {walkForwardData.cycles.slice(0, 20).map((c: any, idx: number) => (
-                            <tr key={idx} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/30">
-                              <td className="py-1 px-2 text-gray-500">{c.date || c.cycle_id || `#${idx + 1}`}</td>
-                              <td className="py-1 px-2 text-right text-gray-300">{c.proposals ?? '—'}</td>
-                              <td className="py-1 px-2 text-right text-gray-300">{c.backtests ?? '—'}</td>
-                              <td className={cn('py-1 px-2 text-right', (c.pass_rate ?? 0) >= 50 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
-                                {c.pass_rate != null ? `${c.pass_rate.toFixed(1)}%` : '—'}
-                              </td>
-                              <td className="py-1 px-2 text-right text-gray-300">{c.avg_sharpe != null ? c.avg_sharpe.toFixed(2) : '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <DataTable
+                      columns={[
+                        {
+                          accessorKey: 'date',
+                          header: 'Cycle',
+                          cell: ({ row }: any) => (
+                            <span className="font-mono text-xs text-gray-400">
+                              {row.original.date || row.original.cycle_id || `#${row.index + 1}`}
+                            </span>
+                          ),
+                        },
+                        {
+                          accessorKey: 'proposals',
+                          header: () => <div className="text-right">Proposals</div>,
+                          cell: ({ row }: any) => (
+                            <div className="text-right font-mono text-xs text-[#3b82f6]">
+                              {row.original.proposals ?? '—'}
+                            </div>
+                          ),
+                        },
+                        {
+                          accessorKey: 'backtests',
+                          header: () => <div className="text-right">BTs</div>,
+                          cell: ({ row }: any) => (
+                            <div className="text-right font-mono text-xs text-gray-300">
+                              {row.original.backtests ?? '—'}
+                            </div>
+                          ),
+                        },
+                        {
+                          accessorKey: 'pass_rate',
+                          header: () => <div className="text-right">Pass %</div>,
+                          cell: ({ row }: any) => {
+                            const v = row.original.pass_rate;
+                            return (
+                              <div className={cn('text-right font-mono text-xs font-semibold',
+                                v == null ? 'text-gray-500' : v >= 50 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
+                                {v != null ? `${v.toFixed(1)}%` : '—'}
+                              </div>
+                            );
+                          },
+                        },
+                        {
+                          accessorKey: 'avg_sharpe',
+                          header: () => <div className="text-right">Avg Sharpe</div>,
+                          cell: ({ row }: any) => (
+                            <div className="text-right font-mono text-xs text-gray-300">
+                              {row.original.avg_sharpe != null ? row.original.avg_sharpe.toFixed(2) : '—'}
+                            </div>
+                          ),
+                        },
+                      ]}
+                      data={walkForwardData.cycles}
+                      virtualise={walkForwardData.cycles.length > 30}
+                      estimatedRowHeight={32}
+                      className={walkForwardData.cycles.length > 30 ? 'h-[300px]' : undefined}
+                      pageSize={20}
+                      showPagination={walkForwardData.cycles.length > 20 && walkForwardData.cycles.length <= 30}
+                    />
                   ) : (
                     <div className="text-center py-6 text-xs text-gray-500">No walk-forward data</div>
                   )}

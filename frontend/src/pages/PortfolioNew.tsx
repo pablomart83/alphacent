@@ -153,7 +153,7 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
       const [account, positionsData, closedPositionsData] = await Promise.all([
         apiClient.getAccountInfo(tradingMode),
         apiClient.getPositions(tradingMode),
-        apiClient.getClosedPositions(tradingMode, 100).catch(err => {
+        apiClient.getClosedPositions(tradingMode).catch(err => {
           console.warn('Failed to fetch closed positions:', err);
           return [];
         }),

@@ -942,8 +942,11 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
-  async getAutonomousCycles(limit: number = 20): Promise<{ success: boolean; data: any[] }> {
-    const response = await this.client.get<ApiResponse<any>>(`/control/autonomous/cycles?limit=${limit}`);
+  async getAutonomousCycles(limit: number = 0): Promise<{ success: boolean; data: any[] }> {
+    const url = limit > 0
+      ? `/control/autonomous/cycles?limit=${limit}`
+      : `/control/autonomous/cycles`;
+    const response = await this.client.get<ApiResponse<any>>(`${url}`);
     return this.handleResponse(response);
   }
 

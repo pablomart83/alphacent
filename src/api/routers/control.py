@@ -1331,35 +1331,22 @@ async def get_sync_status(
 
 @router.get("/autonomous/cycles")
 async def get_autonomous_cycles(
-    limit: int = 20,
+    limit: int = 0,
     session: Session = Depends(get_db_session),
     _user: str = Depends(get_current_user),
 ):
-    """
-    Get autonomous cycle run history with metrics.
-
-    Returns the most recent cycle runs ordered by start time descending.
-    """
+    """Get autonomous cycle run history. Returns all cycles by default (limit=0)."""
     from src.models.orm import AutonomousCycleRunORM
 
     try:
-        runs = (
-            session.query(AutonomousCycleRunORM)
-            .order_by(AutonomousCycleRunORM.started_at.desc())
-            .limit(limit)
-            .all()
+        q = session.query(AutonomousCycleRunORM).order_by(
+            AutonomousCycleRunORM.started_at.desc()
         )
-        return {
-            "success": True,
-            "data": [run.to_dict() for run in runs],
-        }
+        runs = q.limit(limit).all() if limit and limit > 0 else q.all()
+        return {"success": True, "data": [run.to_dict() for run in runs]}
     except Exception as e:
         logger.error(f"Error fetching cycle history: {e}", exc_info=True)
-        return {
-            "success": False,
-            "data": [],
-            "error": str(e),
-        }
+        return {"success": False, "data": [], "error": str(e)}
 
 @router.post("/autonomous/cycles/delete")
 async def delete_autonomous_cycles(

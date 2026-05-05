@@ -149,16 +149,34 @@ function DataTableComponent<TData, TValue>({
     const virtualItems = virtualiser.getVirtualItems();
     const totalHeight = virtualiser.getTotalSize();
 
+    // Column widths — use the column size if defined, otherwise distribute evenly.
+    // table-layout: fixed + explicit col widths ensures header and body align.
+    const colWidths = table.getAllColumns().map(col => col.getSize() || 0);
+    const hasExplicitWidths = colWidths.some(w => w > 0);
+
     return (
       <div className={cn('flex flex-col', className)}>
-        {/* Scrollable container — caller sets height via className */}
         <div
           ref={scrollRef}
           className="overflow-auto rounded-md border border-border flex-1"
         >
-          <table className="w-full text-xs">
+          <table
+            className="w-full text-xs"
+            style={{ tableLayout: hasExplicitWidths ? 'fixed' : 'auto', minWidth: '100%' }}
+          >
+            {hasExplicitWidths && (
+              <colgroup>
+                {colWidths.map((w, i) => (
+                  <col key={i} style={{ width: w > 0 ? `${w}px` : undefined }} />
+                ))}
+              </colgroup>
+            )}
             <TableHeader table={table} columns={columns} />
-            <tbody style={{ height: `${totalHeight}px`, display: 'block', position: 'relative' }}>
+            <tbody>
+              {/* Spacer row for virtual offset top */}
+              {virtualItems.length > 0 && virtualItems[0].start > 0 && (
+                <tr style={{ height: `${virtualItems[0].start}px` }} />
+              )}
               {virtualItems.map((virtualRow) => {
                 const row = allRows[virtualRow.index];
                 return (
@@ -166,17 +184,22 @@ function DataTableComponent<TData, TValue>({
                     key={row.id}
                     data-index={virtualRow.index}
                     ref={virtualiser.measureElement}
-                    className="border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors even:bg-[rgba(31,41,55,0.5)] absolute w-full"
-                    style={{ transform: `translateY(${virtualRow.start}px)` }}
+                    className="border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors even:bg-[rgba(31,41,55,0.5)]"
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-3 py-2">
+                      <td key={cell.id} className="px-3 py-2 overflow-hidden text-ellipsis">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     ))}
                   </tr>
                 );
               })}
+              {/* Spacer row for virtual offset bottom */}
+              {virtualItems.length > 0 && (() => {
+                const lastItem = virtualItems[virtualItems.length - 1];
+                const remaining = totalHeight - lastItem.end;
+                return remaining > 0 ? <tr style={{ height: `${remaining}px` }} /> : null;
+              })()}
             </tbody>
           </table>
           {allRows.length === 0 && (
@@ -185,7 +208,6 @@ function DataTableComponent<TData, TValue>({
             </div>
           )}
         </div>
-        {/* Row count footer */}
         <div className="px-1 pt-1 text-xs text-gray-500 font-mono">
           {allRows.length.toLocaleString()} row{allRows.length !== 1 ? 's' : ''}
         </div>
