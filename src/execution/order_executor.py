@@ -280,10 +280,22 @@ class OrderExecutor:
                                     if _tr_list:
                                         _atr14 = sum(_tr_list[-14:]) / min(14, len(_tr_list[-14:]))
                                         _atr_pct = _atr14 / current_price
-                                        # 1.5x ATR floor — standard institutional minimum
-                                        # (Wilder's original ATR stop, used by most systematic funds).
-                                        # Gives the trade 1.5 bars of normal volatility before stopping out.
-                                        _atr_floor = _atr_pct * 1.5
+                                        # ATR floor multiplier — how many bars of normal
+                                        # volatility the trade gets before stopping out.
+                                        #
+                                        # 4H strategies: 2.0× ATR.
+                                        # Intraday noise on a 4H bar is ~40% of a daily bar.
+                                        # The 1.5× daily multiplier translates to ~0.6× on
+                                        # a 4H basis — far too tight. 4H ADX Trend Swing
+                                        # audit (2026-05-05): median loss -$12, avg hold 86h,
+                                        # 29% WR — classic stop-too-tight signature. 2.0×
+                                        # matches the TSL trail multiplier already used for
+                                        # stocks, making entry stop consistent with the trail.
+                                        #
+                                        # Daily strategies: 1.5× ATR (Wilder's original,
+                                        # standard institutional floor).
+                                        _atr_multiplier = 2.0 if _is_4h else 1.5
+                                        _atr_floor = _atr_pct * _atr_multiplier
 
                                         if stop_loss_pct < _atr_floor:
                                             original_rr = (take_profit_pct / stop_loss_pct) if take_profit_pct and stop_loss_pct else 2.0
@@ -312,7 +324,7 @@ class OrderExecutor:
                                                 logger.info(
                                                     f"ATR floor at order time for {normalized_symbol} ({_atr_interval}): "
                                                     f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
-                                                    f"(ATR={_atr_pct:.2%}, floor=1.5x ATR={_atr_floor:.2%}). "
+                                                    f"(ATR={_atr_pct:.2%}, floor={_atr_multiplier:.1f}x ATR={_atr_floor:.2%}). "
                                                     f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x). "
                                                     f"Size scaled {old_size:.0f} → {position_size:.0f} "
                                                     f"(×{size_scale:.2f}) to preserve dollar risk."
@@ -321,7 +333,7 @@ class OrderExecutor:
                                                 logger.info(
                                                     f"ATR floor at order time for {normalized_symbol} ({_atr_interval}): "
                                                     f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
-                                                    f"(ATR={_atr_pct:.2%}, floor=1.5x ATR={_atr_floor:.2%}). "
+                                                    f"(ATR={_atr_pct:.2%}, floor={_atr_multiplier:.1f}x ATR={_atr_floor:.2%}). "
                                                     f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x)"
                                                 )
                         except Exception as _atr_err:

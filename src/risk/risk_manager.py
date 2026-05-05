@@ -1127,6 +1127,75 @@ class RiskManager:
         except Exception as _lp_err:
             logger.debug(f"Loser penalty check failed (non-fatal): {_lp_err}")
 
+        # ── Step 10c: Conviction-tier size multiplier ────────────────────────
+        # Signals with high conviction scores have demonstrated better P&L
+        # outcomes (scorer audit 2026-05-04: ≥75 bucket +$51/trade vs
+        # 65-70 bucket -$52/trade). Scale up size proportionally to conviction
+        # quality, capped so the result never breaches symbol/heat caps above.
+        #
+        # Tiers (configurable via autonomous_trading.yaml
+        # position_management.conviction_tier_sizing):
+        #   score ≥ 80 → 1.30× (strong signal, proven positive EV)
+        #   score ≥ 75 → 1.15× (above-average signal)
+        #   score < 75 → 1.00× (baseline, no change)
+        #
+        # Conservative multipliers by design — sample is still thin (48 trades
+        # in upper buckets over 14 days). Will be raised once 3-4 weeks of
+        # clean data accumulates. Multiplier is applied AFTER all penalty/cap
+        # steps so it never inflates a penalised position.
+        try:
+            _conv_score = None
+            if signal.metadata and isinstance(signal.metadata, dict):
+                _conv_score = signal.metadata.get('conviction_score')
+            if _conv_score is None:
+                # Fall back to signal.confidence as a proxy (0-1 scale → 0-100)
+                _conv_score = (signal.confidence or 0) * 100 if signal.confidence and signal.confidence <= 1.0 else signal.confidence
+
+            if _conv_score and _conv_score >= 75 and not penalty_applied:
+                # Read tier config from yaml; fall back to conservative defaults.
+                _tier_cfg = {}
+                try:
+                    import yaml as _yaml
+                    from pathlib import Path as _Path
+                    _cfg_path = _Path("config/autonomous_trading.yaml")
+                    if _cfg_path.exists():
+                        with open(_cfg_path) as _f:
+                            _full_cfg = _yaml.safe_load(_f) or {}
+                        _tier_cfg = (
+                            (_full_cfg.get("position_management") or {})
+                            .get("conviction_tier_sizing") or {}
+                        )
+                except Exception:
+                    pass
+
+                _mult_80 = float(_tier_cfg.get("multiplier_score_80", 1.30))
+                _mult_75 = float(_tier_cfg.get("multiplier_score_75", 1.15))
+                _enabled = _tier_cfg.get("enabled", True)
+
+                if _enabled:
+                    if _conv_score >= 80:
+                        _tier_mult = _mult_80
+                        _tier_label = f"≥80 ({_conv_score:.1f})"
+                    else:
+                        _tier_mult = _mult_75
+                        _tier_label = f"75-80 ({_conv_score:.1f})"
+
+                    old_size = position_size
+                    position_size = min(
+                        position_size * _tier_mult,
+                        # Hard cap: never exceed symbol cap or available balance
+                        # (both already enforced above, but re-apply after scaling)
+                        symbol_cap - existing_symbol_exposure,
+                        available_balance,
+                    )
+                    if position_size > old_size * 1.01:  # only log if actually scaled up
+                        logger.info(
+                            f"Conviction-tier sizing: {symbol} score={_tier_label} "
+                            f"→ {_tier_mult:.2f}× ${old_size:.0f} → ${position_size:.0f}"
+                        )
+        except Exception as _ct_err:
+            logger.debug(f"Conviction-tier sizing check failed (non-fatal): {_ct_err}")
+
         # ── Step 11: Minimum floor — applied last ────────────────────────────
         # If caps reduced the size below $5K but no penalty fired, bump to minimum.
         # If ANY risk-reducing penalty (drawdown sizing, vol scale <1.0, loser

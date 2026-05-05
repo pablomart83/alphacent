@@ -4015,16 +4015,37 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 condition
             )
         
-        # Moving average periods
-        if 'fast_period' in params:
-            # Handle SMA(20), EMA(20) format
-            condition = re.sub(r'(SMA|EMA)\(20\)', rf'\1({params["fast_period"]})', condition)
-            # Handle SMA_20, EMA_20 format
-            condition = re.sub(r'(SMA|EMA)_20\b', rf'\1_{params["fast_period"]}', condition)
-        
+        # Moving average periods.
+        #
+        # IMPORTANT — positional substitution for multi-EMA templates:
+        # Templates like Triple EMA Alignment use three distinct periods
+        # (fast=10, mid=20, slow=50). The regex must target each period
+        # value independently so EMA(10) > EMA(20) > EMA(50) doesn't
+        # collapse to EMA(10) > EMA(10) > EMA(30) when fast_period=10
+        # and slow_period=30 are applied.
+        #
+        # Substitution order: slow first, then mid, then fast — so that
+        # replacing EMA(20) with mid_period doesn't accidentally match
+        # a value that was just written by the slow substitution.
         if 'slow_period' in params:
             condition = re.sub(r'(SMA|EMA)\(50\)', rf'\1({params["slow_period"]})', condition)
             condition = re.sub(r'(SMA|EMA)_50\b', rf'\1_{params["slow_period"]}', condition)
+
+        if 'mid_period' in params:
+            # Mid period replaces EMA(20) — the middle EMA in triple-EMA templates.
+            condition = re.sub(r'(SMA|EMA)\(20\)', rf'\1({params["mid_period"]})', condition)
+            condition = re.sub(r'(SMA|EMA)_20\b', rf'\1_{params["mid_period"]}', condition)
+        elif 'fast_period' in params:
+            # No mid_period — fast_period takes the EMA(20) slot (two-EMA templates).
+            condition = re.sub(r'(SMA|EMA)\(20\)', rf'\1({params["fast_period"]})', condition)
+            condition = re.sub(r'(SMA|EMA)_20\b', rf'\1_{params["fast_period"]}', condition)
+
+        if 'fast_period' in params:
+            # Fast period replaces EMA(10) — the shortest EMA.
+            # Only fires when the condition still contains EMA(10) after the
+            # mid/slow substitutions above (i.e. triple-EMA templates).
+            condition = re.sub(r'(SMA|EMA)\(10\)', rf'\1({params["fast_period"]})', condition)
+            condition = re.sub(r'(SMA|EMA)_10\b', rf'\1_{params["fast_period"]}', condition)
         
         # RSI period
         if 'rsi_period' in params:

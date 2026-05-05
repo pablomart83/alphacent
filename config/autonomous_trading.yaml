@@ -662,6 +662,17 @@ position_management:
     threshold_5pct: 0.5
     threshold_10pct: 0.25
     lookback_days: 30
+  # Conviction-tier position sizing (2026-05-05).
+  # Signals with conviction_score >= 75 have demonstrated positive EV
+  # (scorer audit: ≥75 bucket +$51/trade, ≥80 bucket +$28/trade vs
+  # 65-70 bucket -$52/trade). Scale up size for high-conviction signals.
+  # Conservative multipliers — sample still thin (~48 trades in upper
+  # buckets). Raise multipliers after 3-4 weeks of clean data.
+  # Set enabled: false to revert to flat sizing instantly.
+  conviction_tier_sizing:
+    enabled: true
+    multiplier_score_75: 1.15   # score 75-79 → 15% larger
+    multiplier_score_80: 1.30   # score ≥ 80  → 30% larger
   vol_scaling:
     min_scale: 0.1
     max_scale: 1.5
