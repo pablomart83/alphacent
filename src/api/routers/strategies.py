@@ -535,25 +535,29 @@ async def get_strategies(
     mode: TradingMode,
     status_filter: Optional[StrategyStatus] = None,
     include_retired: bool = False,
+    slim: bool = False,
     username: str = Depends(get_current_user),
     session: Session = Depends(get_db_session)
 ):
     """
     Get all strategies.
-    
+
     Args:
         mode: Trading mode (DEMO or LIVE)
         status_filter: Optional status filter
         include_retired: Whether to include retired strategies (default: False)
+        slim: Return lightweight list-view payload — omits rules, reasoning,
+              backtest_results, walk_forward_results, SPY alpha, and deployed
+              capital. Use for list/table views; fetch the full payload only
+              when opening a single strategy detail. Reduces response from
+              ~57KB to ~8KB for 200 strategies.
         username: Current authenticated user
         session: Database session
-        
+
     Returns:
         List of strategies
-        
-    Validates: Requirement 11.3
     """
-    logger.info(f"Getting strategies for {mode.value} mode, user {username}, include_retired={include_retired}")
+    logger.info(f"Getting strategies for {mode.value} mode, user {username}, include_retired={include_retired}, slim={slim}")
     
     # Query strategies from database
     query = session.query(StrategyORM)
@@ -612,28 +616,31 @@ async def get_strategies(
     deployed_capital_map = {sid: float(amt) for sid, amt in deployed_rows}
 
     # Sprint 7.3: Fetch current equity for allocation_pct → dollar conversion
-    # and SPY price series for alpha computation
+    # and SPY price series for alpha computation.
+    # Skipped in slim mode — these are the most expensive queries (SPY fetches
+    # thousands of rows from historical_price_cache).
     current_equity = 0.0
     spy_prices: dict = {}  # date → close
-    try:
-        from src.models.orm import EquitySnapshotORM, HistoricalPriceCacheORM
-        eq_row = (
-            session.query(EquitySnapshotORM.equity)
-            .filter(EquitySnapshotORM.snapshot_type == "daily")
-            .order_by(EquitySnapshotORM.date.desc())
-            .first()
-        )
-        if eq_row:
-            current_equity = float(eq_row.equity)
-        spy_rows = (
-            session.query(HistoricalPriceCacheORM.date, HistoricalPriceCacheORM.close)
-            .filter(HistoricalPriceCacheORM.symbol == "SPY")
-            .order_by(HistoricalPriceCacheORM.date)
-            .all()
-        )
-        spy_prices = {r.date: float(r.close) for r in spy_rows if r.close}
-    except Exception:
-        pass
+    if not slim:
+        try:
+            from src.models.orm import EquitySnapshotORM, HistoricalPriceCacheORM
+            eq_row = (
+                session.query(EquitySnapshotORM.equity)
+                .filter(EquitySnapshotORM.snapshot_type == "daily")
+                .order_by(EquitySnapshotORM.date.desc())
+                .first()
+            )
+            if eq_row:
+                current_equity = float(eq_row.equity)
+            spy_rows = (
+                session.query(HistoricalPriceCacheORM.date, HistoricalPriceCacheORM.close)
+                .filter(HistoricalPriceCacheORM.symbol == "SPY")
+                .order_by(HistoricalPriceCacheORM.date)
+                .all()
+            )
+            spy_prices = {r.date: float(r.close) for r in spy_rows if r.close}
+        except Exception:
+            pass
 
     # Convert ORM models to response models
     strategy_responses = []
@@ -711,35 +718,39 @@ async def get_strategies(
         pos_stat = position_stats.get(strategy_id, {"count": 0, "pnl": 0.0})
         traded_syms = traded_symbols_map.get(strategy_id, [])
 
-        # Sprint 7.3: Compute alpha vs SPY
+        # Sprint 7.3: Compute alpha vs SPY (skipped in slim mode)
         alpha_vs_spy: Optional[float] = None
-        try:
-            activated_at_str = strategy_dict.get("activated_at")
-            if activated_at_str and spy_prices:
-                # Find closest SPY date at or after activation
-                spy_dates = sorted(spy_prices.keys())
-                start_date = activated_at_str[:10]
-                end_date = sorted(spy_prices.keys())[-1]
-                start_spy = next((spy_prices[d] for d in spy_dates if d >= start_date), None)
-                end_spy = spy_prices.get(end_date)
-                if start_spy and end_spy and start_spy > 0:
-                    spy_return = (end_spy - start_spy) / start_spy
-                    strat_return = strategy_dict["performance"].get("total_return", 0.0) or 0.0
-                    alpha_vs_spy = round(strat_return - spy_return, 4)
-        except Exception:
-            pass
+        if not slim:
+            try:
+                activated_at_str = strategy_dict.get("activated_at")
+                if activated_at_str and spy_prices:
+                    # Find closest SPY date at or after activation
+                    spy_dates = sorted(spy_prices.keys())
+                    start_date = activated_at_str[:10]
+                    end_date = sorted(spy_prices.keys())[-1]
+                    start_spy = next((spy_prices[d] for d in spy_dates if d >= start_date), None)
+                    end_spy = spy_prices.get(end_date)
+                    if start_spy and end_spy and start_spy > 0:
+                        spy_return = (end_spy - start_spy) / start_spy
+                        strat_return = strategy_dict["performance"].get("total_return", 0.0) or 0.0
+                        alpha_vs_spy = round(strat_return - spy_return, 4)
+            except Exception:
+                pass
 
-        # Sprint 7.4: Deployed and allocated capital
-        deployed_cap = deployed_capital_map.get(strategy_id, 0.0)
+        # Sprint 7.4: Deployed and allocated capital (skipped in slim mode)
+        deployed_cap = deployed_capital_map.get(strategy_id, 0.0) if not slim else 0.0
         alloc_pct = strategy_dict.get("allocation_percent", 0.0) or 0.0
-        allocated_cap = round(current_equity * alloc_pct / 100.0, 2) if current_equity > 0 else None
+        allocated_cap = round(current_equity * alloc_pct / 100.0, 2) if (current_equity > 0 and not slim) else None
 
         strategy_responses.append(StrategyResponse(
             id=strategy_id,
             name=strategy_dict["name"],
             description=strategy_dict["description"],
             status=StrategyStatus(strategy_dict["status"]),
-            rules=strategy_dict["rules"],
+            # In slim mode omit rules and reasoning — they're large and not
+            # needed for list/table views. Fetch the full strategy detail
+            # endpoint when the user opens a specific strategy.
+            rules=strategy_dict["rules"] if not slim else {},
             symbols=strategy_dict["symbols"],
             allocation_percent=strategy_dict["allocation_percent"],
             risk_params=strategy_dict["risk_params"],
@@ -762,16 +773,24 @@ async def get_strategies(
                 health_score=metadata.get("health_score"),
                 decay_score=metadata.get("decay_score"),
             ),
-            reasoning=strategy_dict.get("reasoning"),
+            reasoning=strategy_dict.get("reasoning") if not slim else None,
             updated_at=strategy_dict.get("created_at"),
             # Enhanced fields
             source=metadata.get("source", "USER" if not metadata.get("template_name") else "TEMPLATE"),
             template_name=metadata.get("template_name"),
             market_regime=metadata.get("market_regime") or metadata.get("activation_regime"),
-            entry_rules=entry_rules,
-            exit_rules=exit_rules,
-            walk_forward_results=walk_forward_results,
-            metadata=metadata,
+            entry_rules=entry_rules if not slim else None,
+            exit_rules=exit_rules if not slim else None,
+            walk_forward_results=walk_forward_results if not slim else None,
+            metadata=metadata if not slim else {
+                # Slim metadata: only the fields list views actually use
+                k: metadata[k] for k in (
+                    "template_name", "strategy_category", "market_regime",
+                    "activation_regime", "interval", "direction",
+                    "health_score", "decay_score", "wf_test_sharpe",
+                    "conviction_score", "source",
+                ) if k in metadata
+            },
             # Task 9.7: Include strategy metadata fields
             strategy_category=strategy_category,
             strategy_type=strategy_type,

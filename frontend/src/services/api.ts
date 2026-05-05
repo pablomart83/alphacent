@@ -429,12 +429,15 @@ class ApiClient {
   // Strategy Endpoints
   // ============================================================================
 
-  async getStrategies(mode: TradingMode, includeRetired: boolean = false): Promise<Strategy[]> {
+  async getStrategies(mode: TradingMode, includeRetired: boolean = false, slim: boolean = true): Promise<Strategy[]> {
     if (!mode) return [];
-    const response = await this.client.get<ApiResponse<Strategy[]>>(
-      `/strategies?mode=${mode}&include_retired=${includeRetired}`
-    );
-    return this.extractArrayFromResponse<Strategy>(response, 'strategies');
+    const key = `strategies:${mode}:${includeRetired}:${slim}`;
+    return dedupedGet(key, async () => {
+      const response = await this.client.get<ApiResponse<Strategy[]>>(
+        `/strategies?mode=${mode}&include_retired=${includeRetired}&slim=${slim}`
+      );
+      return this.extractArrayFromResponse<Strategy>(response, 'strategies');
+    });
   }
 
   async getStrategy(strategyId: string, mode: TradingMode): Promise<Strategy> {
