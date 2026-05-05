@@ -35,6 +35,7 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 - Unified funnel: full rejection taxonomy populated; 89-345 filter rejections per cycle visible with per-row conviction breakdown
 - Market-hours primitive: singleton, symbol-aware, 24/5 compliant (Sun 20:05 ET → Fri 16:00 ET)
 - FMP 1h ingestion: **fixed today.** 275 of 277 non-crypto symbols within 1h of current bar (was 141 stuck). Real UTC-stamped OHLCV across universe.
+- **Known orphan positions (P0 next session):** 7 positions in DB with `strategy_id='etoro_position'` default, 4 of them opened 2026-05-05 13:30 UTC (SOXL/SMH/TQQQ/XLK) from orders we submitted 2026-05-04 21:42-21:46 UTC, incorrectly marked CANCELLED locally when cancel_order got 404, then executed by eToro at market open. These 4 positions are currently un-managed (no TSL, no strategy linkage, no trade-journal attribution). Detailed remediation plan in the next-session MISSION block.
 
 **Data routing matrix (unchanged from 2026-05-03 evening):**
 
@@ -779,79 +780,240 @@ Last commits on main (newest first):
 - f29f23f fix: loser-pair penalty data integrity — populate template_name
 
 ==========================================================================
-MISSION — P0: CONVICTION-TIER POSITION SIZING + PROVEN LOSS PLUGGERS
+MISSION — P0: ORPHAN-POSITION BUG (strategy_id='etoro_position')
 ==========================================================================
 
-The conviction-persist fix + historical backfill are live. Deep-dive
-analysis of 661 trades (logged in the session block below) revealed
-the real structure of our alpha:
+Discovered 2026-05-05 ~18:40 UTC while reviewing the Portfolio page.
+Four of today's positions (SOXL, SMH, TQQQ, XLK, all opened 13:30 UTC
+on the 2026-05-05 US market open) display "etoro_po" in the Strategy
+column — the truncated form of `strategy_id='etoro_position'`, which
+is the default sync-path fallback for eToro positions we don't
+recognize locally. But these WERE our signals. The orphan-creation
+chain is:
 
-- >=75 conviction bucket: 277 trades, +$11,639 total, 2.28 RR, 53% WR
-  (ALL of our net alpha + some)
-- 60-75 conviction buckets: 384 trades, -$5,685 combined (loss drag)
-- Pearson corr(conv, pnl) = +0.178 — real but weak predictive signal
+Timeline reconstructed from logs and DB (six eToro order IDs traced):
 
-The right response is NOT lowering the threshold (we tried 62 briefly
-and reverted). The right response is **size disproportionately by
-conviction tier** — more dollars on the 75+ cohort where alpha lives.
+  1. 2026-05-04 21:42-21:46 UTC (17:42-17:46 ET). Autonomous cycle
+     generates entry signals for XLK, SOXL, SMH, TQQQ (all post-
+     market-close ET). execute_signal's market-hours gate ALLOWED
+     submission (24/5 schedule, Monday evening is within window).
+     Six orders submitted to eToro successfully:
+        348446527 (SMH), 348450614 (TQQQ), 348446528 (SOXL),
+        348418989 (SOXL), 348405225 (XLK), 348405233 (XLK),
+        348405234 (SOXL)
+     Each has a valid etoro_order_id in our orders table, status
+     PENDING. These orders are QUEUED on eToro for market open.
 
-YOUR MISSION for P0:
+  2. 2026-05-04 21:52:49-21:52:59 UTC. Something triggered a cleanup
+     /cancel pass ~6-10 minutes after submission. Our code calls
+     etoro_client.cancel_order(<id>) for each — eToro returns 404
+     "Unknown error". Our code interprets 404 as "order gone,
+     mark CANCELLED locally" and transitions the DB row to
+     status=CANCELLED. The 404 is the same handling added 2026-05-04
+     morning (EToroOrderNotFoundError → sentinel) for user-cancelled
+     orders — which is wrong here because cancel-route 404 doesn't
+     imply the order is dead.
 
-1. IMPLEMENT CONVICTION-TIER POSITION SIZING in risk_manager. Three
-   tiers:
-     65-75: 1.0x BASE_RISK_PCT (0.6% equity)
-     75-85: 1.25x
-     85+:   1.5x (capped at per-symbol + portfolio heat)
-   Source the score from signal.metadata['conviction_score']
-   (populated since 2026-05-04 session).
+     NOTE: three orders (348405233/348405234 at 21:46, one more at
+     similar time) show status=FAILED instead of CANCELLED — likely
+     hit a different error path in the same cleanup sweep.
 
-   Expected impact (mathematically): +$2.9K/quarter on ≥75 cohort at
-   current cadence (277 trades over ~3 months × +$10/trade uplift).
+  3. 2026-05-05 13:30:03-13:30:06 UTC (09:30:03-09:30:06 ET, US market
+     open). eToro executes the queued orders we thought we cancelled.
+     4 positions open on the eToro side (SOXL/SMH/TQQQ/XLK). Two
+     orders (348446528, 348418989) merged into a single SOXL position.
 
-2. PLUG THE 4H TREND-FOLLOWING HOLE. 3 templates (4H ADX Trend Swing,
-   4H EMA Ribbon Trend Long, 4H VWAP Trend Continuation) lost $3,287
-   combined across 92 trades with RR < 0.3. This is NOT a conviction
-   problem — it's a template design problem. Winners clipped short,
-   losers run to SL. Two options:
-   (a) Retire and replace with a longer-hold template family
-   (b) Redesign exits: wider trailing (3x ATR vs current 2x),
-       profit-target at 2x risk instead of TP 10-15%
-   Decision should be made alongside a quick backtest confirmation.
+  4. Next monitoring_service sync tick (60s cadence). Sync fetches
+     eToro positions, finds 4 new positions with etoro_position_id
+     not in our DB, creates PositionORM rows with default fallback
+     strategy_id='etoro_position' (src/api/routers/account.py:1004).
 
-3. HARD-BLOCK SHORTS IN `trending_up_strong`. Current directional
-   quota (5% short in that regime) is clearly insufficient — SHORTS
-   lost $1,663 on 58 trades. Block SHORT ENTRIES outright when
-   sub_regime is trending_up_strong. Keep existing SHORT positions
-   managed normally (TSL, exits) — only block NEW entries.
+The bug is NOT the sync-path fallback — that's correct behavior for
+a genuinely-externally-opened position. The bug is that the CANCEL
+path mis-classifies live-queued orders as dead, silently releasing
+them to eToro's open-market execution queue, where they then come
+back through the sync-path as orphans.
 
-4. WIDEN INTRADAY ATR STOPS. <1d hold: 164 trades, -$16/trade,
-   0.48 RR. Stops too tight — we're getting shaken out on noise.
-   Raise 1h/4h strategy ATR multiplier from 1.5x to 2.0x.
+BLAST RADIUS (today): 4 open positions invisible to:
+  - TSL cycle (no strategy_id → no risk_params lookup → no trail)
+  - loser-pair penalty (no template_name in metadata)
+  - conviction validation loop (no conviction_score, no template)
+  - per-strategy concentration caps
+  - strategy retirement cleanup
+  - trade journal closed-trade attribution when they exit
 
-Estimate: 2-4 hours total. All four together should save ~$5K/quarter
-on current cadence while the conviction restructure continues
-collecting data in the background.
+Plus the 3 earlier orphans (URI 2026-05-04, UK100 + NFLX 2026-04-13)
+indicate this has been happening since at least April. Not a
+regression from today's work.
 
-==========================================================================
-DEFERRED (structural conviction scorer restructure) — NOT THIS SESSION
-==========================================================================
+YOUR MISSION for P0 (three parts, in order):
 
-Items 2-6 of the scorer audit still stand. Queue them for a later
-session once ~3-4 weeks of clean conviction-populated data (~2000+
-trades, mixed regimes) has accumulated:
+========================================================================
+PART 1 — IMMEDIATE RECOVERY (script-only, one-shot)
+========================================================================
 
-- Build score-vs-P&L monitor (daily cron + alert on monotonicity
-  violations)
-- Regression-fit component weights on live P&L
-- Collapse signal_quality into WF_edge
-- Make asset_tradability dynamic (ADV-based)
-- Two-factor conviction gate (score ≥ 65 OR wf_edge ≥ 0.8)
+Write scripts/recover_orphan_positions.py that:
+
+1. Queries positions where strategy_id = 'etoro_position' AND
+   closed_at IS NULL.
+
+2. For each orphan, attempts to find the originating order via:
+   (a) orders table match on (symbol, submitted_at within ±24h of
+       position.opened_at, status IN CANCELLED/FAILED, order_metadata
+       IS NOT NULL)
+   (b) If multiple matches, pick the one whose etoro_order_id is
+       numerically closest to the position's etoro_position_id
+       (eToro positions reuse or derive from order IDs on fill).
+   (c) If no match in orders, try conviction_score_logs by
+       (symbol, timestamp within 6h before position.opened_at).
+
+3. For a matched orphan:
+   - UPDATE positions.strategy_id = <real_strategy_id>
+   - UPDATE positions.stop_loss, take_profit from strategy.risk_params
+     if currently NULL
+   - Backfill trade_journal entry with conviction_score, template_name,
+     market_regime from order.order_metadata
+   - Write a reconciliation log row to trade_journal.trade_metadata
+     with key "orphan_recovery_source": "sync_path_relink_2026_05_06"
+
+4. Dry-run by default. Verify on 4 known orphans:
+     SOXL (pos_id=3509139906)
+     SMH  (pos_id=3509138740)
+     TQQQ (pos_id=3509138333)
+     XLK  (pos_id=3509137957)
+   Expected match via CANCELLED orders submitted 2026-05-04 21:42-21:46.
+
+5. Idempotent — only touches strategy_id = 'etoro_position' rows, so
+   re-running is safe.
+
+========================================================================
+PART 2 — ROOT-CAUSE FIX (cancel_order 404 handling)
+========================================================================
+
+Find the cancel-sweep caller that fired at 2026-05-04 21:52 UTC. Likely
+candidates:
+  - src/strategy/portfolio_manager.py (strategy retirement path)
+  - src/strategy/strategy_engine.py (pending-closure cleanup)
+  - src/core/order_monitor.py _cleanup_stale_pending
+  - src/api/etoro_client.py cancel_order 404 handling
+
+Hypothesis to verify first: a 30-min stale-pending sweep ran and tried
+to cancel orders that had been PENDING > some threshold. Those orders
+were queued for market open but hadn't filled yet (correctly PENDING).
+The cancel attempt hit 404 — the code then assumed cancellation success
+and marked CANCELLED locally. Six minutes is too short for a "stale"
+classification.
+
+Fix strategy:
+  (a) ANY cancel_order call that gets a 404 response MUST NOT
+      transition the local row to CANCELLED. Instead: log a WARNING,
+      leave the row as-is, and let the next poll of order_monitor
+      (which queries order STATUS, not cancel) establish ground truth.
+  (b) The "after-hours grace period" logic at order_monitor.py:2125
+      needs to cover orders submitted in the last trading-day evening
+      (Mon 17:00-20:00 ET) that are waiting for tomorrow's Tue 09:30
+      ET open. Current timeout seems too short.
+  (c) Distinguish "cancel endpoint 404" from "status-poll 404" at the
+      API-client layer via two distinct exceptions or a context flag.
+      Cancel-404 → order still unknown. Status-poll-404 → order
+      definitely gone.
+
+This is the SAME bug family as the earlier 2026-05-04 fix (user
+cancels in UI → our status poll 404s → mark CANCELLED). That fix was
+correct for the USER-cancel case. It became wrong when the same 404
+code path was reused for the cancel-attempt case where 404 doesn't
+imply the order is dead.
+
+========================================================================
+PART 3 — ARCHITECTURAL DEFENSE (sync-path strategy-relink)
+========================================================================
+
+The sync path at src/api/routers/account.py:1004 defaults to
+strategy_id='etoro_position' when creating a PositionORM for an eToro
+position that doesn't exist locally. This is the last-resort fallback
+and it's correct as a fallback. But BEFORE defaulting, the sync should
+attempt to match the eToro position back to a local order by:
+
+  (a) Match on etoro_position_id == any orders.etoro_order_id
+      (eToro position IDs often derive from order IDs on fill — the
+      SOXL case shows position_id 3509139906 and etoro_order_id
+      348405234 which are similar/derived).
+  (b) Match on (symbol, position.opened_at within ±5 min of any
+      recent order.submitted_at).
+  (c) If a match exists, pull strategy_id + metadata from that order
+      instead of defaulting to 'etoro_position'. Record the match
+      reason in position.closure_reason temporarily so we can audit.
+
+This is defense-in-depth — even if Part 2's cancel fix has a gap,
+orphans auto-recover on the sync tick instead of stranding silently.
+
+========================================================================
+NON-GOALS (DO NOT WORK ON THESE)
+========================================================================
+
+- Do NOT change the sync-path default fallback to something other
+  than 'etoro_position'. External positions (user-opened in eToro UI)
+  are legitimate and need a marker.
+- Do NOT remove the 404-on-status-poll → CANCELLED path from the
+  2026-05-04 morning fix. That path is correct for the user-cancel
+  case.
+- Do NOT block submission when "market closed" for post-regular-hours
+  orders. eToro's 24/5 window IS open those hours — our orders
+  correctly land there.
+
+========================================================================
+VERIFICATION CHECKLIST
+========================================================================
+
+After Part 1:
+  - SELECT COUNT(*) FROM positions WHERE strategy_id='etoro_position'
+    AND closed_at IS NULL should drop from 7 to 3 (the 3 genuinely
+    external positions: URI, UK100, NFLX — those don't have matching
+    orders, so they're legitimate externals).
+  - The 4 relinked positions should now appear under their real
+    strategy names on the Portfolio page.
+
+After Part 2:
+  - Submit a test order post-market-close, wait 10 min, confirm it
+    stays PENDING locally even if any cleanup sweep fires a cancel.
+  - errors.log should no longer show the "Failed to cancel order XXX:
+    404 - Unknown error" pattern from our own cleanup.
+
+After Part 3:
+  - Manually open a position on eToro UI (user-path simulation).
+    Sync should still create it with strategy_id='etoro_position'
+    (legitimate external).
+  - Submit a real autonomous signal, force-cancel the local order
+    row (simulate bug), let it fill at market open. Sync should now
+    auto-relink to the real strategy instead of orphaning.
+
+========================================================================
+ALSO IN SCOPE — was next session's original mission (DEFER if P0 runs long)
+========================================================================
+
+The conviction-tier position sizing + 4H template kill + SHORT hard-gate
++ intraday ATR-widen mission is still queued but secondary to the
+orphan-position fix. If P0 Parts 1-3 complete with runway remaining,
+pick up items 1-4 from the "MISSION — CONVICTION-TIER POSITION SIZING"
+block documented in the prior commit's next-session prompt (see
+commit f27c13e message).
+
+Rules (same as every session):
+- Proper solutions only. No patches.
+- Research the cancel-sweep trigger BEFORE editing.
+- Deploy via the scp workflow. Never edit on EC2.
+
+Estimate: 3-5 hours for Parts 1-3. The research phase (tracing the
+cancel-sweep trigger) is the high-variance piece.
 
 ==========================================================================
 OTHER OPEN ITEMS — DO NOT WORK ON THESE BEFORE THE P0
 ==========================================================================
 
-P1:
+P1 (carry forward):
+- Conviction-tier position sizing + 4H template remediation +
+  SHORT hard-gate + intraday ATR-widen (detailed in f27c13e commit
+  message and Session_Continuation prior section).
 - Triple EMA Alignment DSL regex collapse
 - WF test-dominant path admits regime-luck on LONG
 - Cross-cycle signal dedup for market-closed deferrals
