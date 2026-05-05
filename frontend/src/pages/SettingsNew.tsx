@@ -186,6 +186,31 @@ const autonomousConfigSchema = z.object({
   max_long_exposure_pct: z.number().min(10).max(100),
   max_short_exposure_pct: z.number().min(10).max(100),
   max_sector_exposure_pct: z.number().min(10).max(100),
+
+  // ─── Position Sizing Controls ───────────────────────────────────────
+  drawdown_sizing_enabled: z.boolean(),
+  drawdown_sizing_threshold_5pct: z.number().min(0).max(100),
+  drawdown_sizing_threshold_10pct: z.number().min(0).max(100),
+  drawdown_sizing_lookback_days: z.number().min(7).max(365),
+  conviction_tier_enabled: z.boolean(),
+  conviction_tier_multiplier_75: z.number().min(1.0).max(3.0),
+  conviction_tier_multiplier_80: z.number().min(1.0).max(3.0),
+  vol_scaling_min_scale: z.number().min(0.01).max(1.0),
+  vol_scaling_max_scale: z.number().min(1.0).max(5.0),
+  vol_scaling_max_symbol_pct: z.number().min(1).max(20),
+  vol_scaling_sector_soft_cap_pct: z.number().min(5).max(80),
+
+  // ─── Autonomous schedule ────────────────────────────────────────────
+  schedule_hour: z.number().min(0).max(23),
+  schedule_minute: z.number().min(0).max(59),
+  schedule_day_of_week: z.string(),
+
+  // ─── Signal generation ──────────────────────────────────────────────
+  signal_parallel_workers: z.number().min(1).max(16),
+
+  // ─── Rejection blacklist ────────────────────────────────────────────
+  rejection_blacklist_threshold: z.number().min(1).max(20),
+  rejection_blacklist_cooldown_days: z.number().min(1).max(365),
 });
 
 const positionManagementSchema = z.object({
@@ -441,6 +466,27 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
       max_long_exposure_pct: 65,
       max_short_exposure_pct: 60,
       max_sector_exposure_pct: 40,
+      // Position Sizing Controls
+      drawdown_sizing_enabled: true,
+      drawdown_sizing_threshold_5pct: 50,
+      drawdown_sizing_threshold_10pct: 25,
+      drawdown_sizing_lookback_days: 30,
+      conviction_tier_enabled: true,
+      conviction_tier_multiplier_75: 1.15,
+      conviction_tier_multiplier_80: 1.30,
+      vol_scaling_min_scale: 0.10,
+      vol_scaling_max_scale: 1.50,
+      vol_scaling_max_symbol_pct: 5,
+      vol_scaling_sector_soft_cap_pct: 30,
+      // Autonomous schedule
+      schedule_hour: 15,
+      schedule_minute: 15,
+      schedule_day_of_week: 'saturday',
+      // Signal generation
+      signal_parallel_workers: 4,
+      // Rejection blacklist
+      rejection_blacklist_threshold: 3,
+      rejection_blacklist_cooldown_days: 30,
     },
   });
 
@@ -697,6 +743,27 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
           max_long_exposure_pct: num(autonomousConfig.max_long_exposure_pct, 65),
           max_short_exposure_pct: num(autonomousConfig.max_short_exposure_pct, 60),
           max_sector_exposure_pct: num(autonomousConfig.max_sector_exposure_pct, 40),
+          // Position Sizing Controls
+          drawdown_sizing_enabled: autonomousConfig.drawdown_sizing_enabled ?? true,
+          drawdown_sizing_threshold_5pct: num(autonomousConfig.drawdown_sizing_threshold_5pct, 50),
+          drawdown_sizing_threshold_10pct: num(autonomousConfig.drawdown_sizing_threshold_10pct, 25),
+          drawdown_sizing_lookback_days: num(autonomousConfig.drawdown_sizing_lookback_days, 30),
+          conviction_tier_enabled: autonomousConfig.conviction_tier_enabled ?? true,
+          conviction_tier_multiplier_75: num(autonomousConfig.conviction_tier_multiplier_75, 1.15),
+          conviction_tier_multiplier_80: num(autonomousConfig.conviction_tier_multiplier_80, 1.30),
+          vol_scaling_min_scale: num(autonomousConfig.vol_scaling_min_scale, 0.10),
+          vol_scaling_max_scale: num(autonomousConfig.vol_scaling_max_scale, 1.50),
+          vol_scaling_max_symbol_pct: num(autonomousConfig.vol_scaling_max_symbol_pct, 5),
+          vol_scaling_sector_soft_cap_pct: num(autonomousConfig.vol_scaling_sector_soft_cap_pct, 30),
+          // Autonomous schedule
+          schedule_hour: num(autonomousConfig.schedule_hour, 15),
+          schedule_minute: num(autonomousConfig.schedule_minute, 15),
+          schedule_day_of_week: autonomousConfig.schedule_day_of_week ?? 'saturday',
+          // Signal generation
+          signal_parallel_workers: num(autonomousConfig.signal_parallel_workers, 4),
+          // Rejection blacklist
+          rejection_blacklist_threshold: num(autonomousConfig.rejection_blacklist_threshold, 3),
+          rejection_blacklist_cooldown_days: num(autonomousConfig.rejection_blacklist_cooldown_days, 30),
         });
 
         // Keep the advanced_readonly block on a separate state for display
@@ -966,6 +1033,27 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         max_long_exposure_pct: formData.max_long_exposure_pct,
         max_short_exposure_pct: formData.max_short_exposure_pct,
         max_sector_exposure_pct: formData.max_sector_exposure_pct,
+        // Position Sizing Controls
+        drawdown_sizing_enabled: formData.drawdown_sizing_enabled,
+        drawdown_sizing_threshold_5pct: formData.drawdown_sizing_threshold_5pct,
+        drawdown_sizing_threshold_10pct: formData.drawdown_sizing_threshold_10pct,
+        drawdown_sizing_lookback_days: formData.drawdown_sizing_lookback_days,
+        conviction_tier_enabled: formData.conviction_tier_enabled,
+        conviction_tier_multiplier_75: formData.conviction_tier_multiplier_75,
+        conviction_tier_multiplier_80: formData.conviction_tier_multiplier_80,
+        vol_scaling_min_scale: formData.vol_scaling_min_scale,
+        vol_scaling_max_scale: formData.vol_scaling_max_scale,
+        vol_scaling_max_symbol_pct: formData.vol_scaling_max_symbol_pct,
+        vol_scaling_sector_soft_cap_pct: formData.vol_scaling_sector_soft_cap_pct,
+        // Autonomous schedule
+        schedule_hour: formData.schedule_hour,
+        schedule_minute: formData.schedule_minute,
+        schedule_day_of_week: formData.schedule_day_of_week,
+        // Signal generation
+        signal_parallel_workers: formData.signal_parallel_workers,
+        // Rejection blacklist
+        rejection_blacklist_threshold: formData.rejection_blacklist_threshold,
+        rejection_blacklist_cooldown_days: formData.rejection_blacklist_cooldown_days,
       };
       await apiClient.updateAutonomousConfig(payload);
       toast.success('Autonomous configuration saved successfully');
@@ -2007,6 +2095,37 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         <p className="text-xs text-gray-500">Retire BACKTESTED strategies after N signal cycles without a trade (default 168 ≈ 1 week)</p>
                       </div>
                     </div>
+
+                    <h3 className="text-[11px] font-semibold text-gray-300 pt-2 border-t border-dark-border">Cycle Schedule</h3>
+                    <p className="text-xs text-gray-500">When the daily autonomous cycle fires. Changes take effect on next service restart.</p>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Day of Week</Label>
+                        <select
+                          className="w-full h-9 rounded-md border border-dark-border bg-dark-bg px-3 text-xs text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          {...autonomousForm.register('schedule_day_of_week')}
+                        >
+                          {['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].map(d => (
+                            <option key={d} value={d}>{d.charAt(0).toUpperCase() + d.slice(1)}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Hour (UTC)</Label>
+                        <Input type="number" min="0" max="23" {...autonomousForm.register('schedule_hour', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">0-23 UTC</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">Minute</Label>
+                        <Input type="number" min="0" max="59" {...autonomousForm.register('schedule_minute', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">0-59</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[11px]">WF Parallel Workers</Label>
+                        <Input type="number" min="1" max="16" {...autonomousForm.register('signal_parallel_workers', { valueAsNumber: true })} />
+                        <p className="text-xs text-gray-500">Concurrent WF threads (1-16)</p>
+                      </div>
+                    </div>
                   </div>
 
                   {/* ══════════════════════════════════════════════════════════ */}
@@ -2506,6 +2625,120 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                     </div>
                   </div>
 
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  {/* CARD 11 — Position Sizing Controls                           */}
+                  {/* ══════════════════════════════════════════════════════════ */}
+                  <div className="p-4 bg-dark-bg border border-dark-border rounded-lg space-y-4">
+                    <h3 className="text-[11px] font-semibold text-gray-300">Position Sizing Controls</h3>
+                    <p className="text-xs text-gray-500">
+                      Three independent sizing modifiers applied in <code>risk_manager.calculate_position_size</code> after all cap checks.
+                      All three stack multiplicatively — a high-conviction signal in a drawdown period gets both the conviction boost and the drawdown reduction.
+                    </p>
+
+                    {/* Drawdown Sizing */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between p-3 bg-dark-bg/50 border border-dark-border/50 rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label className="text-[11px]">Drawdown-Based Sizing</Label>
+                          <p className="text-xs text-gray-500">Reduce position sizes when portfolio is in drawdown from 30d peak. Prevents doubling down into a losing streak.</p>
+                        </div>
+                        <Switch
+                          checked={autonomousForm.watch('drawdown_sizing_enabled')}
+                          onCheckedChange={(checked) => autonomousForm.setValue('drawdown_sizing_enabled', checked)}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pl-1">
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Size at 5% DD (%)</Label>
+                          <Input type="number" step="5" min="0" max="100" {...autonomousForm.register('drawdown_sizing_threshold_5pct', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">e.g. 50 = half size</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Size at 10% DD (%)</Label>
+                          <Input type="number" step="5" min="0" max="100" {...autonomousForm.register('drawdown_sizing_threshold_10pct', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">e.g. 25 = quarter size</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Lookback (days)</Label>
+                          <Input type="number" min="7" max="365" {...autonomousForm.register('drawdown_sizing_lookback_days', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">Rolling peak window</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Conviction-Tier Sizing */}
+                    <div className="space-y-3 pt-3 border-t border-dark-border">
+                      <div className="flex items-center justify-between p-3 bg-dark-bg/50 border border-dark-border/50 rounded-lg">
+                        <div className="space-y-0.5">
+                          <Label className="text-[11px]">Conviction-Tier Sizing</Label>
+                          <p className="text-xs text-gray-500">Scale up size for high-conviction signals. Audit (2026-05-05): ≥75 bucket +$51/trade vs 65-70 bucket -$52/trade.</p>
+                        </div>
+                        <Switch
+                          checked={autonomousForm.watch('conviction_tier_enabled')}
+                          onCheckedChange={(checked) => autonomousForm.setValue('conviction_tier_enabled', checked)}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 pl-1">
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Score 75-79 multiplier</Label>
+                          <Input type="number" step="0.05" min="1.0" max="3.0" {...autonomousForm.register('conviction_tier_multiplier_75', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">e.g. 1.15 = 15% larger</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Score ≥80 multiplier</Label>
+                          <Input type="number" step="0.05" min="1.0" max="3.0" {...autonomousForm.register('conviction_tier_multiplier_80', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">e.g. 1.30 = 30% larger</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Vol Scaling Bounds */}
+                    <div className="space-y-3 pt-3 border-t border-dark-border">
+                      <h4 className="text-[11px] font-medium text-gray-400">Volatility Scaling Bounds</h4>
+                      <p className="text-xs text-gray-500">Normalises risk contribution across asset classes. TARGET_VOL / realized_vol — crypto (60% vol) → ~0.27×, forex (8% vol) → capped at max_scale.</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Min Scale</Label>
+                          <Input type="number" step="0.01" min="0.01" max="1.0" {...autonomousForm.register('vol_scaling_min_scale', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">Floor (e.g. 0.10)</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Max Scale</Label>
+                          <Input type="number" step="0.1" min="1.0" max="5.0" {...autonomousForm.register('vol_scaling_max_scale', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">Ceiling (e.g. 1.50)</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Symbol Cap (%)</Label>
+                          <Input type="number" step="1" min="1" max="20" {...autonomousForm.register('vol_scaling_max_symbol_pct', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">Max % of equity per symbol</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Sector Soft Cap (%)</Label>
+                          <Input type="number" step="5" min="5" max="80" {...autonomousForm.register('vol_scaling_sector_soft_cap_pct', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">Halve size above this sector %</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Rejection Blacklist */}
+                    <div className="space-y-3 pt-3 border-t border-dark-border">
+                      <h4 className="text-[11px] font-medium text-gray-400">Rejection Blacklist</h4>
+                      <p className="text-xs text-gray-500">After N consecutive WF rejections for a (template, symbol) pair, the pair is blacklisted for cooldown_days before being re-proposed.</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Rejection Threshold</Label>
+                          <Input type="number" min="1" max="20" {...autonomousForm.register('rejection_blacklist_threshold', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">Failures before blacklisting</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-[11px]">Cooldown (days)</Label>
+                          <Input type="number" min="1" max="365" {...autonomousForm.register('rejection_blacklist_cooldown_days', { valueAsNumber: true })} />
+                          <p className="text-xs text-gray-500">Blacklist duration</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Save / Reset */}
                   <div className="flex gap-3">
                     <Button type="submit" disabled={autonomousForm.formState.isSubmitting} className="flex-1">
@@ -2613,6 +2846,49 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                               )}
                             </div>
                           ))}
+                        </div>
+                      </div>
+
+                      {/* Live Market Regime */}
+                      {autonomousAdvanced.market_regime_current && autonomousAdvanced.market_regime_current !== 'unknown' && (
+                        <div>
+                          <h4 className="text-[11px] text-gray-400 font-medium mb-2">Live Market Regime</h4>
+                          <div className="space-y-1 text-[11px] font-mono">
+                            <div className="grid grid-cols-3 gap-2 text-gray-400">
+                              <div>
+                                <span className="text-gray-500">Regime</span>
+                                <p className="text-gray-200 font-medium">{autonomousAdvanced.market_regime_current}</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Confidence</span>
+                                <p className="text-gray-200">{((autonomousAdvanced.market_regime_confidence || 0) * 100).toFixed(1)}%</p>
+                              </div>
+                              <div>
+                                <span className="text-gray-500">Updated</span>
+                                <p className="text-gray-400 text-[10px]">{autonomousAdvanced.market_regime_updated_at ? new Date(autonomousAdvanced.market_regime_updated_at).toLocaleString() : '—'}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Backtest + Regime Detection bounds */}
+                      <div>
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">Backtest Bounds (read-only — changing invalidates WF cache)</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px] font-mono text-gray-400">
+                          <div><span className="text-gray-500">Total window</span><p className="text-gray-300">{autonomousAdvanced.backtest_days}d</p></div>
+                          <div><span className="text-gray-500">Warmup</span><p className="text-gray-300">{autonomousAdvanced.backtest_warmup_days}d</p></div>
+                          <div><span className="text-gray-500">Min data required</span><p className="text-gray-300">{autonomousAdvanced.backtest_data_quality_min_days}d</p></div>
+                          <div><span className="text-gray-500">Fallback</span><p className="text-gray-300">{autonomousAdvanced.backtest_data_quality_fallback_days}d</p></div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h4 className="text-[11px] text-gray-400 font-medium mb-2">Regime Detection (read-only — affects regime classification)</h4>
+                        <div className="grid grid-cols-3 gap-2 text-[11px] font-mono text-gray-400">
+                          <div><span className="text-gray-500">Lookback</span><p className="text-gray-300">{autonomousAdvanced.regime_detection_lookback_days}d</p></div>
+                          <div><span className="text-gray-500">High-vol threshold</span><p className="text-gray-300">{((autonomousAdvanced.regime_detection_high_vol_threshold || 0) * 100).toFixed(1)}%</p></div>
+                          <div><span className="text-gray-500">Low-vol threshold</span><p className="text-gray-300">{((autonomousAdvanced.regime_detection_low_vol_threshold || 0) * 100).toFixed(1)}%</p></div>
                         </div>
                       </div>
                     </div>

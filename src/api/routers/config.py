@@ -928,6 +928,20 @@ class AdvancedReadonly(BaseModel):
     # config/autonomous_trading.yaml on EC2.
     wf_asset_class_windows: Dict[str, Dict[str, int]] = {}
     wf_long_horizon_templates: List[str] = []
+    # Live market regime — written by the regime detector, not user-set.
+    market_regime_current: str = 'unknown'
+    market_regime_confidence: float = 0.0
+    market_regime_updated_at: str = ''
+    # Backtest data-quality + window bounds — changing these silently
+    # invalidates all cached WF results.
+    backtest_days: int = 730
+    backtest_warmup_days: int = 100
+    backtest_data_quality_min_days: int = 400
+    backtest_data_quality_fallback_days: int = 180
+    # Regime detection parameters — affect regime classification itself.
+    regime_detection_lookback_days: int = 60
+    regime_detection_high_vol_threshold: float = 0.02
+    regime_detection_low_vol_threshold: float = 0.01
 
 
 class AutonomousConfigResponse(BaseModel):
@@ -1027,6 +1041,34 @@ class AutonomousConfigResponse(BaseModel):
     max_long_exposure_pct: float = 70.0
     max_short_exposure_pct: float = 60.0
     max_sector_exposure_pct: float = 40.0
+
+    # ─── Position Sizing Controls ───────────────────────────────────────
+    # Drawdown-based sizing
+    drawdown_sizing_enabled: bool = True
+    drawdown_sizing_threshold_5pct: float = 50.0   # percentage (yaml: 0.5)
+    drawdown_sizing_threshold_10pct: float = 25.0  # percentage (yaml: 0.25)
+    drawdown_sizing_lookback_days: int = 30
+    # Conviction-tier sizing
+    conviction_tier_enabled: bool = True
+    conviction_tier_multiplier_75: float = 1.15
+    conviction_tier_multiplier_80: float = 1.30
+    # Vol scaling bounds
+    vol_scaling_min_scale: float = 0.10
+    vol_scaling_max_scale: float = 1.50
+    vol_scaling_max_symbol_pct: float = 5.0    # percentage (yaml: 0.05)
+    vol_scaling_sector_soft_cap_pct: float = 30.0  # percentage (yaml: 0.3)
+
+    # ─── Autonomous schedule ────────────────────────────────────────────
+    schedule_hour: int = 15
+    schedule_minute: int = 15
+    schedule_day_of_week: str = 'saturday'
+
+    # ─── Signal generation ──────────────────────────────────────────────
+    signal_parallel_workers: int = 4
+
+    # ─── Rejection blacklist ────────────────────────────────────────────
+    rejection_blacklist_threshold: int = 3
+    rejection_blacklist_cooldown_days: int = 30
 
     # ─── Category (3) — read-only audit view ───────────────────────────
     advanced_readonly: AdvancedReadonly = AdvancedReadonly()
@@ -1128,6 +1170,31 @@ class AutonomousConfigRequest(BaseModel):
     max_short_exposure_pct: Optional[float] = None
     max_sector_exposure_pct: Optional[float] = None
 
+    # Position Sizing Controls
+    drawdown_sizing_enabled: Optional[bool] = None
+    drawdown_sizing_threshold_5pct: Optional[float] = None
+    drawdown_sizing_threshold_10pct: Optional[float] = None
+    drawdown_sizing_lookback_days: Optional[int] = None
+    conviction_tier_enabled: Optional[bool] = None
+    conviction_tier_multiplier_75: Optional[float] = None
+    conviction_tier_multiplier_80: Optional[float] = None
+    vol_scaling_min_scale: Optional[float] = None
+    vol_scaling_max_scale: Optional[float] = None
+    vol_scaling_max_symbol_pct: Optional[float] = None
+    vol_scaling_sector_soft_cap_pct: Optional[float] = None
+
+    # Autonomous schedule
+    schedule_hour: Optional[int] = None
+    schedule_minute: Optional[int] = None
+    schedule_day_of_week: Optional[str] = None
+
+    # Signal generation
+    signal_parallel_workers: Optional[int] = None
+
+    # Rejection blacklist
+    rejection_blacklist_threshold: Optional[int] = None
+    rejection_blacklist_cooldown_days: Optional[int] = None
+
 
 @router.get("/autonomous", response_model=AutonomousConfigResponse)
 async def get_autonomous_config(
@@ -1172,6 +1239,14 @@ async def get_autonomous_config(
     validation = full_config.get('validation_rules', {}) or {}
     symbols = full_config.get('symbols', {}) or {}
     data_sources = full_config.get('data_sources', {}) or {}
+    drawdown_sizing = pm.get('drawdown_sizing', {}) or {}
+    conviction_tier = pm.get('conviction_tier_sizing', {}) or {}
+    vol_scaling = pm.get('vol_scaling', {}) or {}
+    autonomous_schedule = full_config.get('autonomous_schedule', {}) or {}
+    alpha_edge = full_config.get('alpha_edge', {}) or {}
+    rejection_bl = alpha_edge.get('rejection_blacklist', {}) or {}
+    regime_detection = full_config.get('regime_detection', {}) or {}
+    market_regime = full_config.get('market_regime', {}) or {}
 
     # Helper: yaml decimal fraction (0-1) → API percentage (0-100)
     def pct(val, default=0.0):
@@ -1311,6 +1386,31 @@ async def get_autonomous_config(
         max_short_exposure_pct=pct(portfolio_balance.get('max_directional_exposure_pct'), 60.0),
         max_sector_exposure_pct=pct(portfolio_balance.get('max_sector_exposure_pct'), 40.0),
 
+        # Position Sizing Controls
+        drawdown_sizing_enabled=bool(drawdown_sizing.get('enabled', True)),
+        drawdown_sizing_threshold_5pct=pct(drawdown_sizing.get('threshold_5pct'), 50.0),
+        drawdown_sizing_threshold_10pct=pct(drawdown_sizing.get('threshold_10pct'), 25.0),
+        drawdown_sizing_lookback_days=int(drawdown_sizing.get('lookback_days', 30)),
+        conviction_tier_enabled=bool(conviction_tier.get('enabled', True)),
+        conviction_tier_multiplier_75=float(conviction_tier.get('multiplier_score_75', 1.15)),
+        conviction_tier_multiplier_80=float(conviction_tier.get('multiplier_score_80', 1.30)),
+        vol_scaling_min_scale=float(vol_scaling.get('min_scale', 0.10)),
+        vol_scaling_max_scale=float(vol_scaling.get('max_scale', 1.50)),
+        vol_scaling_max_symbol_pct=pct(vol_scaling.get('max_symbol_pct'), 5.0),
+        vol_scaling_sector_soft_cap_pct=pct(vol_scaling.get('sector_soft_cap_pct'), 30.0),
+
+        # Autonomous schedule
+        schedule_hour=int(autonomous_schedule.get('hour', 15)),
+        schedule_minute=int(autonomous_schedule.get('minute', 15)),
+        schedule_day_of_week=str(autonomous_schedule.get('day_of_week', 'saturday')),
+
+        # Signal generation
+        signal_parallel_workers=int(signal_gen.get('parallel_workers', 4)),
+
+        # Rejection blacklist
+        rejection_blacklist_threshold=int(rejection_bl.get('threshold', 3)),
+        rejection_blacklist_cooldown_days=int(rejection_bl.get('cooldown_days', 30)),
+
         # Read-only audit view
         advanced_readonly=AdvancedReadonly(
             transaction_costs_crypto=tx_per_class.get('crypto', {}) or {},
@@ -1338,6 +1438,16 @@ async def get_autonomous_config(
             wf_long_horizon_templates=[
                 str(x) for x in (wf.get('long_horizon_templates') or [])
             ],
+            market_regime_current=str(market_regime.get('current', 'unknown')),
+            market_regime_confidence=float(market_regime.get('confidence', 0.0) or 0.0),
+            market_regime_updated_at=str(market_regime.get('updated_at', '')),
+            backtest_days=int(backtest.get('days', 730)),
+            backtest_warmup_days=int(backtest.get('warmup_days', 100)),
+            backtest_data_quality_min_days=int((backtest.get('data_quality') or {}).get('min_days_required', 400)),
+            backtest_data_quality_fallback_days=int((backtest.get('data_quality') or {}).get('fallback_days', 180)),
+            regime_detection_lookback_days=int(regime_detection.get('lookback_days', 60)),
+            regime_detection_high_vol_threshold=float(regime_detection.get('high_volatility_threshold', 0.02)),
+            regime_detection_low_vol_threshold=float(regime_detection.get('low_volatility_threshold', 0.01)),
         ),
     )
 
@@ -1363,7 +1473,7 @@ async def update_autonomous_config(
     for section in ('autonomous', 'activation_thresholds', 'retirement_thresholds',
                     'retirement_logic', 'signal_generation', 'backtest',
                     'performance_feedback', 'directional_balance',
-                    'position_management'):
+                    'position_management', 'autonomous_schedule', 'alpha_edge'):
         full_config.setdefault(section, {})
     full_config['backtest'].setdefault('walk_forward', {})
     full_config['backtest']['walk_forward'].setdefault('direction_aware_thresholds', {})
@@ -1371,6 +1481,10 @@ async def update_autonomous_config(
     full_config['activation_thresholds'].setdefault('min_return_per_trade', {})
     full_config['position_management'].setdefault('portfolio_balance', {})
     full_config['position_management'].setdefault('directional_quotas', {})
+    full_config['position_management'].setdefault('drawdown_sizing', {})
+    full_config['position_management'].setdefault('conviction_tier_sizing', {})
+    full_config['position_management'].setdefault('vol_scaling', {})
+    full_config['alpha_edge'].setdefault('rejection_blacklist', {})
 
     # Shortcuts
     a = full_config['autonomous']
@@ -1388,6 +1502,12 @@ async def update_autonomous_config(
     pm = full_config['position_management']
     pb = pm['portfolio_balance']
     dq = pm['directional_quotas']
+    ds_pm = pm['drawdown_sizing']
+    ct_pm = pm['conviction_tier_sizing']
+    vs_pm = pm['vol_scaling']
+    sched = full_config['autonomous_schedule']
+    ae = full_config['alpha_edge']
+    rbl = ae['rejection_blacklist']
 
     # Helper: percentage (API) → decimal fraction (yaml)
     def to_frac(v):
@@ -1507,6 +1627,48 @@ async def update_autonomous_config(
     if request.max_sector_exposure_pct is not None:
         pb['max_sector_exposure_pct'] = to_frac(request.max_sector_exposure_pct)
     # (max_short_exposure_pct shares the same yaml key; long field wins if both set)
+
+    # ─── Position Sizing Controls ───────────────────────────────────────
+    if request.drawdown_sizing_enabled is not None:
+        ds_pm['enabled'] = request.drawdown_sizing_enabled
+    if request.drawdown_sizing_threshold_5pct is not None:
+        ds_pm['threshold_5pct'] = to_frac(request.drawdown_sizing_threshold_5pct)
+    if request.drawdown_sizing_threshold_10pct is not None:
+        ds_pm['threshold_10pct'] = to_frac(request.drawdown_sizing_threshold_10pct)
+    if request.drawdown_sizing_lookback_days is not None:
+        ds_pm['lookback_days'] = request.drawdown_sizing_lookback_days
+    if request.conviction_tier_enabled is not None:
+        ct_pm['enabled'] = request.conviction_tier_enabled
+    if request.conviction_tier_multiplier_75 is not None:
+        ct_pm['multiplier_score_75'] = request.conviction_tier_multiplier_75
+    if request.conviction_tier_multiplier_80 is not None:
+        ct_pm['multiplier_score_80'] = request.conviction_tier_multiplier_80
+    if request.vol_scaling_min_scale is not None:
+        vs_pm['min_scale'] = request.vol_scaling_min_scale
+    if request.vol_scaling_max_scale is not None:
+        vs_pm['max_scale'] = request.vol_scaling_max_scale
+    if request.vol_scaling_max_symbol_pct is not None:
+        vs_pm['max_symbol_pct'] = to_frac(request.vol_scaling_max_symbol_pct)
+    if request.vol_scaling_sector_soft_cap_pct is not None:
+        vs_pm['sector_soft_cap_pct'] = to_frac(request.vol_scaling_sector_soft_cap_pct)
+
+    # ─── Autonomous schedule ────────────────────────────────────────────
+    if request.schedule_hour is not None:
+        sched['hour'] = request.schedule_hour
+    if request.schedule_minute is not None:
+        sched['minute'] = request.schedule_minute
+    if request.schedule_day_of_week is not None:
+        sched['day_of_week'] = request.schedule_day_of_week
+
+    # ─── Signal generation ──────────────────────────────────────────────
+    if request.signal_parallel_workers is not None:
+        sg['parallel_workers'] = request.signal_parallel_workers
+
+    # ─── Rejection blacklist ────────────────────────────────────────────
+    if request.rejection_blacklist_threshold is not None:
+        rbl['threshold'] = request.rejection_blacklist_threshold
+    if request.rejection_blacklist_cooldown_days is not None:
+        rbl['cooldown_days'] = request.rejection_blacklist_cooldown_days
 
     # ─── Persist ────────────────────────────────────────────────────────
     with open(config_file, 'w') as f:
