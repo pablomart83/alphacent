@@ -2,6 +2,7 @@
   "name": "AlphaCent: Block Direct EC2 File Writes",
   "description": "Blocks writing files directly to EC2 src/config via SSH. Pulling files FROM EC2 to sync a stale local workspace is permitted. Everything else (local commands, scp, read-only ssh, git, systemctl) is not intercepted.",
   "version": "1",
+  "disabled": true,
   "when": {
     "type": "preToolUse",
     "toolTypes": [

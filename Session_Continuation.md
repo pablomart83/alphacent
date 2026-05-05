@@ -15,7 +15,85 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 4, 2026, ~21:30 UTC, post FMP-timezone + conviction-persist deploy)
+## Current System State (May 5, 2026, ~18:15 UTC, post orphan-position P0 fix)
+
+- **Equity:** ~$474K
+- **Open positions:** 69 (5 previously orphaned now re-linked to real strategies)
+- **Orphan positions:** 2 remaining (NFLX + UK100, opened 2026-04-13 — confirmed genuine externals, no matching orders)
+- **Mode:** eToro DEMO
+
+**Health:**
+- errors.log: pre-existing 21:52 UTC cancel-404 entries (historical, from the incident). Zero new errors post-restart.
+- `insufficient funds` errors (error 604) visible in errors.log — separate issue, order sizing hitting credit limit, not related to this fix.
+- Service healthy: `{"status":"healthy","service":"alphacent-backend"}`
+
+**Last commits on main (newest first):**
+- `d0d6d7d` fix: P0 orphan-position bug — cancel-404 mis-classification + sync-path relink
+- `ba1aad2` [prior session commits]
+
+---
+
+## Session shipped 2026-05-05 — P0 orphan-position bug (strategy_id='etoro_position')
+
+### Root cause
+
+On 2026-05-04 21:42-21:46 UTC, the autonomous cycle submitted 6 orders for XLK/SOXL/SMH/TQQQ (post-market-close ET, within the 24/5 window). These orders were queued on eToro for the 2026-05-05 09:30 ET market open.
+
+At 21:52 UTC, a strategy retirement cancel-sweep called `cancel_order()` on all PENDING orders for the retiring strategy. eToro returned 404 on the `/market-cancel-orders/` endpoint (the orders were queued, not cancellable via that route). The code mis-interpreted cancel-404 as "order gone" — same as the 2026-05-04 morning fix for status-poll 404 — and marked the orders CANCELLED/FAILED locally.
+
+At 13:30:03-13:30:06 UTC on 2026-05-05, eToro executed the queued orders. The next sync tick found 4 new positions with no matching DB row and created them with `strategy_id='etoro_position'`.
+
+The bug: `EToroOrderNotFoundError` was raised by `_make_request` for 404 on `/orders/` and `/positions/` endpoints, but NOT for `/market-cancel-orders/`. So cancel-404 fell through to generic `EToroAPIError`, and all callers had `except Exception: order.status = CANCELLED` — unconditionally marking the order dead regardless of error type.
+
+### Part 1 — Recovery (scripts/recover_orphan_positions.py)
+
+One-shot script. Matches orphan positions to CANCELLED/FAILED orders by (symbol, ±24h window, numerically-closest etoro_order_id). Backfills strategy_id, trade_journal entry, conviction_score, template_name, market_regime from order.order_metadata.
+
+**Applied result:**
+- 5 positions recovered: SOXL → `4H Strong Uptrend Momentum` (conviction 62.8), SMH → `4H ADX Trend Swing` (64.7), XLK → `4H EMA Ribbon Trend Long` (64.1), TQQQ → `4H EMA Ribbon Trend Long` (63.4), URI → strategy `fcbf9f9e` (66.2)
+- 2 genuine externals left untouched: NFLX + UK100 (April 13, no matching orders)
+- All 5 now visible to TSL cycle, loser-pair penalty, conviction validation loop, concentration caps
+
+### Part 2 — Root-cause fix (cancel_order 404 handling)
+
+**`src/api/etoro_client.py`:**
+- `_make_request`: extended `EToroOrderNotFoundError` to also cover `/market-cancel-orders/` endpoint (was only `/orders/` and `/positions/`)
+- `cancel_order()`: explicit `EToroOrderNotFoundError` handler — logs WARNING, re-raises. Callers must NOT mark CANCELLED on this path.
+
+**All cancel callers fixed** (`portfolio_manager`, `strategy_engine`, `order_monitor.cancel_stale_orders`, `order_executor`, `account.py` ×2, `strategies.py`):
+- `EToroOrderNotFoundError` → log WARNING, leave order as PENDING, let order_monitor status-poll establish ground truth
+- Other `EToroAPIError` → mark CANCELLED locally (non-404 failure, order genuinely stuck)
+- `control.py` kill-switch: logs 404 warning but still marks CANCELLED (explicit emergency action, intentional)
+
+**Invariant going forward:** a 404 on the cancel endpoint means "eToro doesn't know this order on the cancel route" — NOT "order is dead". Only a 404 on the status-poll endpoint (`/orders/{id}`) means the order is definitively gone.
+
+### Part 3 — Architectural defence (sync-path strategy-relink)
+
+**`src/core/order_monitor.sync_positions`:** Added Pass 2 after the existing FILLED-order match fails. Looks for CANCELLED/FAILED orders within ±24h of `position.opened_at`, picks the one whose `etoro_order_id` is numerically closest to `etoro_position_id`. Logs `ORPHAN RELINK` WARNING. Records match reason in `position.closure_reason` for audit.
+
+Defence-in-depth: even if Part 2 has a gap, orphans auto-recover on the next sync tick instead of stranding silently as `etoro_position`.
+
+### Files changed
+
+- `src/api/etoro_client.py` — cancel-404 → EToroOrderNotFoundError + cancel_order handler
+- `src/core/order_monitor.py` — cancel_stale_orders fix + sync_positions Pass 2 relink
+- `src/strategy/portfolio_manager.py` — cancel EToroOrderNotFoundError handling
+- `src/strategy/strategy_engine.py` — cancel EToroOrderNotFoundError handling
+- `src/execution/order_executor.py` — cancel EToroOrderNotFoundError handling
+- `src/api/routers/account.py` — cancel EToroOrderNotFoundError handling (×2)
+- `src/api/routers/control.py` — cancel EToroOrderNotFoundError handling (kill-switch)
+- `src/api/routers/strategies.py` — cancel EToroOrderNotFoundError handling
+- NEW `scripts/recover_orphan_positions.py` — one-shot recovery + --verify mode
+
+### Verification checklist (post-deploy)
+
+- ✅ `SELECT COUNT(*) FROM positions WHERE strategy_id='etoro_position' AND closed_at IS NULL` → 2 (NFLX + UK100, genuine externals)
+- ✅ 5 positions re-linked with real strategy_id, trade_journal entries created with conviction_score + template_name + market_regime
+- ✅ errors.log: no new errors post-restart
+- ✅ Service healthy
+- ✅ Committed `d0d6d7d`, pushed to main
+
+---
 
 - **Equity:** ~$474K
 - **Open positions:** 69
