@@ -781,6 +781,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       ),
       enableSorting: false,
       enableHiding: false,
+      size: 32,
     },
     {
       accessorKey: 'symbol',
@@ -803,7 +804,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'side',
       header: 'Side',
-      size: 60,
+      size: 64,
       cell: ({ row }) => (
         <span className={cn(
           'px-1.5 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
@@ -816,7 +817,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'order_action',
       header: 'Action',
-      size: 72,
+      size: 80,
       cell: ({ row }) => {
         const action = (row.original as any).order_action || 'entry';
         const actionColors: Record<string, string> = {
@@ -900,7 +901,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'strategy_id',
       header: 'Source',
-      size: 64,
+      size: 80,
       cell: ({ row }) => {
         const isAutonomous = row.original.strategy_id && row.original.strategy_id !== 'manual_order';
         return (

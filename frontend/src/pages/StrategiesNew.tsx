@@ -682,9 +682,13 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'description',
       header: 'Description',
+      size: 260,
       cell: ({ row }) => (
-        <div>
-          <div className="text-xs text-gray-400">{row.original.description || 'No description available'}</div>
+        <div
+          className="text-xs text-gray-400 truncate"
+          title={row.original.description || ''}
+        >
+          {row.original.description || '—'}
         </div>
       ),
     },
@@ -1043,9 +1047,13 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'description',
       header: 'Strategy',
+      size: 260,
       cell: ({ row }) => (
-        <div>
-          <div className="text-xs text-gray-400">{row.original.description || 'No description available'}</div>
+        <div
+          className="text-xs text-gray-400 truncate"
+          title={row.original.description || ''}
+        >
+          {row.original.description || '—'}
         </div>
       ),
     },
@@ -1201,9 +1209,13 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'description',
       header: 'Strategy',
+      size: 260,
       cell: ({ row }) => (
-        <div>
-          <div className="text-xs text-gray-400">{row.original.description || 'No description available'}</div>
+        <div
+          className="text-xs text-gray-400 truncate"
+          title={row.original.description || ''}
+        >
+          {row.original.description || '—'}
         </div>
       ),
     },
