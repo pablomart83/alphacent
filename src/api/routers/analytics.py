@@ -4489,8 +4489,30 @@ async def get_alpha_metrics(
         if row.close and row.close > 0:
             spy_by_date[date_str] = row.close
 
-    # ── 3. Find common dates ──────────────────────────────────────────────────
-    common_dates = sorted(set(equity_by_date.keys()) & set(spy_by_date.keys()))
+    # ── 3. Align series — forward-fill SPY into weekends/holidays ────────────
+    # equity_snapshots records equity every calendar day (including weekends).
+    # SPY only has data on trading days. A portfolio's weekend equity is valued
+    # at Friday's close, so SPY's "weekend price" is also Friday's close.
+    # Forward-fill: for each equity date, use the most recent SPY close on or
+    # before that date. This preserves all 32 equity observations instead of
+    # dropping 10 weekend rows via an inner join.
+    all_equity_dates = sorted(equity_by_date.keys())
+    all_spy_dates = sorted(spy_by_date.keys())
+
+    # Build forward-filled SPY lookup for every equity date
+    spy_ffill: Dict[str, float] = {}
+    spy_idx = 0
+    last_spy_close: Optional[float] = None
+    for eq_date in all_equity_dates:
+        # Advance spy_idx to the last SPY date <= eq_date
+        while spy_idx < len(all_spy_dates) and all_spy_dates[spy_idx] <= eq_date:
+            last_spy_close = spy_by_date[all_spy_dates[spy_idx]]
+            spy_idx += 1
+        if last_spy_close is not None:
+            spy_ffill[eq_date] = last_spy_close
+
+    # Common dates: equity dates that have a forward-filled SPY price
+    common_dates = sorted(d for d in all_equity_dates if d in spy_ffill)
 
     if len(common_dates) < 2:
         raise HTTPException(
@@ -4500,7 +4522,7 @@ async def get_alpha_metrics(
 
     # Aligned series
     portfolio_eq = [equity_by_date[d] for d in common_dates]
-    spy_closes = [spy_by_date[d] for d in common_dates]
+    spy_closes = [spy_ffill[d] for d in common_dates]
 
     # ── 4. Compute daily returns ──────────────────────────────────────────────
     # Returns start from index 1 (need two points for a return)
