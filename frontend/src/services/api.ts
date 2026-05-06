@@ -1492,6 +1492,13 @@ class ApiClient {
     return this.extractArrayFromResponse<{ date: string; close: number }>(response, 'data');
   }
 
+  async getAlphaMetrics(): Promise<any> {
+    return dedupedGet('analytics/alpha', async () => {
+      const response = await this.client.get<ApiResponse<any>>('/analytics/alpha');
+      return this.handleResponse(response);
+    });
+  }
+
   // ============================================================================
   // Template Rankings (Task 9.1)
   // ============================================================================

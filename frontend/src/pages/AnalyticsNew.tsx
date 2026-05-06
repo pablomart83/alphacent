@@ -30,7 +30,7 @@ import { usePolling } from '../hooks/usePolling';
 import { PageSkeleton, RefreshIndicator } from '../components/ui/skeleton';
 import { DataFreshnessIndicator } from '../components/ui/DataFreshnessIndicator';
 import type { RollingStatsData, AttributionData, TearSheetData, TCAData } from '../types/analytics';
-import { RollingStatisticsTab, PerformanceAttributionTab, TearSheetTab, TCATab } from './analytics';
+import { RollingStatisticsTab, PerformanceAttributionTab, TearSheetTab, TCATab, AlphaTab } from './analytics';
 import { TearSheetGenerator } from '../components/pdf/TearSheetGenerator';
 
 interface AnalyticsNewProps {
@@ -349,6 +349,11 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = memo(({ onLogout }) => {
   const [tcaData, setTcaData] = useState<TCAData | null>(null);
   const [tcaLoading, setTcaLoading] = useState(false);
   const [tcaError, setTcaError] = useState<string | null>(null);
+
+  // Alpha Generation state
+  const [alphaData, setAlphaData] = useState<any | null>(null);
+  const [alphaLoading, setAlphaLoading] = useState(false);
+  const [alphaError, setAlphaError] = useState<string | null>(null);
   const [journalFilters, setJournalFilters] = useState({
     strategy_id: '',
     symbol: '',
@@ -601,6 +606,19 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = memo(({ onLogout }) => {
           setTcaError(e?.message || 'Failed to load TCA data');
         } finally {
           setTcaLoading(false);
+        }
+      }
+
+      if (currentTab === 'alpha-generation') {
+        setAlphaLoading(true);
+        setAlphaError(null);
+        try {
+          const alpha = await apiClient.getAlphaMetrics();
+          setAlphaData(alpha);
+        } catch (e: any) {
+          setAlphaError(e?.message || 'Failed to load alpha metrics');
+        } finally {
+          setAlphaLoading(false);
         }
       }
 
@@ -1042,6 +1060,7 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = memo(({ onLogout }) => {
               { value: 'tear-sheet', label: 'Tear Sheet' },
               { value: 'tca', label: 'TCA' },
               { value: 'stress-tests', label: 'Stress Tests' },
+              { value: 'alpha-generation', label: '◆ Alpha Generation' },
             ].map((tab) => (
               <button
                 key={tab.value}
@@ -1964,6 +1983,18 @@ export const AnalyticsNew: FC<AnalyticsNewProps> = memo(({ onLogout }) => {
             ) : (
               <div className="text-sm text-muted-foreground p-4">Click the Stress Tests tab to load data.</div>
             )}
+          </TabsContent>
+
+          {/* ═══════════════════════════════════════════════════════════════
+              ALPHA GENERATION TAB
+              ═══════════════════════════════════════════════════════════════ */}
+          <TabsContent value="alpha-generation" className="space-y-3">
+            <AlphaTab
+              data={alphaData}
+              loading={alphaLoading}
+              error={alphaError}
+              onRetry={() => handleTabChange('alpha-generation')}
+            />
           </TabsContent>
         </Tabs>
       </motion.div>

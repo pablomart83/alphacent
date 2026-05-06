@@ -4282,3 +4282,366 @@ async def observability_exec_summary(
         "since": cutoff.isoformat(),
         "stage_counts": counts,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Alpha Generation Endpoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AlphaDailyPoint(BaseModel):
+    date: str
+    portfolio_return: float   # daily % return
+    spy_return: float         # daily % return
+    excess_return: float      # portfolio - spy - rf (daily)
+    cumulative_alpha: float   # rebased to 0 at inception
+    rolling_30d_alpha: Optional[float] = None
+    rolling_90d_alpha: Optional[float] = None
+
+
+class AlphaPeriodRow(BaseModel):
+    period: str               # "1W", "1M", "3M", "6M", "inception"
+    portfolio_return: float   # %
+    spy_return: float         # %
+    alpha: float              # portfolio - spy (simple, not CAPM-adjusted)
+    capm_alpha: float         # portfolio - rf - beta * (spy - rf)
+    beta: float
+
+
+class AlphaAnnotation(BaseModel):
+    date: str
+    label: str
+    description: str
+
+
+class AlphaResponse(BaseModel):
+    daily_series: List[AlphaDailyPoint]
+    information_ratio: float
+    beta: float                    # full-period beta
+    total_alpha: float             # cumulative alpha since inception (%)
+    alpha_30d: float               # 30-day rolling alpha (%)
+    alpha_by_period: List[AlphaPeriodRow]
+    annotations: List[AlphaAnnotation]
+    data_start: str                # earliest common date used
+    data_points: int               # number of daily observations
+
+
+def _compute_rolling_alpha(
+    excess_returns: List[float],
+    dates: List[str],
+    window: int,
+) -> List[Optional[float]]:
+    """Compute rolling sum of excess returns over `window` days.
+
+    Returns a list of the same length as excess_returns.
+    Values before the window is full are None.
+    Result is expressed as a percentage (sum of daily excess returns × 100).
+    """
+    result: List[Optional[float]] = []
+    for i in range(len(excess_returns)):
+        if i < window - 1:
+            result.append(None)
+        else:
+            window_slice = excess_returns[i - window + 1 : i + 1]
+            result.append(round(sum(window_slice) * 100, 4))
+    return result
+
+
+def _compute_beta(
+    portfolio_returns: List[float],
+    spy_returns: List[float],
+    window: int = 60,
+    min_obs: int = 20,
+) -> float:
+    """Compute beta over the last `window` observations (min `min_obs` required)."""
+    n = min(len(portfolio_returns), len(spy_returns), window)
+    if n < min_obs:
+        return 1.0  # not enough data — assume market beta
+    p = np.array(portfolio_returns[-n:])
+    s = np.array(spy_returns[-n:])
+    var_spy = float(np.var(s, ddof=1))
+    if var_spy < 1e-12:
+        return 1.0
+    cov = float(np.cov(p, s, ddof=1)[0, 1])
+    return round(cov / var_spy, 4)
+
+
+def _period_metrics(
+    portfolio_eq: List[float],
+    spy_closes: List[float],
+    dates: List[str],
+    period_label: str,
+    lookback_days: int,
+    rf_daily: float,
+) -> Optional[AlphaPeriodRow]:
+    """Compute return/alpha for a specific lookback period."""
+    if not dates:
+        return None
+    cutoff = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    # Find first index at or after cutoff
+    start_idx = None
+    for i, d in enumerate(dates):
+        if d >= cutoff:
+            start_idx = i
+            break
+    if start_idx is None or start_idx >= len(dates) - 1:
+        return None
+    # Need at least 2 points
+    p_start = portfolio_eq[start_idx]
+    p_end = portfolio_eq[-1]
+    s_start = spy_closes[start_idx]
+    s_end = spy_closes[-1]
+    if p_start <= 0 or s_start <= 0:
+        return None
+    port_ret = (p_end - p_start) / p_start * 100
+    spy_ret = (s_end - s_start) / s_start * 100
+    alpha = round(port_ret - spy_ret, 4)
+    # CAPM alpha: port_ret - rf_period - beta * (spy_ret - rf_period)
+    n_days = len(dates) - start_idx
+    rf_period = rf_daily * n_days * 100  # annualized → period
+    p_rets = [
+        (portfolio_eq[i] - portfolio_eq[i - 1]) / portfolio_eq[i - 1]
+        for i in range(start_idx + 1, len(portfolio_eq))
+    ]
+    s_rets = [
+        (spy_closes[i] - spy_closes[i - 1]) / spy_closes[i - 1]
+        for i in range(start_idx + 1, len(spy_closes))
+    ]
+    beta = _compute_beta(p_rets, s_rets, window=len(p_rets), min_obs=5)
+    capm_alpha = round(port_ret - rf_period - beta * (spy_ret - rf_period), 4)
+    return AlphaPeriodRow(
+        period=period_label,
+        portfolio_return=round(port_ret, 4),
+        spy_return=round(spy_ret, 4),
+        alpha=alpha,
+        capm_alpha=capm_alpha,
+        beta=beta,
+    )
+
+
+@router.get("/alpha", response_model=AlphaResponse)
+async def get_alpha_metrics(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Compute alpha generation metrics for the portfolio vs SPY.
+
+    Uses:
+    - equity_snapshots (snapshot_type='daily') for portfolio equity
+    - historical_price_cache (symbol='SPY', interval='1d') for benchmark
+
+    Returns:
+    - daily_series: date-by-date excess returns + cumulative alpha
+    - information_ratio: mean(excess_return) / std(excess_return) * sqrt(252)
+    - beta: portfolio sensitivity to SPY (60-day rolling, full-period reported)
+    - total_alpha: cumulative alpha since inception (%)
+    - alpha_30d: 30-day rolling alpha (%)
+    - alpha_by_period: 1W / 1M / 3M / 6M / inception table
+    - annotations: key system change dates
+    """
+    logger.info(f"Computing alpha metrics for user {username}")
+
+    RISK_FREE_DAILY = 0.045 / 252  # 4.5% annualized Fed funds proxy
+
+    # ── 1. Load equity snapshots ──────────────────────────────────────────────
+    from src.models.orm import EquitySnapshotORM, HistoricalPriceCacheORM
+
+    snapshot_rows = (
+        session.query(EquitySnapshotORM)
+        .filter(EquitySnapshotORM.snapshot_type == "daily")
+        .order_by(EquitySnapshotORM.date.asc())
+        .all()
+    )
+
+    if len(snapshot_rows) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Insufficient equity snapshot data (need at least 2 daily snapshots)",
+        )
+
+    # Build date → equity dict (date string "YYYY-MM-DD")
+    equity_by_date: Dict[str, float] = {}
+    for row in snapshot_rows:
+        date_str = row.date[:10]  # strip time component if present
+        if row.equity and row.equity > 0:
+            equity_by_date[date_str] = row.equity
+
+    # ── 2. Load SPY daily closes ──────────────────────────────────────────────
+    spy_rows = (
+        session.query(HistoricalPriceCacheORM)
+        .filter(
+            HistoricalPriceCacheORM.symbol == "SPY",
+            HistoricalPriceCacheORM.interval == "1d",
+        )
+        .order_by(HistoricalPriceCacheORM.date.asc())
+        .all()
+    )
+
+    if len(spy_rows) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Insufficient SPY price data in historical_price_cache",
+        )
+
+    spy_by_date: Dict[str, float] = {}
+    for row in spy_rows:
+        date_str = row.date.strftime("%Y-%m-%d") if hasattr(row.date, "strftime") else str(row.date)[:10]
+        if row.close and row.close > 0:
+            spy_by_date[date_str] = row.close
+
+    # ── 3. Find common dates ──────────────────────────────────────────────────
+    common_dates = sorted(set(equity_by_date.keys()) & set(spy_by_date.keys()))
+
+    if len(common_dates) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="No overlapping dates between equity snapshots and SPY data",
+        )
+
+    # Aligned series
+    portfolio_eq = [equity_by_date[d] for d in common_dates]
+    spy_closes = [spy_by_date[d] for d in common_dates]
+
+    # ── 4. Compute daily returns ──────────────────────────────────────────────
+    # Returns start from index 1 (need two points for a return)
+    port_returns: List[float] = []
+    spy_returns: List[float] = []
+    return_dates: List[str] = []
+
+    for i in range(1, len(common_dates)):
+        p_prev, p_curr = portfolio_eq[i - 1], portfolio_eq[i]
+        s_prev, s_curr = spy_closes[i - 1], spy_closes[i]
+        if p_prev > 0 and s_prev > 0:
+            port_returns.append((p_curr - p_prev) / p_prev)
+            spy_returns.append((s_curr - s_prev) / s_prev)
+            return_dates.append(common_dates[i])
+
+    if len(port_returns) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Insufficient return observations for alpha calculation",
+        )
+
+    # ── 5. Excess returns (vs risk-free) ─────────────────────────────────────
+    excess_returns = [
+        p - s - RISK_FREE_DAILY
+        for p, s in zip(port_returns, spy_returns)
+    ]
+
+    # ── 6. Cumulative alpha (rebased to 0 at inception) ──────────────────────
+    # Cumulative alpha = sum of daily excess returns expressed as %
+    cumulative_alpha: List[float] = []
+    running = 0.0
+    for er in excess_returns:
+        running += er
+        cumulative_alpha.append(round(running * 100, 4))
+
+    # ── 7. Rolling alpha ──────────────────────────────────────────────────────
+    rolling_30d = _compute_rolling_alpha(excess_returns, return_dates, 30)
+    rolling_90d = _compute_rolling_alpha(excess_returns, return_dates, 90)
+
+    # ── 8. Information Ratio ──────────────────────────────────────────────────
+    er_arr = np.array(excess_returns)
+    er_std = float(np.std(er_arr, ddof=1))
+    if er_std > 1e-12 and len(excess_returns) >= 10:
+        information_ratio = round(float(np.mean(er_arr)) / er_std * np.sqrt(252), 4)
+    else:
+        information_ratio = 0.0
+    information_ratio = max(-5.0, min(5.0, information_ratio))
+
+    # ── 9. Full-period beta ───────────────────────────────────────────────────
+    full_beta = _compute_beta(port_returns, spy_returns, window=len(port_returns), min_obs=10)
+
+    # ── 10. Build daily series ────────────────────────────────────────────────
+    daily_series: List[AlphaDailyPoint] = []
+    for i, d in enumerate(return_dates):
+        daily_series.append(AlphaDailyPoint(
+            date=d,
+            portfolio_return=round(port_returns[i] * 100, 4),
+            spy_return=round(spy_returns[i] * 100, 4),
+            excess_return=round(excess_returns[i] * 100, 4),
+            cumulative_alpha=cumulative_alpha[i],
+            rolling_30d_alpha=rolling_30d[i],
+            rolling_90d_alpha=rolling_90d[i],
+        ))
+
+    # ── 11. Alpha by period ───────────────────────────────────────────────────
+    alpha_by_period: List[AlphaPeriodRow] = []
+    period_specs = [
+        ("1W", 7),
+        ("1M", 30),
+        ("3M", 90),
+        ("6M", 180),
+    ]
+    for label, days in period_specs:
+        row = _period_metrics(
+            portfolio_eq, spy_closes, common_dates, label, days, RISK_FREE_DAILY
+        )
+        if row:
+            alpha_by_period.append(row)
+
+    # Inception row (full period)
+    if len(portfolio_eq) >= 2 and portfolio_eq[0] > 0 and spy_closes[0] > 0:
+        port_inception = (portfolio_eq[-1] - portfolio_eq[0]) / portfolio_eq[0] * 100
+        spy_inception = (spy_closes[-1] - spy_closes[0]) / spy_closes[0] * 100
+        rf_inception = RISK_FREE_DAILY * len(port_returns) * 100
+        capm_alpha_inception = round(
+            port_inception - rf_inception - full_beta * (spy_inception - rf_inception), 4
+        )
+        alpha_by_period.append(AlphaPeriodRow(
+            period="inception",
+            portfolio_return=round(port_inception, 4),
+            spy_return=round(spy_inception, 4),
+            alpha=round(port_inception - spy_inception, 4),
+            capm_alpha=capm_alpha_inception,
+            beta=full_beta,
+        ))
+
+    # ── 12. Summary scalars ───────────────────────────────────────────────────
+    total_alpha = cumulative_alpha[-1] if cumulative_alpha else 0.0
+    alpha_30d = rolling_30d[-1] if rolling_30d and rolling_30d[-1] is not None else 0.0
+
+    # ── 13. Annotations — key system change dates ─────────────────────────────
+    annotations = [
+        AlphaAnnotation(
+            date="2026-04-29",
+            label="Risk overhaul",
+            description="Position sizing overhaul: BASE_RISK_PCT 0.6%, vol scaling 0.10x-1.50x, drawdown sizing",
+        ),
+        AlphaAnnotation(
+            date="2026-05-01",
+            label="ETF/Index boost",
+            description="ETF tradability 13pts, Index 14pts; Alpha Edge cap raised 5→8; TSL ATR multipliers differentiated",
+        ),
+        AlphaAnnotation(
+            date="2026-05-02",
+            label="TSLA audit",
+            description="Proposer feedback loops: recency decay, directional rebalance bonus, per-pair sizing penalty; C3 trend gate",
+        ),
+        AlphaAnnotation(
+            date="2026-05-04",
+            label="FMP fix + pipeline",
+            description="FMP 1h ET→UTC fix (3.4M bars rebackfilled); loser-pair penalty armed; signal funnel unified",
+        ),
+        AlphaAnnotation(
+            date="2026-05-06",
+            label="Scorer redesign",
+            description="Conviction scorer: DSL/AE split, persistence-based signal quality, threshold 65→70; TSL ratchet fix",
+        ),
+    ]
+    # Only include annotations within our data range
+    data_start = common_dates[0]
+    data_end = common_dates[-1]
+    annotations = [a for a in annotations if data_start <= a.date <= data_end]
+
+    return AlphaResponse(
+        daily_series=daily_series,
+        information_ratio=information_ratio,
+        beta=full_beta,
+        total_alpha=round(total_alpha, 4),
+        alpha_30d=round(alpha_30d, 4) if alpha_30d is not None else 0.0,
+        alpha_by_period=alpha_by_period,
+        annotations=annotations,
+        data_start=data_start,
+        data_points=len(daily_series),
+    )
