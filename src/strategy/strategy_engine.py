@@ -5396,12 +5396,17 @@ class StrategyEngine:
                 
                 # Check conviction threshold
                 if not conviction.passes_threshold(min_conviction):
+                    _scoring_path = conviction.breakdown.get('scoring_path', 'dsl')
+                    _sig_details = conviction.breakdown.get('signal_quality', {}).get('details', {})
+                    _persistence = _sig_details.get('entry_persistence')
+                    _persistence_str = f", persistence={_persistence}" if _persistence is not None else ""
                     _conv_reason = (
                         f"filter:conviction ({conviction.total_score:.1f} < {min_conviction}; "
                         f"wf_edge={conviction.breakdown.get('walkforward_edge', {}).get('score', 0):.1f}, "
-                        f"signal={conviction.signal_strength_score:.1f}, "
+                        f"signal={conviction.signal_strength_score:.1f}{_persistence_str}, "
                         f"asset={conviction.fundamental_score:.1f}, "
-                        f"regime={conviction.regime_alignment_score:.1f})"
+                        f"regime={conviction.regime_alignment_score:.1f}, "
+                        f"path={_scoring_path})"
                     )
                     logger.info(f"Signal rejected for {signal.symbol}: {_conv_reason}")
                     _log_filter_rejection(
@@ -5413,6 +5418,7 @@ class StrategyEngine:
                         },
                     )
                     continue
+
                 
                 # Add conviction score to signal metadata
                 if not hasattr(signal, 'metadata'):

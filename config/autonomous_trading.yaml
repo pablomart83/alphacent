@@ -310,7 +310,7 @@ alpha_edge:
   # position-sizing tiers (next session) — size ≥75 trades at 1.25-1.5x
   # rather than lowering the activation floor. That captures the alpha
   # without admitting the noise.
-  min_conviction_score: 65
+  min_conviction_score: 70
   min_holding_period_days: 3
   max_holding_period_days: 30
   max_trades_per_strategy_per_month: 4

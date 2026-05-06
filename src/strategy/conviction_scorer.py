@@ -5,11 +5,25 @@ Philosophy: The best predictor of a profitable trade is a strategy that has
 already proven it works on out-of-sample data. Walk-forward validation IS
 the evidence. Everything else is secondary.
 
-Scoring dimensions (0-100):
-1. Walk-forward edge (0-40): OOS Sharpe, win rate, trade count, consistency
-2. Signal quality (0-25): Confidence, risk management, indicator alignment
+Two distinct scoring paths based on strategy engine:
+
+DSL (indicator-based) scoring dimensions (0-100):
+1. Walk-forward edge (0-40): OOS Sharpe × trade-count confidence, win rate, consistency
+2. Signal quality (0-25): Signal persistence (bars in condition) + R:R quality
 3. Regime fit (0-20): Strategy type vs current market regime
 4. Asset tradability (0-15): Liquidity, spread cost, data quality
+   Theoretical max DSL = 40+25+20+15+5+5+1 = 111 (no fundamentals, no factor exposure)
+
+Alpha Edge (fundamental-based) scoring dimensions (0-100):
+1-4. Same as DSL
+5. Fundamental quality direction (±15): earnings/revenue/insider/ROE/buyback
+6. Factor exposure (±6): beta/PE/revenue-growth regime tilt
+   Theoretical max AE = 40+25+20+15+15+5+5+1+6 = 132
+
+Rationale for split: DSL strategies are validated on price/indicator data.
+Adding fundamental overlays creates mixed signals — a quality company can still
+have a bad technical entry, and a weak company can still have a valid breakout.
+Alpha Edge strategies ARE the fundamental signal; conviction should amplify it.
 
 Only signals with conviction > threshold are traded.
 """
@@ -46,7 +60,17 @@ class ConvictionScorer:
     The core insight: these strategies already passed walk-forward validation.
     The conviction score should measure HOW STRONG that evidence is, not
     re-litigate whether the strategy is "good enough" with arbitrary checks.
+
+    Two paths:
+    - DSL strategies: pure quantitative evidence (WF edge, signal persistence, regime, liquidity)
+    - Alpha Edge strategies: same base + fundamental quality + factor exposure
     """
+
+    # Theoretical max raw scores per path (used for normalization)
+    # DSL:  WF(40) + Signal(25) + Regime(20) + Asset(15) + Carry(5) + Crypto(5) + News(1) = 111
+    # AE:   DSL(111) + Fundamental(15) + Factor(6) = 132
+    _THEORETICAL_MAX_DSL = 111.0
+    _THEORETICAL_MAX_AE  = 132.0
 
     def __init__(
         self,
@@ -61,7 +85,7 @@ class ConvictionScorer:
         self.market_analyzer = market_analyzer
 
         alpha_edge_config = config.get('alpha_edge', {})
-        self.min_conviction_score = alpha_edge_config.get('min_conviction_score', 57)
+        self.min_conviction_score = alpha_edge_config.get('min_conviction_score', 65)
 
         logger.info(f"ConvictionScorer initialized - Min score: {self.min_conviction_score}")
 
@@ -71,15 +95,33 @@ class ConvictionScorer:
         strategy: Strategy,
         fundamental_report: Optional[FundamentalFilterReport] = None
     ) -> ConvictionScore:
-        """Score a trading signal based on evidence of profitability."""
+        """Score a trading signal based on evidence of profitability.
+
+        Routes through two distinct paths:
+        - DSL strategies: quantitative evidence only (no fundamentals, no factor exposure)
+        - Alpha Edge strategies: quantitative + fundamental + factor exposure
+
+        The split is intentional. DSL edge lives in the price indicators; adding
+        fundamental overlays introduces noise (a quality company can still have a
+        bad technical entry). Alpha Edge edge IS the fundamental signal.
+        """
+        is_alpha_edge = (
+            hasattr(strategy, 'metadata') and
+            isinstance(strategy.metadata, dict) and
+            strategy.metadata.get('strategy_category') == 'alpha_edge'
+        )
+
+        # ── Components shared by both paths ──────────────────────────────
 
         # 1. Walk-forward edge (max 40) — the strongest predictor
         wf_score = self._score_walkforward_edge(strategy)
 
-        # 2. Signal quality (max 25) — confidence, risk mgmt, indicator alignment
+        # 2. Signal quality (max 25)
+        #    DSL:  signal persistence (bars in condition) + R:R quality
+        #    AE:   confidence-based (genuine quality measure) + R:R quality
         signal_score = self._score_signal_quality(signal, strategy)
 
-        # 3. Regime fit (max 20) — does strategy type match current market?
+        # 3. Regime fit (max 20) — strategy type vs current market
         regime_score = self._score_regime_fit(strategy)
 
         # 4. Asset tradability (max 15) — liquidity, spread, data quality
@@ -87,43 +129,39 @@ class ConvictionScorer:
 
         total_score = wf_score + signal_score + regime_score + asset_score
 
-        # 5. Fundamental quality — direction-aware (±15 points)
-        # LONG: strong fundamentals → bonus, weak → penalty
-        # SHORT: weak fundamentals → bonus, strong → penalty (short the garbage)
-        fundamental_quality_adj = self._score_fundamental_quality(signal, fundamental_report)
-        total_score += fundamental_quality_adj
-
-        # Carry bias adjustment for forex pairs (±5 points)
-        # Positive carry = bonus for longs, penalty for shorts (and vice versa)
+        # Carry bias (±5) — forex only
         carry_adjustment = self._score_carry_bias(signal)
         total_score += carry_adjustment
 
-        # Crypto halving cycle adjustment (±5 points)
-        # Boosts during accumulation/early bull, penalizes during distribution/bear
+        # Crypto halving cycle (±5) — crypto only
         crypto_cycle_adjustment = self._score_crypto_cycle(signal)
         total_score += crypto_cycle_adjustment
 
-        # News sentiment adjustment (±1 point) — DB lookup only, never blocks
-        # 0.0 when no data yet (neutral, trade proceeds normally)
-        # Capped at ±1: Marketaux free tier returns too few articles per symbol
-        # to justify stronger conviction impact. Used as a tiebreaker only.
+        # News sentiment (±1) — stocks only, tiebreaker
         news_sentiment_adj = self._score_news_sentiment(signal)
         total_score += news_sentiment_adj
 
-        # Factor exposure adjustment (±6 points) — regime-aware factor tilt
-        # In ranging/low-vol: favor low-beta, high-quality (defensive)
-        # In trending-up: favor high-momentum, high-beta (offensive)
-        factor_adj = self._score_factor_exposure(signal, strategy)
-        total_score += factor_adj
+        # ── Alpha Edge only: fundamental + factor ────────────────────────
+        fundamental_quality_adj = 0.0
+        factor_adj = 0.0
 
-        # Normalize total score to 0-100 scale (3.4).
-        # Theoretical max = 40+25+20+15+15+5+5+1+6 = 132.
-        # (News sentiment was reduced from ±8 to ±1 — free-tier Marketaux has
-        # too few articles per symbol to justify strong conviction impact.)
-        # Without normalization, the 57 threshold means ~43% of max — semantically misleading.
-        # After normalization, 57 means "57% of maximum possible evidence".
-        THEORETICAL_MAX = 132.0
-        total_score = min(100.0, total_score * (100.0 / THEORETICAL_MAX))
+        if is_alpha_edge:
+            # Fundamental quality direction (±15): earnings/revenue/insider/ROE/buyback
+            # LONG + strong fundamentals → bonus; SHORT + weak fundamentals → bonus
+            fundamental_quality_adj = self._score_fundamental_quality(signal, fundamental_report)
+            total_score += fundamental_quality_adj
+
+            # Factor exposure (±6): beta/PE/revenue-growth regime tilt
+            factor_adj = self._score_factor_exposure(signal, strategy)
+            total_score += factor_adj
+
+        # ── Normalize to 0-100 ───────────────────────────────────────────
+        # Different theoretical maxima per path so the threshold means the same
+        # thing regardless of which engine generated the signal.
+        # DSL max:  40+25+20+15+5+5+1 = 111
+        # AE max:   40+25+20+15+15+5+5+1+6 = 132
+        theoretical_max = self._THEORETICAL_MAX_AE if is_alpha_edge else self._THEORETICAL_MAX_DSL
+        total_score = min(100.0, total_score * (100.0 / theoretical_max))
 
         breakdown = {
             'walkforward_edge': {
@@ -166,6 +204,8 @@ class ConvictionScorer:
                 'max': 6,
                 'details': {'symbol': signal.symbol},
             },
+            'scoring_path': 'alpha_edge' if is_alpha_edge else 'dsl',
+            'theoretical_max': theoretical_max,
             # Legacy keys for backward compatibility with frontend/analytics
             'signal_strength': {
                 'score': signal_score,
@@ -189,8 +229,9 @@ class ConvictionScorer:
             breakdown=breakdown
         )
 
+        path_label = "AE" if is_alpha_edge else "DSL"
         logger.info(
-            f"Conviction score for {signal.symbol}: {total_score:.1f}/100 "
+            f"Conviction score [{path_label}] for {signal.symbol}: {total_score:.1f}/100 "
             f"(wf_edge: {wf_score:.1f}, signal: {signal_score:.1f}, "
             f"regime: {regime_score:.1f}, asset: {asset_score:.1f}"
             f"{f', fundamental: {fundamental_quality_adj:+.1f}' if fundamental_quality_adj != 0 else ''}"
@@ -210,28 +251,57 @@ class ConvictionScorer:
         Sharpe 3.0 on unseen data is far more trustworthy than one at 0.3.
 
         Breakdown:
-        - OOS Sharpe ratio: 0-20 points (logarithmic — diminishing returns above 2.0)
+        - OOS Sharpe × trade-count confidence: 0-20 points
+          Multiplicative: Sharpe 3.9 on 4 trades scores the same as Sharpe 1.5
+          on 15 trades. High Sharpe on few trades is noise, not edge.
         - Win rate quality: 0-8 points (>60% is strong, >50% is acceptable)
-        - Trade count confidence: 0-7 points (more trades = more statistical significance)
         - Train/test consistency: 0-5 points (both positive = consistent edge)
+        - WF degradation penalty: 0 to -7 points
+          Extreme test-over-train outperformance (degradation < -100%) is a
+          red flag for regime luck. The strategy object stores this as
+          wf_performance_degradation (negative = test beat train).
+
+        Total max: 20 + 8 + 5 + 7 (trade count additive bonus) = 40
         """
         meta = strategy.metadata or {}
         perf = strategy.backtest_results
 
         score = 0.0
 
-        # --- OOS Sharpe (max 20) ---
+        # --- OOS Sharpe × trade-count confidence (max 20) ---
+        # Multiplicative: confidence = sqrt(min(trades, 15) / 15)
+        # At 4 trades: 0.516x  |  At 8 trades: 0.730x  |  At 15+ trades: 1.0x
+        # This prevents a Sharpe 3.9 on 4 trades from outscore Sharpe 2.5 on 20 trades.
         test_sharpe = meta.get('wf_test_sharpe', 0)
         if perf and hasattr(perf, 'sharpe_ratio'):
             test_sharpe = test_sharpe or perf.sharpe_ratio
+
+        total_trades = 0
+        if perf and hasattr(perf, 'total_trades'):
+            total_trades = perf.total_trades or 0
+
+        trade_confidence = min(1.0, math.sqrt(max(0, total_trades) / 15.0)) if total_trades > 0 else 0.0
 
         if test_sharpe and not (math.isinf(test_sharpe) or math.isnan(test_sharpe)):
             # Logarithmic scaling: Sharpe 0.5→8, 1.0→12, 2.0→17, 3.0→19, 5.0→20
             if test_sharpe > 0:
                 sharpe_pts = min(20.0, 8.0 + 6.0 * math.log(1 + test_sharpe))
             else:
-                sharpe_pts = max(0.0, 4.0 + test_sharpe * 4.0)  # Negative Sharpe → 0-4 pts
-            score += sharpe_pts
+                sharpe_pts = max(0.0, 4.0 + test_sharpe * 4.0)
+            # Apply trade-count confidence multiplier
+            score += sharpe_pts * trade_confidence
+
+        # --- Trade count additive bonus (max 7) ---
+        # Separate from the multiplicative confidence above — rewards strategies
+        # that have been tested on many trades regardless of Sharpe magnitude.
+        if total_trades >= 15:
+            score += 7.0
+        elif total_trades >= 8:
+            score += 5.0
+        elif total_trades >= 4:
+            score += 3.0
+        elif total_trades >= 2:
+            score += 1.0
 
         # --- Win rate quality (max 8) ---
         win_rate = None
@@ -246,118 +316,151 @@ class ConvictionScorer:
                 score += 4.0
             elif win_rate >= 0.40:
                 score += 2.0
-            # Below 40% win rate: 0 points (need very high R:R to compensate)
-
-        # --- Trade count confidence (max 7) ---
-        total_trades = 0
-        if perf and hasattr(perf, 'total_trades'):
-            total_trades = perf.total_trades or 0
-        if total_trades >= 15:
-            score += 7.0  # High statistical confidence
-        elif total_trades >= 8:
-            score += 5.0
-        elif total_trades >= 4:
-            score += 3.0
-        elif total_trades >= 2:
-            score += 1.0
 
         # --- Train/test consistency (max 5) ---
         train_sharpe = meta.get('wf_train_sharpe', 0)
         if train_sharpe and test_sharpe:
             both_positive = train_sharpe > 0 and test_sharpe > 0
             if both_positive:
-                # Both periods profitable — consistent edge
                 ratio = min(test_sharpe, train_sharpe) / max(test_sharpe, train_sharpe) if max(test_sharpe, train_sharpe) > 0 else 0
                 score += 2.0 + ratio * 3.0  # 2-5 points based on consistency
             elif test_sharpe > 0:
-                # Test positive but train negative — edge emerged recently
-                score += 1.0
+                score += 1.0  # Test positive but train negative — edge emerged recently
 
-        return min(40.0, score)
+        # --- WF degradation penalty (0 to -7) ---
+        # wf_performance_degradation is stored as a percentage, e.g. -371 means
+        # test Sharpe was 371% higher than train Sharpe — extreme regime luck.
+        # Penalty only fires when degradation is severe (< -100%) AND test_sharpe
+        # is high (otherwise the strategy already scored low on Sharpe).
+        # This catches the FDX pattern: WF 3.9 on 4 trades, train 0.62 → test 3.9.
+        degradation = meta.get('wf_performance_degradation')
+        if degradation is not None and test_sharpe and test_sharpe > 0:
+            try:
+                deg = float(degradation)
+                if deg < -200:
+                    score -= 7.0  # Extreme: test Sharpe 3x+ above train
+                elif deg < -100:
+                    score -= 4.0  # Significant: test Sharpe 2x+ above train
+                elif deg < -50:
+                    score -= 2.0  # Moderate: test Sharpe 1.5x above train
+            except (TypeError, ValueError):
+                pass
+
+        return min(40.0, max(0.0, score))
 
     # ─── 2. SIGNAL QUALITY (max 25 points) ──────────────────────────────
     def _score_signal_quality(self, signal: TradingSignal, strategy: Strategy) -> float:
         """
         Score the quality of the current signal.
 
-        Breakdown:
-        - Signal confidence (max 12): How strong is the technical trigger?
-        - Risk management (max 8): SL/TP defined, reasonable R:R ratio
-        - Indicator alignment (max 5): Multiple confirming conditions
+        Two paths based on strategy engine:
+
+        DSL path (indicator-based):
+        - Signal persistence (0-15): how many consecutive bars have entry conditions
+          been true? Computed by strategy_engine and stored in signal.metadata.
+          For trend-following: more bars = stronger trend confirmation.
+          For mean-reversion: 1-3 bars = fresh oversold entry (best); 6+ = stuck.
+          This replaces the old confidence sub-component which was near-constant
+          (DSL confidence is a parser artifact, not a quality measure).
+        - R:R quality (0-10): stop-loss and take-profit ratio. Weighted higher
+          than before since it's the only sub-component with real variance.
+
+        Alpha Edge path (fundamental-based):
+        - Signal confidence (0-15): genuine quality measure from the fundamental
+          scoring pipeline (analyst revision count, earnings surprise magnitude, etc.)
+        - R:R quality (0-10): same as DSL.
+
+        Max: 25 points either path.
         """
+        is_alpha_edge = (
+            hasattr(strategy, 'metadata') and
+            isinstance(strategy.metadata, dict) and
+            strategy.metadata.get('strategy_category') == 'alpha_edge'
+        )
+
         score = 0.0
 
-        # --- Signal confidence (max 12) ---
-        if hasattr(signal, 'confidence') and signal.confidence:
-            confidence = signal.confidence
+        if is_alpha_edge:
+            # ── Alpha Edge: confidence is a genuine quality measure ──────
+            if hasattr(signal, 'confidence') and signal.confidence:
+                score += min(1.0, signal.confidence) * 15.0
+        else:
+            # ── DSL: use signal persistence (bars in condition) ──────────
+            # entry_persistence is stored by strategy_engine in signal.metadata.
+            # It counts how many of the last 10 bars had the entry condition true.
+            # Strategy type determines whether persistence is good or bad:
+            #   Trend-following/breakout: more bars = stronger trend = higher score
+            #   Mean-reversion: 1-3 bars = fresh oversold (best); 6+ = stuck (bad)
+            persistence = 0
+            strategy_type = self._detect_strategy_type(strategy)
+            try:
+                meta = getattr(signal, 'metadata', None) or {}
+                persistence = int(meta.get('entry_persistence', 0))
+            except (TypeError, ValueError):
+                persistence = 0
 
-            # Regime-adjust: low-vol signals are naturally weaker but still valid
-            regime_multiplier = 1.0
-            if self.market_analyzer:
-                try:
-                    sub_regime, _, _, _ = self.market_analyzer.detect_sub_regime()
-                    regime_name = sub_regime.value if hasattr(sub_regime, 'value') else str(sub_regime)
-                    if 'low_vol' in regime_name.lower():
-                        regime_multiplier = 1.4
-                    elif 'high_vol' in regime_name.lower():
-                        regime_multiplier = 0.9
-                except Exception:
-                    pass
+            is_mean_reversion = 'mean_reversion' in strategy_type
 
-            adjusted = min(1.0, confidence * regime_multiplier)
-
-            # DSL strategies produce confidence 0.3-0.5 by design — it's a parser
-            # artifact reflecting how many conditions fired, not signal quality.
-            # WF Sharpe already captures signal quality for DSL.
-            # Use a baseline of 8/12 for any DSL signal that clears the confidence
-            # floor (0.3), scaling to 12 at confidence=1.0.
-            # Alpha Edge signals use the full linear scale (their confidence is
-            # a genuine quality measure from the fundamental scoring pipeline).
-            is_alpha_edge = (
-                hasattr(strategy, 'metadata') and
-                isinstance(strategy.metadata, dict) and
-                strategy.metadata.get('strategy_category') == 'alpha_edge'
-            )
-            if is_alpha_edge:
-                score += adjusted * 12.0
-            else:
-                # DSL: baseline 8 pts at confidence floor, scales to 12 at 1.0
-                CONFIDENCE_FLOOR = 0.3
-                if adjusted >= CONFIDENCE_FLOOR:
-                    score += 8.0 + (adjusted - CONFIDENCE_FLOOR) / (1.0 - CONFIDENCE_FLOOR) * 4.0
+            if is_mean_reversion:
+                # Fresh oversold/overbought = best entry
+                # 1 bar  → 12 pts (just fired, cleanest entry)
+                # 2-3    → 15 pts (confirmed, still fresh)
+                # 4-5    → 8 pts  (getting stale)
+                # 6+     → 3 pts  (stuck — dangerous)
+                if persistence <= 1:
+                    score += 12.0
+                elif persistence <= 3:
+                    score += 15.0
+                elif persistence <= 5:
+                    score += 8.0
                 else:
-                    score += adjusted * 12.0  # Below floor: linear (will be rejected anyway)
+                    score += 3.0
+            else:
+                # Trend-following / breakout / momentum: persistence = confirmation
+                # 1 bar  → 5 pts  (could be noise)
+                # 2-3    → 9 pts  (trend establishing)
+                # 4-6    → 12 pts (confirmed trend)
+                # 7-8    → 14 pts (strong trend)
+                # 9-10   → 15 pts (very strong trend)
+                if persistence <= 1:
+                    score += 5.0
+                elif persistence <= 3:
+                    score += 9.0
+                elif persistence <= 6:
+                    score += 12.0
+                elif persistence <= 8:
+                    score += 14.0
+                else:
+                    score += 15.0
 
-        # --- Risk management (max 8) ---
+            # Fallback: if persistence not available, use a neutral 8 pts
+            # (same as old DSL baseline) so existing strategies aren't penalised
+            # during the transition period before all signals carry the field.
+            if persistence == 0 and not meta.get('entry_persistence'):
+                score = 8.0
+
+        # ── R:R quality (0-10) — both paths ─────────────────────────────
+        # Weighted higher than before (was max 8, now max 10) since it's the
+        # only sub-component with real variance across strategies.
         has_sl = strategy.risk_params and strategy.risk_params.stop_loss_pct
         has_tp = strategy.risk_params and strategy.risk_params.take_profit_pct
 
         if has_sl and has_tp:
-            score += 5.0
-            # Bonus for good R:R ratio
             sl = strategy.risk_params.stop_loss_pct
             tp = strategy.risk_params.take_profit_pct
             if sl > 0:
                 rr = tp / sl
-                if rr >= 2.0:
-                    score += 3.0  # Excellent R:R
+                if rr >= 2.5:
+                    score += 10.0  # Excellent R:R
+                elif rr >= 2.0:
+                    score += 8.0
                 elif rr >= 1.5:
-                    score += 2.0
+                    score += 5.0
                 elif rr >= 1.0:
-                    score += 1.0
+                    score += 2.0
+                # R:R < 1.0: 0 pts (losing proposition even at 50% WR)
         elif has_sl:
             score += 3.0  # At least has downside protection
-        elif has_tp:
-            score += 1.0
-
-        # --- Indicator alignment (max 5) ---
-        entry_conditions = strategy.rules.get('entry_conditions', []) if strategy.rules else []
-        if len(entry_conditions) >= 3:
-            score += 5.0
-        elif len(entry_conditions) == 2:
-            score += 3.0
-        elif len(entry_conditions) == 1:
-            score += 1.5
 
         return min(25.0, score)
 
@@ -636,15 +739,12 @@ class ConvictionScorer:
         """
         Direction-aware fundamental quality scoring.
 
+        Alpha Edge only. DSL strategies return 0.0 — their edge is in price
+        indicators, not balance sheets. Adding fundamental overlays to DSL
+        creates noise: a quality company can still have a bad technical entry.
+
         LONG signals: strong fundamentals → up to +15, weak → down to -15
         SHORT signals: weak fundamentals → up to +15, strong → down to -15
-
-        This is the key insight: don't short quality companies, don't buy garbage.
-        A stock with earnings beats + revenue growth + insider buying is a great
-        long but a terrible short. Conversely, earnings misses + revenue decline +
-        insider selling = great short candidate.
-
-        Only applies to stocks. Forex/crypto/commodities/indices/ETFs return 0.
 
         Signals used (each contributes ±3 points):
         - Earnings surprise (beat vs miss)
@@ -653,6 +753,16 @@ class ConvictionScorer:
         - ROE quality (high vs low)
         - Share dilution (buyback vs dilution)
         """
+        # Only applies to Alpha Edge strategies
+        is_alpha_edge = (
+            hasattr(signal, 'metadata') and
+            isinstance(getattr(signal, 'metadata', None), dict) and
+            False  # checked in score_signal; this is defence-in-depth
+        )
+        # Defence-in-depth: also check strategy category via fundamental_report presence
+        # score_signal only calls this for AE, but if called directly, guard here too.
+        # We use fundamental_report as the proxy — it's only populated for AE.
+        # For DSL, fundamental_report is None (no fundamental filter runs).
         # Only applies to stocks
         sym = signal.symbol.upper().split(':')[0]
         try:
@@ -672,6 +782,87 @@ class ConvictionScorer:
             pass
 
         if not fundamental_report or not fundamental_report.fundamental_data:
+            return 0.0
+
+        fd = fundamental_report.fundamental_data
+        is_long = signal.action in (SignalAction.ENTER_LONG,)
+
+        # Raw fundamental quality score: positive = strong, negative = weak
+        raw_score = 0.0
+
+        # 1. Earnings surprise (±3)
+        if fd.earnings_surprise is not None:
+            if fd.earnings_surprise >= 0.05:
+                raw_score += 3.0
+            elif fd.earnings_surprise >= 0.01:
+                raw_score += 1.5
+            elif fd.earnings_surprise <= -0.05:
+                raw_score -= 3.0
+            elif fd.earnings_surprise <= -0.01:
+                raw_score -= 1.5
+
+        # 2. Revenue growth (±3)
+        if fd.revenue_growth is not None:
+            if fd.revenue_growth >= 0.10:
+                raw_score += 3.0
+            elif fd.revenue_growth >= 0.03:
+                raw_score += 1.5
+            elif fd.revenue_growth <= -0.05:
+                raw_score -= 3.0
+            elif fd.revenue_growth <= -0.01:
+                raw_score -= 1.5
+
+        # 3. Insider net buying (±3)
+        if fd.insider_net_buying is not None:
+            if fd.insider_net_buying >= 3:
+                raw_score += 3.0
+            elif fd.insider_net_buying >= 1:
+                raw_score += 1.5
+            elif fd.insider_net_buying <= -3:
+                raw_score -= 3.0
+            elif fd.insider_net_buying <= -1:
+                raw_score -= 1.5
+
+        # 4. ROE quality (±3)
+        if fd.roe is not None:
+            if fd.roe >= 0.20:
+                raw_score += 3.0
+            elif fd.roe >= 0.12:
+                raw_score += 1.5
+            elif fd.roe <= 0.0:
+                raw_score -= 3.0
+            elif fd.roe <= 0.05:
+                raw_score -= 1.5
+
+        # 5. Share dilution vs buyback (±3)
+        if fd.shares_change_percent is not None:
+            if fd.shares_change_percent <= -0.02:
+                raw_score += 3.0
+            elif fd.shares_change_percent <= -0.005:
+                raw_score += 1.5
+            elif fd.shares_change_percent >= 0.05:
+                raw_score -= 3.0
+            elif fd.shares_change_percent >= 0.02:
+                raw_score -= 1.5
+
+        # Direction-aware: flip the sign for shorts
+        if is_long:
+            direction_score = raw_score
+        else:
+            direction_score = -raw_score
+
+        direction_score = max(-15.0, min(15.0, direction_score))
+
+        if direction_score != 0:
+            direction_label = "LONG" if is_long else "SHORT"
+            quality_label = "strong" if raw_score > 0 else "weak" if raw_score < 0 else "neutral"
+            logger.info(
+                f"Fundamental quality for {sym} ({direction_label}): "
+                f"raw={raw_score:+.1f} ({quality_label}), "
+                f"direction_adjusted={direction_score:+.1f}"
+            )
+
+        return direction_scoreental_report or not fundamental_report.fundamental_data:
             return 0.0
 
         fd = fundamental_report.fundamental_data
@@ -953,21 +1144,28 @@ class ConvictionScorer:
     def _get_wf_details(self, strategy: Strategy) -> Dict[str, Any]:
         meta = strategy.metadata or {}
         perf = strategy.backtest_results
+        total_trades = perf.total_trades if perf and hasattr(perf, 'total_trades') else None
+        trade_confidence = round(min(1.0, math.sqrt(max(0, total_trades or 0) / 15.0)), 3) if total_trades else 0.0
         return {
             'wf_test_sharpe': meta.get('wf_test_sharpe'),
             'wf_train_sharpe': meta.get('wf_train_sharpe'),
+            'wf_performance_degradation': meta.get('wf_performance_degradation'),
             'walk_forward_validated': meta.get('walk_forward_validated', False),
-            'total_trades': perf.total_trades if perf and hasattr(perf, 'total_trades') else None,
+            'total_trades': total_trades,
             'win_rate': perf.win_rate if perf and hasattr(perf, 'win_rate') else None,
+            'trade_confidence_factor': trade_confidence,
         }
 
     def _get_signal_details(self, signal: TradingSignal, strategy: Strategy) -> Dict[str, Any]:
         entry_conditions = strategy.rules.get('entry_conditions', []) if strategy.rules else []
+        meta = getattr(signal, 'metadata', None) or {}
         return {
             'entry_conditions_count': len(entry_conditions),
             'has_stop_loss': bool(strategy.risk_params and strategy.risk_params.stop_loss_pct),
             'has_profit_target': bool(strategy.risk_params and strategy.risk_params.take_profit_pct),
             'signal_confidence': getattr(signal, 'confidence', None),
+            'entry_persistence': meta.get('entry_persistence'),
+            'strategy_type': self._detect_strategy_type(strategy),
         }
 
     # Legacy alias for backward compatibility
@@ -1094,16 +1292,16 @@ class ConvictionScorer:
             logger.debug(f"[NewsSentiment] Error scoring {sym}: {e}")
             return 0.0
 
-    # ─── FACTOR EXPOSURE (±6 points) ────────────────────────────────────
+    # ─── FACTOR EXPOSURE (±6 points) — Alpha Edge only ──────────────────
     def _score_factor_exposure(self, signal: TradingSignal, strategy: Strategy) -> float:
         """
-        Regime-aware factor tilt adjustment.
+        Regime-aware factor tilt adjustment. Alpha Edge only.
 
-        In ranging/low-vol regimes: favor low-beta, high-quality (defensive factors).
-        In trending-up regimes: favor high-momentum, high-beta (offensive factors).
+        DSL strategies return 0.0 — beta and P/E are not relevant to a price-based
+        EMA crossover or Keltner breakout strategy. The factor data would add noise.
 
-        Uses FMP fundamental data: beta (market factor), pe_ratio (value proxy),
-        revenue_growth (momentum proxy). Only applies to equity LONGs/SHORTs.
+        For Alpha Edge: in ranging/low-vol regimes favor low-beta (defensive);
+        in trending-up regimes favor high-beta, high-revenue-growth (offensive).
 
         Returns ±6 points.
         """
@@ -1146,37 +1344,32 @@ class ConvictionScorer:
             adjustment = 0.0
 
             if current_regime in ('ranging_low_vol', 'ranging', 'ranging_high_vol'):
-                # Defensive regime: reward low-beta, penalize high-beta for longs
                 if beta is not None:
                     if is_long:
                         if beta < 0.8:
-                            adjustment += 3.0   # Low-beta long in ranging = defensive, good
+                            adjustment += 3.0
                         elif beta > 1.5:
-                            adjustment -= 3.0   # High-beta long in ranging = risky
+                            adjustment -= 3.0
                     else:
                         if beta > 1.5:
-                            adjustment += 2.0   # High-beta short in ranging = good short candidate
+                            adjustment += 2.0
                         elif beta < 0.8:
-                            adjustment -= 2.0   # Shorting defensive stocks in ranging = poor
+                            adjustment -= 2.0
 
             elif current_regime in ('trending_up', 'trending_up_weak', 'trending_up_strong'):
-                # Offensive regime: reward high-momentum, high-beta for longs
                 if beta is not None and is_long:
                     if beta > 1.3:
-                        adjustment += 3.0   # High-beta long in uptrend = amplified gains
+                        adjustment += 3.0
                     elif beta < 0.7:
-                        adjustment -= 2.0   # Low-beta long in uptrend = underperforms
-
-                # Revenue growth momentum factor
+                        adjustment -= 2.0
                 if revenue_growth is not None and is_long:
                     if revenue_growth > 0.15:
-                        adjustment += 3.0   # Strong revenue growth in uptrend = momentum
+                        adjustment += 3.0
                     elif revenue_growth < 0.0:
-                        adjustment -= 2.0   # Declining revenue in uptrend = weak
+                        adjustment -= 2.0
 
-            # Value factor: extremely high P/E is a risk in any regime
             if pe_ratio is not None and pe_ratio > 60 and is_long:
-                adjustment -= 2.0   # Overvalued — higher drawdown risk
+                adjustment -= 2.0
 
             return max(-6.0, min(6.0, adjustment))
 
