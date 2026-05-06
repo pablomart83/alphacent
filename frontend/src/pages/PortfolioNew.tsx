@@ -837,48 +837,86 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       id: 'select',
       enableSorting: false,
+      size: 32,
       header: () => (
-        <div className="flex items-center justify-center">
-          <input type="checkbox" checked={filteredClosedPositions.length > 0 && selectedClosedPositions.size === filteredClosedPositions.length}
-            onChange={() => {
-              if (selectedClosedPositions.size === filteredClosedPositions.length) setSelectedClosedPositions(new Set());
-              else setSelectedClosedPositions(new Set(filteredClosedPositions.map(p => p.id)));
-            }} className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
-        </div>
+        <input type="checkbox"
+          checked={filteredClosedPositions.length > 0 && selectedClosedPositions.size === filteredClosedPositions.length}
+          onChange={() => {
+            if (selectedClosedPositions.size === filteredClosedPositions.length) setSelectedClosedPositions(new Set());
+            else setSelectedClosedPositions(new Set(filteredClosedPositions.map(p => p.id)));
+          }}
+          className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+        />
       ),
       cell: ({ row }) => (
-        <div className="flex items-center justify-center">
-          <input type="checkbox" checked={selectedClosedPositions.has(row.original.id)}
-            onChange={() => {
-              setSelectedClosedPositions(prev => {
-                const next = new Set(prev);
-                if (next.has(row.original.id)) next.delete(row.original.id);
-                else next.add(row.original.id);
-                return next;
-              });
-            }} className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer" />
-        </div>
+        <input type="checkbox"
+          checked={selectedClosedPositions.has(row.original.id)}
+          onChange={() => {
+            setSelectedClosedPositions(prev => {
+              const next = new Set(prev);
+              if (next.has(row.original.id)) next.delete(row.original.id);
+              else next.add(row.original.id);
+              return next;
+            });
+          }}
+          className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+        />
       ),
-      size: 32,
     },
     {
       accessorKey: 'symbol',
       header: 'Symbol',
+      size: 72,
       cell: ({ row }) => <div className="font-mono font-semibold text-[13px]">{row.original.symbol}</div>,
     },
     {
       accessorKey: 'strategy_name',
       header: 'Strategy',
+      size: 160,
       sortingFn: 'alphanumeric',
       cell: ({ row }) => (
-        <div className="font-mono text-xs text-muted-foreground truncate max-w-[140px]" title={row.original.strategy_name || row.original.strategy_id}>
+        <div className="font-mono text-xs text-muted-foreground truncate" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || '—'}
         </div>
       ),
     },
     {
+      accessorKey: 'side',
+      header: 'Side',
+      size: 56,
+      cell: ({ row }) => (
+        <span className={cn(
+          'px-1.5 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
+          row.original.side === 'BUY' ? 'bg-[#22c55e]/20 text-[#22c55e]' : 'bg-[#ef4444]/20 text-[#ef4444]'
+        )}>
+          {row.original.side === 'BUY' ? 'LONG' : 'SHORT'}
+        </span>
+      ),
+    },
+    {
+      accessorKey: 'entry_price',
+      header: () => <div className="text-right">Entry</div>,
+      size: 80,
+      cell: ({ row }) => (
+        <div className="text-right font-mono text-xs text-muted-foreground">
+          {formatCurrency(row.original.entry_price)}
+        </div>
+      ),
+    },
+    {
+      accessorKey: 'exit_price',
+      header: () => <div className="text-right">Exit</div>,
+      size: 80,
+      cell: ({ row }) => (
+        <div className="text-right font-mono text-xs text-muted-foreground">
+          {row.original.exit_price ? formatCurrency(row.original.exit_price) : '—'}
+        </div>
+      ),
+    },
+    {
       accessorKey: 'realized_pnl',
-      header: () => <div className="text-right">Realized P&L</div>,
+      header: () => <div className="text-right">P&L</div>,
+      size: 96,
       cell: ({ row }) => (
         <div className="text-right">
           <div className={cn('font-mono font-semibold text-[13px]', row.original.realized_pnl >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]')}>
@@ -893,9 +931,10 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'holding_time_hours',
       header: () => <div className="text-right">Hold</div>,
+      size: 56,
       cell: ({ row }) => (
         <div className="text-right text-xs text-muted-foreground font-mono">
-          {row.original.holding_time_hours < 24 
+          {row.original.holding_time_hours < 24
             ? `${row.original.holding_time_hours.toFixed(1)}h`
             : `${(row.original.holding_time_hours / 24).toFixed(1)}d`}
         </div>
@@ -903,16 +942,31 @@ export const PortfolioNew: FC<PortfolioNewProps> = ({ onLogout }) => {
     },
     {
       accessorKey: 'exit_reason',
-      header: 'Exit',
+      header: 'Exit Reason',
+      size: 180,
       sortingFn: 'alphanumeric',
-      cell: ({ row }) => <div className="text-xs text-muted-foreground">{row.original.exit_reason || 'N/A'}</div>,
+      cell: ({ row }) => {
+        const reason = row.original.exit_reason || '—';
+        // Show a clean short label; full text on hover
+        const shortLabel = reason.length > 40 ? reason.slice(0, 40) + '…' : reason;
+        return (
+          <div className="text-xs text-muted-foreground truncate" title={reason}>
+            {shortLabel}
+          </div>
+        );
+      },
     },
     {
       accessorKey: 'closed_at',
       header: () => <div className="text-right">Closed</div>,
+      size: 140,
       sortingFn: (rowA, rowB) =>
         new Date(rowA.original.closed_at).getTime() - new Date(rowB.original.closed_at).getTime(),
-      cell: ({ row }) => <div className="text-right text-xs text-muted-foreground whitespace-nowrap font-mono">{formatTimestamp(row.original.closed_at)}</div>,
+      cell: ({ row }) => (
+        <div className="text-right text-xs text-muted-foreground whitespace-nowrap font-mono">
+          {formatTimestamp(row.original.closed_at)}
+        </div>
+      ),
     },
   ];
 
