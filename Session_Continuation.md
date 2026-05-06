@@ -15,7 +15,147 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 5, 2026, ~18:15 UTC, post orphan-position P0 fix)
+## Current System State (May 6, 2026, ~12:30 UTC, post performance + UI session)
+
+- **Equity:** ~$484K
+- **Open positions:** 60
+- **Active strategies:** 54
+- **Mode:** eToro DEMO
+- **Market regime:** `trending_up_strong` (83% confidence)
+
+**Health:**
+- errors.log: pre-existing 21:52 UTC cancel-404 entries (historical). Zero new errors.
+- FRED 500 at 19:30 UTC — third-party transient, fail-open
+- Service healthy post all restarts
+
+**Last commits on main (newest first):**
+- `ff1da95` fix: sparkline null check crash — curve.length on undefined
+- `851be83` feat: Strategies Active/Backtested — remove description column + row click to detail
+- `76c2cd2` fix: Portfolio Closed tab — dense columns matching Open tab
+- `10b4bd3` fix: Orders badge truncation + Strategies description single-line
+- `7a59cc1` fix: Orders table column widths — fix badge truncation
+- `449ae8e` fix: Orders table density + column sizing to match Portfolio Open tab style
+- `815e9e6` feat: Cycle History as proper DataTable + CycleIntelligencePanel table upgrade
+- `8d891b7` fix: virtualised table alignment + remove all remaining data limits site-wide
+- `d0dfad3` perf: virtualised tables + remove all data limits site-wide
+- `38269ab` perf: strategies slim mode + dedup + nginx 404 fix
+- `214f9ef` feat: conviction-tier sizing + Triple EMA fix + 4H ATR floor widen
+- `8bd008e` feat: Settings Autonomous tab — Card 11 + schedule + advanced_readonly expansion
+- `c0823ee` chore: disable deploy-guard hook + update session continuation
+- `d0d6d7d` fix: P0 orphan-position bug — cancel-404 mis-classification + sync-path relink
+
+---
+
+## Session shipped 2026-05-06 — Performance optimisations + UI consistency pass
+
+### Sprint 1 — Backend performance
+
+**nginx gzip** — all gzip directives were commented out. Enabled `gzip_vary`, `gzip_proxied`, `gzip_comp_level 6`, `gzip_types` covering JS/CSS/JSON. Initial load reduced from ~1.8MB to ~435KB (4×). Static assets already had `Cache-Control: immutable`.
+
+**Strategies slim mode** (`src/api/routers/strategies.py`):
+- Added `?slim=true` query param (default false). Skips SPY price series query (was fetching thousands of rows from `historical_price_cache` on every list request), deployed capital, rules, reasoning, walk_forward_results.
+- Reduces response from ~57KB to ~8KB for 200 strategies.
+- Frontend `getStrategies()` now defaults `slim=true` and wraps in `dedupedGet()` with 800ms TTL — simultaneous calls from multiple components collapse to one HTTP request.
+
+**Remove all data limits** — every endpoint that had a hardcoded limit now returns everything:
+- `get_closed_positions`: limit=0 default (was 100). `total_count` now reports real DB count (was `len(slice)`).
+- `get_orders`: limit=0 default (was 1000). `total_count` was already correct.
+- `get_autonomous_cycles`: limit=0 default (was 20). Returns all 90 cycles.
+- `getRecentSignals`: limit=0 default (was 100).
+- Frontend `getClosedPositions`, `getOrders`, `getRecentSignals`, `getAutonomousCycles` all default to no limit.
+
+**nginx 404 on `/autonomous`** — `autonomous` removed from exact-match backend proxy regex. It's a frontend SPA route, not an API endpoint. Sub-paths like `/autonomous/cycle` still proxied.
+
+### Sprint 2 — Virtualised DataTable
+
+**`DataTable.tsx`** upgraded with `virtualise` prop:
+- When `virtualise=true`, uses `@tanstack/react-virtual` (already installed) with spacer-row pattern (not `position:absolute` which breaks table layout).
+- `table-layout: fixed` + `colgroup` with explicit `size` per column ensures header/body alignment.
+- `onRowClick` prop added — clicking a row calls `onRowClick(row.original)`. Used for strategy detail dialogs.
+- All existing callers unchanged (paginated by default).
+
+**Applied virtualisation:**
+- Portfolio Closed tab: all 730 positions, virtualised
+- Orders page: all 1,414 orders, virtualised
+- Analytics trade journal: virtualised via `TradeJournalTable` sub-component
+- Autonomous Cycle History (Walk-Forward tab): `DataTable` with virtualisation above 30 rows
+
+### Sprint 3 — UI consistency pass
+
+**Portfolio Closed tab** — complete column rewrite to match Open tab:
+- Added: Side badge (LONG/SHORT), Entry price, Exit price
+- Fixed: Exit Reason was unwrapped paragraph blowing up row height → single truncated line with hover tooltip
+- All columns have explicit `size` for correct alignment
+
+**Orders page** — column sizing and ordering:
+- Checkbox column: `size: 32` (removes blank space before Symbol)
+- Side: 64px, Action: 80px, Status: 96px, Source: 80px, Time: 148px — badges no longer truncate
+- Status moved right after Action (was buried after Source)
+
+**Strategies Active + Backtested tabs:**
+- Description column removed (was 260px, forcing horizontal scroll, hiding all metric columns)
+- Row click opens existing Strategy Details dialog (same comprehensive popup as DSL Templates: entry/exit rules, WF results, performance metrics, fundamental data, conviction score, live positions)
+- Description still fully visible in the detail dialog
+
+**Strategies description column** — all three tabs (Active, Backtested, Retired): `truncate` + `title` + `size: 260` added. Was unwrapped paragraph blowing up row height.
+
+**Autonomous Cycle History (Control tab)** — replaced `CycleHistoryRow` card list with `DataTable`. Columns: checkbox, When, Duration, Proposals, BT pass/total, Activated, Retired, Avg Sharpe, WR%, Status. All 90 cycles load.
+
+**CycleIntelligencePanel** — compact right-panel table upgraded from `div`-grid to proper `<table>` with `table-layout: fixed`, sticky header, alternating rows. Shows 20 cycles (was 8).
+
+**Settings Autonomous tab** — Card 11 (Position Sizing Controls) added:
+- Drawdown sizing (enabled, threshold_5pct, threshold_10pct, lookback_days)
+- Conviction-tier sizing (enabled, multiplier_score_75, multiplier_score_80)
+- Vol scaling bounds (min_scale, max_scale, max_symbol_pct, sector_soft_cap_pct)
+- Rejection blacklist (threshold, cooldown_days)
+- Card 1 extended: Cycle Schedule (day_of_week, hour, minute, WF parallel workers)
+- Advanced/System read-only block: Live Market Regime, Backtest Bounds, Regime Detection params
+
+### Sprint 4 — Trading logic (shipped earlier in session)
+
+**A — Conviction-tier position sizing** (`risk_manager.py` Step 10c):
+- score ≥80 → 1.30× size | score 75-79 → 1.15× | <75 → 1.0× (baseline)
+- Applied after all penalty/cap steps. Hard-capped at symbol_cap and available_balance.
+- Configurable via `autonomous_trading.yaml` `position_management.conviction_tier_sizing`
+
+**B — Triple EMA Alignment DSL fix** (`strategy_proposer.py`):
+- `_apply_parameters_to_condition`: positional substitution — slow→EMA(50), mid→EMA(20), fast→EMA(10)
+- Was collapsing `EMA(10) > EMA(20) > EMA(50)` to `EMA(10) > EMA(10) > EMA(30)` (always false, 0 trades)
+
+**D — 4H ATR stop floor 1.5× → 2.0×** (`order_executor.py`):
+- 4H strategies: 2.0× ATR (was 1.5×). Daily strategies unchanged at 1.5×.
+- Matches TSL trail multiplier for stocks. Position sizer scales down proportionally.
+
+**C — SHORT hard-gate deferred**: only 4 regime-tagged trades in 30 days. Insufficient data.
+
+### Files changed this session (key files)
+
+**Backend:**
+- `src/api/routers/strategies.py` — slim mode
+- `src/api/routers/account.py` — remove closed positions limit, fix total_count
+- `src/api/routers/orders.py` — remove orders limit
+- `src/api/routers/control.py` — remove cycles limit
+- `src/api/routers/config.py` — Settings Card 11 + advanced_readonly expansion
+- `src/risk/risk_manager.py` — conviction-tier sizing (Step 10c)
+- `src/strategy/strategy_proposer.py` — Triple EMA positional substitution fix
+- `src/execution/order_executor.py` — 4H ATR floor 2.0×
+- `deploy/nginx-alphacent.conf` — remove autonomous from exact-match proxy
+- `/etc/nginx/nginx.conf` (EC2 only) — gzip enabled
+
+**Frontend:**
+- `frontend/src/components/trading/DataTable.tsx` — virtualise prop + onRowClick
+- `frontend/src/components/trading/TradingCyclePipeline.tsx` — Cycle History as DataTable
+- `frontend/src/components/CycleIntelligencePanel.tsx` — proper table, 20 cycles
+- `frontend/src/pages/PortfolioNew.tsx` — closed tab columns, remove limit
+- `frontend/src/pages/OrdersNew.tsx` — column sizing, virtualised
+- `frontend/src/pages/AnalyticsNew.tsx` — trade journal virtualised
+- `frontend/src/pages/StrategiesNew.tsx` — remove description col, row click, sparkline fix
+- `frontend/src/pages/AutonomousNew.tsx` — cycle history DataTable, remove limits
+- `frontend/src/pages/SettingsNew.tsx` — Card 11 + advanced_readonly
+- `frontend/src/services/api.ts` — slim=true default, dedupedGet, remove all limits
+- `scripts/recover_orphan_positions.py` — one-shot orphan recovery
+
+---
 
 - **Equity:** ~$474K
 - **Open positions:** 69 (5 previously orphaned now re-linked to real strategies)
@@ -779,17 +919,26 @@ Log hygiene post-2026-05-03 evening: errors.log clean, warnings.log at signal-to
 
 ### Deferred / still open
 
-- **Conviction-floor two-factor gate** (P0 next session): the 65 conviction floor is correctly killing low-edge broad-market entries (XLK/SPY/TQQQ repeatedly scoring 60-64 in a trending_up_strong regime with wf_edge 23-27/40 — right decision). But the same binary threshold also clips edge-case single-stock entries at 64.5-64.8 where WF quality is genuinely good (MU × Keltner 64.6, UNH × 4H ADX 64.6, ROST × 4H VWAP 64.8). These are real setups the system is missing by 0.2-0.5 points. Proper fix: two-factor gate `score ≥ 65 OR (score ≥ 62 AND wf_edge ≥ 32 AND persistence ≥ 9/10)` — lets through high-quality boundary cases without opening the door to weak-WF broad-market noise. Design session first, then implement. 2-4 hours total. Details in next-session kickoff prompt.
-- **Triple EMA Alignment DSL bug** (P1): `EMA(10) > EMA(10)` tautology from regex param collapse in `strategy_proposer.customize_template_parameters`. ~30 min fix to add explicit positional-EMA-period handling.
-- **WF bypass-path tightening for LONG** (P1): primary + test-dominant paths admit regime-luck on LONG side. Consider `(test_sharpe - train_sharpe) ≤ 1.5` consistency gate. SHORT already tightened (Sprint 1).
-- **Cross-cycle signal dedup for market-closed deferrals** (P1): entry-order 82% FAILED rate is cosmetic — market-closed deferrals re-fire each cycle. 30-min TTL map on `(strategy_id, symbol, direction)` in trading_scheduler.
-- **trade_id convention unification** (P2): `log_entry` uses `position.id`; `log_exit` uses order UUID. Migrate `order_monitor.check_submitted_orders` to `position.id`.
-- **Sector Rotation + Pairs Trading template rewrites** (P2): both structurally broken. Design-first, then rewrite.
+### Deferred / still open
+
+- **Conviction-floor two-factor gate** (P1): `score ≥ 65 OR (score ≥ 62 AND wf_edge ≥ 32 AND persistence ≥ 9/10)`. Needs 2-3 more weeks of conviction_score data before implementing. Design session first.
+- **SHORT hard-gate in trending_up_strong** (P1 deferred): only 4 regime-tagged trades in 30 days — insufficient data. Revisit after 2-3 weeks of clean regime data.
+- **4H template audit** (P1-E): 4H ADX stop-width fix shipped (D). Need to audit which 4H templates are bleeding signal quality vs stop-width after D has run for a few cycles.
+- **Triple EMA Alignment DSL bug** ✅ SHIPPED
+- **WF test-dominant path admits regime-luck on LONG** (P1): add `(test_sharpe - train_sharpe) ≤ 1.5` consistency gate. SHORT already tightened.
+- **Cross-cycle signal dedup for market-closed deferrals** (P1): 30-min TTL map on `(strategy_id, symbol, direction)` in trading_scheduler.
+- **NATGAS 1h stale** (P1): add to explicit-blocked set in fmp_ohlc.py or confirm Yahoo-only.
+- **trade_id convention unification** (P2): `log_entry` uses `position.id`; `log_exit` uses order UUID.
+- **Sector Rotation + Pairs Trading template rewrites** (P2): both structurally broken. Design-first.
 - **Monday Asia Open template** (P2): needs DSL `HOUR()` primitive.
-- **On-chain metrics** (P1, Sprint 4): BTC dominance, stablecoin supply momentum. `ONCHAIN("metric", lookback_days)` DSL primitive. CoinGecko + DeFi Llama free tiers to start.
-- **Forex on-demand via new `fmp_ohlc` client**: the legacy `_fetch_historical_from_fmp` path for forex 1d still uses the dead v3 `historical-price-full` endpoint — returns empty, falls through. Not breaking anything; cleanup task only; ~15 min.
-- **Overview chart panel rewrite** (P2): 3 chart components with misaligned axes; design-first.
-- **Commodity 1h coverage expansion** (P3): if FMP Starter upgrade is ever considered, OIL/COPPER/NATGAS 1h would become WF-validateable with their full 5y history. Until then, 4h is the minimum viable intraday for commodities.
+- **ONCHAIN DSL primitive** (P1): BTC dominance, stablecoin supply. CoinGecko + DeFi Llama.
+- **Overview chart panel rewrite** (P2): 3 chart components with misaligned axes.
+- **CI/CD hardening** (P2).
+- **Commodity 1h coverage** (P3): blocked on FMP Starter upgrade.
+- **Forex 1d legacy FMP path cleanup** (P3): ~15 min cleanup task.
+- **SignalDecisionLogORM table drop** (P3): scheduled 2026-06-03 (T+30d from 2026-05-04).
+- **Score-vs-P&L monitor** (P1): daily cron grouping trades by conviction bucket, flagging monotonicity violations. NOW that write path is armed. ~2h work.
+- **GET /strategies 422** (pre-existing): some component calls `/strategies` without `mode` param. Not causing crashes but logs 422. Needs investigation.
 
 ---
 
