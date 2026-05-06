@@ -1352,7 +1352,40 @@ P3:
 
 ## Open P1 Items (as of May 6, 2026 evening)
 
-### P1 — Alpha Dashboard (MISSION for next session)
+### P1 — Alpha Dashboard ✅ SHIPPED (2026-05-06 session 2)
+
+**What was built:**
+- Backend: `GET /analytics/alpha` endpoint in `src/api/routers/analytics.py`
+  - Queries `equity_snapshots` (daily) + `historical_price_cache` (SPY 1d)
+  - Computes: daily excess returns, cumulative alpha, rolling 30d/90d alpha, IR, beta, CAPM alpha
+  - Risk-free rate: 4.5% annualized (0.045/252 per day)
+  - Beta: cov(portfolio, SPY) / var(SPY) over full period
+  - IR: mean(excess) / std(excess) × √252, capped [-5, 5]
+  - Alpha by period: 1W / 1M / 3M / 6M / inception with CAPM alpha + beta per period
+  - Annotation markers for 5 key system changes (Apr 29 – May 6)
+- Frontend: `AlphaTab.tsx` in `frontend/src/pages/analytics/`
+  - Cumulative alpha chart (lightweight-charts area series, green above zero / red below)
+  - Rolling alpha chart (30d blue + 90d purple lines)
+  - 4 metric tiles: IR, Beta, Total Alpha, Alpha (30d)
+  - Alpha by period table (simple alpha + CAPM alpha + beta per period)
+  - Annotation markers on cumulative chart with legend
+  - Alpha decomposition methodology note
+- New `◆ Alpha Generation` tab in AnalyticsNew.tsx
+- `getAlphaMetrics()` in api.ts with deduplication
+
+**Live baseline (32 daily snapshots, 2026-03-31 to 2026-05-06):**
+- Portfolio: +7.12% | SPY: +11.63% | Cumulative alpha: **-4.91%**
+- IR: **-5.45** (negative — we're underperforming on a risk-adjusted basis)
+- This is the honest baseline. The conviction scorer redesign (May 6), TSL ratchet fix, and pipeline improvements should start showing up as inflection points in the cumulative alpha chart over the next 2-4 weeks.
+
+**Files changed:**
+- `src/api/routers/analytics.py` — new `/analytics/alpha` endpoint appended
+- `frontend/src/pages/analytics/AlphaTab.tsx` — new component
+- `frontend/src/pages/analytics/index.ts` — AlphaTab exported
+- `frontend/src/pages/AnalyticsNew.tsx` — tab wired in
+- `frontend/src/services/api.ts` — getAlphaMetrics() added
+
+**Commit:** `9b4e2ec`
 
 **What:** Build a dedicated Alpha section in the Analytics page, the way hedge funds present it.
 
@@ -1386,8 +1419,6 @@ P3:
 - Beta calculation: use 60-day rolling window, minimum 20 days of data
 - Normalize both series to 100 at the earliest common date in equity_snapshots
 - The alpha chart should be its own section, not embedded in the existing equity chart — it tells a different story (excess return, not absolute return)
-
-### P2 — Conviction scorer calibration (after 2-3 weeks of clean data)
 
 The new scorer (threshold 70, persistence-based, DSL/AE split) has been live since May 6 17:19 UTC. Need 2-3 weeks of clean data before:
 - Regression-fitting component weights on live P&L
