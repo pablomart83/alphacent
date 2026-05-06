@@ -15,34 +15,109 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 6, 2026, ~12:30 UTC, post performance + UI session)
+## Current System State (May 6, 2026, ~20:15 UTC, post conviction scorer + pipeline audit session)
 
-- **Equity:** ~$484K
-- **Open positions:** 60
-- **Active strategies:** 54
+- **Equity:** ~$491K
+- **Open positions:** 68 (includes 10 opened during broken scorer window 17:07-17:19 UTC — all have SL/TP, being managed normally)
+- **Active strategies:** 54 DEMO + 33 BACKTESTED
+- **Balance (free cash):** ~$31K (portfolio nearly fully deployed)
 - **Mode:** eToro DEMO
-- **Market regime:** `trending_up_strong` (83% confidence)
+- **Market regime:** `trending_up_strong` (83-85%)
 
 **Health:**
-- errors.log: pre-existing 21:52 UTC cancel-404 entries (historical). Zero new errors.
-- FRED 500 at 19:30 UTC — third-party transient, fail-open
+- errors.log: clean since May 5 19:30 UTC. Zero new errors.
+- Conviction scorer: running correctly at threshold 70, DSL/AE split, persistence-based signal quality
 - Service healthy post all restarts
 
 **Last commits on main (newest first):**
-- `ff1da95` fix: sparkline null check crash — curve.length on undefined
-- `851be83` feat: Strategies Active/Backtested — remove description column + row click to detail
-- `76c2cd2` fix: Portfolio Closed tab — dense columns matching Open tab
-- `10b4bd3` fix: Orders badge truncation + Strategies description single-line
-- `7a59cc1` fix: Orders table column widths — fix badge truncation
-- `449ae8e` fix: Orders table density + column sizing to match Portfolio Open tab style
-- `815e9e6` feat: Cycle History as proper DataTable + CycleIntelligencePanel table upgrade
-- `8d891b7` fix: virtualised table alignment + remove all remaining data limits site-wide
-- `d0dfad3` perf: virtualised tables + remove all data limits site-wide
-- `38269ab` perf: strategies slim mode + dedup + nginx 404 fix
-- `214f9ef` feat: conviction-tier sizing + Triple EMA fix + 4H ATR floor widen
-- `8bd008e` feat: Settings Autonomous tab — Card 11 + schedule + advanced_readonly expansion
-- `c0823ee` chore: disable deploy-guard hook + update session continuation
-- `d0d6d7d` fix: P0 orphan-position bug — cancel-404 mis-classification + sync-path relink
+- `39bb2a1` fix: regime multiplier cap + confidence floor 0.50→0.30 + min order 5K→2K
+- `3b6bd21` fix: interval filter — 1D strategies run every cycle, not just at midnight
+- `14d3b1d` fix: conviction_scorer syntax error — remove orphaned old function body
+- `04923a5` feat: conviction scorer redesign — DSL/AE split + persistence + WF confidence
+- `0d4aa7f` fix: TSL ratchet freeze + 4H/1D interval filter + OIL/COPPER 1H exclusion
+- `a8ceacd` docs: update session continuation — 2026-05-06 performance + UI session
+
+---
+
+## Session shipped 2026-05-06 (evening) — Conviction scorer redesign + pipeline audit + fixes
+
+### Sprint 1 — TSL ratchet freeze (P0)
+
+**Root cause:** `_compute_effective_trail_distance` used ATR floor unconditionally. For high-ATR instruments (SOXL 4H ATR ~9.8%), the ATR-floor-based stop was *below* the current ratchet position, so `_is_favourable_move` returned False and the trail never advanced. SOXL was +19% with stop frozen at +11.4% above entry.
+
+**Fix:** `_compute_effective_trail_distance` now accepts `current_stop` param. When the ratchet is already ahead of the ATR-floor-based stop, falls back to `fixed_distance_pct` for the advance. ATR floor still applies for initial placement. Verified: `trail=3 db_updated=3` on first post-deploy cycle.
+
+### Sprint 2 — Cross-interval signal churn (P1)
+
+**Root cause:** 1H signal loop evaluated ALL strategies every 30 min regardless of interval. 4H strategies entered mid-bar, then exited 5 minutes later when the same 4H bar's EMA reversed. GOOGL 4H EMA Ribbon opened/closed 5 times in 2 days.
+
+**Fix:** Interval filter in `run_signal_generation_sync`:
+- 4H strategies: only at UTC bar boundaries (0/4/8/12/16/20)
+- 1D strategies: every cycle (daily bar is already closed — yesterday's close is final, signal valid all day)
+- 1H strategies: every cycle
+- Strategies with open positions: always run (exit signals must fire promptly)
+- `strategy_ids` override: skips filter (autonomous cycle Stage 8)
+
+**Later fix:** Initial implementation incorrectly restricted 1D to midnight only. Corrected — 1D runs every cycle.
+
+### Sprint 3 — OIL/COPPER 1H exclusion (root cause fix)
+
+**Root cause:** `DAILY_ONLY_SYMBOLS` only contained LME metals. OIL and COPPER have no 1H data on FMP Starter but do have 4H data. Generic 1H templates (Opening Range Breakout, Intraday Momentum Burst) were getting OIL/COPPER in their watchlists.
+
+**Fix:** Added `NO_1H_SYMBOLS = {OIL, COPPER}` to `symbol_mapper.py`. Guards added at all three phases of `_build_watchlists`, `_match_templates_to_symbols`, and `generate_strategies_from_templates`. `market_data_manager` FMP-blocked early return is defence-in-depth.
+
+### Sprint 4 — Conviction scorer redesign (major)
+
+**Architecture split — DSL vs Alpha Edge:**
+- DSL strategies: pure quantitative evidence (WF edge, signal persistence, regime, liquidity). Theoretical max 111 pts.
+- Alpha Edge: same + fundamental quality direction (±15) + factor exposure (±6). Theoretical max 132 pts.
+- Rationale: DSL edge lives in price indicators. Fundamental overlays add noise (LRCX: strong fundamentals, 5 consecutive losing DSL trades).
+
+**WF edge — multiplicative trade-count confidence:**
+- `sharpe_pts × sqrt(min(trades,15)/15)` — Sharpe 3.9 on 4 trades: 19.4 × 0.516 = 10.0 pts (was 19.4)
+- Added `wf_performance_degradation` penalty: deg < -200% → -7 pts, < -100% → -4 pts, < -50% → -2 pts
+- Fixes FDX pattern: WF 3.9/4 trades, train 0.62, degradation -371% → now correctly blocked
+
+**Signal quality — persistence replaces dead confidence:**
+- `entry_persistence` from `signal.metadata` (bars in condition, already computed by strategy_engine)
+- Trend-following: 1 bar=5pts, 3 bars=9pts, 6 bars=12pts, 9+ bars=15pts
+- Mean-reversion: 1 bar=12pts (fresh oversold = best entry), 2-3 bars=15pts, 4-5 bars=8pts, 6+ bars=3pts
+- R:R quality: max 10pts (was 8), R:R ≥ 2.5=10, ≥ 2.0=8, ≥ 1.5=5, ≥ 1.0=2
+
+**Threshold raised: 65 → 70.** 65-70 bucket: -$8.25 avg P&L, 55% WR (negative EV). 70+ bucket: +$59 avg P&L, 60% WR.
+
+**Syntax error incident:** `strReplace` left orphaned old function body → `SyntaxError` at import time → scorer failed to load → `except` block in `strategy_engine` continued with **unfiltered signals** for 6 minutes 26 seconds (17:09:31–17:15:57 UTC). 10 positions opened without conviction scoring. All have SL/TP and are being managed normally. Fixed immediately.
+
+### Sprint 5 — Pipeline audit + three fixes
+
+**Regime multiplier symbol cap (trading_scheduler):**
+- `trending_up_strong` 1.25× multiplier applied after risk manager's cap checks
+- DJ30: risk manager validated $24K, multiplier produced $30K (6.25% of equity, above 5% cap)
+- Fix: re-check symbol concentration headroom after applying multiplier, clip to cap
+
+**Confidence floor 0.50 → 0.30 (risk_manager):**
+- DSL confidence is a persistence artifact, not a quality signal
+- 121 blocks/24h were signals that would have been blocked by conviction scoring anyway
+- Lowering to 0.30 allows mean-reversion fresh-entry signals (persistence=1, confidence=0.36) to reach conviction scoring where they're properly evaluated
+
+**Minimum order size $5K → $2K (risk_manager + order_executor):**
+- At $488K equity, $5K = 1.02% per trade — too aggressive for vol-penalised signals
+- $2K = 0.41% of equity, still meaningful, above eToro's $10 minimum
+- Penalty logic preserved: penalised signals below $2K still return 0
+
+### Key architectural decisions this session
+
+1. **1D strategies run every cycle** — daily bar is already closed (yesterday's close is final). Running every 55 min catches intraday price moves that satisfy the daily condition. The conviction scorer's persistence component discounts fresh signals (persistence=1 → 5pts for trend-following). No hard gate needed.
+
+2. **Fundamentals removed from DSL conviction scoring** — DSL edge is in price indicators. Fundamental overlays (earnings, ROE, insider buying) add noise for price-based strategies. Alpha Edge keeps fundamentals because the edge IS the fundamental signal.
+
+3. **Conviction scorer is now a proper two-path system** — not a single formula with dead components. DSL path: WF edge (real variance) + persistence (real variance) + regime (binary but correct) + liquidity (4 tiers). Alpha Edge path: same + fundamentals + factor exposure.
+
+### Known issues from this session
+
+- **10 positions opened during broken scorer window (17:07-17:19 UTC):** All have SL/TP, being managed by TSL. P&L: mostly flat to small positive. No action needed.
+- **DJ30 $30K position:** Opened during broken window, regime multiplier cap fix now deployed. Position has SL at 47,322 (5% below entry). Being managed normally.
+- **AMZN 7.24% concentration:** Pre-dates pending-exposure fix. Both positions profitable (+$928, +$950). No new AMZN entries allowed (symbol limit gate blocking). Monitor for exit.
 
 ---
 
@@ -1271,3 +1346,72 @@ P3:
 - `CREATE TABLE signal_decisions (...)` with 5 indexes
 - `ALTER TABLE autonomous_cycle_runs ADD COLUMN proposals_pre_wf INTEGER;`
 - (From today's FMP integration) no schema changes — `historical_price_cache` already supported multi-source via the `source` VARCHAR column.
+
+
+---
+
+## Open P1 Items (as of May 6, 2026 evening)
+
+### P1 — Alpha Dashboard (MISSION for next session)
+
+**What:** Build a dedicated Alpha section in the Analytics page, the way hedge funds present it.
+
+**Why:** Alpha changes over time — especially after our continuous improvements to the conviction scorer, WF thresholds, and pipeline. We need to see whether our changes are actually generating alpha vs just riding the market. The current equity chart shows portfolio vs SPY visually but doesn't surface the number or its evolution.
+
+**What hedge funds show:**
+1. **Cumulative alpha chart** — portfolio return minus SPY return, rebased to 0 at inception. Shows alpha accumulation over time. Periods where the line rises = we're beating the market. Periods where it falls = we're underperforming. Inflection points should correlate with our system improvements.
+2. **Rolling alpha** — 30d and 90d rolling windows. Answers "are we generating alpha *right now* or just historically?" Critical for detecting regime changes and scorer drift.
+3. **Information Ratio** — mean(daily excess returns) / std(daily excess returns) × √252. The risk-adjusted alpha measure. IR > 0.5 is good, > 1.0 is excellent for a systematic fund.
+4. **Beta** — our portfolio's sensitivity to SPY moves. We want β < 1.0 (we're not just leveraged SPY). Computed as cov(portfolio_returns, spy_returns) / var(spy_returns).
+5. **Alpha decomposition** — how much of our return is explained by β × SPY vs genuine stock-picking / timing alpha. α = portfolio_return - β × spy_return - risk_free_rate.
+6. **Alpha by period** — table showing alpha for 1W, 1M, 3M, 6M, since inception. Lets us see if recent improvements are showing up.
+
+**Data we already have:**
+- `equity_snapshots` table: daily portfolio equity (snapshot_type='daily')
+- `historical_price_cache`: SPY daily closes (symbol='SPY', interval='1d')
+- `GET /analytics/spy-benchmark` endpoint: already serves SPY data
+- `PortfolioEquityChart` already normalizes both to same start and plots them
+
+**What needs building:**
+- Backend: new `/analytics/alpha` endpoint that computes all metrics above from equity_snapshots + SPY cache. Returns: daily_alpha series, rolling_30d_alpha, rolling_90d_alpha, information_ratio, beta, alpha_by_period table.
+- Frontend: new "Alpha Generation" section in AnalyticsNew.tsx with:
+  - Cumulative alpha chart (lightweight-charts, area series, green above zero / red below)
+  - Rolling alpha chart (30d + 90d lines)
+  - Metric tiles: IR, Beta, Total Alpha, Alpha (30d)
+  - Alpha by period table (1W / 1M / 3M / 6M / inception)
+  - Annotation markers for major system changes (conviction scorer redesign, WF threshold changes) so we can see if improvements translated to alpha
+
+**Implementation notes:**
+- Risk-free rate: use 4.5% annualized (current Fed funds rate proxy) = 0.045/252 per day
+- Beta calculation: use 60-day rolling window, minimum 20 days of data
+- Normalize both series to 100 at the earliest common date in equity_snapshots
+- The alpha chart should be its own section, not embedded in the existing equity chart — it tells a different story (excess return, not absolute return)
+
+### P2 — Conviction scorer calibration (after 2-3 weeks of clean data)
+
+The new scorer (threshold 70, persistence-based, DSL/AE split) has been live since May 6 17:19 UTC. Need 2-3 weeks of clean data before:
+- Regression-fitting component weights on live P&L
+- Checking if 70-75 bucket is positive EV (currently +$59 avg, 60% WR — too small sample)
+- Considering whether to raise threshold further or adjust persistence thresholds
+
+### P3 — Score-vs-P&L monitor (existing P1 #1)
+
+Daily cron grouping trades by conviction bucket, flagging monotonicity violations. Now that the scorer is redesigned and data is accumulating cleanly, this is the right time to build it. ~2h.
+
+### P4 — WF test-dominant path regime-luck gate for LONG (existing P1 #2)
+
+Add `(test_sharpe - train_sharpe) ≤ 1.5` consistency check to the test-dominant bypass path. SHORT side already tightened. LONG still loose.
+
+### P5 — Cross-cycle signal dedup (existing P1 #3)
+
+30-min TTL map on (strategy_id, symbol, direction) in trading_scheduler. Would have prevented the 4× GOOGL retry loop on May 5. ~1h.
+
+### P6 — GET /strategies 422 (existing P1 #5)
+
+Some component calls /strategies without mode param. Investigate and fix.
+
+### Known issues to monitor
+
+- **AMZN 7.24% concentration** — pre-dates pending-exposure fix. Both positions profitable. No new entries allowed. Monitor for exit.
+- **10 positions from broken scorer window** — all have SL/TP. Being managed by TSL. No action needed unless one hits SL.
+- **Conviction scorer threshold 70** — new as of today. Watch the 70-75 bucket P&L over next 2 weeks. If still negative EV, raise to 72.
