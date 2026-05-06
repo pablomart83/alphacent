@@ -36,6 +36,8 @@ interface DataTableProps<TData, TValue> {
   virtualise?: boolean;
   /** Row height estimate for the virtualiser (default: 36px). */
   estimatedRowHeight?: number;
+  /** Called when a row is clicked. Useful for opening detail dialogs. */
+  onRowClick?: (row: TData) => void;
 }
 
 // ── Shared header renderer ────────────────────────────────────────────────
@@ -99,6 +101,7 @@ function DataTableComponent<TData, TValue>({
   getRowId,
   virtualise = false,
   estimatedRowHeight = 36,
+  onRowClick,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
@@ -184,7 +187,11 @@ function DataTableComponent<TData, TValue>({
                     key={row.id}
                     data-index={virtualRow.index}
                     ref={virtualiser.measureElement}
-                    className="border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors even:bg-[rgba(31,41,55,0.5)]"
+                    className={cn(
+                      'border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors even:bg-[rgba(31,41,55,0.5)]',
+                      onRowClick && 'cursor-pointer'
+                    )}
+                    onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <td key={cell.id} className="px-3 py-1.5 overflow-hidden text-ellipsis">
@@ -226,7 +233,11 @@ function DataTableComponent<TData, TValue>({
               table.getRowModel().rows.map((row) => (
                 <tr
                   key={row.id}
-                  className="border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors even:bg-[rgba(31,41,55,0.5)]"
+                  className={cn(
+                    'border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors even:bg-[rgba(31,41,55,0.5)]',
+                    onRowClick && 'cursor-pointer'
+                  )}
+                  onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <td key={cell.id} className="px-3 py-2">

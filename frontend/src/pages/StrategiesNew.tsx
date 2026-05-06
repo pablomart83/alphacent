@@ -680,24 +680,10 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
       },
     },
     {
-      accessorKey: 'description',
-      header: 'Description',
-      size: 260,
-      cell: ({ row }) => (
-        <div
-          className="text-xs text-gray-400 truncate"
-          title={row.original.description || ''}
-        >
-          {row.original.description || '—'}
-        </div>
-      ),
-    },
-    {
       id: 'sparkline',
       header: 'Equity',
       cell: ({ row }) => {
         const curve = row.original.backtest_results?.equity_curve;
-        if (!curve || curve.length < 2) return <div className="text-gray-600 text-xs">—</div>;
         // Sample up to 20 points for the sparkline
         const step = Math.max(1, Math.floor(curve.length / 20));
         const sampled = curve.filter((_: any, i: number) => i % step === 0 || i === curve.length - 1);
@@ -1044,19 +1030,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
         </div>
       ),
     },
-    {
-      accessorKey: 'description',
-      header: 'Strategy',
-      size: 260,
-      cell: ({ row }) => (
-        <div
-          className="text-xs text-gray-400 truncate"
-          title={row.original.description || ''}
-        >
-          {row.original.description || '—'}
-        </div>
-      ),
-    },
+
     {
       accessorKey: 'metadata.strategy_category',
       header: 'Category',
@@ -1206,19 +1180,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
         </div>
       ),
     },
-    {
-      accessorKey: 'description',
-      header: 'Strategy',
-      size: 260,
-      cell: ({ row }) => (
-        <div
-          className="text-xs text-gray-400 truncate"
-          title={row.original.description || ''}
-        >
-          {row.original.description || '—'}
-        </div>
-      ),
-    },
+
     {
       accessorKey: 'metadata.strategy_category',
       header: 'Category',
@@ -1719,6 +1681,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
               data={filteredActiveStrategies}
               pageSize={20}
               getRowId={(row) => row.id}
+              onRowClick={(row) => handleViewDetails(row)}
               rowSelection={Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]))}
               onRowSelectionChange={(updaterOrValue) => {
                 const currentSelection = Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]));
@@ -1794,6 +1757,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
               data={filteredBacktestedStrategies}
               pageSize={20}
               getRowId={(row) => row.id}
+              onRowClick={(row) => handleViewDetails(row)}
               rowSelection={Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]))}
               onRowSelectionChange={(updaterOrValue) => {
                 const currentSelection = Object.fromEntries(Array.from(selectedStrategies).map(id => [id, true]));
