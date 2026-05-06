@@ -4466,12 +4466,17 @@ async def get_alpha_metrics(
         if row.equity and row.equity > 0:
             equity_by_date[date_str] = row.equity
 
-    # ── 2. Load SPY daily closes ──────────────────────────────────────────────
+    # ── 2. Load SPY daily closes — only what we need ─────────────────────────
+    # We only need SPY from the earliest equity snapshot date (minus a small
+    # buffer for the forward-fill to work on the first date). Loading 5 years
+    # of SPY when we have 35 equity snapshots is wasteful.
+    earliest_eq_date = min(equity_by_date.keys())
     spy_rows = (
         session.query(HistoricalPriceCacheORM)
         .filter(
             HistoricalPriceCacheORM.symbol == "SPY",
             HistoricalPriceCacheORM.interval == "1d",
+            HistoricalPriceCacheORM.date >= earliest_eq_date,
         )
         .order_by(HistoricalPriceCacheORM.date.asc())
         .all()
