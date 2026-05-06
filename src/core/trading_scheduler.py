@@ -329,9 +329,9 @@ class TradingScheduler:
             if not strategy_ids:
                 _now_utc_hour = datetime.utcnow().hour
                 # 4H bar boundaries: 00, 04, 08, 12, 16, 20 UTC
+                # 4H strategies are only evaluated at bar close — a crossover
+                # mid-bar is noise. Wait for the bar to close before acting.
                 _at_4h_boundary = (_now_utc_hour % 4 == 0)
-                # 1D bar boundary: 00 UTC
-                _at_1d_boundary = (_now_utc_hour == 0)
 
                 # Build set of strategy IDs that have open positions (always run)
                 _open_position_strategy_ids: set = set()
@@ -358,12 +358,13 @@ class TradingScheduler:
                         _filtered_strategies.append(_s)
                         continue
 
-                    # 1H strategies: always run
+                    # 1H strategies: always run (bar closes every hour)
                     if _strat_interval == "1h":
                         _filtered_strategies.append(_s)
                         continue
 
-                    # 4H strategies: only at 4H bar boundaries
+                    # 4H strategies: only at 4H bar boundaries (0/4/8/12/16/20 UTC).
+                    # A 4H EMA crossover mid-bar is noise — wait for bar close.
                     if _strat_interval == "4h":
                         if _at_4h_boundary:
                             _filtered_strategies.append(_s)
@@ -371,12 +372,13 @@ class TradingScheduler:
                             _interval_skipped += 1
                         continue
 
-                    # 1D strategies: only at daily bar boundary (00 UTC)
+                    # 1D strategies: run every cycle.
+                    # The daily bar closed yesterday — the signal is already final
+                    # and valid all day. Restricting to midnight would mean a
+                    # BACKTESTED strategy activated at 14:00 UTC waits 10 hours
+                    # for its first signal check. Run every cycle instead.
                     if _strat_interval == "1d":
-                        if _at_1d_boundary:
-                            _filtered_strategies.append(_s)
-                        else:
-                            _interval_skipped += 1
+                        _filtered_strategies.append(_s)
                         continue
 
                     # Unknown interval: run always (safe default)
@@ -386,8 +388,8 @@ class TradingScheduler:
                 if _interval_skipped > 0:
                     logger.info(
                         f"Interval filter: {_interval_skipped}/{_pre_filter_count} strategies "
-                        f"skipped (not at bar boundary — UTC hour={_now_utc_hour}, "
-                        f"4H_boundary={_at_4h_boundary}, 1D_boundary={_at_1d_boundary}). "
+                        f"skipped (4H not at bar boundary — UTC hour={_now_utc_hour}, "
+                        f"4H_boundary={_at_4h_boundary}). "
                         f"{len(active_strategies)} strategies will run."
                     )
 
