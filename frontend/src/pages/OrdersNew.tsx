@@ -793,7 +793,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'strategy_name',
       header: 'Strategy',
-      size: 160,
+      size: 190,
       cell: ({ row }) => (
         <div className="font-mono text-xs text-muted-foreground truncate" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || row.original.strategy_id?.slice(0, 8) || '—'}
@@ -803,7 +803,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'side',
       header: 'Side',
-      size: 52,
+      size: 60,
       cell: ({ row }) => (
         <span className={cn(
           'px-1.5 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
@@ -816,7 +816,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'order_action',
       header: 'Action',
-      size: 64,
+      size: 72,
       cell: ({ row }) => {
         const action = (row.original as any).order_action || 'entry';
         const actionColors: Record<string, string> = {
@@ -842,7 +842,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'status',
       header: 'Status',
-      size: 80,
+      size: 96,
       cell: ({ row }) => {
         const statusColors: Record<string, string> = {
           PENDING: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
@@ -874,7 +874,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'type',
       header: 'Type',
-      size: 56,
+      size: 64,
       cell: ({ row }) => (
         <span className="font-mono text-xs text-muted-foreground">{row.original.type}</span>
       ),
@@ -929,7 +929,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'created_at',
       header: () => <div className="text-right">Time</div>,
-      size: 120,
+      size: 148,
       cell: ({ row }) => (
         <div className="text-right text-xs text-muted-foreground whitespace-nowrap font-mono">
           {formatTimestamp(row.original.created_at)}
