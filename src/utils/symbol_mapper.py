@@ -91,6 +91,19 @@ DAILY_ONLY_SYMBOLS = {
     "NICKEL",     # LME nickel — no intraday data on Yahoo Finance
 }
 
+# Symbols that have no reliable 1H data but DO have valid 4H data via FMP.
+# These must not appear in 1H (intraday=True) strategy watchlists.
+# They are NOT in DAILY_ONLY_SYMBOLS because 4H templates can trade them fine.
+#
+# OIL  (CLUSD): FMP Starter blocks 1H (confirmed in fmp_ohlc.EXPLICIT_BLOCKED).
+#               Yahoo returns daily bars at the 1H interval — the median-gap
+#               guard in _save_historical_to_db rejects them every cycle.
+# COPPER (HGUSD): same situation as OIL.
+NO_1H_SYMBOLS = {
+    "OIL",
+    "COPPER",
+}
+
 
 def to_etoro_wire_format(symbol: str) -> str:
     """Convert display symbol to eToro wire format.

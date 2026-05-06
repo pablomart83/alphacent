@@ -294,6 +294,7 @@ class PositionManager:
                     asset_class=asset_class,
                     fixed_distance_pct=distance_pct,
                     interval=strategy_interval,
+                    current_stop=position.stop_loss,
                 )
 
                 trail_sl = position.current_price * (1 - effective_distance) if is_long else position.current_price * (1 + effective_distance)
@@ -368,12 +369,45 @@ class PositionManager:
         asset_class: str,
         fixed_distance_pct: float,
         interval: str = "1d",
+        current_stop: Optional[float] = None,
     ) -> float:
-        """Compute the trail distance as max(fixed_pct, ATR_pct × ATR_MULTIPLIER[class]).
+        """Compute the trail distance for the ratchet advance.
 
-        Uses bars at the strategy's own interval so a 4H trail isn't forced to
-        use daily ATR (and vice versa). Falls back to the fixed percentage if
-        bars are unavailable or too few.
+        The ATR floor serves two distinct purposes that must be handled
+        separately:
+
+        1. **Initial placement** — when first setting a trailing stop, the
+           distance must be at least ATR_MULTIPLIER × ATR so the stop sits
+           outside normal intraday noise and isn't immediately breached.
+
+        2. **Ratchet advance** — on subsequent cycles the ratchet only moves
+           the stop *forward* (never backward). The ATR floor must NOT block
+           the ratchet from advancing: if the current stop is already above
+           the ATR-floor-based trail (i.e. the ratchet has already moved
+           beyond what the ATR floor would place), the ratchet should
+           continue advancing using the fixed percentage distance.
+
+        Without this distinction, high-ATR instruments (leveraged ETFs like
+        SOXL with 4H ATR ~9.8%) freeze the ratchet permanently once the
+        profit-lock stage sets the stop above the ATR-floor level. The stop
+        never advances again even as the position gains 15-20%.
+
+        Args:
+            symbol: Instrument symbol (for ATR lookup).
+            current_price: Live price used to compute the candidate trail SL.
+            asset_class: Asset class key for ATR multiplier selection.
+            fixed_distance_pct: The class-specific fixed trail distance (e.g.
+                0.05 for ETFs). Used as the floor and as the ratchet distance
+                when the ATR floor is already behind the current stop.
+            interval: Strategy's own timeframe for ATR bars.
+            current_stop: The position's current stop_loss value. When
+                provided, the method detects whether the ATR floor is already
+                behind the current stop and falls back to fixed_distance_pct
+                for the ratchet advance. Pass None to use ATR floor
+                unconditionally (initial placement behaviour).
+
+        Returns:
+            Effective trail distance as a fraction (e.g. 0.0983 = 9.83%).
         """
         effective = fixed_distance_pct
 
@@ -417,15 +451,50 @@ class PositionManager:
                     atr_floor = atr_pct * multiplier
 
                     if atr_floor > effective:
-                        # Log only when the floor meaningfully widens the trail
-                        # (avoids noise for tiny upward adjustments)
-                        if atr_floor >= effective * 1.2 or (atr_floor - effective) >= 0.01:
-                            logger.info(
-                                f"ATR trail floor for {symbol} ({interval}): "
-                                f"{effective:.2%} → {atr_floor:.2%} "
-                                f"(ATR%={atr_pct:.2%}, multiplier={multiplier:.1f}x, class={asset_class})"
-                            )
-                        effective = atr_floor
+                        # ATR floor is wider than the fixed distance.
+                        # Check whether the ratchet has already advanced
+                        # beyond the ATR-floor-based stop level.
+                        #
+                        # If current_stop > current_price × (1 - atr_floor),
+                        # the ratchet is already ahead of where the ATR floor
+                        # would place the stop. Using atr_floor here would
+                        # produce a *lower* candidate stop than the current
+                        # one, causing _is_favourable_move to return False and
+                        # freezing the ratchet permanently.
+                        #
+                        # In that case, use fixed_distance_pct so the ratchet
+                        # keeps advancing at the normal pace. The ATR floor
+                        # has already done its job (it set the initial wide
+                        # stop); the ratchet now takes over.
+                        if current_stop is not None and current_price > 0:
+                            atr_floor_stop = current_price * (1 - atr_floor)
+                            if current_stop > atr_floor_stop:
+                                # Ratchet is ahead of ATR floor — use fixed distance
+                                logger.debug(
+                                    f"ATR trail floor for {symbol} ({interval}): "
+                                    f"ratchet ({current_stop:.4f}) already ahead of "
+                                    f"ATR-floor stop ({atr_floor_stop:.4f}, {atr_floor:.2%}); "
+                                    f"using fixed distance {effective:.2%} for ratchet advance"
+                                )
+                                # effective stays at fixed_distance_pct
+                            else:
+                                # ATR floor is still ahead of the ratchet — use it
+                                if atr_floor >= effective * 1.2 or (atr_floor - effective) >= 0.01:
+                                    logger.info(
+                                        f"ATR trail floor for {symbol} ({interval}): "
+                                        f"{effective:.2%} → {atr_floor:.2%} "
+                                        f"(ATR%={atr_pct:.2%}, multiplier={multiplier:.1f}x, class={asset_class})"
+                                    )
+                                effective = atr_floor
+                        else:
+                            # No current_stop provided (initial placement) — use ATR floor
+                            if atr_floor >= effective * 1.2 or (atr_floor - effective) >= 0.01:
+                                logger.info(
+                                    f"ATR trail floor for {symbol} ({interval}): "
+                                    f"{effective:.2%} → {atr_floor:.2%} "
+                                    f"(ATR%={atr_pct:.2%}, multiplier={multiplier:.1f}x, class={asset_class})"
+                                )
+                            effective = atr_floor
         except Exception as e:
             logger.debug(f"Could not compute ATR trail floor for {symbol} ({interval}): {e}")
 

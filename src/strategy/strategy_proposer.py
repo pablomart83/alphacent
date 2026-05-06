@@ -15,7 +15,7 @@ from src.models.enums import StrategyStatus
 from src.strategy.market_analyzer import MarketStatisticsAnalyzer
 from src.strategy.performance_tracker import StrategyPerformanceTracker
 from src.strategy.strategy_templates import StrategyTemplateLibrary, StrategyTemplate, MarketRegime, StrategyType
-from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS as _DAILY_ONLY_SYMBOLS
+from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS as _DAILY_ONLY_SYMBOLS, NO_1H_SYMBOLS as _NO_1H_SYMBOLS
 
 logger = logging.getLogger(__name__)
 
@@ -4420,6 +4420,14 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 skipped_dupes += 1
                 continue
 
+            # Skip no-1H-data symbols (OIL, COPPER) on 1H-only templates.
+            # These have valid 4H data but no 1H data on FMP Starter.
+            _is_1h_only = _is_intraday and not _is_4h
+            if _primary_sym.upper() in _NO_1H_SYMBOLS and _is_1h_only:
+                logger.debug(f"Skipping {template_name} on {_primary_sym} — no 1H data available (FMP Starter)")
+                skipped_dupes += 1
+                continue
+
             # Build watchlist: primary symbol is the assigned one, rest from template's watchlist
             if template.metadata and 'fixed_symbols' in template.metadata:
                 strategy_symbol = template.metadata['fixed_symbols']
@@ -4437,6 +4445,14 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 strategy_symbol = [s for s in strategy_symbol if s.upper() not in _DAILY_ONLY_SYMBOLS]
                 if not strategy_symbol:
                     logger.debug(f"Skipping {template_name} — all symbols are daily-only after LME filter")
+                    skipped_dupes += 1
+                    continue
+
+            # Strip no-1H-data symbols (OIL, COPPER) from 1H-only strategy watchlists.
+            if _is_1h_only and isinstance(strategy_symbol, list):
+                strategy_symbol = [s for s in strategy_symbol if s.upper() not in _NO_1H_SYMBOLS]
+                if not strategy_symbol:
+                    logger.debug(f"Skipping {template_name} — all symbols have no 1H data after filter")
                     skipped_dupes += 1
                     continue
             
@@ -5945,6 +5961,15 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 if _tmpl_is_intraday and symbol.upper() in _DAILY_ONLY_SYMBOLS:
                     continue
 
+                # Skip no-1H-data symbols (OIL, COPPER) for 1H-only templates.
+                # These symbols have valid 4H data via FMP but no 1H data.
+                _tmpl_is_1h = bool(template.metadata and (
+                    template.metadata.get('intraday') or
+                    template.metadata.get('interval', '') == '1h'
+                ) and not template.metadata.get('interval_4h', False))
+                if _tmpl_is_1h and symbol.upper() in _NO_1H_SYMBOLS:
+                    continue
+
                 base_score = self._score_symbol_for_template(
                     template, symbol, market_statistics, indicator_distributions
                 )
@@ -6327,6 +6352,13 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 template.metadata.get('intraday', False) or
                 template.metadata.get('interval_4h', False)
             ))
+            # True only for genuine 1H templates (intraday=True, interval="1h").
+            # 4H templates (interval_4h=True) can still trade OIL/COPPER — FMP
+            # serves 4H data for them. Only 1H is blocked.
+            _template_is_1h = bool(template.metadata and (
+                template.metadata.get('intraday', False) or
+                template.metadata.get('interval', '') == '1h'
+            ) and not template.metadata.get('interval_4h', False))
             validated_for_template = [
                 (v['sharpe'], sym)
                 for (t, sym), v in self._wf_validated.items()
@@ -6335,6 +6367,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 and (tname, sym) not in _active_pairs  # skip symbols already in active pipeline
                 # Don't add daily-only LME metals to intraday/4h template watchlists
                 and not (_template_is_intraday and sym.upper() in _DAILY_ONLY_SYMBOLS)
+                # Don't add no-1H-data symbols (OIL, COPPER) to 1H template watchlists
+                and not (_template_is_1h and sym.upper() in _NO_1H_SYMBOLS)
             ]
             # Sort by Sharpe descending — best performers first
             validated_for_template.sort(reverse=True)
@@ -6366,6 +6400,9 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 # Don't add daily-only LME metals to intraday/4h template watchlists
                 if _template_is_intraday and symbol.upper() in _DAILY_ONLY_SYMBOLS:
                     continue
+                # Don't add no-1H-data symbols (OIL, COPPER) to 1H template watchlists
+                if _template_is_1h and symbol.upper() in _NO_1H_SYMBOLS:
+                    continue
                 # Skip blacklisted combos
                 bl_key = (tname, symbol)
                 if bl_key in self._zero_trade_blacklist and self._zero_trade_blacklist[bl_key] >= self._zero_trade_blacklist_threshold:
@@ -6394,6 +6431,9 @@ Generate a CORRECTED strategy that addresses all errors:"""
                         continue
                     # Skip if rejection-blacklisted for this exact pair
                     if self.is_rejection_blacklisted(tname, sym):
+                        continue
+                    # Don't add no-1H-data symbols (OIL, COPPER) to 1H template watchlists
+                    if _template_is_1h and sym.upper() in _NO_1H_SYMBOLS:
                         continue
                     seen.add(sym)
                     watchlist.append(sym)

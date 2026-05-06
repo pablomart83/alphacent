@@ -1343,6 +1343,19 @@ class MarketDataManager:
                                 f"FMP unavailable for {symbol} {interval} "
                                 f"({fe.reason}: {fe}); falling back to Yahoo"
                             )
+                elif interval in ("1h", "4h"):
+                    # FMP explicitly does not support this (symbol, interval) combo
+                    # (e.g. OIL/COPPER at 1H, US indices at 4H). Yahoo will also
+                    # fail or return daily data masquerading as intraday — the
+                    # median-gap guard in _save_historical_to_db will reject it and
+                    # emit a WARNING every time. Skip Yahoo entirely for these
+                    # known-blocked intraday combos; the DB cache already holds the
+                    # correct data from the last successful FMP 4H or 1D fetch.
+                    logger.debug(
+                        f"FMP does not support {symbol} {interval} (known-blocked); "
+                        f"skipping Yahoo fallback — DB cache will serve."
+                    )
+                    return []
             except ImportError:
                 # FMP adapter absent (e.g. stale deploy). Silently fall
                 # through to Yahoo so the primary path keeps working.

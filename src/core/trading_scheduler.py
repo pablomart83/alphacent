@@ -303,6 +303,98 @@ class TradingScheduler:
 
             logger.info(f"Found {len(active_strategies)} active strategies")
 
+            # ── Interval-aware strategy filter ───────────────────────────────
+            # The signal loop runs every ~55 minutes. Evaluating 4H and 1D
+            # strategies on every loop iteration causes rapid entry/exit churn:
+            # a 4H strategy's EMA crossover fires on the first 1H bar after
+            # entry, then the exit condition fires 10 minutes later on the next
+            # 1H bar — the position never has time to develop.
+            #
+            # Fix: only evaluate a strategy when the current UTC hour aligns
+            # with a bar boundary for that strategy's interval.
+            #   - 1H strategies: every loop run (bar boundary every hour)
+            #   - 4H strategies: when UTC hour ∈ {0, 4, 8, 12, 16, 20}
+            #   - 1D strategies: when UTC hour ∈ {0} (midnight UTC, once/day)
+            #
+            # Exception: strategies with an open position ALWAYS run so exit
+            # signals fire promptly regardless of bar boundary. This prevents
+            # a position from being stuck open past its exit condition.
+            #
+            # Exception: when strategy_ids is provided (autonomous cycle Stage 8
+            # calling for newly activated strategies), skip the filter — those
+            # strategies need their first signal immediately.
+            #
+            # Exception: 1H strategies always run (their bar boundary is every
+            # hour, which aligns with the loop cadence).
+            if not strategy_ids:
+                _now_utc_hour = datetime.utcnow().hour
+                # 4H bar boundaries: 00, 04, 08, 12, 16, 20 UTC
+                _at_4h_boundary = (_now_utc_hour % 4 == 0)
+                # 1D bar boundary: 00 UTC
+                _at_1d_boundary = (_now_utc_hour == 0)
+
+                # Build set of strategy IDs that have open positions (always run)
+                _open_position_strategy_ids: set = set()
+                try:
+                    from src.models.orm import PositionORM as _PosORM
+                    _open_pos_rows = session.query(_PosORM.strategy_id).filter(
+                        _PosORM.closed_at.is_(None),
+                        _PosORM.pending_closure == False,
+                    ).all()
+                    _open_position_strategy_ids = {r.strategy_id for r in _open_pos_rows}
+                except Exception as _pos_err:
+                    logger.debug(f"Could not fetch open position strategy IDs for interval filter: {_pos_err}")
+
+                _pre_filter_count = len(active_strategies)
+                _interval_skipped = 0
+                _filtered_strategies = []
+                for _s in active_strategies:
+                    _strat_interval = "1d"
+                    if _s.rules and isinstance(_s.rules, dict):
+                        _strat_interval = _s.rules.get("interval", "1d")
+
+                    # Always run if strategy has an open position (need exit signals)
+                    if _s.id in _open_position_strategy_ids:
+                        _filtered_strategies.append(_s)
+                        continue
+
+                    # 1H strategies: always run
+                    if _strat_interval == "1h":
+                        _filtered_strategies.append(_s)
+                        continue
+
+                    # 4H strategies: only at 4H bar boundaries
+                    if _strat_interval == "4h":
+                        if _at_4h_boundary:
+                            _filtered_strategies.append(_s)
+                        else:
+                            _interval_skipped += 1
+                        continue
+
+                    # 1D strategies: only at daily bar boundary (00 UTC)
+                    if _strat_interval == "1d":
+                        if _at_1d_boundary:
+                            _filtered_strategies.append(_s)
+                        else:
+                            _interval_skipped += 1
+                        continue
+
+                    # Unknown interval: run always (safe default)
+                    _filtered_strategies.append(_s)
+
+                active_strategies = _filtered_strategies
+                if _interval_skipped > 0:
+                    logger.info(
+                        f"Interval filter: {_interval_skipped}/{_pre_filter_count} strategies "
+                        f"skipped (not at bar boundary — UTC hour={_now_utc_hour}, "
+                        f"4H_boundary={_at_4h_boundary}, 1D_boundary={_at_1d_boundary}). "
+                        f"{len(active_strategies)} strategies will run."
+                    )
+
+            if not active_strategies:
+                logger.debug("No strategies active for current bar boundary - skipping signal generation")
+                return result
+
             # Market-hours filter — skip strategies whose primary symbol's
             # market is currently closed on eToro. Routes through the
             # symbol-aware MarketHoursManager so S&P/NDX stocks are correctly
