@@ -4323,6 +4323,15 @@ class AlphaResponse(BaseModel):
     annotations: List[AlphaAnnotation]
     data_start: str                # earliest common date used
     data_points: int               # number of daily observations
+    # ── Context / benchmarking fields ────────────────────────────────────────
+    annualized_alpha: float        # inception alpha scaled to annual (%)
+    annualized_alpha_1w: float     # 1W alpha annualized — noisy at low obs
+    ir_confidence: str             # "low" | "building" | "reliable"
+    obs_needed: int                # 252 — target for reliable IR
+    beta_equivalent_return: float  # beta * spy_inception_return (%)
+    beta_gap: float                # portfolio_return - beta_equivalent_return (%)
+    spy_inception_return: float    # SPY return since inception (%)
+    portfolio_inception_return: float  # portfolio return since inception (%)
 
 
 def _compute_rolling_alpha(
@@ -4628,6 +4637,43 @@ async def get_alpha_metrics(
     total_alpha = cumulative_alpha[-1] if cumulative_alpha else 0.0
     alpha_30d = rolling_30d[-1] if rolling_30d and rolling_30d[-1] is not None else 0.0
 
+    # ── 12b. Context / benchmarking scalars ───────────────────────────────────
+    n_obs = len(port_returns)
+    OBS_NEEDED = 252  # 1 year of daily returns for reliable IR
+
+    # IR confidence tier
+    if n_obs < 30:
+        ir_confidence = "low"
+    elif n_obs < 90:
+        ir_confidence = "building"
+    else:
+        ir_confidence = "reliable"
+
+    # Inception returns (already computed above for alpha_by_period)
+    port_inception_ret = (portfolio_eq[-1] - portfolio_eq[0]) / portfolio_eq[0] * 100 if portfolio_eq[0] > 0 else 0.0
+    spy_inception_ret = (spy_closes[-1] - spy_closes[0]) / spy_closes[0] * 100 if spy_closes[0] > 0 else 0.0
+
+    # Annualized alpha: scale cumulative alpha to 252 trading days
+    # Only meaningful when n_obs >= 30; flagged as noisy below that
+    if n_obs >= 5:
+        annualized_alpha = round(total_alpha * (252 / n_obs), 4)
+    else:
+        annualized_alpha = 0.0
+
+    # 1W annualized alpha — explicitly noisy, shown with warning in UI
+    inception_1w = next((r for r in alpha_by_period if r.period == "1W"), None)
+    if inception_1w is not None:
+        # 1W = ~5 trading days; annualize by scaling to 252
+        trading_days_1w = 5
+        annualized_alpha_1w = round(inception_1w.alpha * (252 / trading_days_1w), 4)
+    else:
+        annualized_alpha_1w = 0.0
+
+    # Beta-equivalent passive return: what a β-matched passive portfolio returned
+    beta_equivalent_return = round(full_beta * spy_inception_ret, 4)
+    # Beta gap: how much we over/under-performed vs our beta-equivalent passive
+    beta_gap = round(port_inception_ret - beta_equivalent_return, 4)
+
     # ── 13. Annotations — key system change dates ─────────────────────────────
     annotations = [
         AlphaAnnotation(
@@ -4671,4 +4717,12 @@ async def get_alpha_metrics(
         annotations=annotations,
         data_start=data_start,
         data_points=len(daily_series),
+        annualized_alpha=annualized_alpha,
+        annualized_alpha_1w=annualized_alpha_1w,
+        ir_confidence=ir_confidence,
+        obs_needed=OBS_NEEDED,
+        beta_equivalent_return=beta_equivalent_return,
+        beta_gap=beta_gap,
+        spy_inception_return=round(spy_inception_ret, 4),
+        portfolio_inception_return=round(port_inception_ret, 4),
     )
