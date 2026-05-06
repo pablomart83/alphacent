@@ -187,7 +187,7 @@ function DataTableComponent<TData, TValue>({
                     className="border-b border-dark-border/50 hover:bg-dark-surface/50 transition-colors even:bg-[rgba(31,41,55,0.5)]"
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-3 py-2 overflow-hidden text-ellipsis">
+                      <td key={cell.id} className="px-3 py-1.5 overflow-hidden text-ellipsis">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     ))}

@@ -785,15 +785,17 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'symbol',
       header: 'Symbol',
+      size: 72,
       cell: ({ row }) => (
-        <div className="font-mono font-semibold text-sm">{row.original.symbol}</div>
+        <div className="font-mono font-semibold text-[13px]">{row.original.symbol}</div>
       ),
     },
     {
       accessorKey: 'strategy_name',
       header: 'Strategy',
+      size: 160,
       cell: ({ row }) => (
-        <div className="font-mono text-xs text-muted-foreground truncate max-w-[180px]" title={row.original.strategy_name || row.original.strategy_id}>
+        <div className="font-mono text-xs text-muted-foreground truncate" title={row.original.strategy_name || row.original.strategy_id}>
           {row.original.strategy_name || row.original.strategy_id?.slice(0, 8) || '—'}
         </div>
       ),
@@ -801,9 +803,10 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'side',
       header: 'Side',
+      size: 52,
       cell: ({ row }) => (
         <span className={cn(
-          'px-2 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
+          'px-1.5 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
           row.original.side === 'BUY' ? 'bg-accent-green/20 text-accent-green' : 'bg-accent-red/20 text-accent-red'
         )}>
           {row.original.side}
@@ -813,6 +816,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'order_action',
       header: 'Action',
+      size: 64,
       cell: ({ row }) => {
         const action = (row.original as any).order_action || 'entry';
         const actionColors: Record<string, string> = {
@@ -827,7 +831,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         };
         return (
           <span className={cn(
-            'px-2 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
+            'px-1.5 py-0.5 rounded text-xs font-mono font-semibold whitespace-nowrap',
             actionColors[action] || actionColors.entry
           )}>
             {actionLabels[action] || action}
@@ -836,35 +840,9 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       },
     },
     {
-      accessorKey: 'type',
-      header: 'Type',
-      cell: ({ row }) => (
-        <span className="font-mono text-xs">{row.original.type}</span>
-      ),
-    },
-    {
-      accessorKey: 'quantity',
-      header: () => <div className="text-right">Amount</div>,
-      cell: ({ row }) => (
-        <div className="text-right">
-          <span className="font-mono text-sm">{formatCurrency(row.original.quantity)}</span>
-        </div>
-      ),
-    },
-    {
-      accessorKey: 'price',
-      header: () => <div className="text-right">Price</div>,
-      cell: ({ row }) => (
-        <div className="text-right">
-          <span className="font-mono text-sm whitespace-nowrap">
-            {row.original.price ? formatCurrency(row.original.price) : 'Market'}
-          </span>
-        </div>
-      ),
-    },
-    {
       accessorKey: 'status',
       header: 'Status',
+      size: 80,
       cell: ({ row }) => {
         const statusColors: Record<string, string> = {
           PENDING: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
@@ -885,7 +863,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
         };
         return (
           <span className={cn(
-            'px-2 py-0.5 rounded text-xs font-mono font-semibold border whitespace-nowrap',
+            'px-1.5 py-0.5 rounded text-xs font-mono font-semibold border whitespace-nowrap',
             statusColors[row.original.status] || statusColors.PENDING
           )}>
             {statusLabels[row.original.status] || row.original.status}
@@ -894,8 +872,35 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
       },
     },
     {
+      accessorKey: 'type',
+      header: 'Type',
+      size: 56,
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-muted-foreground">{row.original.type}</span>
+      ),
+    },
+    {
+      accessorKey: 'quantity',
+      header: () => <div className="text-right">Amount</div>,
+      size: 96,
+      cell: ({ row }) => (
+        <div className="text-right font-mono text-[13px]">{formatCurrency(row.original.quantity)}</div>
+      ),
+    },
+    {
+      accessorKey: 'price',
+      header: () => <div className="text-right">Price</div>,
+      size: 80,
+      cell: ({ row }) => (
+        <div className="text-right font-mono text-xs text-muted-foreground">
+          {row.original.price ? formatCurrency(row.original.price) : 'Market'}
+        </div>
+      ),
+    },
+    {
       accessorKey: 'strategy_id',
       header: 'Source',
+      size: 64,
       cell: ({ row }) => {
         const isAutonomous = row.original.strategy_id && row.original.strategy_id !== 'manual_order';
         return (
@@ -903,7 +908,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className={cn(
-                  'px-2 py-0.5 rounded text-xs font-mono whitespace-nowrap cursor-help',
+                  'px-1.5 py-0.5 rounded text-xs font-mono whitespace-nowrap cursor-help',
                   isAutonomous ? 'bg-blue-500/20 text-blue-400' : 'bg-gray-500/20 text-gray-400'
                 )}>
                   {isAutonomous ? 'Auto' : 'Manual'}
@@ -911,8 +916,8 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
               </TooltipTrigger>
               <TooltipContent>
                 <p className="text-xs">
-                  {isAutonomous 
-                    ? `Strategy: ${row.original.strategy_id?.substring(0, 12)}...` 
+                  {isAutonomous
+                    ? `Strategy: ${row.original.strategy_id?.substring(0, 12)}...`
                     : 'Manual order entry'}
                 </p>
               </TooltipContent>
@@ -924,17 +929,17 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
     {
       accessorKey: 'created_at',
       header: () => <div className="text-right">Time</div>,
+      size: 120,
       cell: ({ row }) => (
-        <div className="text-right">
-          <span className="text-xs text-muted-foreground whitespace-nowrap">
-            {formatTimestamp(row.original.created_at)}
-          </span>
+        <div className="text-right text-xs text-muted-foreground whitespace-nowrap font-mono">
+          {formatTimestamp(row.original.created_at)}
         </div>
       ),
     },
     {
       id: 'actions',
       header: () => <div className="text-right">Actions</div>,
+      size: 48,
       cell: ({ row }) => {
         const canCancel = row.original.status === 'PENDING' || (row.original.status as string) === 'SUBMITTED';
         const canDelete = row.original.status === 'CANCELLED' || row.original.status === 'FILLED';
@@ -1237,7 +1242,7 @@ export const OrdersNew: FC<OrdersNewProps> = ({ onLogout }) => {
                         data={filteredOrders}
                         virtualise={true}
                         estimatedRowHeight={36}
-                        className="h-[calc(100vh-300px)] min-h-[400px] [&_table]:table-dense [&_td]:py-1 [&_th]:py-1"
+                        className="h-[calc(100vh-300px)] min-h-[400px]"
                         getRowId={(row) => row.id}
                         rowSelection={Object.fromEntries(
                           Array.from(selectedOrders).map(id => [id, true])
