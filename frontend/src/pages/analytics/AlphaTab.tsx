@@ -7,12 +7,15 @@
  *   - Metric tiles: IR, Beta, Total Alpha, Alpha (30d)
  *   - Alpha by period table (1W / 1M / 3M / 6M / inception)
  *   - Annotation markers for major system changes
+ *
+ * Uses TvChart (lightweight-charts v5 wrapper) for all charting — never
+ * calls the chart API directly.
  */
 
-import { type FC, useEffect, useRef, useState } from 'react';
-import { createChart, type IChartApi, type ISeriesApi, ColorType, LineStyle } from 'lightweight-charts';
+import { type FC, useMemo } from 'react';
 import { cn } from '../../lib/utils';
 import { SectionLabel } from '../../components/ui/SectionLabel';
+import { TvChart, type TvSeriesConfig } from '../../components/charts/TvChart';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -70,206 +73,6 @@ function fmt(n: number, decimals = 2, sign = false): string {
 function fmtPct(n: number, sign = false): string {
   return fmt(n, 2, sign) + '%';
 }
-
-// ── Cumulative Alpha Chart ────────────────────────────────────────────────────
-
-const CumulativeAlphaChart: FC<{
-  series: AlphaDailyPoint[];
-  annotations: AlphaAnnotation[];
-}> = ({ series, annotations }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const areaRef = useRef<ISeriesApi<'Area'> | null>(null);
-
-  useEffect(() => {
-    if (!containerRef.current || series.length === 0) return;
-
-    const chart = createChart(containerRef.current, {
-      layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#9ca3af',
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: '#1f2937', style: LineStyle.Dotted },
-        horzLines: { color: '#1f2937', style: LineStyle.Dotted },
-      },
-      crosshair: {
-        vertLine: { color: '#4b5563', width: 1, style: LineStyle.Dashed },
-        horzLine: { color: '#4b5563', width: 1, style: LineStyle.Dashed },
-      },
-      rightPriceScale: {
-        borderColor: '#374151',
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        borderColor: '#374151',
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      handleScroll: true,
-      handleScale: true,
-    });
-
-    chartRef.current = chart;
-
-    // Area series — green above zero, red below
-    const areaSeries = chart.addAreaSeries({
-      lineColor: '#10b981',
-      topColor: 'rgba(16, 185, 129, 0.25)',
-      bottomColor: 'rgba(239, 68, 68, 0.15)',
-      lineWidth: 2,
-      priceFormat: { type: 'custom', formatter: (v: number) => fmtPct(v, true) },
-    });
-
-    const chartData = series.map((p) => ({
-      time: p.date as any,
-      value: p.cumulative_alpha,
-    }));
-    areaSeries.setData(chartData);
-    areaRef.current = areaSeries;
-
-    // Zero baseline
-    const zeroLine = chart.addLineSeries({
-      color: '#4b5563',
-      lineWidth: 1,
-      lineStyle: LineStyle.Dashed,
-      priceFormat: { type: 'custom', formatter: () => '' },
-      lastValueVisible: false,
-      priceLineVisible: false,
-    });
-    zeroLine.setData(chartData.map((p) => ({ time: p.time, value: 0 })));
-
-    // Annotation markers
-    if (annotations.length > 0) {
-      const markers = annotations
-        .filter((a) => chartData.some((p) => p.time === a.date))
-        .map((a) => ({
-          time: a.date as any,
-          position: 'aboveBar' as const,
-          color: '#f59e0b',
-          shape: 'arrowDown' as const,
-          text: a.label,
-          size: 1,
-        }));
-      if (markers.length > 0) {
-        areaSeries.setMarkers(markers);
-      }
-    }
-
-    chart.timeScale().fitContent();
-
-    const ro = new ResizeObserver(() => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    });
-    ro.observe(containerRef.current);
-
-    return () => {
-      ro.disconnect();
-      chart.remove();
-      chartRef.current = null;
-      areaRef.current = null;
-    };
-  }, [series, annotations]);
-
-  return <div ref={containerRef} className="w-full" style={{ height: 260 }} />;
-};
-
-// ── Rolling Alpha Chart ───────────────────────────────────────────────────────
-
-const RollingAlphaChart: FC<{ series: AlphaDailyPoint[] }> = ({ series }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-
-  useEffect(() => {
-    if (!containerRef.current || series.length === 0) return;
-
-    const chart = createChart(containerRef.current, {
-      layout: {
-        background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#9ca3af',
-        fontFamily: "'JetBrains Mono', monospace",
-        fontSize: 11,
-      },
-      grid: {
-        vertLines: { color: '#1f2937', style: LineStyle.Dotted },
-        horzLines: { color: '#1f2937', style: LineStyle.Dotted },
-      },
-      crosshair: {
-        vertLine: { color: '#4b5563', width: 1, style: LineStyle.Dashed },
-        horzLine: { color: '#4b5563', width: 1, style: LineStyle.Dashed },
-      },
-      rightPriceScale: {
-        borderColor: '#374151',
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        borderColor: '#374151',
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      handleScroll: true,
-      handleScale: true,
-    });
-
-    chartRef.current = chart;
-
-    // 30d rolling alpha
-    const line30 = chart.addLineSeries({
-      color: '#3b82f6',
-      lineWidth: 2,
-      title: '30d',
-      priceFormat: { type: 'custom', formatter: (v: number) => fmtPct(v, true) },
-    });
-    const data30 = series
-      .filter((p) => p.rolling_30d_alpha !== null)
-      .map((p) => ({ time: p.date as any, value: p.rolling_30d_alpha as number }));
-    if (data30.length > 0) line30.setData(data30);
-
-    // 90d rolling alpha
-    const line90 = chart.addLineSeries({
-      color: '#8b5cf6',
-      lineWidth: 2,
-      title: '90d',
-      priceFormat: { type: 'custom', formatter: (v: number) => fmtPct(v, true) },
-    });
-    const data90 = series
-      .filter((p) => p.rolling_90d_alpha !== null)
-      .map((p) => ({ time: p.date as any, value: p.rolling_90d_alpha as number }));
-    if (data90.length > 0) line90.setData(data90);
-
-    // Zero baseline
-    const allDates = series.map((p) => ({ time: p.date as any, value: 0 }));
-    const zeroLine = chart.addLineSeries({
-      color: '#4b5563',
-      lineWidth: 1,
-      lineStyle: LineStyle.Dashed,
-      lastValueVisible: false,
-      priceLineVisible: false,
-    });
-    zeroLine.setData(allDates);
-
-    chart.timeScale().fitContent();
-
-    const ro = new ResizeObserver(() => {
-      if (containerRef.current) {
-        chart.applyOptions({ width: containerRef.current.clientWidth });
-      }
-    });
-    ro.observe(containerRef.current);
-
-    return () => {
-      ro.disconnect();
-      chart.remove();
-      chartRef.current = null;
-    };
-  }, [series]);
-
-  return <div ref={containerRef} className="w-full" style={{ height: 220 }} />;
-};
 
 // ── Metric Tile ───────────────────────────────────────────────────────────────
 
@@ -400,6 +203,79 @@ const AnnotationsLegend: FC<{ annotations: AlphaAnnotation[] }> = ({ annotations
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) => {
+  // ── Build TvChart series configs from data ────────────────────────────────
+  const cumulativeAlphaSeries = useMemo<TvSeriesConfig[]>(() => {
+    if (!data?.daily_series?.length) return [];
+    return [
+      {
+        id: 'cumulative_alpha',
+        type: 'baseline' as const,
+        data: data.daily_series.map((p) => ({ time: p.date, value: p.cumulative_alpha })),
+        baseValue: 0,
+        topFillColor1: 'rgba(16, 185, 129, 0.25)',
+        topFillColor2: 'rgba(16, 185, 129, 0.05)',
+        bottomFillColor1: 'rgba(239, 68, 68, 0.05)',
+        bottomFillColor2: 'rgba(239, 68, 68, 0.20)',
+        topLineColor: '#10b981',
+        bottomLineColor: '#ef4444',
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      },
+    ];
+  }, [data]);
+
+  const rollingAlphaSeries = useMemo<TvSeriesConfig[]>(() => {
+    if (!data?.daily_series?.length) return [];
+    const series: TvSeriesConfig[] = [];
+
+    const data30 = data.daily_series
+      .filter((p) => p.rolling_30d_alpha !== null)
+      .map((p) => ({ time: p.date, value: p.rolling_30d_alpha as number }));
+    if (data30.length > 0) {
+      series.push({
+        id: 'rolling_30d',
+        type: 'line' as const,
+        data: data30,
+        color: '#3b82f6',
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      });
+    }
+
+    const data90 = data.daily_series
+      .filter((p) => p.rolling_90d_alpha !== null)
+      .map((p) => ({ time: p.date, value: p.rolling_90d_alpha as number }));
+    if (data90.length > 0) {
+      series.push({
+        id: 'rolling_90d',
+        type: 'line' as const,
+        data: data90,
+        color: '#8b5cf6',
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      });
+    }
+
+    // Zero baseline
+    series.push({
+      id: 'zero_line',
+      type: 'line' as const,
+      data: data.daily_series.map((p) => ({ time: p.date, value: 0 })),
+      color: '#374151',
+      lineWidth: 1,
+      dashed: true,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+
+    return series;
+  }, [data]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48 text-sm text-gray-500 font-mono">
@@ -430,9 +306,18 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
     );
   }
 
-  const { daily_series, information_ratio, beta, total_alpha, alpha_30d, alpha_by_period, annotations, data_start, data_points } = data;
+  const {
+    daily_series,
+    information_ratio,
+    beta,
+    total_alpha,
+    alpha_30d,
+    alpha_by_period,
+    annotations,
+    data_start,
+    data_points,
+  } = data;
 
-  // IR quality label
   const irLabel =
     information_ratio >= 1.0
       ? 'excellent'
@@ -442,7 +327,14 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
       ? 'marginal'
       : 'negative';
 
-  const betaLabel = beta < 0.8 ? 'low market sensitivity' : beta < 1.2 ? 'market-like' : 'high market sensitivity';
+  const betaLabel =
+    beta < 0.8
+      ? 'low market sensitivity'
+      : beta < 1.2
+      ? 'market-like'
+      : 'high market sensitivity';
+
+  const has30d = daily_series.some((p) => p.rolling_30d_alpha !== null);
 
   return (
     <div className="space-y-4">
@@ -479,13 +371,19 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
         <div className="flex items-center justify-between mb-2">
           <SectionLabel>Cumulative Alpha</SectionLabel>
           <span className="text-xs text-gray-500 font-mono">
-            portfolio return − SPY return − risk-free · rebased to 0 at inception
+            portfolio − SPY − risk-free · rebased to 0 at inception
           </span>
         </div>
-        <CumulativeAlphaChart series={daily_series} annotations={annotations} />
+        <TvChart
+          series={cumulativeAlphaSeries}
+          height={260}
+          showTimeScale
+          showPriceScale
+          autoResize
+        />
         {annotations.length > 0 && (
           <div className="mt-3 pt-2 border-t border-[var(--color-dark-border)]">
-            <p className="text-xs text-gray-500 font-mono mb-1">System changes (▼ markers)</p>
+            <p className="text-xs text-gray-500 font-mono mb-1">System changes</p>
             <AnnotationsLegend annotations={annotations} />
           </div>
         )}
@@ -506,8 +404,14 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
             </span>
           </div>
         </div>
-        {daily_series.some((p) => p.rolling_30d_alpha !== null) ? (
-          <RollingAlphaChart series={daily_series} />
+        {has30d ? (
+          <TvChart
+            series={rollingAlphaSeries}
+            height={220}
+            showTimeScale
+            showPriceScale
+            autoResize
+          />
         ) : (
           <div className="flex items-center justify-center h-32 text-xs text-gray-500 font-mono">
             Need 30+ days of data for rolling alpha
@@ -521,7 +425,7 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
         <AlphaPeriodTable rows={alpha_by_period} />
       </div>
 
-      {/* ── Alpha decomposition note ── */}
+      {/* ── Methodology note ── */}
       <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3 text-xs font-mono text-gray-500 space-y-1">
         <p className="text-gray-400 font-semibold">Alpha decomposition</p>
         <p>
