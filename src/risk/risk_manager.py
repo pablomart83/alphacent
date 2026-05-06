@@ -833,10 +833,19 @@ class RiskManager:
         # ── Step 2: Confidence scalar ────────────────────────────────────────
         # Scales risk linearly from 0.5× at confidence floor to 1.0× at max.
         # A 0.95 confidence signal risks the full 0.6%. A 0.60 signal risks ~0.53%.
-        # Confidence floor raised from 0.30 to 0.50 — signals below 0.50 are noise.
-        # The data shows 0.30-0.45 confidence signals have < 35% win rate and
-        # negative expectancy. Only trade signals where the strategy is genuinely firing.
-        CONFIDENCE_FLOOR = 0.50
+        #
+        # Floor set to 0.30 (was 0.50).
+        # Rationale: DSL strategy confidence is a signal-persistence artifact —
+        # it reflects how many of the last 10 bars had the entry condition true,
+        # not a genuine quality measure. The conviction scorer's persistence
+        # component already discounts low-persistence signals via the signal
+        # quality score. A DSL signal at confidence 0.36 (1/10 bars) that passed
+        # conviction scoring at 70+ has already been validated; blocking it here
+        # at 0.50 is double-counting. The 0.30 floor matches the DSL confidence
+        # floor already used in the conviction scorer's signal quality component.
+        # Alpha Edge signals use genuine confidence (analyst revision count,
+        # earnings surprise magnitude) — the floor is equally appropriate there.
+        CONFIDENCE_FLOOR = 0.30
         confidence = signal.confidence if signal.confidence and signal.confidence > 0 else 0.5
         if confidence < CONFIDENCE_FLOOR:
             logger.info(f"Signal confidence {confidence:.2f} below floor {CONFIDENCE_FLOOR} for {symbol} — skipping")
@@ -1197,10 +1206,19 @@ class RiskManager:
             logger.debug(f"Conviction-tier sizing check failed (non-fatal): {_ct_err}")
 
         # ── Step 11: Minimum floor — applied last ────────────────────────────
-        # If caps reduced the size below $5K but no penalty fired, bump to minimum.
+        # If caps reduced the size below $2K but no penalty fired, bump to minimum.
         # If ANY risk-reducing penalty (drawdown sizing, vol scale <1.0, loser
         # penalty) fired, DO NOT bump — bumping would defeat the penalty. Return
         # 0 instead so the trade is skipped.
+        #
+        # Minimum lowered from $5,000 → $2,000 (2026-05-06).
+        # Rationale: at $488K equity, $5K minimum = 1.02% per trade — too high
+        # for vol-penalised signals on high-volatility instruments (crypto, leveraged
+        # ETFs) where the vol scalar legitimately reduces size to $2-4K. $2K = 0.41%
+        # of equity, still meaningful and above eToro's $10 minimum. The penalty
+        # logic is preserved — we just lower the floor so valid penalised signals
+        # aren't killed entirely when the vol scalar does its job correctly.
+        MINIMUM_ORDER_SIZE = 2000.0
         if position_size <= 0:
             # Earlier caps brought size to 0 without explicit early return
             # (shouldn't happen in practice but defensive). Reason was

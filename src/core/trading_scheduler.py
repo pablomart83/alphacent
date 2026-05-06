@@ -1224,11 +1224,42 @@ class TradingScheduler:
 
                                     if multiplier != 1.0:
                                         original_size = validation_result.position_size
-                                        validation_result.position_size = round(original_size * multiplier, 2)
-                                        logger.info(
-                                            f"Regime-based sizing: {sub_regime.value} → {multiplier}x "
-                                            f"(${original_size:.2f} → ${validation_result.position_size:.2f})"
-                                        )
+                                        new_size = round(original_size * multiplier, 2)
+
+                                        # Re-check symbol concentration cap after regime
+                                        # multiplier — the risk manager checked the cap on
+                                        # the pre-multiplier size. A 1.25× multiplier on a
+                                        # $24K position produces $30K, which can breach the
+                                        # 5% symbol cap on a $488K portfolio.
+                                        try:
+                                            from src.models.orm import PositionORM as _PosORM2
+                                            _sym_cap_pct = 0.05  # 5% symbol cap
+                                            _account_eq = getattr(account_info, 'equity', None) or getattr(account_info, 'balance', 0)
+                                            _sym_cap_abs = _account_eq * _sym_cap_pct
+                                            _existing_sym = session.query(
+                                                _PosORM2.invested_amount
+                                            ).filter(
+                                                _PosORM2.symbol == _sig_sym,
+                                                _PosORM2.closed_at.is_(None),
+                                            ).all()
+                                            _existing_sym_total = sum(r.invested_amount or 0 for r in _existing_sym)
+                                            _sym_headroom = max(0.0, _sym_cap_abs - _existing_sym_total)
+                                            if new_size > _sym_headroom and _sym_headroom > 0:
+                                                new_size = round(_sym_headroom, 2)
+                                                logger.info(
+                                                    f"Regime multiplier capped by symbol concentration: "
+                                                    f"{_sig_sym} headroom=${_sym_headroom:.0f} "
+                                                    f"(cap={_sym_cap_pct:.0%} of ${_account_eq:.0f})"
+                                                )
+                                        except Exception as _cap_err:
+                                            logger.debug(f"Post-regime symbol cap check failed: {_cap_err}")
+
+                                        if new_size != original_size:
+                                            validation_result.position_size = new_size
+                                            logger.info(
+                                                f"Regime-based sizing: {sub_regime.value} → {multiplier}x "
+                                                f"(${original_size:.2f} → ${validation_result.position_size:.2f})"
+                                            )
                                     
                                     # Attach market regime to signal metadata for trade journal
                                     if hasattr(signal, 'metadata') and signal.metadata is not None:

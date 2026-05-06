@@ -318,7 +318,7 @@ class OrderExecutor:
                                                 size_scale = old_sl / stop_loss_pct
                                                 old_size = position_size
                                                 position_size = max(
-                                                    5000.0,  # never go below $5K minimum
+                                                    2000.0,  # never go below $2K minimum (matches risk_manager floor)
                                                     round(position_size * size_scale, 2)
                                                 )
                                                 logger.info(
