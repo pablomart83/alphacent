@@ -90,6 +90,23 @@ class OrderMonitor:
         # Track submission attempts per order to prevent infinite retries
         self._submission_attempts: dict = {}  # order_id -> attempt_count
         self._max_submission_attempts = 5
+
+        # Permanent error patterns — fail the order immediately, no retry.
+        # These are errors where retrying will never succeed:
+        #   - Instrument not tradeable on eToro
+        #   - Insufficient funds / credit (error 604) — retrying won't create money;
+        #     the order stays FAILED until the user frees up capital
+        self._permanent_error_patterns = [
+            "not in the list of verified tradeable instruments",
+            "not tradeable",
+            "instrument not found",
+            "symbol not available",
+            "instrument is not available",
+            "insufficient funds",
+            "error 604",
+            "usercredit",          # eToro error body contains "UserCredit: 0"
+            "minimum defined leveraged amount",
+        ]
         
         # Consecutive miss counter for position closure safety.
         # A position must be missing from eToro for N consecutive syncs
@@ -593,6 +610,34 @@ class OrderMonitor:
             failed_count = 0
 
             for order in pending_orders:
+                order_id = str(order.id)
+
+                # ── Pre-submission balance check ──────────────────────────────
+                # Re-read live balance from DB before every submission attempt.
+                # If balance < order size, skip immediately — don't burn an eToro
+                # API call that will return error 604. The order stays PENDING and
+                # will be retried next cycle (when a position may have closed and
+                # freed up capital). Log at WARNING so it's visible but not an error.
+                try:
+                    from src.models.orm import AccountInfoORM
+                    _bal_sess = self.db.get_session()
+                    try:
+                        _acct = _bal_sess.query(AccountInfoORM).order_by(
+                            AccountInfoORM.updated_at.desc()
+                        ).first()
+                        live_balance = float(_acct.balance) if _acct and _acct.balance else 0.0
+                    finally:
+                        _bal_sess.close()
+                except Exception:
+                    live_balance = 0.0  # fail-open: let eToro be the final arbiter
+
+                if live_balance < order.quantity:
+                    logger.warning(
+                        f"Skipping order {order.id} ({order.symbol} ${order.quantity:.0f}): "
+                        f"insufficient balance (${live_balance:.0f} available). "
+                        f"Order stays PENDING — will retry when capital is freed."
+                    )
+                    continue  # don't increment attempt counter — this isn't a failure
                 order_id = str(order.id)
 
                 # Check if max submission attempts exceeded

@@ -802,7 +802,7 @@ class RiskManager:
         if equity <= 0:
             equity = account.balance
 
-        MINIMUM_ORDER_SIZE = 5000.0
+        MINIMUM_ORDER_SIZE = 2000.0
         if available_balance < MINIMUM_ORDER_SIZE:
             logger.warning(
                 f"Insufficient balance for {symbol}: ${available_balance:.0f} available "
