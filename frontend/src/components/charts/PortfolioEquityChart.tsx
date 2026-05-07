@@ -201,22 +201,38 @@ export const PortfolioEquityChart: FC<PortfolioEquityChartProps> = ({
       value: d.equity,
     }));
 
-    // Pane 0: SPY scaled to same starting equity
+    // Pane 0: SPY scaled to same starting equity.
+    // Forward-fill SPY into weekend/holiday dates so the SPY line has the same
+    // number of points as the portfolio line. Without this, weekend equity
+    // snapshots have no matching SPY price and get dropped, causing the SPY
+    // line to visually compress and appear to move differently than it did.
     let spy: Array<{ time: Time; value: number }> | null = null;
     if (spyData?.length) {
-      const spyMap = new Map(spyData.map(s => [s.date.slice(0, 10), s.close]));
-      const startDay   = toDayKey(filtered[0].date);
-      const startSpy   = spyMap.get(startDay)
-        ?? [...spyMap.entries()].find(([d]) => d >= startDay)?.[1];
+      // Build sorted SPY array for forward-fill lookup
+      const spySorted = [...spyData].sort((a, b) => a.date.localeCompare(b.date));
+      const startDay  = toDayKey(filtered[0].date);
+
+      // Find the SPY close on or before startDay (forward-fill)
+      const ffSpy = (day: string): number | null => {
+        let last: number | null = null;
+        for (const s of spySorted) {
+          if (s.date.slice(0, 10) <= day) last = s.close;
+          else break;
+        }
+        return last;
+      };
+
+      const startSpy = ffSpy(startDay);
       if (startSpy && startSpy > 0) {
         const scale = startEquity / startSpy;
         const seen  = new Set<string>();
         spy = filtered
           .map(d => {
             const day = toDayKey(d.date);
-            const v   = spyMap.get(day);
-            if (v == null || seen.has(day)) return null;
+            if (seen.has(day)) return null;
             seen.add(day);
+            const v = ffSpy(day); // forward-fill: use last known SPY close
+            if (v == null) return null;
             return { time: toTime(d.date, isIntraday), value: v * scale };
           })
           .filter(Boolean) as Array<{ time: Time; value: number }>;
