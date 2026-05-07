@@ -40,10 +40,13 @@ export const PerformanceTab: FC<PerformanceTabProps> = ({
   const pm = performanceMetrics;
 
   useEffect(() => {
-    apiClient.getSpyBenchmark(period).then((spy) => {
+    // Always fetch ALL SPY data — the chart filters client-side by period.
+    // Passing the period to the backend means SPY data might not cover the
+    // start of the equity curve (e.g. period='1W' but equity starts Mar 31).
+    apiClient.getSpyBenchmark('ALL').then((spy) => {
       setSpyData(spy && spy.length > 0 ? spy : undefined);
     }).catch(() => setSpyData(undefined));
-  }, [period]);
+  }, []);
   const cio = cioDashboard;
 
   const kpiRow1 = [

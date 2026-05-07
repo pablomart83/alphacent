@@ -2941,6 +2941,7 @@ async def get_spy_benchmark(
             session.query(HistoricalPriceCacheORM)
             .filter(
                 HistoricalPriceCacheORM.symbol == "SPY",
+                HistoricalPriceCacheORM.interval == "1d",  # daily closes only — not 1h/4h
                 HistoricalPriceCacheORM.date >= start_date,
             )
             .order_by(HistoricalPriceCacheORM.date.asc())
