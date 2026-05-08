@@ -27,6 +27,10 @@ interface AlphaDailyPoint {
   cumulative_alpha: number;
   rolling_30d_alpha: number | null;
   rolling_90d_alpha: number | null;
+  // realized series
+  realized_return_pct: number | null;
+  spy_return_cumulative: number | null;
+  cumulative_realized_alpha: number | null;
 }
 
 interface AlphaPeriodRow {
@@ -63,6 +67,9 @@ interface AlphaData {
   beta_gap: number;
   spy_inception_return: number;
   portfolio_inception_return: number;
+  // realized alpha
+  realized_alpha_inception: number;
+  realized_alpha_30d: number | null;
 }
 
 interface AlphaTabProps {
@@ -420,6 +427,81 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
     return series;
   }, [data]);
 
+  // Realized alpha chart: realized_return_pct vs spy_return_cumulative vs cumulative_realized_alpha
+  const realizedAlphaSeries = useMemo<TvSeriesConfig[]>(() => {
+    if (!data?.daily_series?.length) return [];
+    const series: TvSeriesConfig[] = [];
+
+    const realizedData = data.daily_series
+      .filter((p) => p.realized_return_pct !== null)
+      .map((p) => ({ time: p.date, value: p.realized_return_pct as number }));
+    if (realizedData.length > 0) {
+      series.push({
+        id: 'realized_return',
+        type: 'line' as const,
+        data: realizedData,
+        color: '#22c55e',
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      });
+    }
+
+    const spyCumData = data.daily_series
+      .filter((p) => p.spy_return_cumulative !== null)
+      .map((p) => ({ time: p.date, value: p.spy_return_cumulative as number }));
+    if (spyCumData.length > 0) {
+      series.push({
+        id: 'spy_cumulative',
+        type: 'line' as const,
+        data: spyCumData,
+        color: '#6b7280',
+        lineWidth: 1,
+        dashed: true,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      });
+    }
+
+    // Zero baseline
+    series.push({
+      id: 'zero_realized',
+      type: 'line' as const,
+      data: data.daily_series.map((p) => ({ time: p.date, value: 0 })),
+      color: '#374151',
+      lineWidth: 1,
+      dashed: true,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+
+    return series;
+  }, [data]);
+
+  // Cumulative realized alpha (realized_return_pct - spy_return_cumulative)
+  const cumulativeRealizedAlphaSeries = useMemo<TvSeriesConfig[]>(() => {
+    if (!data?.daily_series?.length) return [];
+    const pts = data.daily_series
+      .filter((p) => p.cumulative_realized_alpha !== null)
+      .map((p) => ({ time: p.date, value: p.cumulative_realized_alpha as number }));
+    if (pts.length < 2) return [];
+    return [{
+      id: 'cumulative_realized_alpha',
+      type: 'baseline' as const,
+      data: pts,
+      baseValue: 0,
+      topFillColor1: 'rgba(34, 197, 94, 0.25)',
+      topFillColor2: 'rgba(34, 197, 94, 0.05)',
+      bottomFillColor1: 'rgba(239, 68, 68, 0.05)',
+      bottomFillColor2: 'rgba(239, 68, 68, 0.20)',
+      topLineColor: '#22c55e',
+      bottomLineColor: '#ef4444',
+      lineWidth: 2,
+      lastValueVisible: true,
+      priceLineVisible: false,
+    }];
+  }, [data]);
+
   if (loading) return <div className="flex items-center justify-center h-48 text-sm text-gray-500 font-mono">Computing alpha metrics…</div>;
   if (error) return (
     <div className="space-y-2 p-4">
@@ -523,6 +605,61 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
         <AlphaPeriodTable rows={alpha_by_period} obsCount={data_points} />
       </div>
 
+      {/* ── 6b. Realized alpha section ── */}
+      {cumulativeRealizedAlphaSeries.length > 0 && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <MetricTile
+              label="Realized Alpha (inception)"
+              value={fmtPct(data.realized_alpha_inception, true)}
+              sub="locked-in P&L / initial equity − SPY return"
+              positive={data.realized_alpha_inception >= 0 ? true : false}
+            />
+            <MetricTile
+              label="Realized Alpha (30d)"
+              value={data.realized_alpha_30d !== null ? fmtPct(data.realized_alpha_30d, true) : 'n/a'}
+              sub="30d change in realized return vs SPY"
+              positive={data.realized_alpha_30d !== null ? (data.realized_alpha_30d >= 0 ? true : false) : null}
+            />
+          </div>
+
+          {/* Realized return vs SPY */}
+          <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
+            <div className="flex items-center justify-between mb-2">
+              <SectionLabel>Realized Return vs SPY</SectionLabel>
+              <div className="flex items-center gap-4 text-xs font-mono text-gray-500">
+                <span className="flex items-center gap-1">
+                  <span className="w-4 h-0.5 bg-accent-green inline-block rounded" />
+                  Realized P&L %
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-4 inline-block" style={{ borderTop: '1.5px dashed #6b7280' }} />
+                  SPY %
+                </span>
+              </div>
+            </div>
+            <TvChart series={realizedAlphaSeries} height={200} showTimeScale showPriceScale autoResize />
+            <p className="text-[10px] font-mono text-gray-600 mt-1">
+              Both as % of initial equity ({data.data_start}). Green above grey = positive realized alpha.
+            </p>
+          </div>
+
+          {/* Cumulative realized alpha */}
+          <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">
+            <div className="flex items-center justify-between mb-2">
+              <SectionLabel>Cumulative Realized Alpha</SectionLabel>
+              <span className="text-xs text-gray-500 font-mono">
+                realized return − SPY · only moves when trades close
+              </span>
+            </div>
+            <TvChart series={cumulativeRealizedAlphaSeries} height={200} showTimeScale showPriceScale autoResize />
+            <p className="text-[10px] font-mono text-gray-600 mt-1">
+              Isolates decision quality from mark-to-market noise. Unlike total equity alpha, this is unaffected by open position fluctuations.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ── 7. Methodology note ── */}
       <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3 text-xs font-mono text-gray-500 space-y-1">
         <p className="text-gray-400 font-semibold">Methodology</p>
@@ -531,6 +668,7 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
         <p><span className="text-gray-300">Annualised alpha</span> = period alpha × (252 / trading days in period) — noisy below 60 obs</p>
         <p><span className="text-gray-300">IR</span> = mean(daily excess returns) / std(daily excess returns) × √252 — reliable at 252+ obs</p>
         <p><span className="text-gray-300">Beta-equivalent passive</span> = β × SPY return — the hurdle a passive β-matched portfolio clears</p>
+        <p><span className="text-gray-300">Realized alpha</span> = cumulative realized P&L / initial equity − SPY return over same period</p>
         <p><span className="text-gray-300">Risk-free rate</span>: 4.5% annualised (Fed funds proxy) = 0.0179bp/day</p>
       </div>
     </div>

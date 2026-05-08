@@ -4291,12 +4291,16 @@ async def observability_exec_summary(
 
 class AlphaDailyPoint(BaseModel):
     date: str
-    portfolio_return: float   # daily % return
-    spy_return: float         # daily % return
-    excess_return: float      # portfolio - spy - rf (daily)
-    cumulative_alpha: float   # rebased to 0 at inception
+    portfolio_return: float        # daily % return (total equity)
+    spy_return: float              # daily % return
+    excess_return: float           # portfolio - spy - rf (daily)
+    cumulative_alpha: float        # rebased to 0 at inception (total equity basis)
     rolling_30d_alpha: Optional[float] = None
     rolling_90d_alpha: Optional[float] = None
+    # ── Realized P&L series ──────────────────────────────────────────────────
+    realized_return_pct: Optional[float] = None   # cumulative realized P&L / initial equity (%)
+    spy_return_cumulative: Optional[float] = None  # SPY cumulative return from inception (%)
+    cumulative_realized_alpha: Optional[float] = None  # realized_return_pct - spy_return_cumulative (%)
 
 
 class AlphaPeriodRow(BaseModel):
@@ -4333,6 +4337,9 @@ class AlphaResponse(BaseModel):
     beta_gap: float                # portfolio_return - beta_equivalent_return (%)
     spy_inception_return: float    # SPY return since inception (%)
     portfolio_inception_return: float  # portfolio return since inception (%)
+    # ── Realized alpha fields ─────────────────────────────────────────────────
+    realized_alpha_inception: float   # realized P&L / initial equity - SPY return (%)
+    realized_alpha_30d: Optional[float] = None  # 30d realized alpha (last 30d realized P&L change / initial equity - SPY 30d return)
 
 
 def _compute_rolling_alpha(
@@ -4471,10 +4478,14 @@ async def get_alpha_metrics(
 
     # Build date → equity dict (date string "YYYY-MM-DD")
     equity_by_date: Dict[str, float] = {}
+    realized_by_date: Dict[str, float] = {}  # cumulative realized P&L per date
     for row in snapshot_rows:
         date_str = row.date[:10]  # strip time component if present
         if row.equity and row.equity > 0:
             equity_by_date[date_str] = row.equity
+        # realized_pnl_cumulative can be 0 or negative early on — store regardless
+        if row.realized_pnl_cumulative is not None:
+            realized_by_date[date_str] = float(row.realized_pnl_cumulative)
 
     # ── 2. Load SPY daily closes — only what we need ─────────────────────────
     # We only need SPY from the earliest equity snapshot date (minus a small
@@ -4590,8 +4601,33 @@ async def get_alpha_metrics(
     full_beta = _compute_beta(port_returns, spy_returns, window=len(port_returns), min_obs=10)
 
     # ── 10. Build daily series ────────────────────────────────────────────────
+    # Realized alpha series:
+    # - realized_return_pct = cumulative_realized_pnl / initial_equity × 100
+    # - spy_return_cumulative = (spy_close / spy_close_at_inception - 1) × 100
+    # - cumulative_realized_alpha = realized_return_pct - spy_return_cumulative
+    #
+    # This answers: "if we had put our starting capital into SPY instead of
+    # trading, would we have made more or less in realized terms?"
+    initial_equity = portfolio_eq[0] if portfolio_eq[0] > 0 else 1.0
+    initial_spy = spy_closes[0] if spy_closes[0] > 0 else 1.0
+
     daily_series: List[AlphaDailyPoint] = []
     for i, d in enumerate(return_dates):
+        # realized_pnl_cumulative for this date (use the date from common_dates[i+1]
+        # since return_dates[i] = common_dates[i+1])
+        realized_pnl = realized_by_date.get(d)
+        realized_return_pct: Optional[float] = None
+        spy_return_cumulative: Optional[float] = None
+        cumulative_realized_alpha: Optional[float] = None
+
+        if realized_pnl is not None:
+            realized_return_pct = round(realized_pnl / initial_equity * 100, 4)
+            # SPY cumulative return from inception to this date
+            spy_close_today = spy_ffill.get(d)
+            if spy_close_today and initial_spy > 0:
+                spy_return_cumulative = round((spy_close_today / initial_spy - 1) * 100, 4)
+                cumulative_realized_alpha = round(realized_return_pct - spy_return_cumulative, 4)
+
         daily_series.append(AlphaDailyPoint(
             date=d,
             portfolio_return=round(port_returns[i] * 100, 4),
@@ -4600,6 +4636,9 @@ async def get_alpha_metrics(
             cumulative_alpha=cumulative_alpha[i],
             rolling_30d_alpha=rolling_30d[i],
             rolling_90d_alpha=rolling_90d[i],
+            realized_return_pct=realized_return_pct,
+            spy_return_cumulative=spy_return_cumulative,
+            cumulative_realized_alpha=cumulative_realized_alpha,
         ))
 
     # ── 11. Alpha by period ───────────────────────────────────────────────────
@@ -4675,6 +4714,32 @@ async def get_alpha_metrics(
     # Beta gap: how much we over/under-performed vs our beta-equivalent passive
     beta_gap = round(port_inception_ret - beta_equivalent_return, 4)
 
+    # ── 12c. Realized alpha scalars ───────────────────────────────────────────
+    # Realized alpha = (cumulative realized P&L / initial equity) - SPY return
+    # Uses the last data point in the daily_series that has realized data.
+    _realized_alpha_inception: float = 0.0
+    _realized_alpha_30d: Optional[float] = None
+
+    # Find the most recent point with realized data
+    realized_points = [p for p in daily_series if p.cumulative_realized_alpha is not None]
+    if realized_points:
+        _realized_alpha_inception = round(realized_points[-1].cumulative_realized_alpha, 4)
+
+        # 30d realized alpha: change in realized return over last 30 days vs SPY over same period
+        if len(realized_points) >= 2:
+            cutoff_30d = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            start_30d = next(
+                (p for p in realized_points if p.date >= cutoff_30d),
+                realized_points[0],
+            )
+            end_30d = realized_points[-1]
+            if start_30d.realized_return_pct is not None and end_30d.realized_return_pct is not None:
+                realized_change_30d = end_30d.realized_return_pct - start_30d.realized_return_pct
+                spy_change_30d = (
+                    (end_30d.spy_return_cumulative or 0.0) - (start_30d.spy_return_cumulative or 0.0)
+                )
+                _realized_alpha_30d = round(realized_change_30d - spy_change_30d, 4)
+
     # ── 13. Annotations — key system change dates ─────────────────────────────
     annotations = [
         AlphaAnnotation(
@@ -4726,6 +4791,8 @@ async def get_alpha_metrics(
         beta_gap=beta_gap,
         spy_inception_return=round(spy_inception_ret, 4),
         portfolio_inception_return=round(port_inception_ret, 4),
+        realized_alpha_inception=_realized_alpha_inception,
+        realized_alpha_30d=_realized_alpha_30d,
     )
 
 
