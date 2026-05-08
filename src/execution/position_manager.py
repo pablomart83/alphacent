@@ -54,6 +54,9 @@ class PositionManager:
     # Calibration logic (ATR-aware):
     # - Stocks: ~1-2% daily ATR → activate at 5%, trail at 7% (3.5-7x daily noise)
     # - ETFs: similar to stocks but slightly tighter (diversified, less volatile)
+    # - Leveraged ETFs (3x): ~6-10% daily ATR → activate at 10%, trail at 12%
+    #   SOXL avg daily range = 6.4%, TQQQ = 3.1%. A 5% trail (regular ETF) is
+    #   less than 1 day's noise for SOXL — guaranteed whipsaw. Must be wider.
     # - Crypto: ~3-5% daily ATR → activate at 8%, trail at 10% (2-3x daily noise)
     # - Forex: ~0.5-1% daily ATR → activate at 2%, trail at 3% (3-6x daily noise)
     # - Commodities: ~1.5-3% daily ATR → activate at 5%, trail at 7% (2-4x daily noise)
@@ -63,12 +66,13 @@ class PositionManager:
     # max(distance_pct * price, ATR_MULTIPLIER * daily_ATR) to prevent penny-stop
     # whipsaws on high-priced instruments. See check_trailing_stops() for ATR logic.
     TRAILING_STOP_PARAMS = {
-        "stock":     {"activation": 0.05, "distance": 0.07},
-        "etf":       {"activation": 0.04, "distance": 0.05},
-        "crypto":    {"activation": 0.08, "distance": 0.10},
-        "forex":     {"activation": 0.02, "distance": 0.03},
-        "commodity": {"activation": 0.05, "distance": 0.07},
-        "index":     {"activation": 0.04, "distance": 0.05},
+        "stock":          {"activation": 0.05, "distance": 0.07},
+        "etf":            {"activation": 0.04, "distance": 0.05},
+        "leveraged_etf":  {"activation": 0.10, "distance": 0.12},  # 3x ETFs: wide stops
+        "crypto":         {"activation": 0.08, "distance": 0.10},
+        "forex":          {"activation": 0.02, "distance": 0.03},
+        "commodity":      {"activation": 0.05, "distance": 0.07},
+        "index":          {"activation": 0.04, "distance": 0.05},
     }
 
     # Breakeven stop thresholds — move SL to entry price when profit reaches this level.
@@ -81,12 +85,13 @@ class PositionManager:
     # could have been avoided. Moving SL to breakeven at +3% costs nothing and
     # eliminates the "gave back a winner" scenario entirely.
     BREAKEVEN_STOP_PARAMS = {
-        "stock":     0.03,   # Move SL to entry at +3% profit
-        "etf":       0.025,  # ETFs are less volatile — tighter breakeven
-        "crypto":    0.05,   # Crypto needs more room before locking in breakeven
-        "forex":     0.015,  # Forex: tight, 1.5% is meaningful
-        "commodity": 0.03,
-        "index":     0.025,
+        "stock":          0.03,
+        "etf":            0.025,
+        "leveraged_etf":  0.06,   # 3x ETFs: need 6% move before locking breakeven
+        "crypto":         0.05,
+        "forex":          0.015,
+        "commodity":      0.03,
+        "index":          0.025,
     }
 
     # Profit lock-in thresholds — move SL to entry + lock_pct when profit reaches this level.
@@ -102,12 +107,13 @@ class PositionManager:
     #   +5%  → SL to entry + 2% (lock in 2% profit)
     #   +7.5%+ → trailing stop takes over, follows price at 7% distance
     PROFIT_LOCK_PARAMS = {
-        "stock":     {"trigger": 0.05, "lock": 0.02},   # At +5%, lock in +2%
-        "etf":       {"trigger": 0.04, "lock": 0.015},  # At +4%, lock in +1.5%
-        "crypto":    {"trigger": 0.08, "lock": 0.03},   # At +8%, lock in +3%
-        "forex":     {"trigger": 0.025,"lock": 0.01},   # At +2.5%, lock in +1%
-        "commodity": {"trigger": 0.05, "lock": 0.02},
-        "index":     {"trigger": 0.04, "lock": 0.015},
+        "stock":          {"trigger": 0.05, "lock": 0.02},
+        "etf":            {"trigger": 0.04, "lock": 0.015},
+        "leveraged_etf":  {"trigger": 0.10, "lock": 0.04},  # At +10%, lock in +4%
+        "crypto":         {"trigger": 0.08, "lock": 0.03},
+        "forex":          {"trigger": 0.025,"lock": 0.01},
+        "commodity":      {"trigger": 0.05, "lock": 0.02},
+        "index":          {"trigger": 0.04, "lock": 0.015},
     }
 
     # ATR multiplier for minimum trail distance, per asset class.
@@ -124,19 +130,42 @@ class PositionManager:
     #   high-vol regimes (CPI days etc.), which is what we want.
     # - Indices: 1.5x — ~1% ATR, 1.5x keeps trails near the 5% fixed distance.
     ATR_MULTIPLIER_BY_ASSET_CLASS = {
-        "stock":     2.0,
-        "etf":       2.0,
-        "crypto":    1.5,
-        "forex":     1.0,
-        "commodity": 2.0,
-        "index":     1.5,
+        "stock":          2.0,
+        "etf":            2.0,
+        "leveraged_etf":  1.5,  # 3x ETFs: ATR already ~6-10%, 2x produces 12-20% stops
+        "crypto":         1.5,
+        "forex":          1.0,
+        "commodity":      2.0,
+        "index":          1.5,
     }
     # Legacy single-value multiplier kept for any external callers that read it.
     ATR_TRAIL_MULTIPLIER = 2.0
 
     def _get_asset_class(self, symbol: str) -> str:
-        """Classify symbol for trailing stop parameter selection."""
+        """Classify symbol for trailing stop parameter selection.
+
+        Leveraged ETFs (3x instruments like SOXL, TQQQ, UPRO) are classified
+        separately from regular ETFs because their daily volatility is 3-9×
+        higher. SOXL avg daily range = 6.4% vs SPY = 0.7%. Applying regular
+        ETF stop parameters (activation 4%, distance 5%) to SOXL guarantees
+        intraday whipsaw — 5% is less than 1 day's noise.
+        """
         sym = symbol.upper() if symbol else ""
+
+        # Leveraged ETF check first — before the general ETF check
+        _LEVERAGED_ETFS = {
+            # 3x Long
+            "SOXL", "TQQQ", "UPRO", "SPXL", "UDOW", "LABU", "TECL",
+            "FAS", "TNA", "NAIL", "CURE", "DFEN", "WANT", "HIBL",
+            # 3x Short / Inverse
+            "SQQQ", "SPXU", "SDOW", "SOXS", "LABD", "TECS",
+            "FAZ", "TZA", "HIBS",
+            # 2x
+            "SSO", "QLD", "DDM", "ROM", "UWM", "USD",
+        }
+        if sym in _LEVERAGED_ETFS:
+            return "leveraged_etf"
+
         try:
             from src.core.tradeable_instruments import (
                 DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,

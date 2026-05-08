@@ -1715,7 +1715,7 @@ class StrategyTemplateLibrary:
         # Sector Rotation Strategy
         templates.append(StrategyTemplate(
             name="Sector Rotation",
-            description="Rotate into sectors that outperform in current economic regimes using sector ETFs",
+            description="Rotate into sectors that outperform in current economic regimes using all 11 SPDR sector ETFs",
             strategy_type=StrategyType.MOMENTUM,
             market_regimes=[
                 MarketRegime.TRENDING_UP,
@@ -1750,7 +1750,22 @@ class StrategyTemplateLibrary:
             expected_holding_period="30-90 days",
             risk_reward_ratio=1.8,
             metadata={
-                "fixed_symbols": ["XLF", "XLK", "XLI", "XLP", "XLY"],
+                # All 11 SPDR sector ETFs — previously only 5 were listed, preventing
+                # rotation into defensive sectors (XLU, XLV) during downturns or
+                # energy (XLE) during inflation regimes.
+                "fixed_symbols": [
+                    "XLF",   # Financials
+                    "XLK",   # Technology
+                    "XLI",   # Industrials
+                    "XLP",   # Consumer Staples (defensive)
+                    "XLY",   # Consumer Discretionary
+                    "XLE",   # Energy
+                    "XLU",   # Utilities (defensive)
+                    "XLV",   # Health Care (defensive)
+                    "XLB",   # Materials
+                    "XLRE",  # Real Estate
+                    "XLC",   # Communication Services
+                ],
                 "requires_macro_data": True,
                 "strategy_category": "alpha_edge",
                 "uses_sector_etfs": True

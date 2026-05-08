@@ -304,10 +304,13 @@ class OrderExecutor:
                                             if take_profit_pct:
                                                 take_profit_pct = round(stop_loss_pct * original_rr, 4)
                                             # Clamp SL to asset-class max to avoid absurdly wide stops.
-                                            # Stocks/ETFs: 9% max. Crypto: 15% max. Forex: 4% max.
+                                            # Stocks/ETFs: 9% max. Leveraged ETFs: 20% max.
+                                            # Crypto: 15% max. Forex: 4% max.
                                             _is_crypto = any(c in normalized_symbol.upper() for c in ["BTC","ETH","XRP","ADA","SOL"])
                                             _is_forex = len(normalized_symbol) == 6 and normalized_symbol[:3].isalpha() and normalized_symbol[3:].isalpha()
-                                            _sl_max = 0.15 if _is_crypto else (0.04 if _is_forex else 0.09)
+                                            _LEVERAGED_ETF_SET = {"SOXL","TQQQ","UPRO","SPXL","UDOW","LABU","TECL","FAS","TNA","SQQQ","SPXU","SDOW","SOXS","LABD","TECS","FAZ","TZA","SSO","QLD","DDM"}
+                                            _is_leveraged_etf = normalized_symbol.upper() in _LEVERAGED_ETF_SET
+                                            _sl_max = 0.15 if _is_crypto else (0.04 if _is_forex else (0.20 if _is_leveraged_etf else 0.09))
                                             if stop_loss_pct > _sl_max:
                                                 stop_loss_pct = _sl_max
                                                 if take_profit_pct:
