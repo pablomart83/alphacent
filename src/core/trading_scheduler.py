@@ -1591,6 +1591,9 @@ class TradingScheduler:
                             _emsg = str(e)
                             if "Market closed" in _emsg and "re-fire at next open" in _emsg:
                                 logger.info(f"Signal deferred (market closed): {signal.symbol}")
+                            elif "gate blocked" in _emsg.lower() or "trend-consistency gate" in _emsg.lower() or "vix gate" in _emsg.lower():
+                                # Gate blocks are expected behaviour — not errors
+                                logger.warning(f"Gate blocked signal for {signal.symbol}: {e}")
                             else:
                                 logger.error(f"Failed to execute signal for {signal.symbol}: {e}")
                             # Count as rejected so the cycle summary is accurate

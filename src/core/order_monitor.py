@@ -1238,8 +1238,24 @@ class OrderMonitor:
                             logger.debug(f"live_trade_count increment failed for {order.id}: {ltc_err}")
                 
                 except Exception as e:
-                    logger.error(f"Error checking order {order.id}: {e}")
-                    failed_count += 1
+                    _emsg = str(e)
+                    # UniqueViolation on etoro_position_id means two sync ticks raced
+                    # to insert the same position simultaneously. The position already
+                    # exists — this is a no-op, not an error. Roll back just this order's
+                    # sub-transaction and continue processing the rest.
+                    if "UniqueViolation" in type(e).__name__ or "unique constraint" in _emsg.lower():
+                        logger.warning(
+                            f"Order {order.id} ({order.symbol}): position already exists "
+                            f"(race condition on etoro_position_id) — skipping duplicate insert"
+                        )
+                        try:
+                            session.rollback()
+                        except Exception:
+                            pass
+                        failed_count += 1
+                    else:
+                        logger.error(f"Error checking order {order.id}: {e}")
+                        failed_count += 1
             
             # Commit all changes
             session.commit()
