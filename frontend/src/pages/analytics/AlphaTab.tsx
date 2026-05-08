@@ -15,6 +15,7 @@ import { type FC, useMemo } from 'react';
 import { cn } from '../../lib/utils';
 import { SectionLabel } from '../../components/ui/SectionLabel';
 import { TvChart, type TvSeriesConfig } from '../../components/charts/TvChart';
+import { ConvictionCalibrationCard } from './ConvictionCalibrationCard';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -479,6 +480,9 @@ export const AlphaTab: FC<AlphaTabProps> = ({ data, loading, error, onRetry }) =
           positive={alpha_30d >= 0 ? true : false}
         />
       </div>
+
+      {/* ── 3b. Conviction calibration ── */}
+      <ConvictionCalibrationCard />
 
       {/* ── 4. Cumulative alpha chart ── */}
       <div className="rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-bg)] p-3">

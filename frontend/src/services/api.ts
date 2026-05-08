@@ -1499,6 +1499,15 @@ class ApiClient {
     });
   }
 
+  async getConvictionCalibration(days = 30): Promise<any> {
+    return dedupedGet(`analytics/conviction-calibration-${days}`, async () => {
+      const response = await this.client.get<ApiResponse<any>>(
+        `/analytics/conviction-calibration?days=${days}`
+      );
+      return this.handleResponse(response);
+    });
+  }
+
   // ============================================================================
   // Template Rankings (Task 9.1)
   // ============================================================================

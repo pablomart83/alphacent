@@ -4727,3 +4727,228 @@ async def get_alpha_metrics(
         spy_inception_return=round(spy_inception_ret, 4),
         portfolio_inception_return=round(port_inception_ret, 4),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Conviction Score vs P&L Calibration Monitor
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ConvictionBucket(BaseModel):
+    bucket: str                  # e.g. "70-75"
+    label: str                   # human label
+    min_score: float
+    max_score: float
+    trades: int
+    wins: int
+    losses: int
+    win_rate: float              # %
+    avg_pnl: float               # $ per trade
+    total_pnl: float             # $ total
+    is_positive_ev: bool
+    is_above_threshold: bool     # bucket is above the current conviction threshold
+    sample_size_warning: bool    # True when trades < 30 (statistically weak)
+
+
+class ConvictionCalibrationResponse(BaseModel):
+    buckets: List[ConvictionBucket]
+    threshold: float             # current conviction threshold
+    is_monotonic: bool           # True when avg_pnl increases with each bucket
+    monotonicity_violations: List[str]  # e.g. ["70-75 < 65-70"]
+    negative_ev_above_threshold: List[str]  # buckets above threshold with negative avg P&L
+    total_trades_with_score: int
+    coverage_pct: float          # % of closed trades that have a conviction score
+    recommendation: str          # actionable text
+    data_window_days: int
+
+
+@router.get("/conviction-calibration", response_model=ConvictionCalibrationResponse)
+async def get_conviction_calibration(
+    days: int = 30,
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Conviction score vs P&L calibration monitor.
+
+    Groups closed trades from trade_journal by conviction score bucket and
+    checks whether higher conviction scores produce higher avg P&L (monotonicity).
+    A well-calibrated scorer should show strictly increasing avg P&L as the
+    conviction score rises.
+
+    Returns per-bucket stats plus:
+    - is_monotonic: False when any higher bucket underperforms a lower one
+    - negative_ev_above_threshold: buckets above the threshold with negative avg P&L
+    - recommendation: actionable text (raise threshold, lower threshold, etc.)
+
+    Args:
+        days: Lookback window in days (default 30). Use 0 for all-time.
+    """
+    logger.info(f"Computing conviction calibration for user {username}, days={days}")
+
+    from src.analytics.trade_journal import TradeJournalEntryORM
+
+    # Current threshold — read from autonomous_trading.yaml
+    CURRENT_THRESHOLD = 70.0
+    try:
+        import yaml
+        from pathlib import Path
+        cfg_path = Path("config/autonomous_trading.yaml")
+        if cfg_path.exists():
+            with open(cfg_path, "r") as f:
+                cfg = yaml.safe_load(f) or {}
+            CURRENT_THRESHOLD = float(
+                cfg.get("conviction_scoring", {}).get("threshold", 70.0)
+            )
+    except Exception:
+        pass
+
+    # ── Query trade_journal ───────────────────────────────────────────────────
+    q = session.query(TradeJournalEntryORM).filter(
+        TradeJournalEntryORM.conviction_score.isnot(None),
+        TradeJournalEntryORM.pnl.isnot(None),
+        TradeJournalEntryORM.exit_time.isnot(None),
+    )
+    if days > 0:
+        cutoff = datetime.now() - timedelta(days=days)
+        q = q.filter(TradeJournalEntryORM.exit_time >= cutoff)
+
+    rows = q.all()
+
+    # Total closed trades (with or without score) for coverage %
+    total_q = session.query(TradeJournalEntryORM).filter(
+        TradeJournalEntryORM.exit_time.isnot(None),
+        TradeJournalEntryORM.pnl.isnot(None),
+    )
+    if days > 0:
+        total_q = total_q.filter(TradeJournalEntryORM.exit_time >= cutoff)
+    total_closed = total_q.count()
+
+    coverage_pct = round(len(rows) / total_closed * 100, 1) if total_closed > 0 else 0.0
+
+    # ── Bucket definitions ────────────────────────────────────────────────────
+    BUCKET_DEFS = [
+        ("<65",   "<65",          0.0,  65.0),
+        ("65-70", "65–70",       65.0,  70.0),
+        ("70-75", "70–75",       70.0,  75.0),
+        ("75-80", "75–80",       75.0,  80.0),
+        ("80+",   "80+",         80.0, 200.0),
+    ]
+
+    buckets: List[ConvictionBucket] = []
+    for bucket_key, label, lo, hi in BUCKET_DEFS:
+        bucket_rows = [r for r in rows if lo <= r.conviction_score < hi]
+        n = len(bucket_rows)
+        if n == 0:
+            buckets.append(ConvictionBucket(
+                bucket=bucket_key, label=label, min_score=lo, max_score=hi,
+                trades=0, wins=0, losses=0, win_rate=0.0,
+                avg_pnl=0.0, total_pnl=0.0,
+                is_positive_ev=False,
+                is_above_threshold=(lo >= CURRENT_THRESHOLD),
+                sample_size_warning=True,
+            ))
+            continue
+
+        pnls = [r.pnl for r in bucket_rows]
+        wins = sum(1 for p in pnls if p > 0)
+        losses = sum(1 for p in pnls if p < 0)
+        avg_pnl = round(float(np.mean(pnls)), 2)
+        total_pnl = round(float(np.sum(pnls)), 2)
+        win_rate = round(wins / n * 100, 1)
+
+        buckets.append(ConvictionBucket(
+            bucket=bucket_key,
+            label=label,
+            min_score=lo,
+            max_score=hi,
+            trades=n,
+            wins=wins,
+            losses=losses,
+            win_rate=win_rate,
+            avg_pnl=avg_pnl,
+            total_pnl=total_pnl,
+            is_positive_ev=(avg_pnl > 0),
+            is_above_threshold=(lo >= CURRENT_THRESHOLD),
+            sample_size_warning=(n < 30),
+        ))
+
+    # ── Monotonicity check ────────────────────────────────────────────────────
+    # Only check buckets that have data. Skip <65 (below threshold, expected to vary).
+    scored_buckets = [b for b in buckets if b.trades > 0 and b.min_score >= 65.0]
+    violations: List[str] = []
+    for i in range(1, len(scored_buckets)):
+        prev = scored_buckets[i - 1]
+        curr = scored_buckets[i]
+        if curr.avg_pnl < prev.avg_pnl:
+            violations.append(
+                f"{curr.label} (avg ${curr.avg_pnl:+.0f}) < {prev.label} (avg ${prev.avg_pnl:+.0f})"
+            )
+
+    is_monotonic = len(violations) == 0
+
+    # ── Negative EV above threshold ───────────────────────────────────────────
+    neg_ev_above = [
+        b.label for b in buckets
+        if b.is_above_threshold and not b.is_positive_ev and b.trades > 0
+    ]
+
+    # ── Recommendation ────────────────────────────────────────────────────────
+    above_threshold_buckets = [b for b in buckets if b.is_above_threshold and b.trades >= 10]
+
+    if not above_threshold_buckets:
+        recommendation = "Insufficient data — need 10+ trades above threshold to calibrate."
+    elif neg_ev_above:
+        # Find the lowest positive-EV bucket above threshold
+        first_positive = next(
+            (b for b in buckets if b.is_above_threshold and b.is_positive_ev and b.trades >= 10),
+            None,
+        )
+        if first_positive:
+            recommendation = (
+                f"Raise threshold to {first_positive.min_score:.0f}. "
+                f"Buckets {', '.join(neg_ev_above)} are above threshold but negative EV. "
+                f"First positive-EV bucket above threshold: {first_positive.label} "
+                f"(avg ${first_positive.avg_pnl:+.0f}/trade, {first_positive.trades} trades)."
+            )
+        else:
+            recommendation = (
+                f"All buckets above threshold are negative EV. "
+                f"Consider raising threshold significantly or auditing scorer components. "
+                f"Negative buckets: {', '.join(neg_ev_above)}."
+            )
+    elif not is_monotonic:
+        recommendation = (
+            f"Scorer is not monotonic: {'; '.join(violations)}. "
+            f"Threshold is correctly placed but scorer components need reweighting."
+        )
+    else:
+        # All good — check if we could lower threshold
+        below_threshold_positive = next(
+            (b for b in reversed(buckets)
+             if not b.is_above_threshold and b.is_positive_ev and b.trades >= 10),
+            None,
+        )
+        if below_threshold_positive:
+            recommendation = (
+                f"Scorer is well-calibrated and monotonic above threshold {CURRENT_THRESHOLD:.0f}. "
+                f"Note: {below_threshold_positive.label} bucket (below threshold) is also positive EV "
+                f"(avg ${below_threshold_positive.avg_pnl:+.0f}/trade, {below_threshold_positive.trades} trades) — "
+                f"consider two-factor gate to capture high-WF boundary cases."
+            )
+        else:
+            recommendation = (
+                f"Scorer is well-calibrated. All buckets above threshold {CURRENT_THRESHOLD:.0f} "
+                f"are positive EV and monotonically increasing. No action needed."
+            )
+
+    return ConvictionCalibrationResponse(
+        buckets=buckets,
+        threshold=CURRENT_THRESHOLD,
+        is_monotonic=is_monotonic,
+        monotonicity_violations=violations,
+        negative_ev_above_threshold=neg_ev_above,
+        total_trades_with_score=len(rows),
+        coverage_pct=coverage_pct,
+        recommendation=recommendation,
+        data_window_days=days,
+    )
