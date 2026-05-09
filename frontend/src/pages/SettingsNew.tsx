@@ -1125,7 +1125,8 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         ml_min_confidence: formData.ml_min_confidence / 100,
         ml_retrain_frequency_days: formData.ml_retrain_frequency_days,
         max_active_strategies: formData.max_active_strategies,
-        min_conviction_score: formData.min_conviction_score,
+        // min_conviction_score intentionally omitted — managed via Autonomous settings
+        // to prevent this form from overwriting the conviction threshold
         min_holding_period_days: formData.min_holding_period_days,
         max_trades_per_strategy_per_month: formData.max_trades_per_strategy_per_month,
         earnings_momentum_enabled: formData.earnings_momentum_enabled,
@@ -3071,14 +3072,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
                       <div className="space-y-2">
                         <Label htmlFor="min_conviction_score" className="text-[11px]">Min Conviction Score</Label>
-                        <Input
-                          id="min_conviction_score"
-                          type="number"
-                          min="50"
-                          max="90"
-                          {...alphaEdgeForm.register('min_conviction_score', { valueAsNumber: true })}
-                        />
-                        <p className="text-xs text-gray-500">Minimum conviction score to generate signals (50-90)</p>
+                        <div className="flex items-center gap-2 h-9 px-3 rounded-md border border-[var(--color-dark-border)] bg-[var(--color-dark-surface)] text-xs font-mono text-gray-400">
+                          {alphaEdgeForm.watch('min_conviction_score')}
+                          <span className="text-gray-600 ml-1">(set in Autonomous → Activation Thresholds)</span>
+                        </div>
+                        <p className="text-xs text-gray-500">Managed in Autonomous settings to avoid conflicts</p>
                       </div>
 
                       <div className="space-y-2">
