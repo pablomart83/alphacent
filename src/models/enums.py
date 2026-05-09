@@ -13,7 +13,7 @@ class StrategyStatus(str, Enum):
     """Strategy lifecycle status."""
     PROPOSED = "PROPOSED"
     BACKTESTED = "BACKTESTED"
-    DEMO = "DEMO"
+    PAPER = "PAPER"   # strategy has paper fills on DEMO account (renamed from DEMO 2026-05-10)
     LIVE = "LIVE"
     PAUSED = "PAUSED"
     RETIRED = "RETIRED"

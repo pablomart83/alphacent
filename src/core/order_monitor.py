@@ -2001,7 +2001,7 @@ class OrderMonitor:
                             # Demote strategy if it has no other real positions
                             from src.models.orm import StrategyORM
                             strategy = session.query(StrategyORM).filter(StrategyORM.id == db_pos.strategy_id).first()
-                            if strategy and strategy.status == _StrategyStatus.DEMO:
+                            if strategy and strategy.status == _StrategyStatus.PAPER:
                                 other_open = session.query(PositionORM).filter(
                                     PositionORM.strategy_id == db_pos.strategy_id,
                                     PositionORM.closed_at.is_(None),
@@ -2012,7 +2012,7 @@ class OrderMonitor:
                                     if isinstance(strategy.strategy_metadata, dict):
                                         strategy.strategy_metadata['activation_approved'] = True
                                     strategy.activated_at = None
-                                    logger.warning(f"Demoted {strategy.name} DEMO → BACKTESTED (phantom position, will re-trigger)")
+                                    logger.warning(f"Demoted {strategy.name} PAPER → BACKTESTED (phantom position, will re-trigger)")
                         except Exception as cleanup_err:
                             logger.warning(f"Phantom cleanup error: {cleanup_err}")
                     
