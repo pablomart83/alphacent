@@ -1350,9 +1350,191 @@ P3:
 
 ---
 
-## Open P1 Items (as of May 6, 2026 evening)
+## Session shipped 2026-05-09 — Alpha Dashboard + Conviction Calibration + Stop/ETF fixes
 
-### P1 — Alpha Dashboard ✅ SHIPPED (2026-05-06 session 2)
+### System state at session close
+- **Equity:** ~$491K | **Balance:** ~$38K | **Open positions:** ~61 | **Mode:** eToro DEMO
+- **errors.log:** Clean. Gate blocks now log as WARNING (not ERROR). UniqueViolation race condition handled gracefully.
+- **Last commits (newest first):**
+  - `839816f` feat: granular conviction calibration — configurable bucket width (1pt/2pt/5pt)
+  - `381630b` feat: conviction threshold in Autonomous settings (Activation Thresholds card)
+  - `e4cc798` fix: remove analytics from nginx exact-match proxy rule (was causing 404 on /analytics)
+  - `5a74166` feat: realized alpha section in Alpha Generation tab
+  - `f29fdbd` feat: conviction score vs P&L calibration monitor
+  - `68c1f9f` fix: leveraged ETF stop calibration + Sector Rotation full universe
+  - `0fc8871` fix: gate blocks log as WARNING not ERROR; UniqueViolation is a no-op
+  - `d6ffef1` fix: SPY benchmark showing wrong direction on equity chart
+  - `fa046ed` fix: forward-fill SPY into weekend dates on equity chart
+  - `e83ff62` fix: stop retrying error 604 (insufficient funds) orders
+
+### Sprint 1 — Alpha Generation Dashboard (full build)
+
+**Backend** (`GET /analytics/alpha`):
+- Computes from `equity_snapshots` (daily) + `historical_price_cache` (SPY 1d, forward-filled into weekends)
+- Returns: daily excess returns, cumulative alpha, rolling 30d/90d alpha, IR, beta, CAPM alpha, alpha by period
+- Context fields: annualized alpha, IR confidence tier, beta-equivalent passive return, beta gap
+- Realized alpha series: `realized_pnl_cumulative / initial_equity` vs SPY cumulative return
+- Risk-free rate: 4.5% annualized (0.045/252 per day)
+- Annotation markers for 5 key system changes (Apr 29 – May 6)
+
+**Frontend** (`◆ Alpha Generation` tab in Analytics):
+- Data confidence banner (progress bar to 252 obs, IR reliability label)
+- 3 context cards: annualized alpha (with noise warning), beta-adjusted benchmark, industry IR comparison
+- 4 metric tiles: IR, Beta, Total Alpha, Alpha (30d)
+- Cumulative alpha chart (baseline, green/red)
+- Rolling alpha chart (30d blue + 90d purple)
+- Alpha by period table (1W/1M/3M/6M/inception) with CAPM alpha + annualized alpha + beta
+- **Realized alpha section** (below period table):
+  - 2 tiles: Realized Alpha (inception) + Realized Alpha (30d)
+  - "Realized Return vs SPY" chart: locked-in P&L % vs SPY % (both as % of initial equity)
+  - "Cumulative Realized Alpha" baseline chart — only moves when trades close, isolates decision quality from mark-to-market noise
+
+**Live baseline (2026-03-31 to 2026-05-09):**
+- Portfolio: +7.2% | SPY: +12.3% | Total alpha: -5.1% | IR: -5.0 (unreliable at 39 obs)
+- Realized P&L: $21K on $457K initial = +4.6% realized return vs SPY +12.3% = realized alpha -7.7%
+- Beta: 0.72 (low market sensitivity — correct for mixed long/short book)
+- **1W alpha: +1.45%** — first week of positive alpha, post-scorer-redesign signal to watch
+
+### Sprint 2 — Conviction Score vs P&L Calibration Monitor
+
+**Backend** (`GET /analytics/conviction-calibration?days=N&granularity=G`):
+- Groups `trade_journal` by conviction bucket (configurable width: 1pt/2pt/5pt)
+- Returns per-bucket: trades, win rate, avg P&L, total P&L, EV flag
+- Monotonicity check: flags when higher bucket underperforms lower one
+- Reads current threshold from `alpha_edge.min_conviction_score` in YAML
+- Generates actionable recommendation (raise/lower threshold, reweight)
+- Coverage %: fraction of closed trades with a conviction score
+
+**Frontend** (`ConvictionCalibrationCard` in Alpha Generation tab):
+- Status banner: red (neg EV above threshold) / amber (non-monotonic) / green (well-calibrated)
+- Bucket table with bar chart, ▶ threshold marker, ⚠ on < 30 trades
+- Granularity selector: 1pt / 2pt / 5pt (default 2pt)
+- Window selector: 7d / 14d / 30d / ALL
+
+**Live data (all-time, 701 scored trades, 2pt granularity):**
+
+| Bucket | Trades | Avg P&L | Signal |
+|--------|--------|---------|--------|
+| 62–64 | 65 | +$19.64 | Positive EV *below* threshold |
+| 64–66 | 44 | **-$51.28** | Worst bucket in entire range |
+| 70–72 | 35 | -$18.30 | Negative EV above threshold |
+| 72–74 | 39 | -$4.32 | Marginal negative |
+| **74–76** | 49 | **+$21.72** | First clearly positive above threshold |
+| 82–84 | 37 | +$130.23 | Best bucket |
+
+**Recommendation from data: raise threshold to 74.** The 64–66 bucket is the single worst performer. The 70–74 range is negative EV. 74+ is consistently positive.
+
+### Sprint 3 — Conviction threshold in Settings
+
+- `conviction_threshold` added to Autonomous → Activation Thresholds card (full-width row at bottom)
+- Reads from / writes to `alpha_edge.min_conviction_score` in YAML
+- Inline note pointing to the Conviction Calibration monitor
+- Range: 50–90
+
+### Sprint 4 — Leveraged ETF stop calibration
+
+**Root cause:** SOXL avg daily range = 6.4% vs SPY = 0.7%. Regular ETF params (activation 4%, trail 5%) are less than 1 day's noise for SOXL — guaranteed intraday whipsaw.
+
+**Fix** (`src/execution/position_manager.py`):
+- New `leveraged_etf` asset class: activation=10%, trail=12%, breakeven=6%, profit_lock=10%/4%
+- ATR multiplier: 1.5× (vs 2.0× for regular ETFs — ATR already wide at 6-10%)
+- `_get_asset_class`: checks leveraged ETF set (SOXL, TQQQ, UPRO, SPXL, SQQQ, etc.) before general ETF check
+
+**Fix** (`src/execution/order_executor.py`):
+- Hard stop cap for leveraged ETFs: 20% (was 9% for all ETFs)
+
+### Sprint 5 — Sector Rotation full SPDR universe
+
+**Fix** (`src/strategy/strategy_templates.py`):
+- Was: 5 sectors [XLF, XLK, XLI, XLP, XLY]
+- Now: 8 sectors [XLF, XLK, XLI, XLP, XLY, **XLE, XLU, XLV**]
+- Added Energy, Utilities (defensive), Healthcare (defensive)
+- Template can now rotate into defensive sectors during trending_down regimes
+
+### Sprint 6 — Bug fixes
+
+**Error 604 retry loop** (`src/core/order_monitor.py`):
+- `_permanent_error_patterns` was dead code (defined after a `return` in `_load_risk_config`)
+- 604 (insufficient funds) was retrying every cycle for 8+ hours
+- Fix: `_permanent_error_patterns` now in `__init__`, includes "insufficient funds", "error 604", "usercredit"
+- Pre-submission balance check: skip if `live_balance < order.quantity`, leave PENDING for next cycle
+
+**MINIMUM_ORDER_SIZE inconsistency** (`src/risk/risk_manager.py`):
+- Balance gate at line 805 still had 5000.0 (not updated with May 6 change to 2000)
+- Fixed to 2000.0
+
+**Gate blocks as WARNING** (`src/core/trading_scheduler.py`):
+- Trend-consistency gate / VIX gate blocks were logging as ERROR, flooding errors.log
+- Now log as WARNING (expected behaviour, not errors)
+
+**UniqueViolation race condition** (`src/core/order_monitor.py`):
+- Two sync ticks racing to INSERT same position → ERROR + batch rollback
+- Now caught at per-order level, logged as WARNING, continues processing other orders
+
+**SPY benchmark wrong direction** (`frontend/src/components/charts/PortfolioEquityChart.tsx`):
+- `spy-benchmark` endpoint was returning 1h + 4h + 1d bars mixed — chart used intraday prices as daily closes
+- Fix: `interval='1d'` filter added to endpoint query
+- Frontend: always fetch ALL SPY data (not period-filtered) — chart filters client-side
+
+**nginx /analytics 404** (`/etc/nginx/sites-enabled/alphacent`):
+- `/analytics` (bare) was being proxied to backend (no bare endpoint) → 404
+- Fix: removed `analytics` from exact-match proxy rule; sub-path rule `/analytics/` unchanged
+
+### Known issues / observations from this session
+
+- **Settings page can revert values on backend restart** — the Settings page re-fetches config on mount. If the page was open during a restart, it may re-send the old values. Workaround: always save after a restart. Proper fix: add "unsaved changes" indicator and don't auto-save on load.
+- **autonomous_trading.yaml local copy drifts** — always sync EC2→local at session start: `scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent/config/autonomous_trading.yaml config/autonomous_trading.yaml`
+- **Pairs Trading template** — still removed (removed 2026-05-02). Needs cross-asset spread primitives (z-score of A/B ratio) not yet in DSL. Design session required before rebuilding.
+
+---
+
+## Open P1 Items (as of May 9, 2026)
+
+### P1 — Raise conviction threshold to 74 (data-backed, ready now)
+
+The calibration monitor shows 74–76 is the first clearly positive-EV bucket above threshold (+$21.72 avg, 49 trades). The 70–74 range is negative EV. Change in Settings → Autonomous → Activation Thresholds → Conviction Score Threshold from 70 → 74. Monitor the calibration card for 1–2 weeks to confirm.
+
+### P2 — Conviction scorer component reweighting (needs 3-4 more weeks of data)
+
+Current scorer has dead-weight components:
+- `signal_quality` collapses to ~4-5 pts variance for 85% of DSL signals (floor-clamped at 8pts)
+- `regime_fit` saturated at 20/20 in trending_up_strong — no variance
+- `asset_tradability` clusters at 13-14 for ~60% of universe
+
+Wait until ~500+ scored trades per bucket (currently 49-131 per 2pt bucket). Then regression-fit component weights on live P&L. Design session first.
+
+### P3 — Cross-cycle signal dedup (P5 from prior backlog, ~1h)
+
+TXN ENTER_LONG fires every 10 minutes for hours in the cycle log. Same signal, same strategy, same symbol — re-evaluated and re-queued every cycle. A 30-min TTL map on `(strategy_id, symbol, direction)` in `trading_scheduler` stops this cold.
+
+### P4 — WF test-dominant regime-luck gate for LONG (P4 from prior backlog, ~1h)
+
+SHORT side was tightened after TSLA audit. LONG still loose — a strategy can pass WF with test_sharpe >> train_sharpe (regime luck). Add `(test_sharpe - train_sharpe) ≤ 1.5` consistency check to the test-dominant bypass path.
+
+### P5 — GET /strategies 422 (pre-existing)
+
+Some component calls `/strategies` without `mode` param. Logs 422. Not crashing but worth fixing.
+
+### P6 — Settings page auto-revert on restart (new, low priority)
+
+Settings page re-fetches config on mount. If open during a backend restart, may re-send stale values. Add "unsaved changes" indicator and prevent auto-save on load.
+
+### P7 — Pairs Trading template rebuild (design-first)
+
+Needs cross-asset spread primitives: z-score of (price_A / price_B) against rolling window. Not in DSL yet. Design session required. Don't touch until DSL spread primitives exist.
+
+### Deferred from prior sessions (still open)
+
+- **WF bypass paths admit regime-luck on LONG** — test-dominant path consistency gate (see P4 above)
+- **Cross-cycle signal dedup** — 30-min TTL (see P3 above)
+- **NATGAS 1h stale** — add to explicit-blocked set in fmp_ohlc.py or confirm Yahoo-only
+- **trade_id convention unification** — `log_entry` uses `position.id`; `log_exit` uses order UUID
+- **Monday Asia Open template** — needs DSL `HOUR()` primitive
+- **ONCHAIN DSL primitive** — BTC dominance, stablecoin supply (CoinGecko + DeFi Llama)
+- **Overview chart panel rewrite** — 3 chart components with misaligned axes
+- **SignalDecisionLogORM table drop** — scheduled 2026-06-03 (T+30d from 2026-05-04)
+- **Commodity 1h coverage** — blocked on FMP Starter upgrade
+- **Forex 1d legacy FMP path cleanup** — ~15 min cleanup task
 
 **What was built:**
 - Backend: `GET /analytics/alpha` endpoint in `src/api/routers/analytics.py`
