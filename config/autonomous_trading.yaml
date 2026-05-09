@@ -37,8 +37,8 @@ activation_thresholds:
     forex_1h: 0.0001
     crypto: 0.05
     crypto_1d: 0.03
-    crypto_4h: 0.03
-    crypto_1h: 0.03
+    crypto_4h: 0.015
+    crypto_1h: 0.009
     index: 0.001
     index_1h: 0.0002
     commodity: 0.0015
