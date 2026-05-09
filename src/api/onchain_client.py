@@ -67,6 +67,14 @@ CACHE_TTL_SECONDS = 86400
 
 REQUEST_TIMEOUT_SEC = 20
 
+# Minimum gap between CoinGecko HTTP calls (seconds).
+# CoinGecko free tier: ~30 calls/min = 2s between calls.
+# With rolling WF running 3 windows per strategy, bursting all calls
+# simultaneously causes 429s. A 2s gap prevents the burst without
+# meaningfully slowing the cycle (most calls hit the in-memory cache).
+_COINGECKO_MIN_CALL_GAP_SEC = 2.0
+_last_coingecko_call_at: float = 0.0  # module-level, process-local
+
 COINGECKO_GLOBAL_URL = "https://api.coingecko.com/api/v3/global"
 COINGECKO_MARKET_CHART_URL = (
     # Market data for BTC with historical market-cap series. 365d is the
@@ -261,30 +269,31 @@ def _fetch_btc_dominance(end: datetime, lookback_days: int) -> pd.Series:
     days = max(1, min(int(lookback_days), 365))
 
     def _cg_request(url: str, params: Optional[Dict] = None) -> Dict:
-        """Wrapped CoinGecko GET with a single 10s retry on 429.
+        """Wrapped CoinGecko GET with rate limiting and a single 2s retry on 429.
 
-        CoinGecko free tier allows ~30 calls/min. With the S5.2 coverage-
-        aware module cache (one entry per metric, fetched at widest
-        provider window), the worst case per cycle is ~4-5 CoinGecko
-        calls total — well under the limit. A single 10s backoff
-        absorbs occasional transient throttling (e.g. another process
-        on the same IP pinged CoinGecko at the same moment); if it's
-        still 429 after that, the problem is a genuine rate-limit
-        exhaustion and we should fail fast, not keep sleeping. The
-        ONCHAIN primitive handles the OnChainAPIError by skipping the
-        condition — strategies without on-chain data get 0 trades in
-        backtest and fall out naturally via the WF funnel.
+        CoinGecko free tier allows ~30 calls/min (~2s between calls).
+        With rolling WF running 3 windows per strategy, calls can burst
+        and hit 429. A module-level rate limiter enforces the minimum gap
+        so we never burst. If we still get 429 (e.g. another process on
+        the same IP), we sleep 2s and retry once — then fail fast.
         """
+        global _last_coingecko_call_at
+        # Rate limit: enforce minimum gap between calls
+        elapsed = time.time() - _last_coingecko_call_at
+        if elapsed < _COINGECKO_MIN_CALL_GAP_SEC:
+            time.sleep(_COINGECKO_MIN_CALL_GAP_SEC - elapsed)
+
         for attempt in (0, 1):
+            _last_coingecko_call_at = time.time()
             try:
                 r = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_SEC)
             except requests.RequestException as e:
                 raise OnChainAPIError(f"CoinGecko request failed: {e}") from e
             if r.status_code == 429 and attempt == 0:
                 logger.info(
-                    "CoinGecko 429 on first attempt — sleeping 10s and retrying once"
+                    "CoinGecko 429 on first attempt — sleeping 2s and retrying once"
                 )
-                time.sleep(10)
+                time.sleep(2)
                 continue
             if r.status_code >= 400:
                 raise OnChainAPIError(
