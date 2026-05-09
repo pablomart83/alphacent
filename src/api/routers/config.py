@@ -965,6 +965,7 @@ class AutonomousConfigResponse(BaseModel):
     min_win_rate: float = 45.0    # percentage
     min_win_rate_crypto: float = 30.0
     min_win_rate_commodity: float = 35.0
+    conviction_threshold: int = 70  # conviction score gate (50-90)
 
     # ─── Activation thresholds — Min Trades (per asset × interval) ────
     min_trades: int = 2
@@ -1097,6 +1098,7 @@ class AutonomousConfigRequest(BaseModel):
     min_win_rate: Optional[float] = None
     min_win_rate_crypto: Optional[float] = None
     min_win_rate_commodity: Optional[float] = None
+    conviction_threshold: Optional[int] = Field(None, ge=50, le=90)
 
     # Activation — Min Trades
     min_trades: Optional[int] = None
@@ -1296,6 +1298,7 @@ async def get_autonomous_config(
         min_win_rate=pct(activation.get('min_win_rate'), 45.0),
         min_win_rate_crypto=pct(activation.get('min_win_rate_crypto'), 30.0),
         min_win_rate_commodity=pct(activation.get('min_win_rate_commodity'), 35.0),
+        conviction_threshold=int(full_config.get('alpha_edge', {}).get('min_conviction_score', 70)),
 
         # Activation — Min Trades
         min_trades=int(activation.get('min_trades', 2)),
@@ -1531,6 +1534,9 @@ async def update_autonomous_config(
     if request.min_win_rate is not None: act['min_win_rate'] = to_frac(request.min_win_rate)
     if request.min_win_rate_crypto is not None: act['min_win_rate_crypto'] = to_frac(request.min_win_rate_crypto)
     if request.min_win_rate_commodity is not None: act['min_win_rate_commodity'] = to_frac(request.min_win_rate_commodity)
+    # conviction_threshold writes to alpha_edge.min_conviction_score (canonical location)
+    if request.conviction_threshold is not None:
+        full_config.setdefault('alpha_edge', {})['min_conviction_score'] = request.conviction_threshold
 
     # ─── Activation — Min Trades ────────────────────────────────────────
     if request.min_trades is not None: act['min_trades'] = request.min_trades
