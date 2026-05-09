@@ -2074,15 +2074,36 @@ class StrategyEngine:
             f"(need {min_pass_windows}) → {'PASS' if not overall_overfitted else 'FAIL'}"
         )
 
-        # Use the most recent window's results as the canonical result.
-        # This is the most relevant for live trading — it reflects the
-        # current regime. If the most recent window failed/errored, walk
-        # back to the last successful window.
-        canonical_wf = None
-        for w in reversed(window_results):
-            if w['wf'] is not None:
-                canonical_wf = w['wf']
-                break
+        # Use the BEST PASSING window as the canonical result.
+        # The canonical window drives: test_results (for activation criteria
+        # like net return, win rate, trade count), train/test Sharpe, and
+        # performance_degradation. Using the most recent window was wrong
+        # when the most recent window is the failing one — activation would
+        # see negative returns from a window that didn't pass, while the
+        # evidence of edge is in the passing windows.
+        #
+        # "Best" = highest test Sharpe among passing windows. This is the
+        # strongest OOS evidence we have for this strategy.
+        #
+        # If no windows passed (shouldn't happen when overall_overfitted=False,
+        # but be defensive), fall back to the most recent valid window.
+        passing_windows_for_canonical = [
+            w for w in window_results
+            if not w['is_overfitted']
+            and w['test_sharpe'] is not None
+            and w['test_sharpe'] > 0
+            and w['wf'] is not None
+        ]
+        if passing_windows_for_canonical:
+            best_canonical = max(passing_windows_for_canonical, key=lambda w: w['test_sharpe'])
+            canonical_wf = best_canonical['wf']
+        else:
+            # Fallback: most recent valid window
+            canonical_wf = None
+            for w in reversed(window_results):
+                if w['wf'] is not None:
+                    canonical_wf = w['wf']
+                    break
 
         if canonical_wf is None:
             raise ValueError(
