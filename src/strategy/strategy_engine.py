@@ -1886,6 +1886,228 @@ class StrategyEngine:
             "test_period": (test_start, test_end)
         }
 
+    def walk_forward_validate_rolling(
+        self,
+        strategy: Strategy,
+        end: datetime,
+        train_days: int,
+        test_days: int,
+        n_windows: int = 3,
+        min_pass_windows: int = 2,
+    ) -> Dict[str, Any]:
+        """Rolling walk-forward validation for crypto strategies.
+
+        Runs N evenly-spaced train/test windows across the available history
+        and returns a majority-vote result. This addresses the core problem
+        with single-window WF on crypto: a 365d+365d split almost always
+        crosses a regime boundary (e.g. 2024 bull run vs 2025 ranging), so
+        a strategy that works in the current regime gets flagged as overfitted
+        because it didn't work in the prior regime.
+
+        Rolling WF asks a better question: "Does this strategy work
+        consistently across multiple recent periods?" A strategy that passes
+        2 of 3 windows has demonstrated regime-robust edge. A strategy that
+        only passes 1 of 3 is regime-specific and correctly rejected.
+
+        Architecture:
+        - Windows are evenly spaced across the available history (5 years).
+        - Each window is train_days + test_days long.
+        - Windows are ordered oldest → newest. The most recent window's
+          test_results are used for activation (most relevant to live trading).
+        - is_overfitted = True only if ≥ (n_windows - min_pass_windows + 1)
+          windows are overfitted (i.e. fewer than min_pass_windows pass).
+        - The return dict is backward-compatible with walk_forward_validate:
+          same keys, same types. Callers (proposer, MC bootstrap, activation)
+          see no difference.
+
+        Args:
+            strategy: Strategy to validate.
+            end: End of the most recent window (typically datetime.now()).
+            train_days: Training window length in days.
+            test_days: Test window length in days.
+            n_windows: Number of rolling windows (default 3).
+            min_pass_windows: Minimum windows that must pass for overall pass
+                (default 2 = majority of 3).
+
+        Returns:
+            Dict with same keys as walk_forward_validate, plus:
+                rolling_windows: list of per-window results for observability
+                rolling_pass_count: number of windows that passed
+                rolling_n_windows: total windows attempted
+        """
+        window_size = train_days + test_days
+
+        # Determine backtest interval (same logic as walk_forward_validate)
+        backtest_interval = "1d"
+        is_intraday_template = (
+            hasattr(strategy, 'metadata') and strategy.metadata and
+            strategy.metadata.get('intraday', False)
+        )
+        is_4h_template = False
+        if hasattr(strategy, 'metadata') and strategy.metadata:
+            is_4h_template = strategy.metadata.get('interval_4h', False)
+        if not is_4h_template and strategy.rules:
+            is_4h_template = strategy.rules.get('interval', '1d') == '4h'
+        if is_intraday_template:
+            backtest_interval = "1h"
+        elif is_4h_template:
+            backtest_interval = "4h"
+
+        # Determine available history depth from DB cache.
+        # We query the earliest bar for this symbol+interval to know how far
+        # back we can place windows. Fail-open: if we can't determine depth,
+        # use 5 years as the assumed maximum.
+        available_days = 1825  # 5 years default
+        try:
+            from src.models.database import get_database as _gdb
+            from sqlalchemy import text as _sa_text
+            _db = _gdb()
+            _sess = _db.get_session()
+            try:
+                _sym = strategy.symbols[0] if strategy.symbols else ''
+                _row = _sess.execute(_sa_text(
+                    "SELECT MIN(date) FROM historical_price_cache "
+                    "WHERE symbol = :sym AND interval = :iv"
+                ), {"sym": _sym, "iv": backtest_interval}).fetchone()
+                if _row and _row[0]:
+                    _earliest = _row[0]
+                    if hasattr(_earliest, 'tzinfo') and _earliest.tzinfo:
+                        _earliest = _earliest.replace(tzinfo=None)
+                    available_days = (end - _earliest).days
+            finally:
+                _sess.close()
+        except Exception as _depth_err:
+            logger.debug(f"Rolling WF: could not determine cache depth for {strategy.name}: {_depth_err}")
+
+        # Space windows evenly across available history.
+        # The most recent window ends at `end`. Older windows are spaced
+        # `step` days apart so they collectively cover the available history.
+        # Minimum: each window needs window_size days of data.
+        usable_days = min(available_days, 1825)  # cap at 5 years
+        if usable_days < window_size:
+            # Not enough data for even one window — fall back to single-window
+            logger.info(
+                f"Rolling WF: insufficient history ({usable_days}d < {window_size}d) "
+                f"for {strategy.name} — falling back to single window"
+            )
+            return self.walk_forward_validate(
+                strategy, end - timedelta(days=window_size), end,
+                train_days=train_days, test_days=test_days
+            )
+
+        # Compute window end-dates. Most recent = end, oldest = end - (usable_days - window_size).
+        # Evenly space n_windows across [oldest_possible_end, end].
+        oldest_end = end - timedelta(days=usable_days - window_size)
+        if n_windows == 1:
+            window_ends = [end]
+        else:
+            step_days = (usable_days - window_size) / (n_windows - 1)
+            window_ends = [
+                oldest_end + timedelta(days=int(step_days * i))
+                for i in range(n_windows)
+            ]
+            # Always ensure the last window ends exactly at `end`
+            window_ends[-1] = end
+
+        logger.info(
+            f"Rolling WF for {strategy.name}: {n_windows} windows × "
+            f"{train_days}d train + {test_days}d test, interval={backtest_interval}, "
+            f"available={usable_days}d, window_ends={[w.date() for w in window_ends]}"
+        )
+
+        window_results = []
+        for i, w_end in enumerate(window_ends):
+            w_start = w_end - timedelta(days=window_size)
+            try:
+                # Clear caches between windows to prevent data bleed
+                if hasattr(self, 'indicator_library'):
+                    self.indicator_library.clear_cache()
+                if hasattr(self.market_data, '_historical_memory_cache'):
+                    self.market_data._historical_memory_cache.clear()
+
+                wf = self.walk_forward_validate(
+                    strategy, w_start, w_end,
+                    train_days=train_days, test_days=test_days
+                )
+                window_results.append({
+                    'window_idx': i,
+                    'window_end': w_end,
+                    'train_sharpe': wf['train_sharpe'],
+                    'test_sharpe': wf['test_sharpe'],
+                    'is_overfitted': wf['is_overfitted'],
+                    'test_trades': wf['test_results'].total_trades if wf.get('test_results') else 0,
+                    'train_trades': wf['train_results'].total_trades if wf.get('train_results') else 0,
+                    'wf': wf,
+                    'error': None,
+                })
+                logger.info(
+                    f"  Window {i+1}/{n_windows} ({w_start.date()}→{w_end.date()}): "
+                    f"train_S={wf['train_sharpe']:.2f} test_S={wf['test_sharpe']:.2f} "
+                    f"overfitted={wf['is_overfitted']} trades={wf['test_results'].total_trades if wf.get('test_results') else 0}"
+                )
+            except Exception as e:
+                logger.warning(f"  Window {i+1}/{n_windows} failed for {strategy.name}: {e}")
+                window_results.append({
+                    'window_idx': i,
+                    'window_end': w_end,
+                    'train_sharpe': None,
+                    'test_sharpe': None,
+                    'is_overfitted': True,  # treat failed window as overfitted
+                    'test_trades': 0,
+                    'train_trades': 0,
+                    'wf': None,
+                    'error': str(e),
+                })
+
+        # Majority vote: count windows that pass (not overfitted AND positive test Sharpe)
+        pass_count = sum(
+            1 for w in window_results
+            if not w['is_overfitted']
+            and w['test_sharpe'] is not None
+            and w['test_sharpe'] > 0
+        )
+        overall_overfitted = pass_count < min_pass_windows
+
+        logger.info(
+            f"Rolling WF result for {strategy.name}: "
+            f"{pass_count}/{len(window_results)} windows passed "
+            f"(need {min_pass_windows}) → {'PASS' if not overall_overfitted else 'FAIL'}"
+        )
+
+        # Use the most recent window's results as the canonical result.
+        # This is the most relevant for live trading — it reflects the
+        # current regime. If the most recent window failed/errored, walk
+        # back to the last successful window.
+        canonical_wf = None
+        for w in reversed(window_results):
+            if w['wf'] is not None:
+                canonical_wf = w['wf']
+                break
+
+        if canonical_wf is None:
+            raise ValueError(
+                f"All {n_windows} rolling WF windows failed for {strategy.name}"
+            )
+
+        # Build the aggregated train/test Sharpe as the average across
+        # successful windows (used for logging and conviction scoring).
+        valid_windows = [w for w in window_results if w['wf'] is not None]
+        avg_train_sharpe = sum(w['train_sharpe'] for w in valid_windows) / len(valid_windows)
+        avg_test_sharpe = sum(w['test_sharpe'] for w in valid_windows) / len(valid_windows)
+
+        # Return backward-compatible dict — same keys as walk_forward_validate.
+        # The canonical (most recent) window's test_results drive activation.
+        result = dict(canonical_wf)  # copy all keys from most recent window
+        result['is_overfitted'] = overall_overfitted
+        result['train_sharpe'] = avg_train_sharpe
+        result['test_sharpe'] = avg_test_sharpe
+        # Rolling-specific observability fields (ignored by existing callers)
+        result['rolling_windows'] = window_results
+        result['rolling_pass_count'] = pass_count
+        result['rolling_n_windows'] = len(window_results)
+        result['rolling_min_pass'] = min_pass_windows
+        return result
+
     def rolling_window_validate(
         self,
         strategy: Strategy,

@@ -1253,11 +1253,15 @@ class MonitoringService:
                 # symbol, write its bars to DB cache, and remove it from
                 # need_list so the Yahoo batch below doesn't re-fetch.
                 #
-                # Crypto window extends further back than the Yahoo-sized
-                # start_dt because Binance serves years of history with no
-                # cap. 2y of 1h = ~17k bars/symbol, 2y of 1d = 730 bars.
-                # These cover at least one full regime cycle for honest WF.
-                _CRYPTO_BINANCE_WINDOW_DAYS = {"1h": 730, "4h": 730, "1d": 730}
+                # Crypto window: 5 years (1825d). Binance has 8+ years of
+                # BTC/ETH history and 5+ years for SOL/AVAX/DOT/LINK.
+                # 5 years covers the full halving cycle (2021 bull, 2022 bear,
+                # 2023 recovery, 2024 bull, 2025 ranging) — essential for
+                # rolling WF validation across multiple regime periods.
+                # Previously 730d (2y) which only covered 1-2 regimes and
+                # caused genuine ranging strategies to be flagged as overfitted
+                # because the single train/test split crossed a regime boundary.
+                _CRYPTO_BINANCE_WINDOW_DAYS = {"1h": 1825, "4h": 1825, "1d": 1825}
                 # Per-interval "one bar" threshold for incremental fetch. If
                 # DB latest bar is newer than this, we fetch only the gap, not
                 # the full window. S4.0.7.

@@ -1855,18 +1855,41 @@ class StrategyProposer:
                         strategy, end_date
                     )
 
-                    wf_results = strategy_engine.walk_forward_validate(
-                        strategy=strategy,
-                        start=_wf_start,
-                        end=_wf_end,
-                        train_days=_wf_train_days,
-                        test_days=_wf_test_days
-                    )
-                    
+                    # Crypto strategies use rolling WF (3 windows, majority vote).
+                    # Single-window WF on crypto almost always crosses a regime
+                    # boundary (e.g. 2024 bull → 2025 ranging), causing genuine
+                    # ranging strategies to be flagged as overfitted. Rolling WF
+                    # asks: "does this work consistently across multiple periods?"
+                    _is_crypto_wf = False
+                    try:
+                        from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO as _WF_CRYPTO
+                        _wf_sym = strategy.symbols[0].upper() if strategy.symbols else ''
+                        _is_crypto_wf = _wf_sym in set(_WF_CRYPTO)
+                    except Exception:
+                        pass
+
+                    if _is_crypto_wf and hasattr(strategy_engine, 'walk_forward_validate_rolling'):
+                        wf_results = strategy_engine.walk_forward_validate_rolling(
+                            strategy=strategy,
+                            end=_wf_end,
+                            train_days=_wf_train_days,
+                            test_days=_wf_test_days,
+                            n_windows=3,
+                            min_pass_windows=2,
+                        )
+                    else:
+                        wf_results = strategy_engine.walk_forward_validate(
+                            strategy=strategy,
+                            start=_wf_start,
+                            end=_wf_end,
+                            train_days=_wf_train_days,
+                            test_days=_wf_test_days
+                        )
+
                     train_sharpe = wf_results['train_sharpe']
                     test_sharpe = wf_results['test_sharpe']
                     is_overfitted = wf_results['is_overfitted']
-                    
+
                     test_trades = wf_results['test_results'].total_trades if wf_results.get('test_results') else 0
                     train_trades = wf_results['train_results'].total_trades if wf_results.get('train_results') else 0
                     

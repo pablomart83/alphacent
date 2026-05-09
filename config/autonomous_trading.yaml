@@ -117,17 +117,17 @@ backtest:
     test_days: 180
     asset_class_windows:
       crypto_1h:
-        train: 365
-        test: 365
+        train: 90
+        test: 45
       crypto_4h:
-        train: 365
-        test: 365
+        train: 120
+        test: 60
       crypto_1d:
-        train: 365
-        test: 365
+        train: 180
+        test: 90
       crypto_1d_longhorizon:
-        train: 730
-        test: 730
+        train: 365
+        test: 180
       non_crypto_1d:
         train: 730
         test: 365
