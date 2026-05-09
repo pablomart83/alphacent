@@ -86,8 +86,15 @@ class ConvictionScorer:
 
         alpha_edge_config = config.get('alpha_edge', {})
         self.min_conviction_score = alpha_edge_config.get('min_conviction_score', 65)
+        # Crypto DSL strategies have a structural ceiling vs equities (no fundamentals
+        # component, crypto cycle currently in reduce phase). A separate threshold
+        # calibrated to what crypto DSL strategies can realistically achieve.
+        self.min_conviction_score_crypto = alpha_edge_config.get('min_conviction_score_crypto', 68)
 
-        logger.info(f"ConvictionScorer initialized - Min score: {self.min_conviction_score}")
+        logger.info(
+            f"ConvictionScorer initialized - Min score: {self.min_conviction_score} "
+            f"(crypto: {self.min_conviction_score_crypto})"
+        )
 
     def score_signal(
         self,

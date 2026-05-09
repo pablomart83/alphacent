@@ -36,6 +36,7 @@ interface ConvictionBucket {
 interface CalibrationData {
   buckets: ConvictionBucket[];
   threshold: number;
+  threshold_crypto: number;
   is_monotonic: boolean;
   monotonicity_violations: string[];
   negative_ev_above_threshold: string[];
@@ -111,7 +112,11 @@ export const ConvictionCalibrationCard: FC<ConvictionCalibrationCardProps> = ({ 
         <div>
           <p className="text-xs font-mono font-semibold text-gray-300">Conviction Score Calibration</p>
           <p className="text-xs font-mono text-gray-500 mt-0.5">
-            Does higher conviction → higher P&L? Threshold: {data?.threshold ?? 70}
+            Does higher conviction → higher P&L?{' '}
+            <span className="text-gray-400">Threshold: {data?.threshold ?? 74}</span>
+            {data?.threshold_crypto !== undefined && data.threshold_crypto !== data.threshold && (
+              <span className="text-blue-400 ml-2">Crypto: {data.threshold_crypto}</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">

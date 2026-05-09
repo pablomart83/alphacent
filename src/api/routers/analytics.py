@@ -4818,7 +4818,8 @@ class ConvictionBucket(BaseModel):
 
 class ConvictionCalibrationResponse(BaseModel):
     buckets: List[ConvictionBucket]
-    threshold: float             # current conviction threshold
+    threshold: float             # current conviction threshold (equities/default)
+    threshold_crypto: float      # crypto-specific conviction threshold
     is_monotonic: bool           # True when avg_pnl increases with each bucket
     monotonicity_violations: List[str]  # e.g. ["70-75 < 65-70"]
     negative_ev_above_threshold: List[str]  # buckets above threshold with negative avg P&L
@@ -4857,6 +4858,7 @@ async def get_conviction_calibration(
 
     # Current threshold — read from autonomous_trading.yaml
     CURRENT_THRESHOLD = 70.0
+    CURRENT_THRESHOLD_CRYPTO = 68.0
     try:
         import yaml
         from pathlib import Path
@@ -4864,9 +4866,9 @@ async def get_conviction_calibration(
         if cfg_path.exists():
             with open(cfg_path, "r") as f:
                 cfg = yaml.safe_load(f) or {}
-            CURRENT_THRESHOLD = float(
-                cfg.get("alpha_edge", {}).get("min_conviction_score", 70.0)
-            )
+            _ae = cfg.get("alpha_edge", {})
+            CURRENT_THRESHOLD = float(_ae.get("min_conviction_score", 70.0))
+            CURRENT_THRESHOLD_CRYPTO = float(_ae.get("min_conviction_score_crypto", 68.0))
     except Exception:
         pass
 
@@ -5021,6 +5023,7 @@ async def get_conviction_calibration(
     return ConvictionCalibrationResponse(
         buckets=buckets,
         threshold=CURRENT_THRESHOLD,
+        threshold_crypto=CURRENT_THRESHOLD_CRYPTO,
         is_monotonic=is_monotonic,
         monotonicity_violations=violations,
         negative_ev_above_threshold=neg_ev_above,

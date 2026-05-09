@@ -5257,10 +5257,21 @@ class StrategyEngine:
             # Get min conviction threshold from config
             _ae_config = config.get('alpha_edge', {}) if config else {}
             min_conviction = _ae_config.get('min_conviction_score', 57)
-            
+            # Crypto-specific threshold — calibrated to what crypto DSL strategies
+            # can realistically achieve (no fundamentals component, cycle adjustments).
+            min_conviction_crypto = _ae_config.get('min_conviction_score_crypto', 68)
+
+            # Resolve crypto symbol set once for the loop
+            _crypto_symbols: set = set()
+            try:
+                from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+                _crypto_symbols = set(DEMO_ALLOWED_CRYPTO)
+            except ImportError:
+                pass
+
             logger.info(
-                f"Applying conviction scoring (min: {min_conviction}), frequency limiting, "
-                f"and ML filtering to {len(signals)} signals"
+                f"Applying conviction scoring (min: {min_conviction}, crypto min: {min_conviction_crypto}), "
+                f"frequency limiting, and ML filtering to {len(signals)} signals"
             )
             # Accumulate raw signal count for batch reporting
             self._last_batch_raw_signals = getattr(self, '_last_batch_raw_signals', 0) + len(signals)
@@ -5393,15 +5404,31 @@ class StrategyEngine:
                 
                 # Score conviction
                 conviction = conviction_scorer.score_signal(signal, strategy, fundamental_report)
-                
+
+                # Use crypto-specific threshold for crypto DSL signals.
+                # Crypto has no fundamentals component and is subject to cycle
+                # adjustments — its realistic ceiling is lower than equities.
+                _is_crypto_signal = signal.symbol.upper().split(':')[0] in _crypto_symbols
+                _is_alpha_edge_signal = (
+                    hasattr(strategy, 'metadata') and
+                    isinstance(strategy.metadata, dict) and
+                    strategy.metadata.get('strategy_category') == 'alpha_edge'
+                )
+                _effective_threshold = (
+                    min_conviction_crypto
+                    if _is_crypto_signal and not _is_alpha_edge_signal
+                    else min_conviction
+                )
+
                 # Check conviction threshold
-                if not conviction.passes_threshold(min_conviction):
+                if not conviction.passes_threshold(_effective_threshold):
                     _scoring_path = conviction.breakdown.get('scoring_path', 'dsl')
                     _sig_details = conviction.breakdown.get('signal_quality', {}).get('details', {})
                     _persistence = _sig_details.get('entry_persistence')
                     _persistence_str = f", persistence={_persistence}" if _persistence is not None else ""
+                    _threshold_label = f"{_effective_threshold}" + (" [crypto]" if _is_crypto_signal and not _is_alpha_edge_signal else "")
                     _conv_reason = (
-                        f"filter:conviction ({conviction.total_score:.1f} < {min_conviction}; "
+                        f"filter:conviction ({conviction.total_score:.1f} < {_threshold_label}; "
                         f"wf_edge={conviction.breakdown.get('walkforward_edge', {}).get('score', 0):.1f}, "
                         f"signal={conviction.signal_strength_score:.1f}{_persistence_str}, "
                         f"asset={conviction.fundamental_score:.1f}, "
@@ -5413,7 +5440,7 @@ class StrategyEngine:
                         _conv_reason,
                         {
                             "conviction_score": conviction.total_score,
-                            "min_conviction": min_conviction,
+                            "min_conviction": _effective_threshold,
                             "breakdown": conviction.breakdown,
                         },
                     )

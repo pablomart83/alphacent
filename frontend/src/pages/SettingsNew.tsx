@@ -69,6 +69,7 @@ const autonomousConfigSchema = z.object({
   min_win_rate_crypto: z.number().min(15).max(70),
   min_win_rate_commodity: z.number().min(20).max(70),
   conviction_threshold: z.number().min(50).max(90),
+  conviction_threshold_crypto: z.number().min(50).max(90),
 
   // ─── Activation — Min Trades ──────────────────────────────────────
   min_trades: z.number().min(1).max(50),
@@ -360,6 +361,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
       min_win_rate_crypto: 30,
       min_win_rate_commodity: 35,
       conviction_threshold: 70,
+      conviction_threshold_crypto: 68,
       // Min Trades
       min_trades: 2,
       min_trades_dsl: 8,
@@ -638,6 +640,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
           min_win_rate_crypto: num(autonomousConfig.min_win_rate_crypto, 30),
           min_win_rate_commodity: num(autonomousConfig.min_win_rate_commodity, 35),
           conviction_threshold: num(autonomousConfig.conviction_threshold, 70),
+          conviction_threshold_crypto: num(autonomousConfig.conviction_threshold_crypto, 68),
           // Min Trades
           min_trades: num(autonomousConfig.min_trades, 2),
           min_trades_dsl: num(autonomousConfig.min_trades_dsl, 8),
@@ -907,6 +910,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         min_win_rate_crypto: formData.min_win_rate_crypto,
         min_win_rate_commodity: formData.min_win_rate_commodity,
         conviction_threshold: formData.conviction_threshold,
+        conviction_threshold_crypto: formData.conviction_threshold_crypto,
         // Min Trades
         min_trades: formData.min_trades,
         min_trades_dsl: formData.min_trades_dsl,
@@ -2176,10 +2180,22 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                         <p className="text-xs text-gray-500">Low-frequency floor (20-70%)</p>
                       </div>
                       <div className="space-y-2 md:col-span-3 border-t border-dark-border pt-3">
-                        <Label htmlFor="conviction_threshold" className="text-[11px] font-semibold text-gray-200">Conviction Score Threshold</Label>
-                        <div className="flex items-center gap-3">
-                          <Input id="conviction_threshold" type="number" step="1" min="50" max="90" className="w-24" {...autonomousForm.register('conviction_threshold', { valueAsNumber: true })} />
-                          <p className="text-xs text-gray-500">Minimum conviction score for a signal to be traded (50–90). Current live data: 65–70 bucket is negative EV — consider raising to 75. Check Analytics → Alpha Generation → Conviction Calibration.</p>
+                        <Label className="text-[11px] font-semibold text-gray-200">Conviction Score Thresholds</Label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="conviction_threshold" className="text-[11px] text-gray-300">Equities / Default</Label>
+                            <div className="flex items-center gap-3">
+                              <Input id="conviction_threshold" type="number" step="1" min="50" max="90" className="w-24" {...autonomousForm.register('conviction_threshold', { valueAsNumber: true })} />
+                              <p className="text-xs text-gray-500">Min score for stocks, ETFs, forex, indices (50–90). Check Analytics → Conviction Calibration.</p>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="conviction_threshold_crypto" className="text-[11px] text-gray-300">Crypto DSL</Label>
+                            <div className="flex items-center gap-3">
+                              <Input id="conviction_threshold_crypto" type="number" step="1" min="50" max="90" className="w-24" {...autonomousForm.register('conviction_threshold_crypto', { valueAsNumber: true })} />
+                              <p className="text-xs text-gray-500">Separate floor for crypto DSL signals (50–90). Crypto has no fundamentals component — calibrated to realistic ceiling (~72 in ranging regime).</p>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>

@@ -5,16 +5,10 @@ autonomous:
   enabled: true
   watchlist_size: 5
   proposal_frequency: daily
-  proposal_count: 400
+  proposal_count: 500
   max_active_strategies: 200
   min_active_strategies: 10
   backtested_ttl_cycles: 168
-autonomous_schedule:
-  enabled: true
-  frequency: daily
-  day_of_week: saturday
-  hour: 15
-  minute: 15
 activation_thresholds:
   min_sharpe: 1.0
   min_sharpe_crypto: 0.3
@@ -119,46 +113,35 @@ backtest:
   warmup_days: 100
   min_trades: 5
   walk_forward:
-    # Fallback default. Only used when no asset_class_windows key matches
-    # (e.g. a new asset_class / interval combo appears). The live windows
-    # for every currently-supported combo are in asset_class_windows below.
     train_days: 365
     test_days: 180
-    # ──────────────────────────────────────────────────────────────────
-    # asset_class_windows — the live walk-forward windows that actually run
-    # per (asset_class, interval, template). Single source of truth;
-    # strategy_proposer._select_wf_window() reads these at cycle time.
-    #
-    # Data sources per (asset_class, interval):
-    #   crypto 1h/4h/1d        → Binance primary (years of history)
-    #   non-crypto 1h/4h       → FMP Starter primary, Yahoo fallback
-    #   non-crypto 1d          → Yahoo (decades of daily history)
-    #
-    # FMP Starter covers most US stocks + ETFs + forex + gold/silver at 1h
-    # and 4h with 5+ years of intraday history. The per-(symbol, interval)
-    # support map lives in src/api/fmp_ohlc.SUPPORT. For the handful of
-    # symbols FMP Starter does NOT cover at the requested interval
-    # (^GDAXI, ^FCHI fully blocked; indices at 4h; OIL/COPPER at 1h)
-    # the Yahoo 1h → 4h resample fallback still applies — which inherits
-    # Yahoo's ~7-month 1h cap. The engine-level safety cap at
-    # strategy_engine.walk_forward_validate truncates those fallback
-    # requests and emits an INFO log.
-    # ──────────────────────────────────────────────────────────────────
     asset_class_windows:
-      crypto_1h:             { train: 365, test: 365 }
-      crypto_4h:             { train: 365, test: 365 }
-      crypto_1d:             { train: 365, test: 365 }
-      crypto_1d_longhorizon: { train: 730, test: 730 }
-      non_crypto_1d:         { train: 730, test: 365 }
-      non_crypto_1h:         { train: 365, test: 365 }   # widened from 180/90 — FMP serves 5y of 1h
-      non_crypto_4h:         { train: 365, test: 365 }   # widened from 240/120 — FMP serves 5y of 4h
-    # Templates that get the longhorizon crypto_1d window (previously a
-    # hardcoded set inside strategy_proposer.py). Add / remove by name.
+      crypto_1h:
+        train: 365
+        test: 365
+      crypto_4h:
+        train: 365
+        test: 365
+      crypto_1d:
+        train: 365
+        test: 365
+      crypto_1d_longhorizon:
+        train: 730
+        test: 730
+      non_crypto_1d:
+        train: 730
+        test: 365
+      non_crypto_1h:
+        train: 365
+        test: 365
+      non_crypto_4h:
+        train: 365
+        test: 365
     long_horizon_templates:
-      - Crypto 21W MA Trend Follow
-      - Crypto Vol-Compression Momentum
-      - Crypto Weekly Trend Follow
-      - Crypto Golden Cross
+    - Crypto 21W MA Trend Follow
+    - Crypto Vol-Compression Momentum
+    - Crypto Weekly Trend Follow
+    - Crypto Golden Cross
     direction_aware_thresholds:
       default:
         min_return: 0.0
@@ -299,18 +282,8 @@ data_management:
   cleanup_enabled: true
 alpha_edge:
   max_active_strategies: 10
-  # 2026-05-04 paper-trading threshold analysis (revision post deep-dive):
-  # Initial 65 → 62 relaxation was based on incomplete data. Re-analysis
-  # after full conviction backfill (661 trades) shows:
-  #   - Scorer works at the top: ≥75 bucket has 2.28 RR, +$42/trade avg,
-  #     +$11,639 total (100% of our net alpha + some)
-  #   - 60-65 buckets are net-negative with 40-54% WR and RR < 0.5
-  #   - Pearson corr(conv, pnl) = +0.18 — weak but positive
-  # Reverted to 65. A proper "accept edge cases" solution comes via
-  # position-sizing tiers (next session) — size ≥75 trades at 1.25-1.5x
-  # rather than lowering the activation floor. That captures the alpha
-  # without admitting the noise.
-  min_conviction_score: 70
+  min_conviction_score: 74
+  min_conviction_score_crypto: 68
   min_holding_period_days: 3
   max_holding_period_days: 30
   max_trades_per_strategy_per_month: 4
@@ -614,10 +587,10 @@ similarity_detection:
     symbol_penalty: 0.2
 directional_balance:
   enabled: true
-  min_long_pct: 30
-  max_long_pct: 70
-  min_short_pct: 20
-  max_short_pct: 50
+  min_long_pct: 30.0
+  max_long_pct: 70.0
+  min_short_pct: 20.0
+  max_short_pct: 50.0
 position_management:
   max_positions_per_symbol: 5
   max_long_pct: 0.75
@@ -662,17 +635,10 @@ position_management:
     threshold_5pct: 0.5
     threshold_10pct: 0.25
     lookback_days: 30
-  # Conviction-tier position sizing (2026-05-05).
-  # Signals with conviction_score >= 75 have demonstrated positive EV
-  # (scorer audit: ≥75 bucket +$51/trade, ≥80 bucket +$28/trade vs
-  # 65-70 bucket -$52/trade). Scale up size for high-conviction signals.
-  # Conservative multipliers — sample still thin (~48 trades in upper
-  # buckets). Raise multipliers after 3-4 weeks of clean data.
-  # Set enabled: false to revert to flat sizing instantly.
   conviction_tier_sizing:
     enabled: true
-    multiplier_score_75: 1.15   # score 75-79 → 15% larger
-    multiplier_score_80: 1.30   # score ≥ 80  → 30% larger
+    multiplier_score_75: 1.15
+    multiplier_score_80: 1.3
   vol_scaling:
     min_scale: 0.1
     max_scale: 1.5
@@ -733,5 +699,46 @@ regime_detection:
     - all
 market_regime:
   current: trending_up_strong
-  confidence: 0.9347988845014702
-  updated_at: '2026-05-03T14:36:29.373966'
+  confidence: 0.8995269302050175
+  updated_at: '2026-05-09T15:01:07.786263'
+autonomous_schedules:
+- id: slot_1
+  enabled: true
+  days:
+  - monday
+  - tuesday
+  - wednesday
+  - thursday
+  - friday
+  - saturday
+  - sunday
+  hour: 12
+  minute: 15
+- id: slot_1778338465361
+  enabled: true
+  days:
+  - monday
+  - tuesday
+  - wednesday
+  - thursday
+  - friday
+  - saturday
+  - sunday
+  hour: 15
+  minute: 15
+- id: slot_1778338465777
+  enabled: true
+  days:
+  - monday
+  - tuesday
+  - wednesday
+  - thursday
+  - friday
+  - saturday
+  - sunday
+  hour: 18
+  minute: 15
+autonomous_schedule:
+  hour: 15
+  minute: 15
+  day_of_week: saturday
