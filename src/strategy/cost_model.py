@@ -44,8 +44,8 @@ Consumers:
   4. Hard-coded fallback in this module (if yaml missing/malformed)
 
 A round trip sums commission + spread + slippage, each applied on both entry
-and exit sides. For crypto on eToro this comes to ~2.96% (1% commission ×2
-+ 0.38% spread ×2 + 0.1% slippage ×2).
+and exit sides. For crypto on eToro Platinum this comes to ~1.16% (0.1% commission ×2
++ 0.38% spread ×2 + 0.1% slippage ×2). Standard account was 2.96% (1% commission).
 
 ### What `edge_ratio` actually measures
 
@@ -83,7 +83,7 @@ _FALLBACK_COSTS_PER_SIDE = {
     "stock": 0.0019,      # 15bps spread + 4bps slippage
     "etf": 0.0019,
     "forex": 0.0002,      # 1.5bps spread + 0.5bps slippage
-    "crypto": 0.0148,     # 100bps commission + 38bps spread + 10bps slippage — eToro reality
+    "crypto": 0.0058,     # 10bps commission + 38bps spread + 10bps slippage — eToro Platinum (0.1% commission)
     "index": 0.00025,
     "commodity": 0.0006,
 }

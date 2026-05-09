@@ -1314,8 +1314,10 @@ class PortfolioManager:
                             pass
 
                     if _regime_key != 'unknown':
-                        # Round-trip cost for crypto on eToro (~2.96%)
-                        _crypto_rtc = 0.0296
+                        # Round-trip cost for crypto on eToro Platinum account (~1.16%)
+                        # Platinum: 0.1% commission × 2 + 0.38% spread × 2 + 0.1% slippage × 2
+                        # (was 2.96% at standard 1% commission — Platinum is 10× cheaper)
+                        _crypto_rtc = 0.0116
                         _regime_multipliers = {
                             'trending_up_strong':   1.5,
                             'trending_up':          1.5,

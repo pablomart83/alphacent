@@ -209,7 +209,7 @@ backtest:
         slippage_percent: 5.0e-05
         overnight_financing_pct_per_day: 0.0001
       crypto:
-        commission_percent: 0.01
+        commission_percent: 0.001
         spread_percent: 0.0038
         slippage_percent: 0.001
         overnight_financing_pct_per_day: 0.0
@@ -225,7 +225,7 @@ backtest:
         overnight_financing_pct_per_day: 0.0002
     per_symbol:
       BTC:
-        commission_percent: 0.01
+        commission_percent: 0.001
         spread_percent: 0.0004
         slippage_percent: 0.0005
         overnight_financing_pct_per_day: 0.0
