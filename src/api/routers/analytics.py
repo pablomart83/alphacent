@@ -566,7 +566,7 @@ async def get_comprehensive_regime_analysis(
     # --- 5. Performance by regime (from DB) ---
     try:
         strategies = session.query(StrategyORM).filter(
-            StrategyORM.status.in_(['PAPER', 'LIVE', 'RETIRED'])
+            StrategyORM.status.in_(['DEMO', 'LIVE', 'RETIRED'])
         ).all()
 
         all_positions = session.query(PositionORM).all()
@@ -2308,7 +2308,7 @@ async def get_cio_dashboard(
         thirty_days_ago = datetime.now() - timedelta(days=30)
         
         all_strategies = session.query(StrategyORM).all()
-        active_count = sum(1 for s in all_strategies if s.status in (StrategyStatus.PAPER, StrategyStatus.LIVE))
+        active_count = sum(1 for s in all_strategies if s.status in (StrategyStatus.DEMO, StrategyStatus.LIVE))
         
         proposed_30d = sum(1 for s in all_strategies if s.created_at and s.created_at >= thirty_days_ago)
         activated_30d = sum(1 for s in all_strategies if s.activated_at and s.activated_at >= thirty_days_ago)
@@ -2430,7 +2430,7 @@ async def get_cio_dashboard(
         
         # --- Active Strategy Health (BULK query) ---
         active_strategies = [s for s in all_strategies 
-                           if s.status in (StrategyStatus.PAPER, StrategyStatus.LIVE)]
+                           if s.status in (StrategyStatus.DEMO, StrategyStatus.LIVE)]
         active_profitable = 0
         active_unprofitable = 0
         active_total_unrealized = 0.0

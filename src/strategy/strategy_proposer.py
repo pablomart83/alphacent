@@ -4345,7 +4345,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 try:
                     # Include DEMO, LIVE, and BACKTESTED with activation_approved
                     existing = session.query(StrategyORM).filter(
-                        StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
+                        StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
                     ).all()
                     for s in existing:
                         md = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
@@ -4608,7 +4608,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
             session = db.get_session()
             try:
                 active_strategies_db = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_(["PAPER", "LIVE", "BACKTESTED"])
+                    StrategyORM.status.in_(["DEMO", "LIVE", "BACKTESTED"])
                 ).all()
                 for s in active_strategies_db:
                     meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
@@ -5931,7 +5931,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
             session = db.get_session()
             try:
                 existing = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
+                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
                 ).all()
                 for s in existing:
                     md = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}

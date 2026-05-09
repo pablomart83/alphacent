@@ -421,7 +421,7 @@ class RiskManager:
             session = db.get_session()
             try:
                 active = session.query(StrategyORM.id).filter(
-                    StrategyORM.status.in_(["PAPER", "LIVE"])
+                    StrategyORM.status.in_(["DEMO", "LIVE"])
                 ).all()
                 active_strategy_ids = {s.id for s in active}
             finally:

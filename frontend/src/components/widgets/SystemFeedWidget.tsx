@@ -105,7 +105,7 @@ export const SystemFeedWidget: FC = () => {
         const strategies = await apiClient.getStrategies(tradingMode, true);
         const cutoff = Date.now() - 24 * 3600 * 1000; // last 24h
         for (const s of strategies) {
-          if (s.status === 'PAPER' || s.status === 'LIVE') {
+          if (s.status === 'DEMO' || s.status === 'LIVE') {
             const ts = parseTs((s as any).activated_at || s.created_at);
             if (ts > cutoff) {
               const sharpe = s.performance_metrics?.sharpe_ratio ?? s.backtest_results?.sharpe_ratio ?? 0;

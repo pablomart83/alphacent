@@ -971,7 +971,7 @@ async def get_strategy_templates(
 
             # Count strategies that passed activation (for success_rate calculation)
             is_activated = (
-                s.status in (StrategyStatus.PAPER.value, StrategyStatus.LIVE.value, "PAPER", "LIVE")
+                s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE")
                 or (md.get('activation_approved', False))
             )
             if is_activated:
@@ -983,7 +983,7 @@ async def get_strategy_templates(
             ret = perf.get("total_return", 0)
             trades = perf.get("total_trades", 0)
 
-            if s.status in (StrategyStatus.PAPER.value, StrategyStatus.LIVE.value, "PAPER", "LIVE"):
+            if s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE"):
                 if sharpe and not (math.isnan(sharpe) or math.isinf(sharpe)):
                     ts["sharpes"].append(sharpe)
                 if wr and not (math.isnan(wr) or math.isinf(wr)):
@@ -1194,12 +1194,12 @@ async def get_symbol_stats(
             perf = s.performance if isinstance(s.performance, dict) else {}
 
             is_activated = (
-                s.status in (StrategyStatus.PAPER.value, StrategyStatus.LIVE.value, "PAPER", "LIVE")
+                s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE")
                 or md.get('activation_approved', False)
             )
             live_trades = perf.get("total_trades", 0)
             has_traded = (
-                s.status in (StrategyStatus.PAPER.value, StrategyStatus.LIVE.value, "PAPER", "LIVE")
+                s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE")
                 and live_trades > 0
             )
 
@@ -1222,7 +1222,7 @@ async def get_symbol_stats(
                 if has_traded:
                     ss["traded"] += 1
 
-                if s.status in (StrategyStatus.PAPER.value, StrategyStatus.LIVE.value, "PAPER", "LIVE"):
+                if s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE"):
                     ss["active"] += 1
                     sharpe = perf.get("sharpe_ratio", 0)
                     wr = perf.get("win_rate", 0)
@@ -1515,7 +1515,7 @@ async def get_template_rankings(
             wr = perf.get("win_rate", 0)
             sharpe = perf.get("sharpe_ratio", 0)
             trades = perf.get("total_trades", 0)
-            if s.status in (StrategyStatus.PAPER.value, StrategyStatus.LIVE.value, "PAPER", "LIVE"):
+            if s.status in (StrategyStatus.DEMO.value, StrategyStatus.LIVE.value, "DEMO", "LIVE"):
                 if wr and not (math.isnan(wr) or math.isinf(wr)):
                     td["win_rates"].append(wr)
                 if sharpe and not (math.isnan(sharpe) or math.isinf(sharpe)):
@@ -2573,7 +2573,7 @@ async def update_strategy_allocation(
                 )
             
             # Determine mode from strategy status
-            if strategy_orm.status == StrategyStatus.PAPER.value:
+            if strategy_orm.status == StrategyStatus.DEMO.value:
                 mode = TradingMode.DEMO
             elif strategy_orm.status == StrategyStatus.LIVE.value:
                 mode = TradingMode.LIVE
@@ -2695,7 +2695,7 @@ async def get_autonomous_status(
         try:
             # Active strategies count
             active_strategy_count = session.query(StrategyORM).filter(
-                StrategyORM.status.in_(["PAPER", "LIVE"])
+                StrategyORM.status.in_(["DEMO", "LIVE"])
             ).count()
 
             # Open positions count
@@ -2744,7 +2744,7 @@ async def get_autonomous_status(
             total_allocation_result = session.query(
                 sa_func.sum(StrategyORM.allocation_percent)
             ).filter(
-                StrategyORM.status.in_(["PAPER", "LIVE"])
+                StrategyORM.status.in_(["DEMO", "LIVE"])
             ).scalar()
             total_allocation = float(total_allocation_result) if total_allocation_result else 0.0
 

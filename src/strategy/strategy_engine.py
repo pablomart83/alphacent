@@ -291,7 +291,7 @@ class StrategyEngine:
             primary_symbol = strategy.symbols[0] if strategy.symbols else None
             if primary_symbol:
                 active_count = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE]),
+                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE]),
                     StrategyORM.symbols.contains(f'"{primary_symbol}"')
                 ).count()
                 
@@ -300,7 +300,7 @@ class StrategyEngine:
                     activated_on_alt = False
                     for alt_symbol in strategy.symbols[1:]:
                         alt_count = session.query(StrategyORM).filter(
-                            StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE]),
+                            StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE]),
                             StrategyORM.symbols.contains(f'"{alt_symbol}"')
                         ).count()
                         if alt_count < risk_config.max_strategies_per_symbol:
@@ -323,7 +323,7 @@ class StrategyEngine:
         
         # Update status based on mode
         if mode == TradingMode.DEMO:
-            strategy.status = StrategyStatus.PAPER
+            strategy.status = StrategyStatus.DEMO
         else:
             strategy.status = StrategyStatus.LIVE
         
@@ -648,7 +648,7 @@ class StrategyEngine:
             raise ValueError(f"Strategy {strategy_id} not found")
 
         # Validate strategy is active
-        if strategy.status not in [StrategyStatus.PAPER, StrategyStatus.LIVE]:
+        if strategy.status not in [StrategyStatus.DEMO, StrategyStatus.LIVE]:
             raise ValueError(
                 f"Cannot update allocation for strategy in {strategy.status} status. "
                 f"Strategy must be active (DEMO or LIVE)."
@@ -706,7 +706,7 @@ class StrategyEngine:
         try:
             # Query all active strategies (DEMO or LIVE)
             active_strategies = session.query(StrategyORM).filter(
-                StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
+                StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
             ).all()
 
             total_allocation = 0.0
@@ -757,7 +757,7 @@ class StrategyEngine:
         session = self.db.get_session()
         try:
             strategy_orms = session.query(StrategyORM).filter(
-                StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
+                StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
             ).all()
             strategies = [self._orm_to_strategy(orm) for orm in strategy_orms]
             return strategies
@@ -5065,7 +5065,7 @@ class StrategyEngine:
             return []
         
         # Validate strategy is active
-        if strategy.status not in [StrategyStatus.PAPER, StrategyStatus.LIVE, StrategyStatus.BACKTESTED]:
+        if strategy.status not in [StrategyStatus.DEMO, StrategyStatus.LIVE, StrategyStatus.BACKTESTED]:
             raise ValueError(
                 f"Cannot generate signals for strategy in {strategy.status} status. "
                 f"Strategy must be DEMO, LIVE, or BACKTESTED."
@@ -11643,7 +11643,7 @@ class StrategyEngine:
             return None
         
         # Only check active strategies
-        if strategy.status not in [StrategyStatus.PAPER, StrategyStatus.LIVE]:
+        if strategy.status not in [StrategyStatus.DEMO, StrategyStatus.LIVE]:
             return None
         
         # Load retirement configuration
@@ -11783,7 +11783,7 @@ class StrategyEngine:
         # Filter to only active strategies
         active_strategies = [
             s for s in strategies 
-            if s.status in [StrategyStatus.PAPER, StrategyStatus.LIVE]
+            if s.status in [StrategyStatus.DEMO, StrategyStatus.LIVE]
         ]
         
         if not active_strategies:

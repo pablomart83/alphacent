@@ -1847,7 +1847,7 @@ async def get_dashboard_summary(
         # Fallback: try strategy metadata
         if regime_str == 'unknown':
             latest_strategy = db.query(StrategyORM).filter(
-                StrategyORM.status.in_(["PAPER", "LIVE"])
+                StrategyORM.status.in_(["DEMO", "LIVE"])
             ).order_by(StrategyORM.activated_at.desc()).first()
             if latest_strategy and latest_strategy.strategy_metadata:
                 import json
@@ -1901,7 +1901,7 @@ async def get_dashboard_summary(
 
     # Strategy diversity (0-25 points)
     active_strategies = db.query(StrategyORM).filter(
-        StrategyORM.status.in_(["PAPER", "LIVE"])
+        StrategyORM.status.in_(["DEMO", "LIVE"])
     ).count()
     diversity_score = min(25, active_strategies * 5)  # 5 points per active strategy, max 25
 
@@ -2238,7 +2238,7 @@ async def get_metrics_bar(
             PositionORM.closed_at.is_(None),
         ).scalar() or 0
         active_count = db.query(_func.count(_StrategyORM.id)).filter(
-            _StrategyORM.status.in_(["PAPER", "LIVE", "ACTIVE"]),
+            _StrategyORM.status.in_(["DEMO", "LIVE", "ACTIVE"]),
         ).scalar() or 0
     except Exception as e:
         logger.warning(f"metrics-bar count query failed: {e}")

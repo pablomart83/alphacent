@@ -688,12 +688,12 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   const lifecycleCounts = {
     proposed: strategies.filter(s => s.status === 'PROPOSED').length,
     backtested: strategies.filter(s => s.status === 'BACKTESTED').length,
-    active: strategies.filter(s => s.status === 'PAPER' || s.status === 'LIVE').length,
+    active: strategies.filter(s => s.status === 'DEMO' || s.status === 'LIVE').length,
     retired: strategies.filter(s => s.status === 'RETIRED').length,
   };
 
   // Calculate performance metrics
-  const activeStrategies = strategies.filter(s => s.status === 'PAPER' || s.status === 'LIVE');
+  const activeStrategies = strategies.filter(s => s.status === 'DEMO' || s.status === 'LIVE');
   const avgSharpe = activeStrategies.length > 0
     ? activeStrategies.reduce((sum, s) => sum + (s.performance_metrics?.sharpe_ratio || 0), 0) / activeStrategies.length
     : 0;
@@ -1175,7 +1175,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                 {[
                   { key: 'PROPOSED', label: 'Proposed', count: lifecycleCounts.proposed, color: 'blue' },
                   { key: 'BACKTESTED', label: 'Backtested', count: lifecycleCounts.backtested, color: 'purple' },
-                  { key: 'PAPER', label: 'Active', count: lifecycleCounts.active, color: 'green' },
+                  { key: 'DEMO', label: 'Active', count: lifecycleCounts.active, color: 'green' },
                   { key: 'RETIRED', label: 'Retired', count: lifecycleCounts.retired, color: 'red' },
                 ].map(s => (
                   <button key={s.key}
@@ -1213,7 +1213,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     <SelectItem value="all">All Stages</SelectItem>
                     <SelectItem value="PROPOSED">Proposed</SelectItem>
                     <SelectItem value="BACKTESTED">Backtested</SelectItem>
-                    <SelectItem value="PAPER">Paper</SelectItem>
+                    <SelectItem value="DEMO">Demo</SelectItem>
                     <SelectItem value="RETIRED">Retired</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1592,7 +1592,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
               <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Conviction Score Decomposition</div>
                   {(() => {
                     const activeWithConviction = strategies.filter(
-                      (s) => (s.status === 'PAPER' || s.status === 'LIVE') && s.metadata?.conviction_score
+                      (s) => (s.status === 'DEMO' || s.status === 'LIVE') && s.metadata?.conviction_score
                     );
                     if (activeWithConviction.length === 0) {
                       return <div className="flex items-center justify-center h-24 text-xs text-muted-foreground">No conviction score data</div>;

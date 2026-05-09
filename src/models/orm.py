@@ -945,7 +945,7 @@ class AutonomousCycleRunORM(Base):
     avg_sharpe = Column(Float, nullable=True)
     avg_win_rate = Column(Float, nullable=True)
     activated = Column(Integer, nullable=False, default=0)
-    promoted_to_paper = Column(Integer, nullable=False, default=0)  # Strategies that got first order → DEMO status
+    promoted_to_demo = Column(Integer, nullable=False, default=0)  # Strategies that got first order → DEMO status
     total_active = Column(Integer, nullable=False, default=0)
     total_backtested = Column(Integer, nullable=False, default=0)
     signals_generated = Column(Integer, nullable=False, default=0)
@@ -984,7 +984,7 @@ class AutonomousCycleRunORM(Base):
             "avg_sharpe": self.avg_sharpe,
             "avg_win_rate": self.avg_win_rate,
             "activated": self.activated,
-            "promoted_to_paper": self.promoted_to_paper,
+            "promoted_to_demo": self.promoted_to_demo,
             "total_active": self.total_active,
             "total_backtested": self.total_backtested,
             "signals_generated": self.signals_generated,

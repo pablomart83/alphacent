@@ -142,7 +142,7 @@ async def get_system_status(
         from src.models.orm import StrategyORM, PositionORM
         try:
             active_strategies_count = session.query(StrategyORM).filter(
-                StrategyORM.status.in_(["PAPER", "LIVE"])
+                StrategyORM.status.in_(["DEMO", "LIVE"])
             ).count()
             
             open_positions_count = session.query(PositionORM).filter(

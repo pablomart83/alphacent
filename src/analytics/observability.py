@@ -105,7 +105,7 @@ def wf_live_divergence(min_live_trades: int = 5) -> List[Dict[str, Any]]:
         session = db.get_session()
         try:
             strategies = session.query(StrategyORM).filter(
-                StrategyORM.status.in_(['PAPER', 'LIVE', 'BACKTESTED'])
+                StrategyORM.status.in_(['DEMO', 'LIVE', 'BACKTESTED'])
             ).all()
 
             alerts: List[Dict[str, Any]] = []

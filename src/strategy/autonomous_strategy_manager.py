@@ -444,7 +444,7 @@ class AutonomousStrategyManager:
                 session = get_database().get_session()
                 try:
                     total_active = session.query(StrategyORM).filter(
-                        StrategyORM.status.in_(["PAPER", "LIVE"])
+                        StrategyORM.status.in_(["DEMO", "LIVE"])
                     ).count()
                 finally:
                     session.close()
@@ -550,7 +550,7 @@ class AutonomousStrategyManager:
             signals_generated = 0
             signals_rejected = 0
             orders_submitted = 0
-            promoted_to_paper = 0  # Strategies actually activated (BACKTESTED→DEMO) this cycle
+            promoted_to_demo = 0  # Strategies actually activated (BACKTESTED→DEMO) this cycle
             newly_approved = stats["strategies_activated"]  # Count of strategies approved as BACKTESTED
 
             if newly_approved > 0:
@@ -585,7 +585,7 @@ class AutonomousStrategyManager:
                     signals_generated = sig_result.get("signals_generated", 0)
                     signals_rejected = sig_result.get("signals_rejected", 0)
                     orders_submitted = sig_result.get("orders_submitted", 0)
-                    promoted_to_paper = sig_result.get("promoted_to_paper", 0)
+                    promoted_to_demo = sig_result.get("promoted_to_demo", 0)
                     signals_raw = sig_result.get("signals_raw", signals_generated)
 
                     scheduler._last_signal_check = _time.time()
@@ -594,7 +594,7 @@ class AutonomousStrategyManager:
                         f"Signal generation complete: {signals_generated} raw signals, "
                         f"{sig_result.get('signals_coordinated', 0)} after coordination, "
                         f"{orders_submitted} orders, {signals_rejected} rejected, "
-                        f"{promoted_to_paper} promoted to DEMO"
+                        f"{promoted_to_demo} promoted to DEMO"
                     )
 
                 except Exception as e:
@@ -636,7 +636,7 @@ class AutonomousStrategyManager:
                 session = get_database().get_session()
                 try:
                     total_active = session.query(StrategyORM).filter(
-                        StrategyORM.status.in_(["PAPER", "LIVE"])
+                        StrategyORM.status.in_(["DEMO", "LIVE"])
                     ).count()
                     total_backtested = session.query(StrategyORM).filter(
                         StrategyORM.status == "BACKTESTED"
@@ -649,8 +649,8 @@ class AutonomousStrategyManager:
 
             # Save completed cycle to DB
             # activated = strategies that passed activation criteria → BACKTESTED status
-            # promoted_to_paper = strategies that got their first order executed → DEMO status
-            stats["strategies_activated_to_demo"] = promoted_to_paper
+            # promoted_to_demo = strategies that got their first order executed → DEMO status
+            stats["strategies_activated_to_demo"] = promoted_to_demo
             self._update_cycle_run(cycle_id, "completed", cycle_end, cycle_duration, stats, {
                 "symbols_checked": symbols_checked,
                 "avg_sharpe": cycle_avg_sharpe,
@@ -697,7 +697,7 @@ class AutonomousStrategyManager:
                 "signals_generated": signals_generated,
                 "signals_rejected": signals_rejected,
                 "active_strategies": total_active,
-                "newly_activated": promoted_to_paper,
+                "newly_activated": promoted_to_demo,
                 "newly_approved": newly_approved,
                 "cycle_duration": f"{cycle_duration:.0f}s",
             })
@@ -712,7 +712,7 @@ class AutonomousStrategyManager:
                     "strategies_cleaned": stats["strategies_cleaned"],
                     "proposals_generated": stats["proposals_generated"],
                     "proposals_backtested": stats["proposals_backtested"],
-                    "strategies_activated": promoted_to_paper,
+                    "strategies_activated": promoted_to_demo,
                     "strategies_retired": stats["strategies_retired"],
                     "errors_count": len(stats["errors"]),
                     "timestamp": cycle_end.isoformat()
@@ -725,7 +725,7 @@ class AutonomousStrategyManager:
             logger.info(f"Strategies cleaned: {stats['strategies_cleaned']}")
             logger.info(f"Proposals generated: {stats['proposals_generated']}")
             logger.info(f"Proposals backtested: {stats['proposals_backtested']}")
-            logger.info(f"Strategies approved (BACKTESTED): {newly_approved}, Activated to DEMO: {promoted_to_paper}, Retired: {stats['strategies_retired']}")
+            logger.info(f"Strategies approved (BACKTESTED): {newly_approved}, Activated to DEMO: {promoted_to_demo}, Retired: {stats['strategies_retired']}")
             logger.info(f"Total active (DEMO+LIVE): {total_active}")
             logger.info(f"Signals generated: {signals_generated}, Orders submitted: {orders_submitted}, Rejected: {signals_rejected}")
             if signals_generated == 0 and newly_approved > 0:
@@ -734,8 +734,8 @@ class AutonomousStrategyManager:
                     logger.info(f"  ({raw} raw signals generated, all rejected by conviction/frequency filters — entry conditions not met or scores below threshold)")
                 else:
                     logger.info("  (0 signals passed conviction/frequency filters — entry conditions not met or scores below threshold)")
-            if promoted_to_paper > 0:
-                logger.info(f"Strategies promoted to DEMO: {promoted_to_paper} (signal fired + order placed)")
+            if promoted_to_demo > 0:
+                logger.info(f"Strategies promoted to DEMO: {promoted_to_demo} (signal fired + order placed)")
             if stats["errors"]:
                 logger.warning(f"Errors encountered: {len(stats['errors'])}")
             logger.info("=" * 80)
@@ -812,7 +812,7 @@ class AutonomousStrategyManager:
                 if activated_details or rejected_details:
                     cl.log_activation(activated_details, rejected_details)
                 else:
-                    cl.log_stage("ACTIVATION", f"{promoted_to_paper} activated to DEMO (approved={stats['strategies_activated']})",
+                    cl.log_stage("ACTIVATION", f"{promoted_to_demo} activated to DEMO (approved={stats['strategies_activated']})",
                                  {"avg_sharpe": f"{avg_sharpe:.2f}", "avg_wr": f"{avg_win_rate:.1f}%"})
 
                 # Log retirement details
@@ -935,20 +935,20 @@ class AutonomousStrategyManager:
                     # 2026-05-04 footer fix: report strategies that passed
                     # activation criteria (BACKTESTED) — matches the inline
                     # `[ACTIVATION] N activated` line emitted earlier in the
-                    # same cycle. The previous value `promoted_to_paper`
+                    # same cycle. The previous value `promoted_to_demo`
                     # counts strategies that GOT A FIRST ORDER THIS CYCLE,
                     # which is a strict subset (every BACKTESTED strategy
                     # enters DEMO only on its first fill). In cycles where
                     # signals defer (market closed, gate-blocked, pending
-                    # state), `promoted_to_paper` was 0 even when 4 strategies
+                    # state), `promoted_to_demo` was 0 even when 4 strategies
                     # were successfully activated. Creates false "nothing
                     # happened" impression that costs investigation time.
-                    # Also include promoted_to_paper as an explicit separate
+                    # Also include promoted_to_demo as an explicit separate
                     # field for callers that care about fill-through (DB
                     # already tracks both as `activated` and
-                    # `promoted_to_paper`).
+                    # `promoted_to_demo`).
                     "strategies_activated": stats['strategies_activated'],
-                    "strategies_promoted_to_paper": promoted_to_paper,
+                    "strategies_promoted_to_demo": promoted_to_demo,
                     "strategies_retired": stats['strategies_retired'],
                     "total_active": total_active,
                     "signals_generated": signals_generated,
@@ -1065,7 +1065,7 @@ class AutonomousStrategyManager:
                 run.avg_sharpe = extra.get("avg_sharpe")
                 run.avg_win_rate = extra.get("avg_win_rate")
                 run.activated = stats.get("strategies_activated", 0)  # passed activation → BACKTESTED
-                run.promoted_to_paper = stats.get("strategies_activated_to_demo", 0)  # got first order → DEMO
+                run.promoted_to_demo = stats.get("strategies_activated_to_demo", 0)  # got first order → DEMO
                 run.total_active = extra.get("total_active", 0)
                 run.total_backtested = extra.get("total_backtested", 0)
                 run.errors = stats.get("errors", []) if stats.get("errors") else None
@@ -1168,7 +1168,7 @@ class AutonomousStrategyManager:
                     StrategyORM.status == StrategyStatus.BACKTESTED
                 ).count()
                 active_count = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
+                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
                 ).count()
 
                 logger.info(
@@ -2012,7 +2012,7 @@ class AutonomousStrategyManager:
                             try:
                                 # Find the existing active strategy for this template+symbol
                                 existing_strats = _sess.query(StrategyORM).filter(
-                                    StrategyORM.status.in_(['PAPER', 'LIVE'])
+                                    StrategyORM.status.in_(['DEMO', 'LIVE'])
                                 ).all()
                                 for _es in existing_strats:
                                     _em = _es.strategy_metadata if isinstance(_es.strategy_metadata, dict) else {}
@@ -2535,7 +2535,7 @@ class AutonomousStrategyManager:
                 continue
 
             # Skip if already active
-            if strategy.status in (StrategyStatus.PAPER, StrategyStatus.LIVE):
+            if strategy.status in (StrategyStatus.DEMO, StrategyStatus.LIVE):
                 continue
 
             if sharpe > best_sharpe:
@@ -2685,7 +2685,7 @@ class AutonomousStrategyManager:
                 continue
 
             # Skip if already active
-            if strategy.status in (StrategyStatus.PAPER, StrategyStatus.LIVE):
+            if strategy.status in (StrategyStatus.DEMO, StrategyStatus.LIVE):
                 continue
 
             if sharpe > best_sharpe:

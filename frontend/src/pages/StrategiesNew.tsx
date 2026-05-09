@@ -197,7 +197,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
   // Filter strategies by status
   const activeStrategies = useMemo(() => 
-    strategies.filter(s => s.status === 'PAPER' || s.status === 'LIVE'),
+    strategies.filter(s => s.status === 'DEMO' || s.status === 'LIVE'),
     [strategies]
   );
 
@@ -256,7 +256,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
       .filter(Boolean) as Strategy[];
     
     const hasBacktested = selectedList.some(s => s.status === 'BACKTESTED');
-    const hasActive = selectedList.some(s => s.status === 'PAPER' || s.status === 'LIVE');
+    const hasActive = selectedList.some(s => s.status === 'DEMO' || s.status === 'LIVE');
     
     return { hasBacktested, hasActive };
   }, [selectedStrategies, strategies]);
@@ -532,7 +532,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     switch (status) {
       case 'PROPOSED': return 'secondary';
       case 'BACKTESTED': return 'default';
-      case 'PAPER': return 'warning';
+      case 'DEMO': return 'warning';
       case 'LIVE': return 'success';
       case 'RETIRED': return 'destructive';
       default: return 'default';
@@ -1605,7 +1605,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 <SelectContent>
                   <SelectItem value="all">All Status</SelectItem>
                   <SelectItem value="BACKTESTED">Backtested</SelectItem>
-                  <SelectItem value="PAPER">Paper</SelectItem>
+                  <SelectItem value="DEMO">Demo</SelectItem>
                   <SelectItem value="LIVE">Live</SelectItem>
                 </SelectContent>
               </Select>

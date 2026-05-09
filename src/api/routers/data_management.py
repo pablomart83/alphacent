@@ -399,7 +399,7 @@ def _run_sync_with_logging(mon) -> None:
             session = db.get_session()
             try:
                 active = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
+                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
                 ).all()
                 for s in active:
                     if s.symbols:
@@ -1242,7 +1242,7 @@ async def get_monitoring_status():
             session = db.get_session()
             try:
                 active = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
+                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
                 ).count()
                 backtested = session.query(StrategyORM).filter(
                     StrategyORM.status == StrategyStatus.BACKTESTED
