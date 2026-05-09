@@ -1499,10 +1499,10 @@ class ApiClient {
     });
   }
 
-  async getConvictionCalibration(days = 30): Promise<any> {
-    return dedupedGet(`analytics/conviction-calibration-${days}`, async () => {
+  async getConvictionCalibration(days = 30, granularity = 2): Promise<any> {
+    return dedupedGet(`analytics/conviction-calibration-${days}-${granularity}`, async () => {
       const response = await this.client.get<ApiResponse<any>>(
-        `/analytics/conviction-calibration?days=${days}`
+        `/analytics/conviction-calibration?days=${days}&granularity=${granularity}`
       );
       return this.handleResponse(response);
     });

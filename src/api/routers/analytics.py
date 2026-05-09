@@ -4831,6 +4831,7 @@ class ConvictionCalibrationResponse(BaseModel):
 @router.get("/conviction-calibration", response_model=ConvictionCalibrationResponse)
 async def get_conviction_calibration(
     days: int = 30,
+    granularity: int = 2,  # bucket width: 2 = fine (2-point), 5 = coarse (5-point)
     username: str = Depends(get_current_user),
     session: Session = Depends(get_db_session),
 ):
@@ -4842,17 +4843,17 @@ async def get_conviction_calibration(
     A well-calibrated scorer should show strictly increasing avg P&L as the
     conviction score rises.
 
-    Returns per-bucket stats plus:
-    - is_monotonic: False when any higher bucket underperforms a lower one
-    - negative_ev_above_threshold: buckets above the threshold with negative avg P&L
-    - recommendation: actionable text (raise threshold, lower threshold, etc.)
-
     Args:
         days: Lookback window in days (default 30). Use 0 for all-time.
+        granularity: Bucket width in score points. 2 = fine (2-point buckets),
+                     5 = coarse (5-point buckets). Default 2.
     """
-    logger.info(f"Computing conviction calibration for user {username}, days={days}")
+    logger.info(f"Computing conviction calibration for user {username}, days={days}, granularity={granularity}")
 
     from src.analytics.trade_journal import TradeJournalEntryORM
+
+    # Clamp granularity to sensible values
+    granularity = max(1, min(10, granularity))
 
     # Current threshold — read from autonomous_trading.yaml
     CURRENT_THRESHOLD = 70.0
@@ -4864,7 +4865,7 @@ async def get_conviction_calibration(
             with open(cfg_path, "r") as f:
                 cfg = yaml.safe_load(f) or {}
             CURRENT_THRESHOLD = float(
-                cfg.get("conviction_scoring", {}).get("threshold", 70.0)
+                cfg.get("alpha_edge", {}).get("min_conviction_score", 70.0)
             )
     except Exception:
         pass
@@ -4892,14 +4893,23 @@ async def get_conviction_calibration(
 
     coverage_pct = round(len(rows) / total_closed * 100, 1) if total_closed > 0 else 0.0
 
-    # ── Bucket definitions ────────────────────────────────────────────────────
-    BUCKET_DEFS = [
-        ("<65",   "<65",          0.0,  65.0),
-        ("65-70", "65–70",       65.0,  70.0),
-        ("70-75", "70–75",       70.0,  75.0),
-        ("75-80", "75–80",       75.0,  80.0),
-        ("80+",   "80+",         80.0, 200.0),
-    ]
+    # ── Build bucket definitions dynamically ─────────────────────────────────
+    # Score range: 50 to 95 in steps of `granularity`, plus a catch-all below 50.
+    # Buckets with 0 trades are included so the UI shows the full range.
+    SCORE_MIN = 50
+    SCORE_MAX = 96  # exclusive upper bound — scores above 95 are rare
+
+    BUCKET_DEFS: List[tuple] = []
+    # Below-range catch-all
+    BUCKET_DEFS.append((f"<{SCORE_MIN}", f"<{SCORE_MIN}", 0.0, float(SCORE_MIN)))
+    # Dynamic buckets
+    lo = SCORE_MIN
+    while lo < SCORE_MAX:
+        hi = lo + granularity
+        label = f"{lo}–{hi}" if hi < SCORE_MAX else f"{lo}+"
+        key = f"{lo}-{hi}" if hi < SCORE_MAX else f"{lo}+"
+        BUCKET_DEFS.append((key, label, float(lo), float(hi)))
+        lo = hi
 
     buckets: List[ConvictionBucket] = []
     for bucket_key, label, lo, hi in BUCKET_DEFS:

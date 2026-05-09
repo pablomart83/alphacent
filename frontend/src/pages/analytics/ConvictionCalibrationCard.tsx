@@ -80,15 +80,16 @@ export const ConvictionCalibrationCard: FC<ConvictionCalibrationCardProps> = ({ 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [window, setWindow] = useState(days);
+  const [granularity, setGranularity] = useState(2);
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    apiClient.getConvictionCalibration(window)
+    apiClient.getConvictionCalibration(window, granularity)
       .then(setData)
       .catch((e: any) => setError(e?.message || 'Failed to load calibration data'))
       .finally(() => setLoading(false));
-  }, [window]);
+  }, [window, granularity]);
 
   // ── Status banner ─────────────────────────────────────────────────────────
   const bannerConfig = data
@@ -113,22 +114,42 @@ export const ConvictionCalibrationCard: FC<ConvictionCalibrationCardProps> = ({ 
             Does higher conviction → higher P&L? Threshold: {data?.threshold ?? 70}
           </p>
         </div>
-        {/* Window selector */}
-        <div className="flex items-center gap-1">
-          {[7, 14, 30, 0].map((d) => (
-            <button
-              key={d}
-              onClick={() => setWindow(d)}
-              className={cn(
-                'px-2 py-0.5 text-[10px] font-mono rounded transition-colors',
-                window === d
-                  ? 'bg-gray-700 text-gray-200 font-semibold'
-                  : 'text-gray-600 hover:text-gray-300',
-              )}
-            >
-              {d === 0 ? 'ALL' : `${d}d`}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          {/* Granularity selector */}
+          <div className="flex items-center gap-0.5">
+            <span className="text-[10px] font-mono text-gray-600 mr-1">bucket</span>
+            {[1, 2, 5].map((g) => (
+              <button
+                key={g}
+                onClick={() => setGranularity(g)}
+                className={cn(
+                  'px-1.5 py-0.5 text-[10px] font-mono rounded transition-colors',
+                  granularity === g
+                    ? 'bg-blue-600/30 text-blue-300 font-semibold'
+                    : 'text-gray-600 hover:text-gray-300',
+                )}
+              >
+                {g}pt
+              </button>
+            ))}
+          </div>
+          {/* Window selector */}
+          <div className="flex items-center gap-1">
+            {[7, 14, 30, 0].map((d) => (
+              <button
+                key={d}
+                onClick={() => setWindow(d)}
+                className={cn(
+                  'px-2 py-0.5 text-[10px] font-mono rounded transition-colors',
+                  window === d
+                    ? 'bg-gray-700 text-gray-200 font-semibold'
+                    : 'text-gray-600 hover:text-gray-300',
+                )}
+              >
+                {d === 0 ? 'ALL' : `${d}d`}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -169,7 +190,9 @@ export const ConvictionCalibrationCard: FC<ConvictionCalibrationCardProps> = ({ 
                 </tr>
               </thead>
               <tbody>
-                {data.buckets.map((b) => {
+                {data.buckets
+                  .filter((b) => b.trades > 0 || b.is_above_threshold)
+                  .map((b) => {
                   const isThresholdRow = b.min_score === data.threshold;
                   return (
                     <tr
@@ -184,9 +207,8 @@ export const ConvictionCalibrationCard: FC<ConvictionCalibrationCardProps> = ({ 
                           : '',
                       )}
                     >
-                      <td className="py-1.5 pr-3">
+                      <td className="py-1 pr-3">
                         <div className="flex items-center gap-1.5">
-                          {/* Threshold marker */}
                           {isThresholdRow && (
                             <span className="text-[9px] text-blue-400 font-semibold">▶</span>
                           )}
@@ -200,15 +222,15 @@ export const ConvictionCalibrationCard: FC<ConvictionCalibrationCardProps> = ({ 
                             <span className="text-amber-400 text-[9px]" title="< 30 trades — statistically weak">⚠</span>
                           )}
                           {b.trades === 0 && (
-                            <span className="text-gray-700 text-[9px]">no data</span>
+                            <span className="text-gray-700 text-[9px]">—</span>
                           )}
                         </div>
                       </td>
-                      <td className="py-1.5 px-2 text-right text-gray-400">
+                      <td className="py-1 px-2 text-right text-gray-400">
                         {b.trades > 0 ? b.trades : '—'}
                       </td>
                       <td className={cn(
-                        'py-1.5 px-2 text-right',
+                        'py-1 px-2 text-right',
                         b.trades > 0
                           ? b.win_rate >= 50 ? 'text-accent-green' : 'text-accent-red'
                           : 'text-gray-700',
@@ -216,7 +238,7 @@ export const ConvictionCalibrationCard: FC<ConvictionCalibrationCardProps> = ({ 
                         {b.trades > 0 ? `${b.win_rate.toFixed(0)}%` : '—'}
                       </td>
                       <td className={cn(
-                        'py-1.5 px-2 text-right font-semibold',
+                        'py-1 px-2 text-right font-semibold',
                         b.trades > 0
                           ? b.avg_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'
                           : 'text-gray-700',
@@ -224,14 +246,14 @@ export const ConvictionCalibrationCard: FC<ConvictionCalibrationCardProps> = ({ 
                         {b.trades > 0 ? fmtPnl(b.avg_pnl) : '—'}
                       </td>
                       <td className={cn(
-                        'py-1.5 px-2 text-right',
+                        'py-1 px-2 text-right',
                         b.trades > 0
                           ? b.total_pnl >= 0 ? 'text-accent-green' : 'text-accent-red'
                           : 'text-gray-700',
                       )}>
                         {b.trades > 0 ? fmtPnl(b.total_pnl) : '—'}
                       </td>
-                      <td className="py-1.5 pl-3">
+                      <td className="py-1 pl-3">
                         {b.trades > 0
                           ? <PnlBar value={b.avg_pnl} maxAbs={maxAbsPnl} />
                           : <div className="h-2 w-full bg-gray-800/40 rounded" />
