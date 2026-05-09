@@ -1288,9 +1288,12 @@ class PortfolioManager:
                     _regime_key = 'unknown'
 
                     # Path 1: strategy metadata carries the regime at proposal time
+                    # Only use 'market_regime' — NOT 'macro_regime' which is the
+                    # equity macro regime (e.g. 'transitional') and is irrelevant
+                    # for crypto sub-regime detection.
                     _meta_regime = None
                     if hasattr(strategy, 'metadata') and strategy.metadata:
-                        _meta_regime = strategy.metadata.get('market_regime') or strategy.metadata.get('macro_regime')
+                        _meta_regime = strategy.metadata.get('market_regime') or strategy.metadata.get('crypto_regime')
                     if _meta_regime and isinstance(_meta_regime, str):
                         _regime_key = _meta_regime.lower().replace(' ', '_')
 
