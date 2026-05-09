@@ -32,7 +32,7 @@ export type OrderStatus = typeof OrderStatus[keyof typeof OrderStatus];
 export const StrategyStatus = {
   PROPOSED: 'PROPOSED',
   BACKTESTED: 'BACKTESTED',
-  DEMO: 'DEMO',
+  PAPER: 'PAPER',
   LIVE: 'LIVE',
   RETIRED: 'RETIRED',
 } as const;

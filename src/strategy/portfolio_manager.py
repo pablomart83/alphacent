@@ -1630,7 +1630,7 @@ class PortfolioManager:
             from src.models.orm import StrategyORM, RegimeHistoryORM
 
             active_strategies = session.query(StrategyORM).filter(
-                StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
+                StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
             ).all()
 
             results = {}
@@ -1766,7 +1766,7 @@ class PortfolioManager:
                         'timestamp': datetime.now().isoformat(),
                         'type': 'strategy_retired',
                         'reason': f'Trend reversal detected: {change_type}',
-                        'original_status': 'DEMO'
+                        'original_status': 'PAPER'
                     }
                     adjustments.append(adjustment)
 
@@ -2721,7 +2721,7 @@ class PortfolioManager:
                 active_strategies = session.query(StrategyORM).filter(
                     StrategyORM.status.in_([
                         StrategyStatus.ACTIVE.value,
-                        StrategyStatus.DEMO.value
+                        StrategyStatus.PAPER.value
                     ])
                 ).all()
                 

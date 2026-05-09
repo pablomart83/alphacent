@@ -710,7 +710,7 @@ class MonitoringService:
             active_symbols = set()
             try:
                 active = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
+                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
                 ).all()
                 for s in active:
                     if s.symbols:
@@ -987,7 +987,7 @@ class MonitoringService:
             session = self.db.get_session()
             try:
                 active = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
+                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
                 ).all()
                 for s in active:
                     if s.symbols:
@@ -2078,7 +2078,7 @@ class MonitoringService:
             session = self.db.get_session()
             try:
                 active_count = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
+                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
                 ).count()
                 open_positions = session.query(PositionORM).filter(
                     PositionORM.closed_at.is_(None)
@@ -3989,7 +3989,7 @@ class MonitoringService:
             session = self.db.get_session()
             try:
                 active_strategies = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
+                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
                 ).all()
                 
                 # Finalize pending retirements: strategies marked for retirement
@@ -4436,7 +4436,7 @@ class MonitoringService:
             session = self.db.get_session()
             try:
                 active_strategies = session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
+                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
                 ).all()
                 
                 if not active_strategies:
@@ -5000,7 +5000,7 @@ class MonitoringService:
             session.expire_all()
 
             demo_strategies = session.query(StrategyORM).filter(
-                StrategyORM.status == StrategyStatus.DEMO
+                StrategyORM.status == StrategyStatus.PAPER
             ).all()
 
             if not demo_strategies:
@@ -5095,7 +5095,7 @@ class MonitoringService:
                 ).count() > 0
 
                 if has_open:
-                    s.status = StrategyStatus.DEMO
+                    s.status = StrategyStatus.PAPER
                     promoted += 1
                     logger.warning(
                         f"Re-promoted BACKTESTED strategy to DEMO: {s.name} "
@@ -5166,7 +5166,7 @@ class MonitoringService:
                 # Priority 2: active strategy symbols
                 active_syms = set()
                 for s in session.query(StrategyORM).filter(
-                    StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE])
+                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE])
                 ).all():
                     if s.symbols:
                         try:

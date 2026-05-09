@@ -63,7 +63,7 @@ function countStrategiesByStage(strategies: Strategy[]): Record<string, number> 
     const status = s.status?.toUpperCase();
     if (status === 'PROPOSED') { proposed++; }
     else if (status === 'BACKTESTED') { proposed++; backtested++; }
-    else if (status === 'DEMO' || status === 'LIVE') { proposed++; backtested++; active++; }
+    else if (status === 'PAPER' || status === 'LIVE') { proposed++; backtested++; active++; }
     else if (status === 'RETIRED') { proposed++; backtested++; retired++; }
     else if (status === 'PAUSED') { proposed++; backtested++; active++; }
   }

@@ -272,7 +272,7 @@ class TradingScheduler:
             # BACKTESTED strategies with activation_approved=True are ready to trade —
             # they'll be promoted to DEMO when they generate their first signal.
             active_strategies = session.query(StrategyORM).filter(
-                StrategyORM.status.in_([StrategyStatus.DEMO, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
+                StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
             ).all()
             
             # Filter:
@@ -284,7 +284,7 @@ class TradingScheduler:
                 meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
                 if meta.get('pending_retirement') or meta.get('superseded'):
                     return False
-                if s.status in (StrategyStatus.DEMO, StrategyStatus.LIVE):
+                if s.status in (StrategyStatus.PAPER, StrategyStatus.LIVE):
                     return True
                 if s.status == StrategyStatus.BACKTESTED and meta.get('activation_approved'):
                     return True
@@ -1442,7 +1442,7 @@ class TradingScheduler:
                                     logger.warning(f"Pairs Trading hedge leg failed for {_pt_partner}: {_hedge_err}")
                             # Strategy proved it can trade — actual order placed on eToro
                             if strategy_orm.status == StrategyStatus.BACKTESTED:
-                                strategy_orm.status = StrategyStatus.DEMO
+                                strategy_orm.status = StrategyStatus.PAPER
                                 strategy_orm.activated_at = datetime.now()
                                 allocation = strategy.allocation_percent or 2.0
                                 strategy_orm.allocation_percent = allocation
@@ -1450,8 +1450,8 @@ class TradingScheduler:
                                 from sqlalchemy.orm.attributes import flag_modified
                                 flag_modified(strategy_orm, 'strategy_metadata')
                                 session.commit()
-                                result.setdefault("promoted_to_demo", 0)
-                                result["promoted_to_demo"] += 1
+                                result.setdefault("promoted_to_paper", 0)
+                                result["promoted_to_paper"] += 1
                                 logger.info(
                                     f"  ✓ Promoted {strategy.name} from BACKTESTED → DEMO "
                                     f"(order executed, allocation: {allocation:.1f}%)"
@@ -1478,7 +1478,7 @@ class TradingScheduler:
                                     "strategy": {
                                         "id": strategy.id,
                                         "name": strategy.name,
-                                        "status": "DEMO",
+                                        "status": "PAPER",
                                         "activated_at": strategy_orm.activated_at.isoformat(),
                                         "allocation_percent": allocation,
                                         "symbols": strategy.symbols,
@@ -1668,7 +1668,7 @@ class TradingScheduler:
                 for strategy_id, signals in coordinated_results.items():
                     if signals:
                         strategy, strategy_orm = strategy_map.get(strategy_id, (None, None))
-                        if strategy_orm and strategy_orm.status == StrategyStatus.DEMO:
+                        if strategy_orm and strategy_orm.status == StrategyStatus.PAPER:
                             # Was BACKTESTED, now DEMO — it fired
                             promoted_ids.add(strategy_id)
 

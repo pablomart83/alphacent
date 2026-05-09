@@ -80,7 +80,7 @@ interface CycleRun {
   backtest_passed: number;
   backtest_failed: number;
   activated: number;          // passed activation criteria → BACKTESTED status
-  promoted_to_demo: number;   // got first order executed → DEMO status
+  promoted_to_paper: number;   // got first order executed → DEMO status
   total_active: number;
   total_backtested: number;
   signals_generated: number;
@@ -325,7 +325,7 @@ export const CycleIntelligencePanel: FC<CycleIntelligencePanelProps> = ({
       { label: 'Validated',  value: proposalCount,       color: 'bg-[#6366f1]/60', sub: `DSL→WF · AE→Fundamental` },
       { label: 'Passed WF',  value: c.backtest_passed,   color: 'bg-[#a855f7]/60' },
       { label: 'Backtested', value: c.activated,         color: 'bg-[#22c55e]/60' },
-      { label: 'Activated',  value: c.promoted_to_demo ?? 0, color: 'bg-[#f97316]/60' },
+      { label: 'Activated',  value: c.promoted_to_paper ?? 0, color: 'bg-[#f97316]/60' },
       { label: 'Signals',    value: signalsGen,           color: 'bg-[#eab308]/60' },
       { label: 'Trades',     value: trades,               color: 'bg-[#f97316]/60' },
     ];
