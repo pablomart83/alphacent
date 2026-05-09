@@ -1239,8 +1239,10 @@ class PortfolioManager:
             # has 0.05% per trade — that's noise, not edge.
             # Interval-aware: 1h/4h/1d strategies have different hold periods and
             # per-trade return expectations — use interval-specific thresholds.
-            # For crypto: crypto_1h=0.5%, crypto_4h=1.5%, crypto_1d=2.5%,
-            # crypto=4% fallback for weekly/21d+ templates.
+            #
+            # For crypto the YAML floor is the fallback for unknown regime.
+            # The actual floor is regime-aware (see below) so it self-adjusts
+            # when crypto moves between trending and ranging without manual edits.
             min_rpt_config = config_thresholds.get('min_return_per_trade', {})
             if isinstance(min_rpt_config, dict):
                 _strat_interval = ''
@@ -1258,6 +1260,73 @@ class PortfolioManager:
             else:
                 min_return_per_trade = 0.002
                 _rpt_source = 'default'
+
+            # ── Regime-aware RPT floor for crypto (2026-05-09) ───────────────
+            # The YAML floor (crypto_1d/4h: 3%) was calibrated for a trending
+            # bull market. In a ranging regime, crypto oscillates with smaller
+            # moves — a 1.8% per-trade return is genuine edge after ~2.96%
+            # round-trip costs, but 3% is structurally unachievable.
+            #
+            # Floor = round_trip_cost × regime_multiplier, where:
+            #   trending_up / trending_down (strong):  1.5× → ~4.5%
+            #   trending_up_weak / trending_down_weak: 1.2× → ~3.6%
+            #   ranging / ranging_low_vol:             0.6× → ~1.8%
+            #   ranging_high_vol / high_volatility:    0.8× → ~2.4%
+            #   unknown / fallback:                    1.0× → ~3.0% (YAML value)
+            #
+            # The YAML value remains the fallback so a regime-detection failure
+            # degrades gracefully to the previous behaviour.
+            # Only applies to crypto — non-crypto RPT floors are unchanged.
+            if asset_class == 'crypto':
+                try:
+                    from src.strategy.market_analyzer import MarketAnalyzer as _MA
+                    _ma_inst = getattr(self, '_market_analyzer', None)
+                    if _ma_inst is None:
+                        # Try to get from the module-level singleton if available
+                        try:
+                            from src.data.market_data_manager import get_market_data_manager as _get_mdm
+                            _mdm = _get_mdm()
+                            if _mdm is not None:
+                                _ma_inst = _MA(_mdm)
+                        except Exception:
+                            pass
+                    if _ma_inst is not None:
+                        _crypto_regime, _, _, _ = _ma_inst.detect_sub_regime(symbols=['BTC', 'ETH'])
+                        _regime_key = (
+                            _crypto_regime.value.lower().replace(' ', '_')
+                            if hasattr(_crypto_regime, 'value') else 'unknown'
+                        )
+                        # Round-trip cost for crypto on eToro (~2.96%)
+                        _crypto_rtc = 0.0296
+                        _regime_multipliers = {
+                            'trending_up_strong':   1.5,
+                            'trending_up':          1.5,
+                            'trending_down_strong': 1.5,
+                            'trending_down':        1.5,
+                            'trending_up_weak':     1.2,
+                            'trending_down_weak':   1.2,
+                            'ranging_low_vol':      0.6,
+                            'ranging':              0.6,
+                            'ranging_high_vol':     0.8,
+                            'high_volatility':      0.8,
+                            'low_volatility':       0.6,
+                        }
+                        _multiplier = _regime_multipliers.get(_regime_key, 1.0)
+                        _regime_rpt = _crypto_rtc * _multiplier
+                        # Only apply if it differs meaningfully from the YAML floor
+                        # (avoids log noise when regime happens to match the default)
+                        if abs(_regime_rpt - min_return_per_trade) > 0.001:
+                            logger.info(
+                                f"Regime-aware RPT floor for {primary_symbol}: "
+                                f"{min_return_per_trade:.1%} ({_rpt_source}) → "
+                                f"{_regime_rpt:.1%} "
+                                f"(crypto_regime={_regime_key}, multiplier={_multiplier}×)"
+                            )
+                            min_return_per_trade = _regime_rpt
+                            _rpt_source = f"{_rpt_source}+regime_{_regime_key}"
+                except Exception as _regime_rpt_err:
+                    # Fail-open: regime detection failure keeps the YAML floor
+                    logger.debug(f"Regime-aware RPT failed for {primary_symbol}: {_regime_rpt_err}")
 
             # Sprint 5 S5.1 A1 (2026-05-02): per-template RPT override.
             # Some swing templates (2-5 trades/month, multi-day holds, R:R ≥ 2.0)

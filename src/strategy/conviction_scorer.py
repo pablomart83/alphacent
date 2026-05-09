@@ -1090,12 +1090,38 @@ class ConvictionScorer:
         if not self.market_analyzer:
             return {'status': 'no_analyzer'}
         try:
-            market_context = self.market_analyzer.get_market_context()
-            return {
-                'current_regime': market_context.get('regime', 'unknown'),
-                'strategy_type': self._detect_strategy_type(strategy),
-                'vix_level': market_context.get('vix', None),
-            }
+            # Use the same crypto-aware regime source as _score_regime_fit.
+            # Previously this read get_market_context() (equity regime) for all
+            # strategies, so crypto signals showed current_regime='unknown' in the
+            # breakdown even though _score_regime_fit was correctly using
+            # detect_sub_regime(['BTC','ETH']). The breakdown now matches the score.
+            is_crypto = False
+            if strategy.metadata:
+                is_crypto = strategy.metadata.get('crypto_optimized', False)
+            if not is_crypto and strategy.symbols:
+                try:
+                    from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+                    is_crypto = strategy.symbols[0].upper() in set(DEMO_ALLOWED_CRYPTO)
+                except ImportError:
+                    pass
+
+            if is_crypto:
+                sub_regime, confidence, _, _ = self.market_analyzer.detect_sub_regime(symbols=['BTC', 'ETH'])
+                regime_key = sub_regime.value.lower().replace(' ', '_') if hasattr(sub_regime, 'value') else 'unknown'
+                return {
+                    'current_regime': regime_key,
+                    'regime_confidence': round(confidence, 3) if confidence else None,
+                    'strategy_type': self._detect_strategy_type(strategy),
+                    'regime_source': 'crypto_btc_eth',
+                }
+            else:
+                market_context = self.market_analyzer.get_market_context()
+                return {
+                    'current_regime': market_context.get('regime', 'unknown'),
+                    'strategy_type': self._detect_strategy_type(strategy),
+                    'vix_level': market_context.get('vix', None),
+                    'regime_source': 'equity',
+                }
         except Exception as e:
             return {'error': str(e)}
 
