@@ -1279,23 +1279,38 @@ class PortfolioManager:
             # Only applies to crypto — non-crypto RPT floors are unchanged.
             if asset_class == 'crypto':
                 try:
-                    from src.strategy.market_analyzer import MarketAnalyzer as _MA
-                    _ma_inst = getattr(self, '_market_analyzer', None)
-                    if _ma_inst is None:
-                        # Try to get from the module-level singleton if available
+                    # Resolve crypto regime. Priority order:
+                    # 1. Strategy metadata (written by proposer at proposal time —
+                    #    always available, no singleton dependency).
+                    # 2. Market analyzer singleton (may not be registered yet during
+                    #    the activation phase of the autonomous cycle).
+                    # 3. Fallback: keep YAML floor (fail-open).
+                    _regime_key = 'unknown'
+
+                    # Path 1: strategy metadata carries the regime at proposal time
+                    _meta_regime = None
+                    if hasattr(strategy, 'metadata') and strategy.metadata:
+                        _meta_regime = strategy.metadata.get('market_regime') or strategy.metadata.get('macro_regime')
+                    if _meta_regime and isinstance(_meta_regime, str):
+                        _regime_key = _meta_regime.lower().replace(' ', '_')
+
+                    # Path 2: live detect_sub_regime via market analyzer singleton
+                    if _regime_key == 'unknown':
                         try:
                             from src.data.market_data_manager import get_market_data_manager as _get_mdm
+                            from src.strategy.market_analyzer import MarketAnalyzer as _MA
                             _mdm = _get_mdm()
                             if _mdm is not None:
                                 _ma_inst = _MA(_mdm)
+                                _crypto_regime, _, _, _ = _ma_inst.detect_sub_regime(symbols=['BTC', 'ETH'])
+                                _regime_key = (
+                                    _crypto_regime.value.lower().replace(' ', '_')
+                                    if hasattr(_crypto_regime, 'value') else 'unknown'
+                                )
                         except Exception:
                             pass
-                    if _ma_inst is not None:
-                        _crypto_regime, _, _, _ = _ma_inst.detect_sub_regime(symbols=['BTC', 'ETH'])
-                        _regime_key = (
-                            _crypto_regime.value.lower().replace(' ', '_')
-                            if hasattr(_crypto_regime, 'value') else 'unknown'
-                        )
+
+                    if _regime_key != 'unknown':
                         # Round-trip cost for crypto on eToro (~2.96%)
                         _crypto_rtc = 0.0296
                         _regime_multipliers = {
