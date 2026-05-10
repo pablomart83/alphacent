@@ -4,6 +4,351 @@
 
 ---
 
+## ⚡ NEXT SESSION KICKOFF — Phase 2: Live Trading Architecture
+
+**Read this block first. It contains everything needed to continue implementation without re-researching.**
+
+### What was completed this session (2026-05-10)
+
+1. **StrategyStatus.DEMO → PAPER rename** (commit `eea80bc`) — 17 Python files + DB migration
+2. **Frontend PAPER fix** (commit `90360cd`) — 8 frontend files, all `status === 'DEMO'` → `'PAPER'`
+3. **eToro LIVE API tested and confirmed working** — credentials stored, architecture understood
+4. **Full Phase 2 design completed** — see MISSION block below
+
+### System state entering next session
+
+- **DEMO equity:** ~$491K, ~65 open positions, `trending_up_strong`
+- **LIVE account:** Agent Portfolio, `credit: $10,000 virtual`, `real_investment: $1,000`, `mirror_ratio: 0.10`
+- **Last commits:** `90360cd` (frontend PAPER fix) → `eea80bc` (StrategyStatus rename)
+- **errors.log:** clean as of 2026-05-10 ~09:30 UTC
+- **Live credentials:** stored encrypted at `config/live_credentials.json` on EC2
+
+### eToro LIVE API — confirmed facts (do not re-research)
+
+| | Value |
+|---|---|
+| Base URL | `https://public-api.etoro.com` |
+| Auth headers | `x-api-key` + `x-user-key` + `x-request-id` (UUID) |
+| Agent virtual balance | `$10,000` (what `credit` field reports) |
+| Real investment | `$1,000` (your money at risk) |
+| Mirror ratio | `10%` — every agent $1,000 order = $100 real exposure |
+| Open order | `POST /api/v1/trading/execution/market-open-orders/by-amount` |
+| Close position | `POST /api/v1/trading/execution/market-close-orders/positions/{positionId}` body: `{"InstrumentId": id}` |
+| Portfolio/balance | `GET /api/v1/trading/info/real/pnl` → `clientPortfolio.credit` |
+| Order status | `GET /api/v1/trading/info/real/orders/{orderId}` |
+| Trade history | `GET /api/v1/trading/info/trade/history?minDate=YYYY-MM-DD` |
+| Identity | `GET /api/v1/me` → `{gcid: 48243427, realCid: 48239007, demoCid: 49422123}` |
+| DEMO open order | `POST /api/v1/trading/execution/demo/market-open-orders/by-amount` |
+| DEMO close | `POST /api/v1/trading/execution/demo/market-close-orders/positions/{positionId}` |
+| DEMO order status | `GET /api/v1/trading/info/demo/orders/{orderId}` |
+| DEMO portfolio | `GET /api/v1/trading/info/demo/pnl` |
+
+**Mirror ratio explained (documented in eToro API docs):** The Agent Portfolio receives a fixed $10,000 virtual balance. Your $1,000 investment from your main account copy-trades it at 10% scale. When the agent places a $1,000 virtual order, your main account mirrors a $100 real position. The API key is scoped to the agent sub-account — it sees and trades the full $10,000 virtual balance. The eToro app shows your main account which sees the 10% mirror.
+
+**Position sizing for 10 trades with $1,000 real:**
+- Each agent order: `$1,000 virtual` → `$100 real`
+- 10 trades × $1,000 = $10,000 virtual = $1,000 real fully deployed
+- `min_order_size`: $200 virtual (= $20 real)
+- `max_order_size`: $1,500 virtual (= $150 real)
+- `symbol_cap`: $2,000 virtual (= $200 real)
+
+### Architecture decision: PAPER + LIVE run simultaneously
+
+A strategy promoted to LIVE **continues paper trading on DEMO**. Status `LIVE` means "running on DEMO (paper) AND LIVE (real) simultaneously". DEMO is the permanent validation layer. LIVE is additive.
+
+```
+PAPER strategy "4H EMA Ribbon Trend Long" — watchlist: [AAPL, MSFT, NVDA]
+  AAPL: 24 paper trades, 87% WF ratio → APPROVED via Graduation Gate → LIVE
+  MSFT: 8 paper trades, 29% ratio → not qualified
+  NVDA: 15 paper trades, 71% ratio → not qualified
+
+Signal fires for AAPL:
+  → DEMO client: paper fill (always, for all symbols)
+  → LIVE client: real fill with graduation overrides (AAPL only, because approved)
+
+Signal fires for MSFT:
+  → DEMO client: paper fill only
+```
+
+Graduation is per **(template, symbol) pair**, not per strategy. No watchlist on LIVE — only individually approved pairs get live fills.
+
+### MISSION — Phase 2 implementation (10 sprints)
+
+**HARD GATE: No live trade fires until Sprint 8 (Graduation Gate UI) is complete and at least one strategy has been manually approved.**
+
+#### Sprint 1 — DB migrations (START HERE, no restart needed)
+
+Run on EC2 before any code changes:
+
+```sql
+-- 1. account_type on positions
+ALTER TABLE positions ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
+
+-- 2. account_type on orders
+ALTER TABLE orders ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
+
+-- 3. account_type on equity_snapshots (break old unique constraint, add account_type)
+ALTER TABLE equity_snapshots ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
+DROP INDEX IF EXISTS uq_equity_snapshot_date_type;
+CREATE UNIQUE INDEX uq_equity_snapshot_date_type_account
+  ON equity_snapshots(date, snapshot_type, account_type);
+
+-- 4. graduation_approvals table
+CREATE TABLE graduation_approvals (
+    id                      SERIAL PRIMARY KEY,
+    strategy_id             VARCHAR(36) NOT NULL,
+    symbol                  VARCHAR(20) NOT NULL,
+    template_name           VARCHAR(200) NOT NULL,
+    approved_at             TIMESTAMP,
+    rejected_at             TIMESTAMP,
+    notes                   TEXT,
+    position_size_override  FLOAT,
+    sl_pct_override         FLOAT,
+    tp_pct_override         FLOAT,
+    conviction_min_override INTEGER,
+    paper_trades            INTEGER,
+    paper_sharpe            FLOAT,
+    paper_win_rate          FLOAT,
+    paper_total_pnl         FLOAT,
+    wf_sharpe               FLOAT,
+    qualification_ratio     FLOAT,
+    created_at              TIMESTAMP DEFAULT NOW()
+);
+
+-- 5. live_strategies table
+CREATE TABLE live_strategies (
+    id              SERIAL PRIMARY KEY,
+    graduation_id   INTEGER REFERENCES graduation_approvals(id),
+    strategy_id     VARCHAR(36) NOT NULL,
+    template_name   VARCHAR(200) NOT NULL,
+    symbol          VARCHAR(20) NOT NULL,
+    activated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    retired_at      TIMESTAMP,
+    position_size   FLOAT NOT NULL,
+    sl_pct          FLOAT NOT NULL,
+    tp_pct          FLOAT NOT NULL,
+    conviction_min  INTEGER NOT NULL DEFAULT 74,
+    live_trades     INTEGER NOT NULL DEFAULT 0,
+    live_pnl        FLOAT NOT NULL DEFAULT 0.0,
+    live_sharpe     FLOAT,
+    UNIQUE(strategy_id, symbol)
+);
+```
+
+Then add ORM classes to `src/models/orm.py`:
+- `account_type` column to `PositionORM`, `OrderORM`, `EquitySnapshotORM`
+- Fix `UniqueConstraint` on `EquitySnapshotORM` to include `account_type`
+- New `GraduationApprovalORM` class
+- New `LiveStrategyORM` class
+
+#### Sprint 2 — EToroAPIClient: remove TradingMode, add account_type
+
+**File:** `src/api/etoro_client.py`
+
+Replace `mode: TradingMode` → `account_type: str` (`"demo"` or `"live"`). Update all 12 internal `self.mode == TradingMode.DEMO` checks. Key endpoint differences:
+
+```python
+# place_order:
+"demo": "/api/v1/trading/execution/demo/market-open-orders/by-amount"
+"live": "/api/v1/trading/execution/market-open-orders/by-amount"
+
+# cancel_order:
+"demo": f"/api/v1/trading/execution/demo/market-cancel-orders/{order_id}"
+"live": f"/api/v1/trading/execution/market-cancel-orders/{order_id}"
+
+# close_position:
+"demo": f"/api/v1/trading/execution/demo/market-close-orders/positions/{position_id}"
+"live": f"/api/v1/trading/execution/market-close-orders/positions/{position_id}"
+# LIVE body uses "InstrumentId" (lowercase 'd'), DEMO uses "InstrumentID"
+
+# get_order_status:
+"demo": f"/api/v1/trading/info/demo/orders/{order_id}"
+"live": f"/api/v1/trading/info/real/orders/{order_id}"
+
+# get_account_info / get_positions:
+"demo": "/api/v1/trading/info/demo/pnl"
+"live": "/api/v1/trading/info/real/pnl"
+```
+
+New method for LIVE only: `get_trade_history(min_date: str)` → `GET /api/v1/trading/info/trade/history?minDate={min_date}`
+
+#### Sprint 3 — Dual-client startup
+
+**File:** `src/api/app.py`
+
+```python
+demo_client = EToroAPIClient(demo_creds["public_key"], demo_creds["user_key"], account_type="demo")
+live_client = None
+try:
+    live_creds = config.load_credentials(TradingMode.LIVE)
+    live_client = EToroAPIClient(live_creds["public_key"], live_creds["user_key"], account_type="live")
+    logger.info("Live eToro client initialized (Agent Portfolio, $10K virtual)")
+except ConfigurationError:
+    logger.info("No live credentials — DEMO-only mode")
+
+monitoring_service = MonitoringService(
+    demo_etoro_client=demo_client,
+    live_etoro_client=live_client,
+    ...
+)
+```
+
+Add global getters: `get_demo_etoro_client()`, `get_live_etoro_client()`.
+
+**File:** `src/core/config.py` — `load_credentials("live")` already reads `live_credentials.json`. Add `virtual_balance`, `real_investment`, `mirror_ratio` to returned dict.
+
+#### Sprint 4 — MonitoringService: dual-account sync
+
+**File:** `src/core/monitoring_service.py`
+
+Constructor: `demo_etoro_client` + `live_etoro_client=None`. Position sync runs for both clients, tags rows with `account_type`. Equity snapshots write separate rows per account_type. Account info writes separate rows for DEMO and LIVE.
+
+#### Sprint 5 — TradingScheduler + OrderExecutor: strategy routing
+
+**File:** `src/core/trading_scheduler.py`
+
+```python
+# For each signal:
+live_approval = get_live_approval(strategy.template_name, signal.symbol)  # from live_strategies table
+
+# Always paper fill on DEMO
+await submit_order(demo_client, signal, strategy.default_params, account_type='demo')
+
+# Real fill on LIVE only if approved
+if live_approval and live_approval.retired_at is None:
+    await submit_order(live_client, signal, live_approval.overrides, account_type='live')
+```
+
+#### Sprint 6 — Live risk parameters
+
+**File:** `config/autonomous_trading.yaml` — add section:
+```yaml
+live_trading:
+  enabled: true
+  virtual_balance: 10000
+  real_investment: 1000
+  mirror_ratio: 0.10
+  base_risk_pct: 0.006
+  min_order_size: 200
+  max_order_size: 1500
+  symbol_cap_pct: 0.20
+  portfolio_heat_cap: 0.90
+  conviction_threshold: 74
+```
+
+Risk manager already takes `AccountInfo` as parameter — pass LIVE account info (equity=$10,000 virtual) when sizing live orders.
+
+#### Sprint 7 — Graduation Gate backend
+
+**New file:** `src/strategy/graduation_gate.py`
+
+Qualification criteria (checked every cycle):
+- `paper_trades >= 20`
+- `paper_sharpe >= 0.6 × wf_sharpe`
+- `paper_win_rate >= 0.45`
+- `paper_pnl > 0`
+- Not already in `live_strategies` (active)
+- Not rejected in last 14 days
+
+**New API endpoints** in `src/api/routers/strategies.py`:
+```
+GET  /strategies/graduation-queue          # qualified (template, symbol) pairs
+POST /strategies/{id}/graduate             # approve with overrides
+     body: {symbol, position_size, sl_pct, tp_pct, conviction_min, notes}
+POST /strategies/{id}/reject-graduation    # reject with 14-day cooldown
+     body: {symbol, notes}
+GET  /strategies/live                      # active live_strategies rows
+```
+
+#### Sprint 8 — Graduation Gate UI (HARD GATE — must complete before any live trade)
+
+**Location:** New "🎓 Graduation Gate" tab in `AutonomousNew.tsx`
+
+**View 1 — Queue table** (qualified candidates, not yet approved):
+
+Columns: Template | Symbol | Paper Trades | Paper Sharpe | WF Sharpe | Ratio | Paper P&L | Win% | Qualified Since
+
+Clicking a row opens the **CIO Decision Card** (slide-over panel).
+
+**CIO Decision Card — 7 sections:**
+1. Strategy identity (template, symbol, direction, interval, proposed date, conviction score, regime)
+2. Walk-forward evidence (WF Sharpe, train Sharpe, win rate, trades, avg return, max DD, MC bootstrap p5)
+3. Paper trading performance (equity curve chart + trade-by-trade table: date, entry, exit, P&L, hold time)
+4. Signal quality (avg conviction, avg persistence, avg R:R, gate blocks)
+5. Risk profile (SL%, TP%, avg MAE, avg MFE, profit factor, max consecutive losses)
+6. **Live sizing controls (editable):**
+   - Virtual order size (slider $200–$2,000) → shows real exposure (× mirror_ratio) below
+   - Stop Loss % (editable) → shows price level at current market price
+   - Take Profit % (editable) → shows price level at current market price
+   - Conviction minimum (editable, default 74)
+   - Notes (free text)
+7. Portfolio context (other live strategies on same symbol, portfolio heat if approved)
+
+Action buttons: `[ ✗ REJECT — keep PAPER ]` `[ ✓ APPROVE → LIVE ]`
+
+**View 2 — Live strategies table** (already approved):
+
+Columns: Template | Symbol | Activated | Live Trades | Live P&L | Live Sharpe | Paper Sharpe | Divergence | Status
+
+#### Sprint 9 — Frontend: DEMO/LIVE separation
+
+**Pattern:** Every page that shows account data gets a `DEMO | LIVE` account toggle. When LIVE selected, all API calls pass `mode=LIVE`.
+
+**New component:** `AccountToggle.tsx` — replaces the existing TradingModeContext toggle. Shows `[DEMO $491K] [LIVE $10K virtual / $1K real]`. Only shows LIVE option when `live_available: true` in health endpoint.
+
+**Pages that need the toggle:**
+- `PortfolioNew.tsx` — DEMO/LIVE toggle. Live tab shows positions with both virtual and real amounts displayed
+- `OrdersNew.tsx` — DEMO/LIVE toggle
+- `AnalyticsNew.tsx` — DEMO/LIVE toggle + new "Live vs Paper" comparison tab
+- `StrategiesNew.tsx` — add "Live" status filter, show live P&L alongside paper P&L for LIVE strategies
+- `MetricsBar.tsx` — add live equity pill: `[LIVE: $10K virtual / $1K real | $0 today]`
+- `OverviewNew.tsx` — add live position count
+
+**Key display rule for live data:** Always show both virtual and real:
+```
+Position: AAPL LONG
+Virtual: $1,000  |  Real: $100  (10% mirror)
+```
+
+**New "Live vs Paper" tab in Analytics:**
+- For each live strategy: paper equity curve (blue) vs live equity curve (green) on same chart
+- Divergence metric: `(live_sharpe / paper_sharpe) × 100%`
+- Flag if divergence < 50%
+
+#### Sprint 10 — MetricsBar live pill
+
+Add live account summary alongside DEMO in `MetricsBar.tsx`. Only shows when live client is configured.
+
+### Sprint sequencing
+
+| Sprint | What | Blocking? |
+|---|---|---|
+| 1 | DB migrations | Blocks everything |
+| 2 | EToroAPIClient refactor | Blocks 3,4,5 |
+| 3 | Dual-client startup | Blocks 4,5 |
+| 4 | MonitoringService dual-sync | After 3 |
+| 5 | TradingScheduler routing | After 3 |
+| 6 | Live risk params in yaml | Independent |
+| 7 | Graduation gate backend | Blocks 8 |
+| **8** | **Graduation Gate UI** | **HARD GATE — blocks all live trades** |
+| 9 | Frontend DEMO/LIVE separation | After 1 |
+| 10 | MetricsBar live pill | After 9 |
+
+### Live credentials location
+
+Stored encrypted at `/home/ubuntu/alphacent/config/live_credentials.json` on EC2. Contains:
+- `public_key` (encrypted): the `x-api-key` header value
+- `user_key` (encrypted): the `x-user-key` header value
+- `virtual_balance`: 10000.0
+- `real_investment`: 1000.0
+- `mirror_ratio`: 0.10
+- `gcid`: 48243427
+- `real_cid`: 48239007
+
+Load via: `config.load_credentials(TradingMode.LIVE)` — already works, reads `live_credentials.json`.
+
+---
+
 ## Session Start Checklist
 
 ```bash
@@ -15,31 +360,73 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT date, equity, market_q
 
 ---
 
-## Current System State (May 6, 2026, ~20:15 UTC, post conviction scorer + pipeline audit session)
+## Current System State (May 10, 2026, ~09:30 UTC, post Phase 1 rename + Live API testing session)
 
-- **Equity:** ~$491K
-- **Open positions:** 68 (includes 10 opened during broken scorer window 17:07-17:19 UTC — all have SL/TP, being managed normally)
-- **Active strategies:** 54 DEMO + 33 BACKTESTED
-- **Balance (free cash):** ~$31K (portfolio nearly fully deployed)
-- **Mode:** eToro DEMO
-- **Market regime:** `trending_up_strong` (83-85%)
+- **DEMO Equity:** ~$491K
+- **DEMO Open positions:** ~65 (some closed/opened during session)
+- **DEMO Active strategies:** 50 PAPER + 66 BACKTESTED
+- **LIVE Account:** Agent Portfolio, $10,000 virtual balance, $1,000 real investment, 10% mirror ratio
+- **LIVE Positions:** 0 (test BTC position opened and closed during session)
+- **Market regime:** `trending_up_strong`
 
 **Health:**
-- errors.log: clean since May 5 19:30 UTC. Zero new errors.
-- Conviction scorer: running correctly at threshold 70, DSL/AE split, persistence-based signal quality
-- Service healthy post all restarts
+- errors.log: clean. Last errors were from first restart during Phase 1 (23:23 UTC May 9) — historical, not recurring
+- Service healthy: `{"status":"healthy","service":"alphacent-backend"}`
+- StrategyStatus.PAPER fully deployed (DB + code + frontend)
 
 **Last commits on main (newest first):**
-- `39bb2a1` fix: regime multiplier cap + confidence floor 0.50→0.30 + min order 5K→2K
-- `3b6bd21` fix: interval filter — 1D strategies run every cycle, not just at midnight
-- `14d3b1d` fix: conviction_scorer syntax error — remove orphaned old function body
-- `04923a5` feat: conviction scorer redesign — DSL/AE split + persistence + WF confidence
-- `0d4aa7f` fix: TSL ratchet freeze + 4H/1D interval filter + OIL/COPPER 1H exclusion
-- `a8ceacd` docs: update session continuation — 2026-05-06 performance + UI session
+- `90360cd` fix: frontend strategy status DEMO → PAPER (8 frontend files)
+- `eea80bc` refactor: StrategyStatus.DEMO → PAPER + promoted_to_demo → promoted_to_paper (17 Python files + DB migration)
+- `9b4e2ec` feat: Alpha Generation tab in Analytics
 
 ---
 
-## Session shipped 2026-05-06 (evening) — Conviction scorer redesign + pipeline audit + fixes
+## Session shipped 2026-05-10 — Phase 1 rename + Live API architecture design
+
+### Sprint 1 — StrategyStatus.DEMO → PAPER (commit `eea80bc`)
+
+**Root cause of last attempt failure:** Bulk sed on EC2 missed 3 files, DB had PAPER but code had DEMO, strategies endpoint hung 30s. SQLAlchemy session leak blocked connection pool. Reverted to `6414e52`.
+
+**This session's approach:** Design-first inventory, local changes only, getDiagnostics before deploy, DB migration BEFORE code deploy, one file at a time.
+
+**Changes:**
+- `src/models/enums.py` — `StrategyStatus.DEMO = "DEMO"` → `StrategyStatus.PAPER = "PAPER"`
+- `src/models/orm.py` — `promoted_to_demo` → `promoted_to_paper` column + to_dict key
+- 15 other Python files — all `StrategyStatus.DEMO` → `StrategyStatus.PAPER`, all `promoted_to_demo` → `promoted_to_paper`
+- Fixed pre-existing bug: `StrategyStatus.ACTIVE` ghost value in `portfolio_manager.py` (not in enum) → replaced with `PAPER + LIVE`
+- DB: `UPDATE strategies SET status='PAPER' WHERE status='DEMO'` (50 rows)
+- DB: `ALTER TABLE autonomous_cycle_runs RENAME COLUMN promoted_to_demo TO promoted_to_paper`
+- Cleared Python bytecode cache on EC2 (SQLAlchemy compiled old column name from pyc)
+
+**Verification:** `grep StrategyStatus.DEMO → 0`, `grep promoted_to_demo → 0`, getDiagnostics 0 errors, service healthy, errors.log frozen.
+
+### Sprint 2 — Frontend PAPER fix (commit `90360cd`)
+
+**Root cause:** Frontend had hardcoded `status === 'DEMO'` in 8 files — all strategy count/filter logic returned 0 after DB rename.
+
+**Files fixed:** `types/index.ts`, `ActivityPanel.tsx`, `CycleIntelligencePanel.tsx`, `StrategyPulseWidget.tsx`, `SystemFeedWidget.tsx`, `AutonomousNew.tsx`, `OverviewNew.tsx`, `StrategiesNew.tsx`
+
+### Sprint 3 — eToro LIVE API research and testing
+
+**Confirmed via live API calls:**
+- Agent Portfolio architecture: $10K virtual balance, $1K real investment, 10% mirror ratio
+- BTC test order placed ($50 virtual → $5 real in eToro app) and closed cleanly
+- All endpoint paths confirmed working (see MISSION block above)
+- Live credentials stored encrypted at `config/live_credentials.json` on EC2
+- Trade history endpoint: `GET /api/v1/trading/info/trade/history?minDate=YYYY-MM-DD`
+
+### Sprint 4 — Phase 2 architecture design
+
+Full 10-sprint implementation plan designed (see MISSION block above). Key decisions:
+- PAPER + LIVE run simultaneously (DEMO is permanent validation layer)
+- Graduation is per (template, symbol) pair, not per strategy
+- No watchlist on LIVE — only individually approved pairs get live fills
+- Hard gate: no live trade fires until Graduation Gate UI complete and strategy manually approved
+- UI shows both virtual ($1,000) and real ($100) amounts for live positions
+
+---
+
+## Session shipped 2026-05-09 — Leveraged ETF stops + Sector Rotation + bug fixes
 
 ### Sprint 1 — TSL ratchet freeze (P0)
 
@@ -1488,7 +1875,11 @@ P3:
 
 ---
 
-## Open P1 Items (as of May 9, 2026)
+## Open P1 Items (as of May 10, 2026)
+
+### 🔴 P0 — Phase 2 Live Trading (10 sprints, see MISSION block above)
+
+Start with Sprint 1 (DB migrations). Full plan in the MISSION block at the top of this file.
 
 ### P1 — Raise conviction threshold to 74 (data-backed, ready now)
 
