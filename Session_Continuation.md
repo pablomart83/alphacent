@@ -6,7 +6,7 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Frontend rebuild is Sprints 9-12 next. Read `.kiro/steering/trading-system-context.md` and `FRONTEND_REBUILD_SPEC.md` before touching code.**
+**Frontend rebuild is Sprints 10-12 next. Read `.kiro/steering/trading-system-context.md` and `FRONTEND_REBUILD_SPEC.md` before touching code.**
 
 ### Frontend rebuild progress
 
@@ -21,8 +21,8 @@
 | 6 | Strategies / Cycle (autonomous pipeline + funnel) | ✅ SHIPPED | `6d1aa89` |
 | 7 | Strategies / Templates + Symbols + Blacklist + Graduation (flagship) + Lab | ✅ SHIPPED | `b52ea72` |
 | 8 | Guard / Risk + Gates | ✅ SHIPPED | `b4b11dc` |
-| 9 | Guard / System + Circuit Breakers + Alerts + Audit | **Next** |  |
-| 10 | Research / Performance + Attribution + Trades | Pending |  |
+| 9 | Guard / System + Circuit Breakers + Alerts + Audit | ✅ SHIPPED | `3f40f8e` |
+| 10 | Research / Performance + Attribution + Trades | **Next** |  |
 | 11 | Research / Regime + Alpha Edge + Tear Sheet + Stress + Journal | Pending |  |
 | 12 | Settings + cross-cutting polish (palette, shortcuts, a11y) | Pending |  |
 
@@ -62,6 +62,16 @@
 - **Sprint 7 bundle:** `Strategies-*.js` ≈ 191 KB raw (44.5 KB gzip), still inside the 250 KB budget. Templates/Symbols/Graduation/Lab all mount on the same route split — revisit code-splitting if Sprint 8 pushes past 250 KB.
 - **Latest commits on main:** `b52ea72` (Sprint 7) ← `69fc07e` (Sprint 6 promote pipeline) ← `99157a8` (Session doc: Sprint 6) ← `6d1aa89` (Sprint 6) ← `a97e86f` (Session doc: LIVE dashboard fix) ← `15a5394` (LIVE dashboard fix) ← `042c2c5` (Sprint 5) ← `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
 - **errors.log:** clean — most recent entry is still 2026-05-09 23:24 stale `promoted_to_demo` (pre-rename, expected)
+
+### Sprint 9 notes
+
+- **No new endpoints, no new deps.** Every tab wires an existing route — `/control/system-health` for system + breakers + gates (already used in Sprint 8), `/data/*` for sync/quality/fmp-cache/news, `/alerts/*` for history + config, `/audit/log` + `/audit/trade-lifecycle/{id}` + `/audit/export` for the audit tab.
+- **Adaptive polling on data sync.** `useDataSyncStatus` flips `refetchInterval` via a callback: 5s while `sync_running` is true, 30s idle. Keeps the log tail responsive during a full sync without hammering the backend the rest of the time.
+- **Trade lifecycle endpoint takes a raw id.** Audit entries come back prefixed (`ord-<uuid>`, `pos-<uuid>`, `sig-<id>`) — only `ord-` / `pos-` rows can drill into `/audit/trade-lifecycle/{id}`, and I strip the prefix before the call. Signal / strategy / rejection rows expand to show inline metadata instead, labelled honestly.
+- **Export CSV is a direct href.** `buildAuditExportUrl` turns the filter state into a query string and the Button's child `<a href>` streams the CSV. Avoids blob churn and the click-to-download-url dance.
+- **Circuit-breaker reset is honest.** `/control/circuit-breaker/reset` is a single-target endpoint that clears the RiskManager-level CB, not the per-API (eToro/Yahoo/FMP) breakers. The grid renders per-category cards from `system_health.circuit_breakers[]` but the action label says "Reset global breaker" and a footer note flags the extension needed for per-API resets. Not faked.
+- **Alert preferences dialog** reads and writes the full `AlertConfigORM` shape — thresholds for PNL loss/gain, drawdown, position loss, margin, plus toggles for cycle-complete and strategy-retired notifications and browser push.
+- **System tab** is a single scrollable column. At desktop widths everything fits the 70% right panel without horizontal scroll. EventTimeline24h plots events along a 24h baseline with severity-coded dots at `right: ageInHours/24 * 100%`.
 
 ### Sprint 8 notes
 
