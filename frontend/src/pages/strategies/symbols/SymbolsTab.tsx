@@ -18,7 +18,6 @@ import { PnLNumber } from '@/components/trading/PnLNumber'
 import { classifyError } from '@/lib/errors'
 import { useSymbolStats, type SymbolStatsRow } from '../useStrategiesData'
 import { SymbolDetailDrawer } from './SymbolDetailDrawer'
-import { BlacklistAccordion } from './BlacklistAccordion'
 
 /**
  * Symbols tab — /strategies/symbols.
@@ -26,8 +25,9 @@ import { BlacklistAccordion } from './BlacklistAccordion'
  * Current view  = active_strategies + usage_count (what's running right now)
  * Lifetime view = proposed / traded / win_rate / total_pnl / best_template
  *
- * Click a row → SymbolDetailDrawer in a right-side panel.
- * Blacklists + Idle demotions read-only accordion below the table.
+ * Click a row → SymbolDetailDrawer in a right-side panel. Blacklists and idle
+ * demotions live in their own `/strategies/blacklist` tab (spec §3B put them
+ * in an accordion here; we split them per operator preference).
  */
 
 type ViewMode = 'current' | 'lifetime'
@@ -94,7 +94,7 @@ export function SymbolsTab() {
   }
 
   const tableContent = (
-    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto">
+    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)]">
       <FilterBar>
         <div className="relative">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-[var(--text-3)] pointer-events-none" />
@@ -156,25 +156,27 @@ export function SymbolsTab() {
       </FilterBar>
 
       {filtered.length === 0 && !query.isLoading ? (
-        <EmptyState
-          icon={Globe}
-          title="No symbols match"
-          description="Clear filters to see the full universe."
-        />
+        <div className="flex-1 min-h-0 flex items-center justify-center">
+          <EmptyState
+            icon={Globe}
+            title="No symbols match"
+            description="Clear filters to see the full universe."
+          />
+        </div>
       ) : (
-        <DataTable
-          data={filtered}
-          columns={columns}
-          rowKey={(r) => r.symbol}
-          loading={query.isLoading}
-          sorting={{ state: sorting, onChange: setSorting }}
-          density="compact"
-          onRowClick={(r) => setSelected(r.symbol)}
-          activeRowId={selected}
-        />
+        <div className="flex-1 min-h-0">
+          <DataTable
+            data={filtered}
+            columns={columns}
+            rowKey={(r) => r.symbol}
+            loading={query.isLoading}
+            sorting={{ state: sorting, onChange: setSorting }}
+            density="compact"
+            onRowClick={(r) => setSelected(r.symbol)}
+            activeRowId={selected}
+          />
+        </div>
       )}
-
-      <BlacklistAccordion />
     </div>
   )
 

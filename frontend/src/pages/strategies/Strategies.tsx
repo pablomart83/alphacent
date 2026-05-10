@@ -6,22 +6,31 @@ import { LibraryTab } from './library/LibraryTab'
 import { CycleTab } from './cycle/CycleTab'
 import { TemplatesTab } from './templates/TemplatesTab'
 import { SymbolsTab } from './symbols/SymbolsTab'
+import { BlacklistTab } from './blacklist/BlacklistTab'
 import { GraduationTab } from './graduation/GraduationTab'
 import { LabTab } from './lab/LabTab'
 
 /**
  * Strategies surface — /strategies.
  *
- * Tabs: Library · Cycle · Templates · Symbols · Graduation · Lab.
+ * Tabs: Library · Cycle · Templates · Symbols · Blacklist · Graduation · Lab.
  */
 
-type TabValue = 'library' | 'cycle' | 'templates' | 'symbols' | 'graduation' | 'lab'
+type TabValue =
+  | 'library'
+  | 'cycle'
+  | 'templates'
+  | 'symbols'
+  | 'blacklist'
+  | 'graduation'
+  | 'lab'
 
 const TABS: Array<{ value: TabValue; label: string }> = [
   { value: 'library', label: 'Library' },
   { value: 'cycle', label: 'Cycle' },
   { value: 'templates', label: 'Templates' },
   { value: 'symbols', label: 'Symbols' },
+  { value: 'blacklist', label: 'Blacklist' },
   { value: 'graduation', label: 'Graduation' },
   { value: 'lab', label: 'Lab' },
 ]
@@ -53,10 +62,12 @@ function StrategiesShell() {
         : current === 'templates'
           ? 'Template library'
           : current === 'symbols'
-            ? 'Symbol analytics'
-            : current === 'graduation'
-              ? 'CIO promotion workflow'
-              : 'Research lab'
+            ? 'Tradeable symbols'
+            : current === 'blacklist'
+              ? 'Rejection blacklist · idle demotions'
+              : current === 'graduation'
+                ? 'CIO promotion workflow'
+                : 'Research lab'
 
   return (
     <PageTemplate title="Strategies" description={description}>
@@ -82,6 +93,8 @@ function StrategiesShell() {
               <TemplatesTab />
             ) : current === 'symbols' ? (
               <SymbolsTab />
+            ) : current === 'blacklist' ? (
+              <BlacklistTab />
             ) : current === 'graduation' ? (
               <GraduationTab />
             ) : (
