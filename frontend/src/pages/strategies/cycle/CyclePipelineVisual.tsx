@@ -136,26 +136,62 @@ export function CyclePipelineVisual({ lastCycle, isRunning, className }: CyclePi
       </div>
 
       {lastCycle === null && !anyLive ? (
-        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-20 w-full" />
       ) : (
-        <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] p-2 overflow-x-auto">
-          <div className="flex items-stretch gap-0.5 min-w-max">
+        <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] p-2">
+          {/* Grid of 9 stages + 8 drops: `1fr 32px 1fr 32px ... 1fr`.
+              Stages share the available width equally; drop labels sit
+              in fixed-width gaps between them. No horizontal scrolling
+              at any viewport wider than the minimum 9 * 72px + 8 * 32px
+              ≈ 900px. */}
+          <div
+            className="grid items-stretch w-full"
+            style={{
+              gridTemplateColumns: Array(9)
+                .fill('minmax(0, 1fr)')
+                .flatMap((col, i) => (i < 8 ? [col, '32px'] : [col]))
+                .join(' '),
+            }}
+          >
             {stages.map((stage, idx) => {
               const nextStage = stages[idx + 1]
               const dropPct = computeDropPct(stage.count, nextStage?.count ?? null)
               return (
-                <div key={stage.id} className="flex items-stretch">
-                  <StagePill stage={stage} />
-                  {idx < stages.length - 1 && (
-                    <DropConnector dropPct={dropPct} />
-                  )}
-                </div>
+                <FragmentPair
+                  key={stage.id}
+                  stage={stage}
+                  dropPct={idx < stages.length - 1 ? dropPct : null}
+                  showConnector={idx < stages.length - 1}
+                />
               )
             })}
           </div>
         </div>
       )}
     </section>
+  )
+}
+
+function FragmentPair({
+  stage,
+  dropPct,
+  showConnector,
+}: {
+  stage: {
+    id: SpecStageId
+    label: string
+    status: StageStatus
+    count: number | null
+    error: string | null
+  }
+  dropPct: number | null
+  showConnector: boolean
+}) {
+  return (
+    <>
+      <StagePill stage={stage} />
+      {showConnector && <DropConnector dropPct={dropPct} />}
+    </>
   )
 }
 
@@ -172,21 +208,21 @@ function StagePill({ stage }: {
   return (
     <div
       className={cn(
-        'relative flex flex-col items-center justify-between rounded-[3px] border px-2 py-1.5 min-w-[88px]',
+        'relative flex flex-col items-center justify-between rounded-[3px] border px-1.5 py-1.5 min-w-0',
         bg,
         border,
       )}
       title={stage.error || stage.label}
     >
-      <div className="flex items-center gap-1 mb-0.5">
+      <div className="flex items-center gap-1 mb-0.5 min-w-0 w-full justify-center">
         <Icon
           className={cn(
-            'h-3 w-3',
+            'h-3 w-3 shrink-0',
             stage.status === 'running' && 'animate-spin',
             text,
           )}
         />
-        <span className={cn('text-[9px] uppercase tracking-wider font-medium', text)}>
+        <span className={cn('text-[9px] uppercase tracking-wider font-medium truncate', text)}>
           {stage.label}
         </span>
       </div>
@@ -204,7 +240,7 @@ function StagePill({ stage }: {
 
 function DropConnector({ dropPct }: { dropPct: number | null }) {
   if (dropPct == null) {
-    return <div className="self-center w-4 h-px bg-[var(--border-subtle)] mx-0.5" />
+    return <div className="self-center h-px bg-[var(--border-subtle)]" />
   }
   const color =
     dropPct >= 80
@@ -214,12 +250,12 @@ function DropConnector({ dropPct }: { dropPct: number | null }) {
         : 'var(--text-3)'
   return (
     <div
-      className="self-center inline-flex flex-col items-center justify-center px-1 min-w-[36px]"
+      className="self-center inline-flex flex-col items-center justify-center px-0.5"
       title={`Drop-off ${dropPct.toFixed(0)}%`}
     >
       <div className="h-px w-full bg-[var(--border-subtle)]" />
       <span
-        className="mono text-[9px] mt-0.5"
+        className="mono text-[9px] mt-0.5 whitespace-nowrap"
         style={{ color }}
       >
         -{dropPct.toFixed(0)}%

@@ -40,55 +40,64 @@ export function CycleTab() {
   }, [cyclesQuery.data])
 
   return (
-    <ResizablePanelLayout
-      layoutId="strategies.cycle"
-      panels={[
-        {
-          id: 'cycle-left',
-          defaultSize: 30,
-          minSize: 22,
-          maxSize: 42,
-          content: (
-            <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto">
-              <SystemStateControl />
-              <SchedulerPanel />
-              <ManualCycleTrigger />
-            </div>
-          ),
-        },
-        {
-          id: 'cycle-main',
-          defaultSize: 40,
-          minSize: 30,
-          content: (
-            <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto">
-              <CyclePipelineVisual
-                lastCycle={lastCycle}
-                isRunning={isRunning || statusQuery.data?.state === 'ACTIVE'}
-              />
-              <CycleIntelligencePanel
-                lastCycle={lastCycle}
-                regime={autonomousQuery.data?.market_regime}
-                regimeConfidence={autonomousQuery.data?.market_confidence}
-                loading={cyclesQuery.isLoading}
-              />
-              <SignalFunnel />
-              <CycleHistoryList limit={30} />
-            </div>
-          ),
-        },
-        {
-          id: 'cycle-stream',
-          defaultSize: 30,
-          minSize: 22,
-          maxSize: 42,
-          content: (
-            <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)]">
-              <LiveStream />
-            </div>
-          ),
-        },
-      ]}
-    />
+    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)]">
+      {/* Hero pipeline — full width so all 9 stages fit without scrolling.
+          The 30/40/30 sub-layout below houses the other panels. */}
+      <div className="shrink-0 border-b border-[var(--border-subtle)]">
+        <CyclePipelineVisual
+          lastCycle={lastCycle}
+          isRunning={isRunning || statusQuery.data?.state === 'ACTIVE'}
+        />
+      </div>
+
+      <div className="flex-1 min-h-0">
+        <ResizablePanelLayout
+          layoutId="strategies.cycle"
+          panels={[
+            {
+              id: 'cycle-left',
+              defaultSize: 30,
+              minSize: 22,
+              maxSize: 42,
+              content: (
+                <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto">
+                  <SystemStateControl />
+                  <SchedulerPanel />
+                  <ManualCycleTrigger />
+                </div>
+              ),
+            },
+            {
+              id: 'cycle-main',
+              defaultSize: 40,
+              minSize: 30,
+              content: (
+                <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto">
+                  <CycleIntelligencePanel
+                    lastCycle={lastCycle}
+                    regime={autonomousQuery.data?.market_regime}
+                    regimeConfidence={autonomousQuery.data?.market_confidence}
+                    loading={cyclesQuery.isLoading}
+                  />
+                  <SignalFunnel />
+                  <CycleHistoryList limit={30} />
+                </div>
+              ),
+            },
+            {
+              id: 'cycle-stream',
+              defaultSize: 30,
+              minSize: 22,
+              maxSize: 42,
+              content: (
+                <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)]">
+                  <LiveStream />
+                </div>
+              ),
+            },
+          ]}
+        />
+      </div>
+    </div>
   )
 }
