@@ -55,7 +55,7 @@ export const StrategyPulseWidget: FC = () => {
         const status = s.status?.toUpperCase();
         if (status === 'PROPOSED') proposed++;
         else if (status === 'BACKTESTED') { proposed++; backtested++; }
-        else if (status === 'DEMO' || status === 'LIVE' || status === 'PAUSED') { proposed++; backtested++; active++; }
+        else if (status === 'PAPER' || status === 'LIVE' || status === 'PAUSED') { proposed++; backtested++; active++; }
         else if (status === 'RETIRED') { proposed++; backtested++; retired++; }
 
         // Track most recent lifecycle event
@@ -63,7 +63,7 @@ export const StrategyPulseWidget: FC = () => {
         const retiredTs = s.retired_at ? new Date(s.retired_at.endsWith('Z') ? s.retired_at : s.retired_at + 'Z').getTime() : 0;
         const updatedTs = s.updated_at ? new Date(s.updated_at.endsWith('Z') ? s.updated_at : s.updated_at + 'Z').getTime() : 0;
 
-        if ((status === 'DEMO' || status === 'LIVE') && activatedTs > lastEventTs) {
+        if ((status === 'PAPER' || status === 'LIVE') && activatedTs > lastEventTs) {
           lastEventTs = activatedTs;
           lastEvent = { kind: 'ACTIVATED', name: s.name?.split(' ').slice(-2).join(' ') || s.name, ageMin: minsAgo((s as any).activated_at || s.updated_at) };
         }

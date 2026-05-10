@@ -80,7 +80,7 @@ const pnlColor = (v: number) => v >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]';
 const sideColor = (s: string) => s === 'BUY' ? 'text-[#22c55e] bg-[#22c55e]/10' : 'text-[#ef4444] bg-[#ef4444]/10';
 
 const STATUS_CFG: Record<string, { label: string; color: string; bg: string }> = {
-  DEMO:       { label: 'ACTIVATED', color: 'text-[#22c55e]', bg: 'bg-[#22c55e]/10' },
+  PAPER:      { label: 'ACTIVATED', color: 'text-[#22c55e]', bg: 'bg-[#22c55e]/10' },
   LIVE:       { label: 'ACTIVATED', color: 'text-[#22c55e]', bg: 'bg-[#22c55e]/10' },
   BACKTESTED: { label: 'BACKTESTED', color: 'text-[#eab308]', bg: 'bg-[#eab308]/10' },
   RETIRED:    { label: 'RETIRED',   color: 'text-[#f97316]', bg: 'bg-[#f97316]/10' },
