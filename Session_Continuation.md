@@ -16,17 +16,19 @@
 | 1 | Command — Pulse + Equity + Stream (the "now" surface) | ✅ SHIPPED | `d297d85` |
 | 2 | Book / Positions — 4 sub-tabs, allocation panel, detail drill-down | ✅ SHIPPED | `ae2c78f` |
 | 3 | Book / Orders + Execution | ✅ SHIPPED | `c9006ee` |
-| 4 | Book / Live | Next |  |
-| 5-12 | per `FRONTEND_REBUILD_SPEC.md §3E` | Pending |  |
+| 4 | Book / Live — master switch, tiles, mirror strip, divergence | ✅ SHIPPED | `f22db70` |
+| 5 | Strategies / Library | Next |  |
+| 6-12 | per `FRONTEND_REBUILD_SPEC.md §3E` | Pending |  |
 
-Sprint 3 highlights:
-- Orders tab with 3 sub-tabs (All · Pending · Cancelled/Failed), full filter + bulk + CSV + per-row actions
-- Manual 2-step order dialog wired to `POST /orders`
-- Pending sub-tab shows market-status strip (Stocks/ETFs/Forex/Crypto/Indices/Commodities) via a client-side classifier in `lib/market-hours.ts`
-- Cancelled/Failed sub-tab surfaces the known market-closed-FAILED cosmetic honestly
-- Execution tab: 6 tiles, slippage trend (P50/P75/P95) Recharts line, Visx dow×hour heatmap with diverging colour scale, by-strategy bar, rejection reasons bar, fill-time buckets, per-asset-class strip, worst-20 table
-- All execution analytics are computed client-side from the orders list — single source of truth, no backend additions, honest sample-coverage strip when slippage data is sparse
-- Book chunk 114kB / 29kB gz; vendor-charts 562kB / 171kB gz (Recharts 3 first use)
+Sprint 4 highlights:
+- Live tab is a dedicated sub-surface with a permanent header (MasterSwitchBlock, AccountTiles, MirrorRatioStrip) and 4 URL-synced sub-tabs (Overview, Positions, Orders, Divergence)
+- MasterSwitchBlock: 3 visual states (OFF grey, ON-no-auth amber pulsing, ON-active emerald), confirmation dialogs that spell out mirror math for Enable and explicitly warn "existing positions stay open" for Disable
+- LivePositionsTab has Virtual/Real columns for invested + P&L, a DB-SL honesty banner, and wires close to `POST /live/positions/{id}/close`
+- Orders sub-tab reuses Sprint 3's `AllOrdersTab` with the new `pinMode="LIVE"` prop — no fork
+- Divergence tab: card per authorisation with Paper vs Live side-by-side stats, big divergence % readout, intensity bar with 50% and 100% reference lines, retire action per card
+- Consolidated duplicate `useLiveSummary` between Command and Book (Command now re-exports from useBookData)
+- No backend changes; YAML synced from EC2 first per steering-file exception
+- Book chunk 138kB / 35kB gz; useBookData extracted to its own 12kB chunk
 
 Sprint 2 highlights:
 - DataTable primitive: TanStack Table + Virtual, auto-virtualize >100 rows, sort, multi-select, sticky header, density, row menu — the foundation for every table in Sprints 3+
