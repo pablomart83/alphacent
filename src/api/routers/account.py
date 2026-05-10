@@ -1171,6 +1171,306 @@ async def close_positions(
     }
 
 
+# ── Position SL/TP modification ────────────────────────────────────────────
+#
+# Positions store stop_loss and take_profit as DB fields. Enforcement runs
+# from MonitoringService._check_trailing_stops every 60s — breach closes the
+# position via the eToro close-position endpoint. The eToro public API does
+# not support SL modification, so the DB value is the authoritative stop
+# for both DEMO and LIVE accounts. A manual write to this endpoint is
+# functionally equivalent to what the trailing-stop ratchet does internally.
+#
+# Rules enforced here:
+# - Position must exist, not be closed, and not pending closure.
+# - SL distance from entry must be ≤ asset-class cap (see sl_caps.py).
+# - SL must be positive when provided (or null to clear).
+# - TP must be positive when provided (or null to clear).
+# - Response surfaces immediate-breach warnings when the requested level
+#   would trigger on the next monitoring tick (helpful UX guard).
+# - Writes broadcast `position_update` so open clients re-sync immediately.
+
+
+class ModifyPositionRiskRequest(BaseModel):
+    """
+    Partial update for a position's SL/TP. Fields are optional; omitted
+    fields leave the existing DB value untouched. Send `null` explicitly
+    to clear a level (remove SL or TP).
+    """
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+
+    # Discriminate "not provided" vs. "clear me". Pydantic v2 needs explicit
+    # markers — we use an allow-list of set fields from the raw request dict
+    # (see the endpoint below) so the API contract stays simple.
+
+
+class ModifyPositionRiskResponse(BaseModel):
+    success: bool
+    position_id: str
+    previous: dict
+    current: dict
+    warnings: List[str] = []
+
+
+@router.put("/positions/{position_id}/risk-levels")
+async def modify_position_risk_levels(
+    position_id: str,
+    request: dict,  # raw dict so we can distinguish "unset" vs "null"
+    mode: TradingMode,
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+) -> ModifyPositionRiskResponse:
+    """
+    Update a position's stop-loss and/or take-profit levels.
+
+    Contract:
+        - `stop_loss` key present with number → set SL to that value (must
+          pass asset-class cap based on distance from entry).
+        - `stop_loss` key present with null → clear SL (no stop enforcement).
+        - `stop_loss` key absent → leave existing SL unchanged.
+        - Same semantics for `take_profit`.
+
+    Returns:
+        ModifyPositionRiskResponse — includes previous/current values plus
+        any warnings (e.g. "SL above current price will trigger immediately").
+
+    Raises:
+        404 — position not found.
+        400 — position closed / pending closure / invalid payload / cap breach.
+    """
+    # Validate payload shape — reject unknown keys so typos don't silently no-op.
+    allowed_keys = {"stop_loss", "take_profit"}
+    extra_keys = set(request.keys()) - allowed_keys
+    if extra_keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown fields: {sorted(extra_keys)}. Allowed: stop_loss, take_profit.",
+        )
+    if not request.keys() & allowed_keys:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Request must include at least one of: stop_loss, take_profit.",
+        )
+
+    # Scope to the account_type implied by mode — avoid editing a LIVE
+    # position while mode=DEMO, or vice versa.
+    _account_type = "live" if mode == TradingMode.LIVE else "demo"
+    position_orm = db.query(PositionORM).filter(
+        PositionORM.id == position_id,
+        PositionORM.account_type == _account_type,
+    ).first()
+
+    if not position_orm:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Position {position_id} not found in {mode.value} account",
+        )
+    if position_orm.closed_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify a closed position",
+        )
+    if position_orm.pending_closure:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Position is flagged for closure. Dismiss the closure first before modifying risk levels.",
+        )
+
+    entry = float(position_orm.entry_price or 0)
+    if entry <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Position has no valid entry price on record — cannot validate risk levels.",
+        )
+
+    current_price = float(position_orm.current_price or entry)
+    side_str = str(position_orm.side).upper() if position_orm.side else "LONG"
+    is_long = "LONG" in side_str or "BUY" in side_str
+
+    from src.risk.sl_caps import sl_cap_pct, tp_cap_pct
+
+    previous = {
+        "stop_loss": float(position_orm.stop_loss) if position_orm.stop_loss else None,
+        "take_profit": float(position_orm.take_profit) if position_orm.take_profit else None,
+    }
+    new_sl: Optional[float] = previous["stop_loss"]
+    new_tp: Optional[float] = previous["take_profit"]
+    warnings: List[str] = []
+
+    # ── Stop-loss ──
+    if "stop_loss" in request:
+        raw_sl = request["stop_loss"]
+        if raw_sl is None:
+            new_sl = None
+            warnings.append(
+                "Stop-loss cleared. Position has no downside enforcement until a new SL is set."
+            )
+        else:
+            try:
+                sl_val = float(raw_sl)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="stop_loss must be a number or null",
+                )
+            if sl_val <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="stop_loss must be positive",
+                )
+
+            # Distance from entry.
+            distance_pct = abs(sl_val - entry) / entry
+            cap = sl_cap_pct(position_orm.symbol)
+            if distance_pct > cap:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Stop-loss distance {distance_pct:.2%} exceeds asset-class cap "
+                        f"{cap:.0%} for {position_orm.symbol}."
+                    ),
+                )
+
+            # Side-aware sanity: SL on the wrong side of entry widens unbounded.
+            if is_long and sl_val >= entry:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Stop-loss ({sl_val}) must be below entry ({entry}) for a LONG position."
+                    ),
+                )
+            if not is_long and sl_val <= entry:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Stop-loss ({sl_val}) must be above entry ({entry}) for a SHORT position."
+                    ),
+                )
+
+            # Immediate-breach warning — not an error, sometimes desired.
+            if is_long and current_price <= sl_val:
+                warnings.append(
+                    f"Stop-loss {sl_val} is at or above current price {current_price:.4f} — "
+                    f"this will trigger closure on the next monitoring tick."
+                )
+            elif not is_long and current_price >= sl_val:
+                warnings.append(
+                    f"Stop-loss {sl_val} is at or below current price {current_price:.4f} — "
+                    f"this will trigger closure on the next monitoring tick."
+                )
+
+            new_sl = round(sl_val, 6)
+
+    # ── Take-profit ──
+    if "take_profit" in request:
+        raw_tp = request["take_profit"]
+        if raw_tp is None:
+            new_tp = None
+        else:
+            try:
+                tp_val = float(raw_tp)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="take_profit must be a number or null",
+                )
+            if tp_val <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="take_profit must be positive",
+                )
+
+            distance_pct = abs(tp_val - entry) / entry
+            tp_cap = tp_cap_pct(position_orm.symbol)
+            if distance_pct > tp_cap:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Take-profit distance {distance_pct:.0%} exceeds sanity cap "
+                        f"{tp_cap:.0%} from entry."
+                    ),
+                )
+
+            if is_long and tp_val <= entry:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Take-profit ({tp_val}) must be above entry ({entry}) for a LONG position."
+                    ),
+                )
+            if not is_long and tp_val >= entry:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Take-profit ({tp_val}) must be below entry ({entry}) for a SHORT position."
+                    ),
+                )
+
+            # Immediate-hit warning — TP at or past current price.
+            if is_long and current_price >= tp_val:
+                warnings.append(
+                    f"Take-profit {tp_val} is at or below current price {current_price:.4f} — "
+                    f"this will trigger closure on the next monitoring tick."
+                )
+            elif not is_long and current_price <= tp_val:
+                warnings.append(
+                    f"Take-profit {tp_val} is at or above current price {current_price:.4f} — "
+                    f"this will trigger closure on the next monitoring tick."
+                )
+
+            new_tp = round(tp_val, 6)
+
+    # ── Persist ──
+    try:
+        position_orm.stop_loss = new_sl
+        position_orm.take_profit = new_tp
+        db.commit()
+        db.refresh(position_orm)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to update SL/TP for position {position_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update risk levels: {e}",
+        )
+
+    current_vals = {
+        "stop_loss": float(position_orm.stop_loss) if position_orm.stop_loss else None,
+        "take_profit": float(position_orm.take_profit) if position_orm.take_profit else None,
+    }
+
+    logger.info(
+        f"Position {position_id} ({position_orm.symbol} {side_str}) risk levels modified by {username}: "
+        f"SL {previous['stop_loss']} → {current_vals['stop_loss']}, "
+        f"TP {previous['take_profit']} → {current_vals['take_profit']}, "
+        f"entry={entry}, current={current_price}, warnings={len(warnings)}"
+    )
+
+    # ── Broadcast so open clients re-sync ──
+    try:
+        from src.api.websocket_manager import get_websocket_manager
+        import asyncio
+        ws = get_websocket_manager()
+        payload = position_orm.to_dict()
+        try:
+            loop = asyncio.get_running_loop()
+            asyncio.ensure_future(ws.broadcast_position_update(payload), loop=loop)
+        except RuntimeError:
+            # No running loop in this request context — fire-and-forget.
+            asyncio.run(ws.broadcast_position_update(payload))
+    except Exception as broadcast_err:
+        # Never fail the request on a broadcast problem.
+        logger.warning(f"Position update broadcast failed for {position_id}: {broadcast_err}")
+
+    return ModifyPositionRiskResponse(
+        success=True,
+        position_id=position_id,
+        previous=previous,
+        current=current_vals,
+        warnings=warnings,
+    )
+
+
 @router.post("/positions/close-all")
 async def close_all_positions(
     mode: TradingMode,
