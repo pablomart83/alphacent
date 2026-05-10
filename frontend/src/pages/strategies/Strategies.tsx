@@ -4,20 +4,21 @@ import { PageTemplate } from '@/components/layout'
 import { Tabs, TabsList, TabsTrigger, EmptyState } from '@/components/primitives'
 import { useTradingMode } from '@/stores'
 import { LibraryTab } from './library/LibraryTab'
+import { CycleTab } from './cycle/CycleTab'
 
 /**
  * Strategies surface — /strategies.
  *
  * Tabs: Library · Cycle · Templates · Symbols · Graduation · Lab.
- * Library is live as of Sprint 5; the rest render scoped ComingSoon cards
- * with their sprint numbers.
+ * Library (Sprint 5) and Cycle (Sprint 6) are live. Templates / Symbols /
+ * Graduation / Lab render scoped ComingSoon cards with their sprint numbers.
  */
 
 type TabValue = 'library' | 'cycle' | 'templates' | 'symbols' | 'graduation' | 'lab'
 
 const TABS: Array<{ value: TabValue; label: string; sprint?: number }> = [
   { value: 'library', label: 'Library' },
-  { value: 'cycle', label: 'Cycle', sprint: 6 },
+  { value: 'cycle', label: 'Cycle' },
   { value: 'templates', label: 'Templates', sprint: 7 },
   { value: 'symbols', label: 'Symbols', sprint: 7 },
   { value: 'graduation', label: 'Graduation', sprint: 7 },
@@ -47,7 +48,7 @@ function StrategiesShell() {
     current === 'library'
       ? `Library · ${mode}`
       : current === 'cycle'
-        ? 'Autonomous cycle'
+        ? 'Autonomous cycle · DEMO'
         : current === 'templates'
           ? 'Template library'
           : current === 'symbols'
@@ -74,6 +75,8 @@ function StrategiesShell() {
           <div className="flex-1 min-h-0">
             {current === 'library' ? (
               <LibraryTab />
+            ) : current === 'cycle' ? (
+              <CycleTab />
             ) : (
               <ComingSoonCard
                 tab={current}
@@ -89,8 +92,6 @@ function StrategiesShell() {
 
 function ComingSoonCard({ tab, sprint }: { tab: string; sprint: number }) {
   const copy: Record<string, string> = {
-    cycle:
-      'Autonomous cycle visualization — SystemStateControl, Scheduler, 9-stage CyclePipelineVisual, SignalFunnel, CycleHistoryList, LiveStream. Ships with Sprint 6.',
     templates:
       'Template grid + TemplateRankings leaderboard. Bulk toggle per template, direction filter. Ships with Sprint 7.',
     symbols:

@@ -61,7 +61,7 @@ export function CycleStatusCard({ status, className }: CycleStatusCardProps) {
       <SectionLabel>Cycle</SectionLabel>
       <button
         type="button"
-        onClick={() => navigate('/strategies?tab=cycle')}
+        onClick={() => navigate('/strategies/cycle')}
         className="w-full text-left rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] p-2 hover:bg-[var(--bg-hover)] transition-colors"
       >
         <div className="flex items-center justify-between mb-1.5">

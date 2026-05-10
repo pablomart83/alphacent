@@ -417,3 +417,290 @@ export function hasPaper20Plus(s: StrategyRow): boolean {
   if (s.status !== 'PAPER') return false
   return (s.performance_metrics?.total_trades ?? 0) >= 20
 }
+
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  Cycle data hooks — Sprint 6
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export type SystemStateValue = 'ACTIVE' | 'PAUSED' | 'STOPPED' | 'EMERGENCY_HALT'
+
+export interface SystemStatusPayload {
+  state: SystemStateValue
+  timestamp: string
+  active_strategies: number
+  open_positions: number
+  reason: string
+  uptime_seconds: number
+  last_signal_generated?: string | null
+  last_order_executed?: string | null
+}
+
+export interface ScheduleSlot {
+  id: string
+  enabled: boolean
+  /** lowercase day names: monday..sunday */
+  days: string[]
+  hour: number
+  minute: number
+}
+
+export interface SchedulesPayload {
+  success: boolean
+  schedules: ScheduleSlot[]
+  next_runs: Array<string | null>
+  last_run: string | null
+  message: string
+}
+
+export interface CycleRunRow {
+  id: number
+  cycle_id: string
+  status: 'running' | 'completed' | 'error' | string
+  started_at: string
+  completed_at: string | null
+  duration_seconds: number | null
+  strategies_cleaned: number
+  strategies_retired: number
+  trades_analyzed: number
+  template_adjustments: number
+  proposals_generated: number
+  proposals_pre_wf: number
+  proposals_alpha_edge: number
+  proposals_template: number
+  symbols_checked: number
+  symbols_passed: number
+  symbols_failed: number
+  backtested: number
+  backtest_passed: number
+  backtest_failed: number
+  avg_sharpe: number | null
+  avg_win_rate: number | null
+  activated: number
+  promoted_to_paper: number
+  total_active: number
+  total_backtested: number
+  signals_generated: number
+  signals_passed: number
+  orders_submitted: number
+  orders_filled: number
+  orders_pending: number
+  orders_rejected: number
+  stage_details: Record<string, unknown> | null
+  errors: unknown[] | null
+}
+
+export interface CyclesPayload {
+  success: boolean
+  data: CycleRunRow[]
+  error?: string
+}
+
+export interface FunnelStage {
+  stage: string
+  count: number
+  drop_from_prev: number | null
+}
+
+export interface FunnelPayload {
+  lookback_days: number
+  funnel: FunnelStage[]
+  error?: string
+}
+
+export interface TriggerCycleBody {
+  force?: boolean
+  asset_classes?: string[]
+  intervals?: string[]
+  strategy_types?: string[]
+}
+
+export interface TriggerCycleResponse {
+  success: boolean
+  message: string
+  cycle_id?: string
+  estimated_duration?: number
+}
+
+/* ──── Queries ──── */
+
+export function useSystemStatus(enabled = true) {
+  return useQuery<SystemStatusPayload>({
+    queryKey: ['system-status'],
+    queryFn: () => api.get<SystemStatusPayload>('/control/system/status'),
+    refetchInterval: 15_000,
+    staleTime: 5_000,
+    enabled,
+  })
+}
+
+export function useAutonomousSchedules() {
+  return useQuery<SchedulesPayload>({
+    queryKey: ['autonomous-schedules'],
+    queryFn: () => api.get<SchedulesPayload>('/control/autonomous/schedules'),
+    staleTime: 60_000,
+  })
+}
+
+export function useAutonomousCycles(limit = 30) {
+  return useQuery<CyclesPayload>({
+    queryKey: ['autonomous-cycles', { limit }],
+    queryFn: () => api.get<CyclesPayload>('/control/autonomous/cycles', { limit }),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+export function useGraduationFunnel(lookbackDays = 30) {
+  return useQuery<FunnelPayload>({
+    queryKey: ['graduation-funnel', lookbackDays],
+    queryFn: () =>
+      api.get<FunnelPayload>('/analytics/observability/graduation-funnel', {
+        lookback_days: lookbackDays,
+      }),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+/* ──── Mutations ──── */
+
+export function useUpdateSchedules() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (schedules: ScheduleSlot[]) =>
+      api.post<SchedulesPayload>('/control/autonomous/schedules', {
+        schedules,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autonomous-schedules'] })
+      qc.invalidateQueries({ queryKey: ['autonomous-status'] })
+    },
+  })
+}
+
+export function useTriggerCycle() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: TriggerCycleBody) =>
+      api.post<TriggerCycleResponse>('/strategies/autonomous/trigger', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['autonomous-cycles'] })
+      qc.invalidateQueries({ queryKey: ['autonomous-status'] })
+      qc.invalidateQueries({ queryKey: ['system-status'] })
+    },
+  })
+}
+
+/* System-state transitions — every call takes `{ confirmation: true }`. */
+type SystemAction = 'start' | 'pause' | 'stop' | 'resume' | 'reset'
+
+export function useSystemStateTransition() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ action }: { action: SystemAction }) =>
+      api.post<{ success: boolean; message: string; state: SystemStateValue }>(
+        `/control/system/${action}`,
+        { confirmation: true },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['system-status'] })
+      qc.invalidateQueries({ queryKey: ['autonomous-status'] })
+    },
+  })
+}
+
+/* ──── Valid transition map — matches backend system_state_manager ──── */
+export function validTransitions(state: SystemStateValue | undefined): SystemAction[] {
+  switch (state) {
+    case 'ACTIVE':
+      return ['pause', 'stop']
+    case 'PAUSED':
+      return ['resume', 'stop']
+    case 'STOPPED':
+      return ['start']
+    case 'EMERGENCY_HALT':
+      return ['reset']
+    default:
+      return ['start']
+  }
+}
+
+/* ──── Stage name normalisation ─────────────────────────────────────────
+ *  Backend WS events use implementation stage keys
+ *  (cleanup_retirement, strategy_proposals, walk_forward_backtesting, ...).
+ *  The spec describes the cycle as 9 business-logic stages. Map the
+ *  backend keys onto the spec stage ids so the pipeline visual is
+ *  consistent across WS pushes and DB summaries.
+ *
+ *  Spec stages (in order):
+ *    cleanup → market_analysis → proposal → walk_forward → monte_carlo →
+ *    direction_aware → conviction → activation → signal_generation
+ * ─────────────────────────────────────────────────────────────────────── */
+
+export type SpecStageId =
+  | 'cleanup'
+  | 'market_analysis'
+  | 'proposal'
+  | 'walk_forward'
+  | 'monte_carlo'
+  | 'direction_aware'
+  | 'conviction'
+  | 'activation'
+  | 'signal_generation'
+
+export const SPEC_STAGES: Array<{ id: SpecStageId; label: string }> = [
+  { id: 'cleanup', label: 'Cleanup' },
+  { id: 'market_analysis', label: 'Market analysis' },
+  { id: 'proposal', label: 'Proposal' },
+  { id: 'walk_forward', label: 'Walk-forward' },
+  { id: 'monte_carlo', label: 'Monte Carlo' },
+  { id: 'direction_aware', label: 'Direction-aware' },
+  { id: 'conviction', label: 'Conviction' },
+  { id: 'activation', label: 'Activation' },
+  { id: 'signal_generation', label: 'Signal generation' },
+]
+
+/**
+ * Map a backend stage key (from WS `cycle_progress` or from
+ * CycleRunRow.stage_details keys) to the corresponding spec stage id.
+ */
+export function mapBackendStageToSpec(backendStage: string): SpecStageId | null {
+  const key = backendStage.toLowerCase()
+  switch (key) {
+    case 'cleanup_retirement':
+    case 'cleanup':
+      return 'cleanup'
+    case 'performance_feedback':
+    case 'market_analysis':
+    case 'regime_detection':
+    case 'data_validation':
+    case 'cache_warming':
+      return 'market_analysis'
+    case 'strategy_proposals':
+    case 'proposal':
+      return 'proposal'
+    case 'walk_forward_backtesting':
+    case 'walk_forward':
+    case 'backtesting':
+      return 'walk_forward'
+    case 'monte_carlo':
+    case 'bootstrap':
+      return 'monte_carlo'
+    case 'direction_aware':
+    case 'direction_aware_thresholds':
+      return 'direction_aware'
+    case 'conviction':
+    case 'conviction_scoring':
+      return 'conviction'
+    case 'strategy_activation':
+    case 'activation':
+      return 'activation'
+    case 'signal_generation':
+    case 'order_submission':
+    case 'signals':
+      return 'signal_generation'
+    default:
+      return null
+  }
+}

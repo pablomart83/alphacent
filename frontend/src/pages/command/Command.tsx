@@ -269,7 +269,7 @@ export function Command() {
                       <Button
                         variant="primary"
                         size="sm"
-                        onClick={() => navigate('/strategies?tab=cycle')}
+                        onClick={() => navigate('/strategies/cycle')}
                       >
                         Go to Cycle
                       </Button>

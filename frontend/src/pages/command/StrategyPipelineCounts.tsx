@@ -43,7 +43,7 @@ export function StrategyPipelineCounts({ counts, loading, className }: StrategyP
             const handleClick = () => {
               const search = new URLSearchParams({ status: row.statusFilter })
               if (row.includeRetired) search.set('include_retired', 'true')
-              navigate(`/strategies?${search.toString()}`)
+              navigate(`/strategies/library?${search.toString()}`)
             }
             return (
               <li key={row.key}>
