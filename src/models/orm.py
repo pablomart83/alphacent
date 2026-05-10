@@ -360,7 +360,7 @@ class EquitySnapshotORM(Base):
     __tablename__ = "equity_snapshots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    date = Column(String, nullable=False, index=True)  # YYYY-MM-DD or YYYY-MM-DD HH:00
+    date = Column(String, nullable=False)  # YYYY-MM-DD or YYYY-MM-DD HH:00 — indexed via uq_equity_snapshot_date_type_account
     snapshot_type = Column(String, nullable=False, default='daily')  # 'daily' or 'hourly'
     equity = Column(Float, nullable=False)
     balance = Column(Float, nullable=False)

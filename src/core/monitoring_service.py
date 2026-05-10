@@ -2202,7 +2202,11 @@ class MonitoringService:
                 account_id=f"{account_type}_account_001"
             ).first()
             if not account:
-                # Fallback: any account row (handles legacy rows without account_type prefix)
+                # For live: no fallback — don't write DEMO equity into live snapshot
+                if account_type == 'live':
+                    logger.debug(f"  Equity snapshot ({snapshot_type}/{account_type}): no live account row yet — skipping")
+                    return
+                # For demo: fallback to any account row (legacy compat)
                 account = session.query(AccountInfoORM).first()
             if not account:
                 logger.warning(f"  Equity snapshot ({snapshot_type}/{account_type}): no account info found")
