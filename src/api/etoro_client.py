@@ -183,26 +183,41 @@ class EToroAPIClient:
 
     def __init__(
         self,
-        public_key: str,
-        user_key: str,
-        mode: TradingMode,
+        public_key: str = "",
+        user_key: str = "",
+        mode: Optional[TradingMode] = None,
         timeout: int = 30,
-        max_retries: int = 3
+        max_retries: int = 3,
+        account_type: Optional[str] = None,
     ):
         """Initialize eToro API client.
-        
+
         Args:
             public_key: eToro API public key (x-api-key)
             user_key: eToro API user key (x-user-key)
-            mode: Trading mode (DEMO or LIVE) - determines which keys are used
+            account_type: 'demo' or 'live' — preferred parameter (Phase 2)
+            mode: TradingMode enum — legacy parameter, kept for backward compat.
+                  If both are supplied, account_type wins.
             timeout: Request timeout in seconds
             max_retries: Maximum number of retry attempts
         """
         self.public_key = public_key
         self.user_key = user_key
-        self.mode = mode
         self.timeout = timeout
         self.max_retries = max_retries
+
+        # Normalise to account_type string ('demo' | 'live').
+        # Accept either the new account_type kwarg or the legacy mode enum.
+        if account_type is not None:
+            self.account_type: str = account_type.lower()
+        elif mode is not None:
+            self.account_type = "demo" if mode == TradingMode.DEMO else "live"
+        else:
+            self.account_type = "demo"
+
+        # Legacy attribute — kept so any code that still reads self.mode doesn't crash.
+        # New code should use self.account_type.
+        self.mode: TradingMode = TradingMode.DEMO if self.account_type == "demo" else TradingMode.LIVE
 
         # Rate limiting
         self._last_request_time = 0.0
@@ -221,7 +236,7 @@ class EToroAPIClient:
         # Setup session with retry logic
         self._session = self._create_session()
 
-        logger.info(f"Initialized eToro API client in {mode.value} mode")
+        logger.info(f"Initialized eToro API client in {self.account_type} mode")
 
     def _create_session(self) -> requests.Session:
         """Create requests session with retry configuration.
@@ -1144,12 +1159,12 @@ class EToroAPIClient:
         Raises:
             EToroAPIError: If request fails or endpoint not available
         """
-        logger.debug(f"Fetching account information from eToro portfolio endpoint ({self.mode.value} mode)")
+        logger.debug(f"Fetching account information from eToro portfolio endpoint ({self.account_type} mode)")
 
         try:
             # Use demo-specific endpoints for DEMO mode
-            portfolio_endpoint = "/api/v1/trading/info/demo/portfolio" if self.mode == TradingMode.DEMO else "/api/v1/trading/info/portfolio"
-            pnl_endpoint = "/api/v1/trading/info/demo/pnl" if self.mode == TradingMode.DEMO else "/api/v1/trading/info/real/pnl"
+            portfolio_endpoint = "/api/v1/trading/info/demo/portfolio" if self.account_type == "demo" else "/api/v1/trading/info/portfolio"
+            pnl_endpoint = "/api/v1/trading/info/demo/pnl" if self.account_type == "demo" else "/api/v1/trading/info/real/pnl"
             
             # Get full portfolio data
             portfolio_data = self._make_request(
@@ -1166,7 +1181,7 @@ class EToroAPIClient:
             # Extract account info from portfolio response
             # Demo mode returns nested structure: { "clientPortfolio": { ... } }
             # Live mode returns flat structure: { "Credit": ..., "Equity": ..., ... }
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 client_portfolio = portfolio_data.get("clientPortfolio", {})
                 credit = float(client_portfolio.get("credit", 0))
                 positions = client_portfolio.get("positions", [])
@@ -1188,7 +1203,7 @@ class EToroAPIClient:
             positions_count = len([p for p in positions if p.get("isBuy") is not None or p.get("IsBuy") is not None])
             
             # Get unrealized PnL from pnl endpoint
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 pnl_portfolio = pnl_data.get("clientPortfolio", {})
                 # Fetch live positions (with enriched prices) for accurate PnL
                 try:
@@ -1202,7 +1217,7 @@ class EToroAPIClient:
                 realized_pnl = float(pnl_data.get("RealizedPnL", 0))
             
             # Calculate buying power and margin
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 # Demo: equity already includes invested capital from above
                 # Add unrealized P&L for the final equity figure
                 actual_equity = equity + unrealized_pnl
@@ -1219,7 +1234,7 @@ class EToroAPIClient:
                 buying_power = available_margin
 
             account_info = AccountInfo(
-                account_id=f"{self.mode.value.lower()}_account_001",
+                account_id=f"{self.account_type}_account_001",
                 mode=self.mode,
                 balance=credit,
                 buying_power=buying_power,
@@ -1252,7 +1267,7 @@ class EToroAPIClient:
         Raises:
             EToroAPIError: If request fails or endpoint not available
         """
-        logger.debug(f"Fetching open positions from eToro portfolio endpoint ({self.mode.value} mode)")
+        logger.debug(f"Fetching open positions from eToro portfolio endpoint ({self.account_type} mode)")
 
         # Circuit breaker check — return cached positions if circuit is open
         try:
@@ -1265,7 +1280,7 @@ class EToroAPIClient:
 
         try:
             # Use demo-specific endpoints for DEMO mode
-            portfolio_endpoint = "/api/v1/trading/info/demo/portfolio" if self.mode == TradingMode.DEMO else "/api/v1/trading/info/portfolio"
+            portfolio_endpoint = "/api/v1/trading/info/demo/portfolio" if self.account_type == "demo" else "/api/v1/trading/info/portfolio"
             
             # Get full portfolio data
             portfolio_data = self._make_request(
@@ -1278,7 +1293,7 @@ class EToroAPIClient:
             # Extract positions based on mode
             # Demo mode returns nested structure: { "clientPortfolio": { "positions": [...] } }
             # Live mode returns flat structure: { "Positions": [...] }
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 position_list = portfolio_data.get("clientPortfolio", {}).get("positions", [])
             else:
                 position_list = portfolio_data.get("Positions", [])
@@ -1286,7 +1301,7 @@ class EToroAPIClient:
             for item in position_list:
                 # Parse position data from eToro format
                 # Demo uses lowercase keys, Live uses PascalCase
-                if self.mode == TradingMode.DEMO:
+                if self.account_type == "demo":
                     is_buy = item.get("isBuy", True)
                     position_id = str(item.get("positionID", ""))
                     instrument_id = int(item.get("instrumentID", 0))
@@ -1477,10 +1492,10 @@ class EToroAPIClient:
 
         try:
             # Use demo-specific endpoints for DEMO mode
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 endpoint = f"/api/v1/trading/info/demo/orders/{order_id}"
             else:
-                endpoint = f"/api/v1/trading/orders/{order_id}"
+                endpoint = f"/api/v1/trading/info/real/orders/{order_id}"
             
             data = self._make_request(
                 method="GET",
@@ -1592,7 +1607,7 @@ class EToroAPIClient:
 
             # Submit order to eToro
             # Use demo-specific endpoints for DEMO mode
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 endpoint = "/api/v1/trading/execution/demo/market-open-orders/by-amount"
             else:
                 endpoint = "/api/v1/trading/execution/market-open-orders/by-amount"
@@ -1662,7 +1677,7 @@ class EToroAPIClient:
             # Use the correct cancel endpoint matching eToro's API pattern.
             # Demo uses POST to market-cancel-orders (mirrors market-open-orders
             # and market-close-orders patterns). Live uses the same pattern.
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 endpoint = f"/api/v1/trading/execution/demo/market-cancel-orders/{order_id}"
             else:
                 endpoint = f"/api/v1/trading/execution/market-cancel-orders/{order_id}"
@@ -1730,15 +1745,19 @@ class EToroAPIClient:
         self._check_circuit_breaker("positions")
 
         try:
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 endpoint = f"/api/v1/trading/execution/demo/market-close-orders/positions/{position_id}"
             else:
                 endpoint = f"/api/v1/trading/execution/market-close-orders/positions/{position_id}"
 
-            # Full close: only send InstrumentID, omit UnitsToDeduct entirely
+            # Full close: only send InstrumentID/InstrumentId, omit UnitsToDeduct entirely.
+            # DEMO uses "InstrumentID" (uppercase D), LIVE uses "InstrumentId" (lowercase d).
             payload = {}
             if instrument_id is not None:
-                payload["InstrumentID"] = instrument_id
+                if self.account_type == "demo":
+                    payload["InstrumentID"] = instrument_id
+                else:
+                    payload["InstrumentId"] = instrument_id
 
             data = self._make_request(
                 method="POST",
@@ -1779,14 +1798,17 @@ class EToroAPIClient:
         self._check_circuit_breaker("positions")
 
         try:
-            if self.mode == TradingMode.DEMO:
+            if self.account_type == "demo":
                 endpoint = f"/api/v1/trading/execution/demo/market-close-orders/positions/{position_id}"
             else:
-                endpoint = f"/api/v1/trading/positions/{position_id}/close"
+                endpoint = f"/api/v1/trading/execution/market-close-orders/positions/{position_id}"
 
             payload = {"UnitsToDeduct": amount}
             if instrument_id is not None:
-                payload["InstrumentID"] = instrument_id
+                if self.account_type == "demo":
+                    payload["InstrumentID"] = instrument_id
+                else:
+                    payload["InstrumentId"] = instrument_id
 
             data = self._make_request(
                 method="POST",
@@ -1880,6 +1902,33 @@ class EToroAPIClient:
                     logger.error(f"Order placement failed after {max_retries + 1} attempts")
 
         raise EToroAPIError(f"Order placement failed after {max_retries + 1} attempts: {last_error}")
+
+    def get_trade_history(self, min_date: str) -> List[Dict[str, Any]]:
+        """Retrieve closed trade history (LIVE account only).
+
+        Args:
+            min_date: Start date in YYYY-MM-DD format
+
+        Returns:
+            List of closed trade records
+
+        Raises:
+            EToroAPIError: If request fails
+        """
+        logger.debug(f"Fetching trade history from {min_date} ({self.account_type} mode)")
+
+        try:
+            data = self._make_request(
+                method="GET",
+                endpoint="/api/v1/trading/info/trade/history",
+                params={"minDate": min_date}
+            )
+            trades = data if isinstance(data, list) else data.get("trades", data.get("Trades", []))
+            logger.info(f"Retrieved {len(trades)} trade history records from {min_date}")
+            return trades
+        except Exception as e:
+            logger.error(f"Failed to fetch trade history: {e}")
+            raise EToroAPIError(f"Failed to fetch trade history: {e}")
 
     def get_social_insights(self, symbol: str) -> Dict[str, Any]:
         """Retrieve social sentiment, trending status, and Pro Investor activity.
