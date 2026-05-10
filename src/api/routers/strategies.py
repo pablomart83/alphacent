@@ -3832,3 +3832,127 @@ async def get_risk_attribution(
         "total_heat_pct": round(total_dollar_risk / equity * 100, 2) if equity else None,
         "positions": rows,
     }
+
+
+# ── Phase 2: Graduation Gate endpoints ───────────────────────────────────────
+
+class GraduateRequest(BaseModel):
+    """Approve a (strategy, symbol) pair for live trading."""
+    symbol: str
+    position_size: float = Field(..., gt=0, description="Virtual order size in USD (e.g. 500)")
+    sl_pct: float = Field(..., gt=0, lt=1, description="Stop-loss as decimal (e.g. 0.06 = 6%)")
+    tp_pct: float = Field(..., gt=0, lt=2, description="Take-profit as decimal (e.g. 0.15 = 15%)")
+    conviction_min: int = Field(74, ge=60, le=100, description="Minimum conviction score for live fills")
+    notes: Optional[str] = None
+
+
+class RejectGraduationRequest(BaseModel):
+    """Reject a (strategy, symbol) pair with 14-day cooldown."""
+    symbol: str
+    notes: Optional[str] = None
+
+
+@router.get("/graduation-queue")
+async def get_graduation_queue(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Return all (strategy, symbol) pairs that qualify for live trading.
+
+    Qualification criteria:
+    - paper_trades >= 20
+    - paper_sharpe >= 60% of WF sharpe
+    - paper_win_rate >= 45%
+    - paper_pnl > 0
+    - Not already active in live_strategies
+    - Not rejected in the last 14 days
+    """
+    from src.strategy.graduation_gate import get_graduation_queue as _get_queue
+    try:
+        queue = _get_queue(session)
+        return {"queue": queue, "count": len(queue)}
+    except Exception as e:
+        logger.error(f"Error fetching graduation queue: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{strategy_id}/graduate")
+async def graduate_strategy(
+    strategy_id: str,
+    request: GraduateRequest,
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Approve a (strategy, symbol) pair for live trading.
+
+    Creates a graduation_approvals record and a live_strategies authorization row.
+    The HARD GATE (live_trading.enabled in autonomous_trading.yaml) must also be
+    true before any live fills fire.
+    """
+    from src.strategy.graduation_gate import approve_graduation as _approve
+    try:
+        result = _approve(
+            session=session,
+            strategy_id=strategy_id,
+            symbol=request.symbol,
+            position_size=request.position_size,
+            sl_pct=request.sl_pct,
+            tp_pct=request.tp_pct,
+            conviction_min=request.conviction_min,
+            notes=request.notes,
+        )
+        logger.info(f"User {username} approved graduation: strategy={strategy_id} symbol={request.symbol}")
+        return {"success": True, "live_strategy": result}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error approving graduation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{strategy_id}/reject-graduation")
+async def reject_graduation(
+    strategy_id: str,
+    request: RejectGraduationRequest,
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Reject a (strategy, symbol) pair with a 14-day cooldown.
+    The pair will not appear in the graduation queue for 14 days.
+    """
+    from src.strategy.graduation_gate import reject_graduation as _reject
+    try:
+        result = _reject(
+            session=session,
+            strategy_id=strategy_id,
+            symbol=request.symbol,
+            notes=request.notes,
+        )
+        logger.info(f"User {username} rejected graduation: strategy={strategy_id} symbol={request.symbol}")
+        return {"success": True, "rejection": result}
+    except Exception as e:
+        logger.error(f"Error rejecting graduation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/live")
+async def get_live_strategies(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Return all active live_strategies rows with current paper stats for divergence monitoring.
+
+    Columns: template, symbol, activated_at, live_trades, live_pnl, live_sharpe,
+             current_paper_sharpe, divergence_pct, position_size, sl_pct, tp_pct
+    """
+    from src.strategy.graduation_gate import get_live_strategies as _get_live
+    try:
+        strategies = _get_live(session)
+        return {"live_strategies": strategies, "count": len(strategies)}
+    except Exception as e:
+        logger.error(f"Error fetching live strategies: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

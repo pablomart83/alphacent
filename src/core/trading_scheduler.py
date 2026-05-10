@@ -66,6 +66,7 @@ class TradingScheduler:
         self._strategy_engine = None
         self._risk_manager = None
         self._order_executor = None
+        self._live_order_executor = None  # Phase 2: live account executor (None = DEMO-only)
         self._websocket_manager = None
         self._components_initialized = False
         self._reconciliation_done = False  # Block signals until startup reconciliation completes
@@ -1353,6 +1354,82 @@ class TradingScheduler:
                             
                             # Track cumulative allocation
                             cumulative_allocated += validation_result.position_size
+
+                            # ── Phase 2: Live fill routing ────────────────────────────────
+                            # If a live_strategies row exists for this (strategy, symbol) AND
+                            # live_trading.enabled is True in config, fire a real fill.
+                            # HARD GATE: both conditions must be true. Fail-open on any error.
+                            if (
+                                signal.action in [SignalAction.ENTER_LONG, SignalAction.ENTER_SHORT]
+                                and self._live_order_executor is not None
+                            ):
+                                try:
+                                    from src.core.config_loader import load_config as _load_cfg_live
+                                    _live_cfg = _load_cfg_live().get("live_trading", {})
+                                    _live_enabled = _live_cfg.get("enabled", False)
+
+                                    if _live_enabled:
+                                        from src.strategy.graduation_gate import get_live_approval
+                                        from src.models.database import get_database as _get_db_live
+                                        _live_sess = _get_db_live().get_session()
+                                        try:
+                                            _approval = get_live_approval(_live_sess, strategy_id, _sig_sym)
+                                        finally:
+                                            _live_sess.close()
+
+                                        if _approval is not None:
+                                            # Override risk params with CIO-approved values
+                                            _live_order = self._live_order_executor.execute_signal(
+                                                signal=signal,
+                                                position_size=_approval.position_size,
+                                                stop_loss_pct=_approval.sl_pct,
+                                                take_profit_pct=_approval.tp_pct,
+                                            )
+                                            # Persist live order with account_type='live'
+                                            _live_order_orm = OrderORM(
+                                                id=_live_order.id,
+                                                strategy_id=_live_order.strategy_id,
+                                                symbol=_live_order.symbol,
+                                                side=_live_order.side,
+                                                order_type=_live_order.order_type,
+                                                quantity=_live_order.quantity,
+                                                status=_live_order.status,
+                                                price=_live_order.price,
+                                                stop_price=_live_order.stop_price,
+                                                take_profit_price=_live_order.take_profit_price,
+                                                submitted_at=_live_order.submitted_at or datetime.now(),
+                                                filled_at=_live_order.filled_at,
+                                                filled_price=_live_order.filled_price,
+                                                filled_quantity=_live_order.filled_quantity,
+                                                etoro_order_id=_live_order.etoro_order_id,
+                                                expected_price=_live_order.expected_price,
+                                                slippage=_live_order.slippage,
+                                                fill_time_seconds=_live_order.fill_time_seconds,
+                                                order_action='entry',
+                                                account_type='live',
+                                                order_metadata=(
+                                                    signal.metadata
+                                                    if isinstance(getattr(signal, 'metadata', None), dict)
+                                                    else None
+                                                ),
+                                            )
+                                            session.add(_live_order_orm)
+                                            session.commit()
+                                            logger.info(
+                                                f"LIVE FILL: {_sig_sym} {_sig_dir} "
+                                                f"${_approval.position_size:.0f} virtual "
+                                                f"(${_approval.position_size * 0.10:.0f} real) "
+                                                f"order_id={_live_order.id}"
+                                            )
+                                        else:
+                                            logger.debug(
+                                                f"Live routing: no approval for ({strategy_id}, {_sig_sym}) — DEMO only"
+                                            )
+                                    else:
+                                        logger.debug("Live routing: live_trading.enabled=false — DEMO only")
+                                except Exception as _live_err:
+                                    # Never let live routing errors block DEMO trading
+                                    logger.error(f"Live fill routing failed (non-fatal): {_live_err}", exc_info=True)
 
                             # ── PAIRS TRADING: Execute hedge leg ──────────────────────────
                             # If this signal is from a pairs trading strategy, immediately
@@ -2855,7 +2932,17 @@ class TradingScheduler:
             
             market_hours = get_market_hours_manager()
             self._order_executor = OrderExecutor(self._etoro_client, market_hours)
-            
+
+            # Phase 2: live order executor (optional — fail-open)
+            try:
+                from src.api.app import get_live_etoro_client
+                _live_client = get_live_etoro_client()
+                if _live_client is not None:
+                    self._live_order_executor = OrderExecutor(_live_client, market_hours)
+                    logger.info("TradingScheduler: live OrderExecutor initialized")
+            except Exception as _live_init_err:
+                logger.info(f"TradingScheduler: no live executor ({_live_init_err})")
+
             self._components_initialized = True
             logger.info("Trading scheduler components initialized successfully")
             return True
