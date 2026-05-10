@@ -17,9 +17,9 @@
 | 2 | Book / Positions — 4 sub-tabs, allocation panel, detail drill-down | ✅ SHIPPED | `ae2c78f` |
 | 3 | Book / Orders + Execution — 3 sub-tabs, slippage heatmap, manual order | ✅ SHIPPED | `c9006ee` |
 | 4 | Book / Live — master switch, tiles, mirror strip, divergence cards | ✅ SHIPPED | `f22db70` |
-| 5 | Strategies / Library | ✅ SHIPPED | (this sprint) |
-| 6 | Strategies / Cycle (autonomous pipeline + funnel) | **Next** |  |
-| 7 | Strategies / Templates + Symbols + Graduation (flagship) + Lab | Pending |  |
+| 5 | Strategies / Library | ✅ SHIPPED | `042c2c5` |
+| 6 | Strategies / Cycle (autonomous pipeline + funnel) | ✅ SHIPPED | `6d1aa89` |
+| 7 | Strategies / Templates + Symbols + Graduation (flagship) + Lab | **Next** |  |
 | 8 | Guard / Risk + Gates | Pending |  |
 | 9 | Guard / System + Circuit Breakers + Alerts + Audit | Pending |  |
 | 10 | Research / Performance + Attribution + Trades | Pending |  |
@@ -34,7 +34,7 @@
 - **Hooks**: `useWebSocketQueryBridge` (invalidates `positions`, `orders`, `strategies`, `autonomous-status`, `system-status`, `autonomous-cycles`, `fundamental-alerts`, `recent-signals`, `live-summary`, `dashboard`, reconnect toast + full invalidation), `useKeyboardShortcuts` (g c/b/s/g/r/, + ⌘K), `useWebSocketState`
 - **Stores**: trading-mode, layout, theme, command-palette, filters, notifications, research
 - **Data hooks in `pages/book/useBookData.ts`**: positions (open/pending-open/pending-closures/fundamental-alerts/closed), close / close-all / approve-closure / bulk-approve / dismiss-closure / dismiss-fundamental-alert / sync-positions / modify-position-risk / delete-closed-positions; orders (list/execution-quality/cancel/delete/bulk-delete/close-position-from-order/sync/place); live (summary/config/update-config/divergence/retire-strategy/close-live-position). `AllOrdersTab` accepts `pinMode` so any surface can scope it to DEMO or LIVE without forking.
-- **Data hooks in `pages/strategies/useStrategiesData.ts`** (Sprint 5): `useStrategies({ slim, include_retired, status_filter })`, `useStrategy(id)` for detail, `useStrategyBacktest`, `useActivateStrategy`, `useDeactivateStrategy`, `useRetireStrategy`, `useDeleteStrategyPermanent`, `useGraduateStrategy`, `useRejectGraduation`. Derived helpers `isGraduationEligible`, `isIdle7d`, `hasSignalToday`, `hasNegativeLivePnl`, `hasPaper20Plus` for the Library quick-pill filters.
+- **Data hooks in `pages/strategies/useStrategiesData.ts`** (Sprint 5): `useStrategies({ slim, include_retired, status_filter })`, `useStrategy(id)` for detail, `useStrategyBacktest`, `useActivateStrategy`, `useDeactivateStrategy`, `useRetireStrategy`, `useDeleteStrategyPermanent`, `useGraduateStrategy`, `useRejectGraduation`. Derived helpers `isGraduationEligible`, `isIdle7d`, `hasSignalToday`, `hasNegativeLivePnl`, `hasPaper20Plus` for the Library quick-pill filters. Sprint 6 adds `useSystemStatus`, `useAutonomousSchedules`, `useUpdateSchedules`, `useAutonomousCycles`, `useGraduationFunnel`, `useTriggerCycle`, `useSystemStateTransition` + the `SPEC_STAGES` / `mapBackendStageToSpec` helpers that bridge backend stage names onto the spec's 9 business-logic stages.
 - **CSV** (`lib/csv.ts`): RFC-4180 quoting, UTF-8 BOM for Excel
 - **Market hours** (`lib/market-hours.ts`): client-side classifier for UI hints only — not a trading gate
 - **Design tokens** (`lib/design-tokens.ts` + `styles/tokens.css`): every hex from spec §3A plus `regimeColor()` / `convictionColor()` / `pnlColor()` helpers
@@ -59,7 +59,7 @@
 - **DEMO strategies:** 49 PAPER + 74 BACKTESTED (counts move cycle-to-cycle; run the diagnostic query below for fresh numbers)
 - **LIVE account:** Agent Portfolio | Virtual: $10,000 | Real: $1,000 | Mirror: 10%
 - **LIVE positions:** 0 | **live_trading.enabled:** TRUE | **Live authorisations:** 0
-- **Latest commits on main:** `15a5394` (LIVE dashboard fix) ← `042c2c5` (Sprint 5) ← `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
+- **Latest commits on main:** `6d1aa89` (Sprint 6) ← `a97e86f` (Session doc: LIVE dashboard fix) ← `15a5394` (LIVE dashboard fix) ← `042c2c5` (Sprint 5) ← `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
 - **errors.log:** clean — most recent entry is 2026-05-09 23:24 stale `promoted_to_demo` (pre-rename, expected)
 
 ### Session start checklist
