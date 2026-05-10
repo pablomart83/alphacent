@@ -1,0 +1,143 @@
+/* AlphaCent design tokens — see FRONTEND_REBUILD_SPEC.md §3A for rationale. */
+
+:root,
+:root[data-theme='dark'] {
+  /* Background layers */
+  --bg-0: #0a0a0b;
+  --bg-1: #101012;
+  --bg-2: #16171a;
+  --bg-3: #1d1e22;
+  --bg-hover: #20222a;
+  --bg-active: #2a2d37;
+
+  /* Borders */
+  --border-subtle: #1f2024;
+  --border-default: #2a2c33;
+  --border-strong: #3a3d46;
+  --border-focus: #5eb0ff;
+
+  /* Text */
+  --text-0: #ebedf2;
+  --text-1: #c5c8d0;
+  --text-2: #8a8e99;
+  --text-3: #5a5e68;
+
+  /* P&L */
+  --pnl-up: #22c55e;
+  --pnl-up-bg: rgba(34, 197, 94, 0.10);
+  --pnl-up-flash: #4ade80;
+  --pnl-down: #ef4444;
+  --pnl-down-bg: rgba(239, 68, 68, 0.10);
+  --pnl-down-flash: #f87171;
+  --pnl-flat: #8a8e99;
+
+  /* Regime */
+  --regime-up-strong: #16a34a;
+  --regime-up: #22c55e;
+  --regime-up-weak: #86efac;
+  --regime-range: #eab308;
+  --regime-down-weak: #fca5a5;
+  --regime-down: #ef4444;
+  --regime-down-strong: #b91c1c;
+  --regime-vol: #a855f7;
+
+  /* Conviction heat (0-100) */
+  --conviction-0: #6b7280;
+  --conviction-40: #94a3b8;
+  --conviction-55: #84cc16;
+  --conviction-65: #22c55e;
+  --conviction-74: #16a34a;
+  --conviction-85: #15803d;
+
+  /* Account accents */
+  --account-demo: #3b82f6;
+  --account-live: #10b981;
+  --account-live-off-tint: #6b7280;
+
+  /* Interactive / info */
+  --accent-primary: #3b82f6;
+  --accent-secondary: #8b5cf6;
+  --accent-ticker: #06b6d4;
+
+  /* Status */
+  --status-warning: #f59e0b;
+  --status-warning-bg: rgba(245, 158, 11, 0.10);
+  --status-error: #dc2626;
+  --status-error-bg: rgba(220, 38, 38, 0.12);
+  --status-success: #059669;
+  --status-info: #0284c7;
+
+  /* Typography */
+  --font-ui: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+
+  --lh-xs: 14px;
+  --lh-sm: 16px;
+  --lh-base: 16px;
+  --lh-md: 18px;
+  --lh-lg: 22px;
+  --lh-xl: 24px;
+  --lh-2xl: 28px;
+  --lh-3xl: 32px;
+
+  /* Spacing (4px base) */
+  --sp-0: 0;
+  --sp-0-5: 2px;
+  --sp-1: 4px;
+  --sp-1-5: 6px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* Layout */
+  --shell-topnav-h: 40px;
+  --shell-metrics-h: 56px;
+  --shell-ticker-h: 24px;
+  --shell-bottom-h: 120px;
+  --panel-header-h: 32px;
+
+  /* Motion */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-flash: 400ms;
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+}
+
+:root[data-theme='light'] {
+  --bg-0: #fafafa;
+  --bg-1: #ffffff;
+  --bg-2: #f4f5f7;
+  --bg-3: #eceef2;
+  --bg-hover: #e4e6eb;
+  --bg-active: #d8dae0;
+  --border-subtle: #e4e6eb;
+  --border-default: #d1d4db;
+  --border-strong: #a8acb5;
+  --border-focus: #2b7bce;
+  --text-0: #0a0a0b;
+  --text-1: #26272d;
+  --text-2: #5a5e68;
+  --text-3: #8a8e99;
+  --pnl-up: #16a34a;
+  --pnl-up-bg: rgba(22, 163, 74, 0.08);
+  --pnl-up-flash: #22c55e;
+  --pnl-down: #dc2626;
+  --pnl-down-bg: rgba(220, 38, 38, 0.08);
+  --pnl-down-flash: #ef4444;
+  --pnl-flat: #5a5e68;
+}

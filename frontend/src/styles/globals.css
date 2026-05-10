@@ -1,0 +1,190 @@
+@import './tokens.css';
+@import 'tailwindcss';
+
+/* Map design tokens to Tailwind v4 theme so `bg-bg-1`, `text-pnl-up` etc. work. */
+@theme {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-bg-hover: var(--bg-hover);
+  --color-bg-active: var(--bg-active);
+
+  --color-border-subtle: var(--border-subtle);
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
+  --color-border-focus: var(--border-focus);
+
+  --color-text-0: var(--text-0);
+  --color-text-1: var(--text-1);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+
+  --color-pnl-up: var(--pnl-up);
+  --color-pnl-up-bg: var(--pnl-up-bg);
+  --color-pnl-up-flash: var(--pnl-up-flash);
+  --color-pnl-down: var(--pnl-down);
+  --color-pnl-down-bg: var(--pnl-down-bg);
+  --color-pnl-down-flash: var(--pnl-down-flash);
+  --color-pnl-flat: var(--pnl-flat);
+
+  --color-regime-up-strong: var(--regime-up-strong);
+  --color-regime-up: var(--regime-up);
+  --color-regime-up-weak: var(--regime-up-weak);
+  --color-regime-range: var(--regime-range);
+  --color-regime-down-weak: var(--regime-down-weak);
+  --color-regime-down: var(--regime-down);
+  --color-regime-down-strong: var(--regime-down-strong);
+  --color-regime-vol: var(--regime-vol);
+
+  --color-account-demo: var(--account-demo);
+  --color-account-live: var(--account-live);
+
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-secondary: var(--accent-secondary);
+  --color-accent-ticker: var(--accent-ticker);
+
+  --color-status-warning: var(--status-warning);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-error: var(--status-error);
+  --color-status-error-bg: var(--status-error-bg);
+  --color-status-success: var(--status-success);
+  --color-status-info: var(--status-info);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-md: var(--text-md);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-2xl: var(--text-2xl);
+  --text-3xl: var(--text-3xl);
+
+  --spacing-0-5: var(--sp-0-5);
+  --spacing-1-5: var(--sp-1-5);
+}
+
+/* Base element styles */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: var(--lh-base);
+  color: var(--text-1);
+  background-color: var(--bg-0);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular numerals for any element marked .mono or .number */
+.mono,
+.number,
+[data-numeric='true'] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'cv11' 1;
+}
+
+/* Focus rings */
+:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-0);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 4px;
+  border: 2px solid var(--bg-0);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* Selection */
+::selection {
+  background: color-mix(in oklab, var(--accent-primary) 35%, transparent);
+  color: var(--text-0);
+}
+
+/* Shimmer animation for Skeleton */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-1) 0%,
+    var(--bg-2) 50%,
+    var(--bg-1) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+/* P&L flash animation — applied via className on PnLNumber when value changes */
+@keyframes pnl-flash-up {
+  0% { background-color: transparent; }
+  20% { background-color: var(--pnl-up-flash); }
+  100% { background-color: transparent; }
+}
+
+@keyframes pnl-flash-down {
+  0% { background-color: transparent; }
+  20% { background-color: var(--pnl-down-flash); }
+  100% { background-color: transparent; }
+}
+
+.pnl-flash-up {
+  animation: pnl-flash-up var(--dur-flash) var(--ease-standard);
+}
+
+.pnl-flash-down {
+  animation: pnl-flash-down var(--dur-flash) var(--ease-standard);
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
