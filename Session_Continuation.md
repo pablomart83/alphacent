@@ -301,130 +301,207 @@ ALTER TABLE orders ADD COLUMN order_action VARCHAR, slippage FLOAT, fill_time_se
 
 Use this prompt to kick off the frontend rebuild as a new spec in the next session.
 
+**Before starting the spec session, run this on EC2 to backup the deployed frontend:**
+```bash
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 \
+  'cp -r /home/ubuntu/alphacent/frontend /home/ubuntu/alphacent/frontend_v1_backup && echo "Backup done"'
+```
+
+**Then archive the local frontend in git (do this at the START of the spec session, not before):**
+```bash
+git mv frontend frontend_v1
+git commit -m "Archive frontend v1 before rebuild — preserved in git history and EC2 backup"
+```
+
+The new frontend goes in `frontend/`. Nginx serves `frontend/dist` — that path stays identical. Instant rollback: swap `frontend_v1_backup` back on EC2.
+
 ---
 
 **PROMPT:**
 
 ```
-I want to rebuild the AlphaCent frontend from scratch as a proper spec-driven project. Before writing a single requirement, I need you to do a thorough audit of everything that exists today so nothing gets missed or re-invented.
+I want to build a brand new AlphaCent frontend from scratch. The existing frontend is being archived — no code, no components, no patterns carry forward. This is a greenfield design.
 
-## CONTEXT
+## WHAT WE'RE BUILDING
 
-AlphaCent is an autonomous trading platform. The backend is a FastAPI/Python system running on EC2 that:
+AlphaCent is an autonomous trading platform. The backend is a FastAPI/Python system that:
 - Runs 50+ PAPER strategies simultaneously on a $491K eToro DEMO account (65 open positions)
 - Has a LIVE trading account (Agent Portfolio, $10K virtual / $1K real, 10% mirror ratio) with a Graduation Gate for promoting paper-validated (template, symbol) pairs to real fills
 - Uses a full autonomous cycle: propose → walk-forward validate → Monte Carlo bootstrap → conviction score → activate → signal → execute
 - Connects to eToro's public API for order execution, position sync, and market data
-- Uses TradingView Lightweight Charts for price charts (already integrated)
+- Uses TradingView Lightweight Charts (npm package already available)
 - Has WebSocket for real-time updates (positions, orders, signals, cycle events)
 - Exposes ~80 REST endpoints
 
-The current frontend was built incrementally over many sessions — it works but is architecturally inconsistent. I want to rebuild it from scratch as the best autonomous trading dashboard ever built.
+The goal: the best autonomous trading dashboard ever built. State of the art design, best-in-class charts, consistent design system, every component built from scratch.
 
-## PHASE 1 — AUDIT (do this before anything else)
+## PHASE 1 — AUDIT THE EXISTING SYSTEM (extract the WHAT, not the HOW)
 
-Read and catalogue everything that exists today. Do not skip this phase. The goal is a complete inventory so the requirements doc is grounded in reality, not description.
+Read the existing codebase to build a complete inventory of capabilities. We are not preserving any of this code — we are extracting knowledge. Every feature, every data flow, every user action, every edge case that exists today must be captured so nothing gets missed in the new design.
 
-### 1A. Read the backend API surface
-Read every router file in `src/api/routers/`:
-- `account.py`, `orders.py`, `strategies.py`, `autonomous` endpoints in `control.py`, `performance.py`, `analytics.py`, `risk.py`, `signals.py`, `config.py`, `live.py`, `alerts.py`, `market_data.py`, `dashboard.py`, `data_management.py`, `audit.py`
-For each router, catalogue: endpoint path, method, query params, response shape, what it's used for.
+### 1A. Backend API surface — read every router
+Read every file in `src/api/routers/`:
+`account.py`, `orders.py`, `strategies.py`, `control.py`, `performance.py`, `analytics.py`, `risk.py`, `signals.py`, `config.py`, `live.py`, `alerts.py`, `market_data.py`, `dashboard.py`, `data_management.py`, `audit.py`
 
-### 1B. Read the WebSocket event system
+For each endpoint, extract:
+- Path, method, query params
+- Response shape (key fields)
+- What business concept it serves
+- How frequently it should be called (real-time, polling, on-demand)
+
+### 1B. WebSocket event system
 Read `src/api/websocket_manager.py` and `frontend/src/services/websocket.ts`.
-Catalogue every event type emitted and what data it carries.
+Extract every event type, its payload shape, and what UI element it should update.
 
-### 1C. Read every existing frontend page
-Read every file in `frontend/src/pages/`:
-- `OverviewNew.tsx`, `PortfolioNew.tsx`, `OrdersNew.tsx`, `StrategiesNew.tsx`, `AutonomousNew.tsx`, `AnalyticsNew.tsx`, `RiskNew.tsx`, `SettingsNew.tsx`, `LiveNew.tsx`, `SystemHealthPage.tsx`, `AuditLogPage.tsx`, `WatchlistPage.tsx`, `DataManagementNew.tsx`, `PositionDetailView.tsx`
-For each page, catalogue:
-- What data it fetches (which endpoints, polling interval)
-- What WebSocket events it subscribes to
-- What the user can do (actions, forms, buttons)
-- What's working well and what's broken or incomplete
-- What's missing that should be there
+### 1C. Existing pages — extract features, not code
+Read every file in `frontend/src/pages/`.
+For each page, extract:
+- Every piece of data displayed (what fields, what aggregations)
+- Every user action (buttons, forms, filters, toggles)
+- Every edge case handled (empty states, loading states, errors)
+- What's currently broken or incomplete (note these as gaps to fix in the new design)
 
-### 1D. Read every existing frontend component
-Read every file in `frontend/src/components/` including subdirectories (charts/, trading/, layout/, etc.).
-Catalogue: what each component does, its props interface, whether it's reused or one-off.
-
-### 1E. Read the API client
-Read `frontend/src/services/api.ts` completely.
-Catalogue every method: what endpoint it calls, what it returns, any quirks.
-
-### 1F. Read the data models and types
+### 1D. Data models and types
 Read `frontend/src/types/` and `frontend/src/contexts/`.
-Catalogue: what types exist, what context is shared globally, what state management patterns are used.
+Extract the complete data model: what entities exist, their fields, their relationships.
 
-### 1G. Read the current routing and nav
-Read `frontend/src/App.tsx` and `frontend/src/components/TopNavBar.tsx` and `frontend/src/components/AppShell.tsx`.
-Catalogue: all routes, nav items, permission system, layout structure.
-
-### 1H. Read the design tokens and utilities
-Read `frontend/src/lib/design-tokens.ts`, `frontend/src/lib/utils.ts`, `frontend/src/lib/date-utils.ts`.
-Catalogue: color system, typography, spacing, utility functions.
-
-### 1I. Read the current package.json
+### 1E. Current package.json
 Read `frontend/package.json`.
-Catalogue: all dependencies and their versions.
+List all current dependencies and versions.
 
-## PHASE 2 — RESEARCH
+**Output of Phase 1:** A structured feature inventory — every capability the system has, organized by domain (account, positions, orders, strategies, autonomous cycle, live trading, analytics, risk, settings, system health).
 
-After completing the audit, research the state of the art in trading platform UI/UX design (2024-2026):
-- Professional trading terminals: Bloomberg Terminal, Refinitiv Eikon, TradingView
-- Algorithmic trading dashboards: QuantConnect, Alpaca dashboard, Interactive Brokers TWS
-- Modern fintech: Composer (autonomous investing), Collective2, Robinhood, Webull
-- Design systems for data-dense financial interfaces
+## PHASE 2 — RESEARCH (define the HOW)
 
-Focus specifically on:
-- How professional platforms handle autonomous/algorithmic system transparency (making AI decisions legible)
-- Information hierarchy for multi-account (paper + live) trading
-- Real-time data visualization patterns for positions, P&L, signals
-- Dark theme best practices for extended trading sessions
-- How to surface conviction/confidence scores and decision audit trails
+Research the state of the art in trading platform UI/UX design (2024-2026). Use web search.
 
-## PHASE 3 — REQUIREMENTS DOCUMENT
+### 2A. Professional trading terminals
+Research: Bloomberg Terminal, Refinitiv Eikon, TradingView platform (not just charts).
+Extract: information hierarchy patterns, how they handle data density, color systems, typography choices, layout patterns for multi-panel views.
 
-Only after completing the audit and research, produce a comprehensive requirements document. Every requirement must be grounded in either (a) something that exists today and must be preserved/improved, or (b) something identified as missing from the audit, or (c) a best practice from the research.
+### 2B. Algorithmic and autonomous trading platforms
+Research: QuantConnect (algorithm research + live trading), Composer (autonomous investing), Collective2 (strategy marketplace), Alpaca dashboard.
+Extract: how they make algorithmic decisions transparent to humans, how they show strategy performance, how they handle paper vs live account separation.
 
-The document must cover:
+### 2C. Modern fintech dashboards
+Research: best-in-class examples of dark-theme financial dashboards (search for "trading dashboard design 2024", "fintech dark UI", "algorithmic trading interface").
+Extract: design patterns that work for extended use, micro-interaction patterns, chart integration patterns.
 
-### A. WHAT EXISTS AND WORKS (preserve)
-List every feature, interaction, and data flow from the audit that is working correctly and must be preserved in the rebuild. Be specific — "the strategy table with conviction score column" not "strategy management".
+### 2D. Chart library evaluation
+Research and compare for our specific use cases:
+- **Price/OHLC charts:** TradingView Lightweight Charts (already available) vs alternatives
+- **Analytics charts (equity curves, drawdown, returns distribution):** Recharts vs Visx vs Nivo vs Observable Plot
+- **Real-time data visualization:** how to handle 65 positions updating every 60s without jank
+- **Heatmaps and matrices:** for regime-conditional performance, correlation matrices
 
-### B. WHAT EXISTS BUT IS BROKEN OR INCOMPLETE (fix)
-List every gap, bug, or incomplete feature found in the audit. For each: what it is, why it matters, what the correct behavior should be.
+### 2E. Component library and design system
+Research: building a custom design system vs adopting one.
+Evaluate: Radix UI primitives (headless, full control) vs shadcn/ui vs Ark UI vs Mantine.
+The requirement: every component must be purpose-built for trading data — tables that handle 200 rows smoothly, numbers that flash on update, charts that render without layout shift.
 
-### C. WHAT IS MISSING (add)
-List every feature that should exist given the backend capabilities but doesn't. Ground each in a specific backend endpoint or WebSocket event that already supports it.
+### 2F. State management and data fetching
+Research: TanStack Query vs SWR for the hybrid polling/WebSocket pattern we need.
+Research: Zustand vs Jotai vs Context for trading state (account, positions, regime).
 
-### D. DESIGN SYSTEM
-- Color palette: exact hex values for background, surface, border, text, green/red P&L, regime colors, conviction heat gradient, live vs demo account colors
-- Typography: font stack, size scale, weight usage
-- Spacing and layout grid
-- Component states: default, hover, active, loading, error, empty
-- Animation principles: what animates (P&L flash, new signal), what doesn't
+**Output of Phase 2:** Technology decisions with justification, design language definition, reference examples for each major UI pattern.
 
-### E. PAGE ARCHITECTURE
-For each page: purpose, primary user goal, data sources (endpoints + WS events), key interactions, layout sketch (panels, tabs, tables, charts).
+## PHASE 3 — DESIGN THE NEW PLATFORM
 
-### F. COMPONENT LIBRARY
-For each reusable component: name, purpose, props interface, variants, which pages use it.
+Using the feature inventory from Phase 1 and the research from Phase 2, design the new platform from scratch. Every decision is made here. Nothing is left as "TBD".
 
-### G. TECHNICAL DECISIONS
-Based on the audit of current dependencies and patterns:
-- What to keep (justify each)
-- What to replace (justify each, name the replacement)
-- State management approach
-- Data fetching pattern (polling vs WebSocket vs hybrid)
-- Chart library decisions (TradingView Lightweight Charts for price, what for analytics)
+### 3A. Design system specification
+Define completely:
+- **Color palette:** exact hex values for every token — background layers (3 levels), surface, border, text (4 levels), green/red P&L, regime colors (trending_up/down/ranging/high_vol), conviction heat gradient (0-100), live account accent, demo account accent, warning/error/success
+- **Typography:** font stack (consider JetBrains Mono for numbers, Inter/Geist for UI), size scale (10px to 24px), weight usage, line heights
+- **Spacing system:** base unit, scale
+- **Component states:** every interactive component has default, hover, active, focus, loading, error, empty, disabled states defined
+- **Animation principles:** what animates (P&L number flash on update, new signal pulse, cycle stage progress), duration, easing. What never animates (tables, charts — performance first)
+- **Layout system:** grid, panel split ratios, responsive breakpoints (this is a desktop-first trading app — mobile is secondary)
 
-### H. IMPLEMENTATION PLAN
-Prioritized sprints where each sprint delivers a shippable increment. Sprint 1 must be the design system and component library foundation. Each subsequent sprint builds one page or feature area on top of it.
+### 3B. Page architecture
+For each page, define:
+- **Purpose:** one sentence — what decision does this page help the user make?
+- **Primary layout:** panel configuration, tab structure
+- **Data sources:** exact endpoints + WebSocket events, polling intervals
+- **Key components:** what goes where
+- **Empty/loading/error states:** what the user sees before data arrives
+- **User actions:** every button, form, filter — what it does, what API call it makes
+
+Pages to design:
+1. **Overview / Command Centre** — real-time portfolio health, regime, active cycle status, recent signals
+2. **Portfolio** — DEMO + LIVE positions, TSL status, sector exposure, P&L attribution
+3. **Orders** — DEMO + LIVE order history, execution quality, slippage analysis
+4. **Strategies** — PAPER/BACKTESTED/LIVE tabs, strategy detail panel, walk-forward evidence, conviction decomposition
+5. **Autonomous** — cycle pipeline visualization, signal funnel, scheduler, cycle history
+6. **Live Trading** — master switch, graduation gate (CIO workflow), live positions, paper vs live divergence
+7. **Analytics** — equity curve, drawdown, Sharpe by regime, returns distribution, MAE/MFE
+8. **Risk** — portfolio heat map, sector exposure, VaR, signal-time gates status, directional quotas
+9. **Settings** — API config, risk limits, autonomous params, live trading params (all in one place, tabbed)
+10. **System Health** — background threads, circuit breakers, data freshness, error log
+
+### 3C. Component library specification
+Define every reusable component:
+- **Name and purpose**
+- **Props interface** (TypeScript)
+- **Visual specification** (size, color, states)
+- **Usage examples** (which pages, in what context)
+
+Required components include (but are not limited to):
+- `MetricsBar` — top bar with real-time account metrics
+- `AccountToggle` — DEMO / LIVE switcher
+- `RegimePill` — colored badge for market regime
+- `LivePill` — ● LIVE / ○ LIVE OFF indicator
+- `ConvictionBar` — stacked bar showing conviction score components
+- `PnLNumber` — number that flashes green/red on update
+- `EquityChart` — TradingView or Recharts equity curve with drawdown overlay
+- `PriceChart` — TradingView Lightweight Charts OHLC with signal markers
+- `StrategyCard` — compact strategy summary with key metrics
+- `GraduationCard` — CIO decision card for live approval
+- `SignalFunnel` — visual pipeline from proposed → filled
+- `DataTable` — high-performance table with sorting, filtering, virtual scroll
+- `HeatMap` — for regime-conditional performance matrix
+- `GateStatus` — traffic-light indicator for signal-time gates
+
+### 3D. Technical stack decision
+Make final decisions:
+- Framework: React 18 + TypeScript + Vite (keep)
+- Styling: Tailwind CSS (keep) + CSS variables for design tokens
+- Component primitives: [decision from research]
+- Data fetching: [decision from research]
+- State management: [decision from research]
+- Price charts: TradingView Lightweight Charts (keep)
+- Analytics charts: [decision from research]
+- Tables: TanStack Table (keep — best in class)
+- Animations: Framer Motion (keep)
+- Toasts: Sonner (keep)
+- Icons: Lucide (keep)
+
+### 3E. Implementation plan
+Ordered sprints where each delivers a shippable increment:
+
+**Sprint 0 — Foundation (must complete before any page work)**
+- Scaffold new `frontend/` with chosen stack
+- Implement complete design system (tokens, CSS variables)
+- Build all primitive components (Button, Input, Badge, Card, Tabs, Select, Switch, Dialog, etc.)
+- Build layout shell (AppShell, TopNav, MetricsBar, routing)
+- Deploy empty shell to EC2 — verify it renders
+
+**Sprint 1-N — Pages**
+- One page per sprint, built entirely on the foundation
+- Each sprint: page is complete, deployed, and verified before moving on
+- Order: Overview → Portfolio → Strategies → Autonomous → Live Trading → Orders → Analytics → Risk → Settings → System Health
 
 ## DELIVERABLE
 
-A single comprehensive document that a developer could hand to a senior frontend engineer and say "build this". No ambiguity, no "TBD", no "similar to current implementation" — every decision made, every component specified, every data flow mapped.
+A single document that answers every question a developer would have before writing the first line of code:
+- What does every page show and do?
+- What does every component look like and how does it behave?
+- What is the exact color of a positive P&L number?
+- What happens when the WebSocket disconnects?
+- How does the graduation gate CIO workflow work step by step?
+- What chart library renders the equity curve and what are its exact props?
 
-Do not write any code. Do not start implementation. Produce the requirements document only.
+No ambiguity. No "similar to current". No "TBD". Every decision made.
+
+Do not write any code. Produce the requirements document only.
 ```
