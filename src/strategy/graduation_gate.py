@@ -68,6 +68,7 @@ def get_paper_stats_for_strategy(
             WHERE strategy_id = :sid
               AND symbol       = :sym
               AND pnl IS NOT NULL
+              AND account_type = 'demo'
         """),
         {"sid": strategy_id, "sym": symbol},
     ).fetchone()
@@ -181,6 +182,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             JOIN strategies s ON s.id = tj.strategy_id
             WHERE s.status = 'PAPER'
               AND tj.pnl IS NOT NULL
+              AND tj.account_type = 'demo'
             GROUP BY s.id, s.name, tj.symbol
             HAVING COUNT(*) >= :min_trades
         """),

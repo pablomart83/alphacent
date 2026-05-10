@@ -1378,10 +1378,24 @@ class TradingScheduler:
                                             _live_sess.close()
 
                                         if _approval is not None:
+                                            # Fetch live account info for correct position sizing.
+                                            # The DEMO account_info (equity=$491K) must NOT be used
+                                            # for live sizing — live equity is $10K virtual.
+                                            _live_account_info = None
+                                            try:
+                                                _live_account_info = self._live_order_executor._etoro_client.get_account_info()
+                                            except Exception as _acct_err:
+                                                logger.warning(f"Could not fetch live account info: {_acct_err} — using approval.position_size directly")
+
+                                            # Enforce live order bounds from yaml
+                                            _live_min = float(_live_cfg.get("min_order_size", 200))
+                                            _live_max = float(_live_cfg.get("max_order_size", 1500))
+                                            _live_size = max(_live_min, min(_live_max, float(_approval.position_size)))
+
                                             # Override risk params with CIO-approved values
                                             _live_order = self._live_order_executor.execute_signal(
                                                 signal=signal,
-                                                position_size=_approval.position_size,
+                                                position_size=_live_size,
                                                 stop_loss_pct=_approval.sl_pct,
                                                 take_profit_pct=_approval.tp_pct,
                                             )
@@ -1417,8 +1431,8 @@ class TradingScheduler:
                                             session.commit()
                                             logger.info(
                                                 f"LIVE FILL: {_sig_sym} {_sig_dir} "
-                                                f"${_approval.position_size:.0f} virtual "
-                                                f"(${_approval.position_size * 0.10:.0f} real) "
+                                                f"${_live_size:.0f} virtual "
+                                                f"(${_live_size * _live_cfg.get('mirror_ratio', 0.10):.0f} real) "
                                                 f"order_id={_live_order.id}"
                                             )
                                         else:

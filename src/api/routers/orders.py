@@ -126,8 +126,11 @@ async def get_orders(
     """
     logger.info(f"Getting orders for {mode.value} mode, user {username}")
     
-    # Query orders from database (MonitoringService keeps it fresh)
-    query = session.query(OrderORM)
+    # Query orders from database — filter by account_type
+    _account_type = 'live' if mode == TradingMode.LIVE else 'demo'
+    query = session.query(OrderORM).filter(
+        OrderORM.account_type == _account_type
+    )
     
     # Apply status filter if provided
     if status_filter:

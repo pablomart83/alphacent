@@ -60,6 +60,9 @@ class TradeJournalEntryORM(Base):
     
     # Additional metadata
     trade_metadata = Column(JSON, nullable=True)
+
+    # Phase 2: which account this trade belongs to ('demo' or 'live')
+    account_type = Column(String(10), nullable=False, default='demo')
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert ORM model to dictionary."""
@@ -90,7 +93,8 @@ class TradeJournalEntryORM(Base):
             "fundamentals": self.fundamentals,
             "conviction_score": self.conviction_score,
             "ml_confidence": self.ml_confidence,
-            "metadata": self.trade_metadata
+            "metadata": self.trade_metadata,
+            "account_type": self.account_type,
         }
 
 
@@ -140,7 +144,8 @@ class TradeJournal:
         ml_confidence: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
         expected_price: Optional[float] = None,
-        order_side: Optional[str] = None
+        order_side: Optional[str] = None,
+        account_type: str = 'demo',
     ) -> None:
         """Log trade entry.
         
@@ -211,7 +216,8 @@ class TradeJournal:
                 fundamentals=fundamentals,
                 conviction_score=conviction_score,
                 ml_confidence=ml_confidence,
-                trade_metadata=enriched_metadata
+                trade_metadata=enriched_metadata,
+                account_type=account_type,
             )
             session.add(entry)
             session.commit()

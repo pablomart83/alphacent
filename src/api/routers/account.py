@@ -337,18 +337,22 @@ async def get_positions(
     logger.info(f"Getting positions for {mode.value} mode, user {username}")
     
     # Get all open positions from database (updated by background sync)
+    # Filter by account_type: DEMO mode → 'demo', LIVE mode → 'live'
+    _account_type = 'live' if mode == TradingMode.LIVE else 'demo'
     position_orms = db.query(PositionORM).filter(
-        PositionORM.closed_at.is_(None)
+        PositionORM.closed_at.is_(None),
+        PositionORM.account_type == _account_type,
     ).all()
     
-    logger.info(f"Found {len(position_orms)} open positions in database")
+    logger.info(f"Found {len(position_orms)} open {_account_type} positions in database")
     
-    # Get pending orders count (orders waiting for market open)
+    # Get pending orders count (orders waiting for market open) — scoped to account_type
     from src.models.orm import OrderORM
     from src.models.enums import OrderStatus
     
     pending_orders_count = db.query(OrderORM).filter(
-        OrderORM.status == OrderStatus.PENDING
+        OrderORM.status == OrderStatus.PENDING,
+        OrderORM.account_type == _account_type,
     ).count()
     
     logger.info(f"Found {pending_orders_count} pending orders (positions waiting for market open)")
@@ -416,9 +420,11 @@ async def get_closed_positions(
     """
     logger.info(f"Getting closed positions for {mode.value} mode, user {username}")
 
-    query = db.query(PositionORM).filter(PositionORM.closed_at.isnot(None)).order_by(
-        PositionORM.closed_at.desc()
-    )
+    _account_type_closed = 'live' if mode == TradingMode.LIVE else 'demo'
+    query = db.query(PositionORM).filter(
+        PositionORM.closed_at.isnot(None),
+        PositionORM.account_type == _account_type_closed,
+    ).order_by(PositionORM.closed_at.desc())
     # Real total count — always the full count, never the slice size
     total = query.count()
     if limit and limit > 0:

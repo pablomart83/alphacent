@@ -1186,6 +1186,7 @@ class OrderMonitor:
                                 ml_confidence=_ml_conf,
                                 expected_price=order.expected_price,
                                 order_side=order.side.value if hasattr(order.side, 'value') else str(order.side),
+                                account_type=getattr(order, 'account_type', 'demo') or 'demo',
                                 metadata={
                                     "etoro_order_id": order.etoro_order_id,
                                     "fill_time_seconds": order.fill_time_seconds,
@@ -1971,6 +1972,7 @@ class OrderMonitor:
                             conviction_score=_recovered_meta.get("conviction_score"),
                             ml_confidence=_recovered_meta.get("ml_confidence"),
                             fundamentals=_recovered_meta.get("fundamental_data") or _recovered_meta.get("fundamentals"),
+                            account_type=getattr(db_pos, 'account_type', 'demo') or 'demo',
                             metadata=_jr_meta or None,
                         )
                         journal.log_exit(
