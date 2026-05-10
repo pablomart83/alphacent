@@ -462,6 +462,7 @@ Settings page re-fetches config on mount. If open during restart, may re-send st
 - **Monday Asia Open template** — needs DSL `HOUR()` primitive
 - **ONCHAIN DSL primitive** — BTC dominance, stablecoin supply
 - **Overview chart panel rewrite** — 3 chart components with misaligned axes
+- **CI/CD hardening** — GitHub Actions pipeline, automated deploy on push to main
 - **SignalDecisionLogORM table drop** — scheduled 2026-06-03
 - **Commodity 1h coverage** — blocked on FMP Starter upgrade
 - **Forex 1d legacy FMP path cleanup** — ~15 min

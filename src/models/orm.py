@@ -193,6 +193,9 @@ class OrderORM(Base):
     # time. Previously lost when fills came back async — caused 99.9% NULL
     # market_regime rows in trade_journal.
     order_metadata = Column(JSON, nullable=True)
+
+    # Phase 2: which account this order belongs to ('demo' or 'live')
+    account_type = Column(String(10), nullable=False, default='demo')
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert ORM model to dictionary."""
@@ -244,6 +247,9 @@ class PositionORM(Base):
     close_order_id = Column(String, nullable=True)  # ID of the close order submitted for this position
     close_attempts = Column(Integer, nullable=False, default=0)  # Number of close order attempts
     invested_amount = Column(Float, nullable=True)  # Actual capital invested (from eToro 'amount' field, not leveraged notional)
+
+    # Phase 2: which account this position belongs to ('demo' or 'live')
+    account_type = Column(String(10), nullable=False, default='demo')
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert ORM model to dictionary."""
@@ -366,8 +372,11 @@ class EquitySnapshotORM(Base):
     market_quality_score = Column(Float, nullable=True)   # 0-100
     market_quality_grade = Column(String, nullable=True)  # 'high' | 'normal' | 'low'
 
+    # Phase 2: which account this snapshot belongs to ('demo' or 'live')
+    account_type = Column(String(10), nullable=False, default='demo')
+
     __table_args__ = (
-        UniqueConstraint('date', 'snapshot_type', name='uq_equity_snapshot_date_type'),
+        UniqueConstraint('date', 'snapshot_type', 'account_type', name='uq_equity_snapshot_date_type_account'),
     )
 
 
@@ -1155,4 +1164,113 @@ class SignalDecisionORM(Base):
             "reason": self.reason,
             "score": self.score,
             "metadata": self.decision_metadata,
+        }
+
+
+class GraduationApprovalORM(Base):
+    """Records CIO approval/rejection decisions for promoting a (template, symbol) pair to live trading.
+
+    One row per decision. A pair can be rejected and later re-approved after the 14-day cooldown.
+    When approved_at is set and rejected_at is NULL, the pair is eligible for live fills.
+    """
+    __tablename__ = "graduation_approvals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    strategy_id = Column(String(36), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    template_name = Column(String(200), nullable=False)
+    approved_at = Column(DateTime, nullable=True)
+    rejected_at = Column(DateTime, nullable=True)
+    notes = Column(String, nullable=True)
+
+    # CIO overrides applied at approval time (None = use strategy defaults)
+    position_size_override = Column(Float, nullable=True)
+    sl_pct_override = Column(Float, nullable=True)
+    tp_pct_override = Column(Float, nullable=True)
+    conviction_min_override = Column(Integer, nullable=True)
+
+    # Paper trading stats at time of decision (snapshot for audit trail)
+    paper_trades = Column(Integer, nullable=True)
+    paper_sharpe = Column(Float, nullable=True)
+    paper_win_rate = Column(Float, nullable=True)
+    paper_total_pnl = Column(Float, nullable=True)
+    wf_sharpe = Column(Float, nullable=True)
+    qualification_ratio = Column(Float, nullable=True)  # paper_sharpe / wf_sharpe
+
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "strategy_id": self.strategy_id,
+            "symbol": self.symbol,
+            "template_name": self.template_name,
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "rejected_at": self.rejected_at.isoformat() if self.rejected_at else None,
+            "notes": self.notes,
+            "position_size_override": self.position_size_override,
+            "sl_pct_override": self.sl_pct_override,
+            "tp_pct_override": self.tp_pct_override,
+            "conviction_min_override": self.conviction_min_override,
+            "paper_trades": self.paper_trades,
+            "paper_sharpe": self.paper_sharpe,
+            "paper_win_rate": self.paper_win_rate,
+            "paper_total_pnl": self.paper_total_pnl,
+            "wf_sharpe": self.wf_sharpe,
+            "qualification_ratio": self.qualification_ratio,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class LiveStrategyORM(Base):
+    """Active live-trading authorizations.
+
+    One row per approved (strategy_id, symbol) pair. retired_at NULL = currently live.
+    Linked to the graduation_approvals row that created it.
+
+    Risk parameters here are the effective values used for live order sizing —
+    either the strategy defaults or the CIO overrides from graduation_approvals.
+    """
+    __tablename__ = "live_strategies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    graduation_id = Column(Integer, nullable=True)  # FK to graduation_approvals.id
+    strategy_id = Column(String(36), nullable=False)
+    template_name = Column(String(200), nullable=False)
+    symbol = Column(String(20), nullable=False)
+    activated_at = Column(DateTime, nullable=False, default=datetime.now)
+    retired_at = Column(DateTime, nullable=True)
+
+    # Effective risk parameters for live fills
+    position_size = Column(Float, nullable=False)
+    sl_pct = Column(Float, nullable=False)
+    tp_pct = Column(Float, nullable=False)
+    conviction_min = Column(Integer, nullable=False, default=74)
+
+    # Live performance tracking (updated on each fill/close)
+    live_trades = Column(Integer, nullable=False, default=0)
+    live_pnl = Column(Float, nullable=False, default=0.0)
+    live_sharpe = Column(Float, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('strategy_id', 'symbol', name='uq_live_strategy_strategy_symbol'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "graduation_id": self.graduation_id,
+            "strategy_id": self.strategy_id,
+            "template_name": self.template_name,
+            "symbol": self.symbol,
+            "activated_at": self.activated_at.isoformat() if self.activated_at else None,
+            "retired_at": self.retired_at.isoformat() if self.retired_at else None,
+            "position_size": self.position_size,
+            "sl_pct": self.sl_pct,
+            "tp_pct": self.tp_pct,
+            "conviction_min": self.conviction_min,
+            "live_trades": self.live_trades,
+            "live_pnl": self.live_pnl,
+            "live_sharpe": self.live_sharpe,
+            "is_active": self.retired_at is None,
         }
