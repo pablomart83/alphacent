@@ -1178,60 +1178,56 @@ class EToroAPIClient:
                 endpoint=pnl_endpoint
             )
 
-            # Extract account info from portfolio response
-            # Demo mode returns nested structure: { "clientPortfolio": { ... } }
-            # Live mode returns flat structure: { "Credit": ..., "Equity": ..., ... }
-            if self.account_type == "demo":
-                client_portfolio = portfolio_data.get("clientPortfolio", {})
-                credit = float(client_portfolio.get("credit", 0))
-                positions = client_portfolio.get("positions", [])
-                
-                # eToro DEMO doesn't provide an equity field.
-                # Equity = credit (available cash) + sum of position invested amounts + unrealized P&L
-                # The 'amount' field on each position is the invested capital.
-                try:
-                    invested = sum(float(p.get("amount", 0)) for p in positions)
-                except Exception:
-                    invested = 0.0
-                equity = credit + invested  # Will add unrealized P&L below
-            else:
-                credit = float(portfolio_data.get("Credit", 0))
-                equity = float(portfolio_data.get("Equity", credit))
-                positions = portfolio_data.get("Positions", [])
-            
+            # Extract account info from portfolio response.
+            # eToro returns the same nested structure for both DEMO and LIVE:
+            #   { "clientPortfolio": { "credit": ..., "positions": [...], ... } }
+            # The previous LIVE branch looked for flat top-level keys
+            # (Credit/Equity/Positions) that don't exist, so every LIVE field
+            # silently parsed as 0. Unify the parsing — both modes read from
+            # clientPortfolio.
+            client_portfolio = portfolio_data.get("clientPortfolio", {})
+            credit = float(client_portfolio.get("credit", 0))
+            positions = client_portfolio.get("positions", [])
+
+            # eToro doesn't surface an explicit equity field on either account
+            # type. Equity = credit (available cash) + sum of position
+            # invested amounts; unrealized P&L is added once we've fetched it
+            # from the PnL endpoint below.
+            try:
+                invested = sum(float(p.get("amount", 0)) for p in positions)
+            except Exception:
+                invested = 0.0
+            equity = credit + invested
+
             # Calculate metrics
             positions_count = len([p for p in positions if p.get("isBuy") is not None or p.get("IsBuy") is not None])
-            
-            # Get unrealized PnL from pnl endpoint
+
+            # Get unrealized PnL from pnl endpoint.
+            # Same nested structure for DEMO and LIVE.
+            pnl_portfolio = pnl_data.get("clientPortfolio", {})
             if self.account_type == "demo":
-                pnl_portfolio = pnl_data.get("clientPortfolio", {})
-                # Fetch live positions (with enriched prices) for accurate PnL
+                # DEMO: fetch enriched positions so unrealized uses live
+                # quotes rather than the stale pnl-endpoint value.
                 try:
                     live_positions = self.get_positions()
                     unrealized_pnl = sum(p.unrealized_pnl for p in live_positions)
                 except Exception:
-                    unrealized_pnl = 0.0
+                    unrealized_pnl = float(pnl_portfolio.get("unrealizedPnL", 0))
                 realized_pnl = 0.0
             else:
-                unrealized_pnl = float(pnl_data.get("UnrealizedPnL", 0))
-                realized_pnl = float(pnl_data.get("RealizedPnL", 0))
-            
-            # Calculate buying power and margin
-            if self.account_type == "demo":
-                # Demo: equity already includes invested capital from above
-                # Add unrealized P&L for the final equity figure
-                actual_equity = equity + unrealized_pnl
-                try:
-                    used_margin = sum(float(p.get("amount", 0)) for p in positions)
-                except Exception:
-                    used_margin = 0.0
-                available_margin = max(0.0, credit)
-                buying_power = available_margin
-            else:
-                used_margin = float(portfolio_data.get("UsedMargin", 0))
-                actual_equity = equity  # Live mode has real equity from eToro
-                available_margin = equity - used_margin
-                buying_power = available_margin
+                unrealized_pnl = float(pnl_portfolio.get("unrealizedPnL", 0))
+                realized_pnl = 0.0
+
+            # Equity includes unrealized P&L — what the account is worth now.
+            actual_equity = equity + unrealized_pnl
+
+            # Buying power / margin. eToro DEMO doesn't lock margin (credit
+            # is always free-to-trade); LIVE follows the same pattern on the
+            # Agent Portfolio (the mirror wrapper handles margin, not the
+            # virtual side we see).
+            used_margin = invested
+            available_margin = max(0.0, credit)
+            buying_power = available_margin
 
             account_info = AccountInfo(
                 account_id=f"{self.account_type}_account_001",

@@ -388,6 +388,15 @@ class MonitoringService:
                     f"Position sync: {position_results['updated']} updated, "
                     f"{position_results['created']} created"
                 )
+                # Upsert DEMO account_info — keeps equity/balance fresh even
+                # when no user hits the dashboard. Without this, the dashboard
+                # handler only refreshes account_info opportunistically on
+                # request, which goes stale between hits.
+                try:
+                    self._sync_account_info(account_type='demo')
+                except Exception as _acct_err:
+                    logger.warning(f"DEMO account_info sync failed: {_acct_err}")
+
                 # Phase 2: sync live positions if live client is configured
                 if self.live_order_monitor is not None:
                     try:
@@ -399,6 +408,17 @@ class MonitoringService:
                         )
                     except Exception as _live_sync_err:
                         logger.error(f"Live position sync failed: {_live_sync_err}")
+
+                # Upsert LIVE account_info — always attempt when a live client
+                # is configured, even if there are no live positions yet. The
+                # Command page needs equity/balance to render real numbers on
+                # first LIVE view.
+                if self.live_etoro_client is not None:
+                    try:
+                        self._sync_account_info(account_type='live')
+                    except Exception as _acct_err:
+                        logger.warning(f"LIVE account_info sync failed: {_acct_err}")
+
                 self._last_position_sync = now
             except Exception as e:
                 logger.error(f"Error syncing positions: {e}")
@@ -2172,6 +2192,76 @@ class MonitoringService:
         can be rendered at 1h or 4h resolution in addition to daily.
         """
         self._write_equity_snapshot(snapshot_type='hourly')
+
+    def _sync_account_info(self, account_type: str = 'demo') -> bool:
+        """Fetch account info from the eToro client for the given account_type
+        and upsert the matching `account_info` row.
+
+        Keeps the DB copy fresh so request-time handlers (e.g. dashboard/summary,
+        metrics-bar, /live/summary) can read equity and balance without waiting
+        on a synchronous eToro call in the request thread.
+
+        Returns True on success, False on failure. Never raises — callers just
+        log.
+        """
+        try:
+            client = self.live_etoro_client if account_type == 'live' else self.etoro_client
+            if client is None:
+                return False
+
+            account_info = client.get_account_info()
+
+            from src.models.orm import AccountInfoORM
+            session = self.db.get_session()
+            try:
+                # Prefer match by mode; fall back to account_id to recover from
+                # legacy rows that may have been saved with a different mode
+                # string (enum vs string mismatch has bitten us before).
+                mode_str = getattr(account_info.mode, 'value', str(account_info.mode))
+                account_orm = session.query(AccountInfoORM).filter(
+                    AccountInfoORM.mode == mode_str
+                ).first()
+                if not account_orm:
+                    account_orm = session.query(AccountInfoORM).filter_by(
+                        account_id=account_info.account_id
+                    ).first()
+
+                if account_orm:
+                    account_orm.balance = account_info.balance
+                    account_orm.equity = account_info.equity
+                    account_orm.buying_power = account_info.buying_power
+                    account_orm.margin_used = account_info.margin_used
+                    account_orm.margin_available = account_info.margin_available
+                    account_orm.daily_pnl = account_info.daily_pnl
+                    account_orm.total_pnl = account_info.total_pnl
+                    account_orm.positions_count = account_info.positions_count
+                    account_orm.updated_at = account_info.updated_at
+                else:
+                    account_orm = AccountInfoORM(
+                        account_id=account_info.account_id,
+                        mode=account_info.mode,
+                        balance=account_info.balance,
+                        equity=account_info.equity,
+                        buying_power=account_info.buying_power,
+                        margin_used=account_info.margin_used,
+                        margin_available=account_info.margin_available,
+                        daily_pnl=account_info.daily_pnl,
+                        total_pnl=account_info.total_pnl,
+                        positions_count=account_info.positions_count,
+                        updated_at=account_info.updated_at,
+                    )
+                    session.add(account_orm)
+                session.commit()
+                logger.debug(
+                    f"Account info synced ({account_type}): equity={account_info.equity:.2f}, "
+                    f"balance={account_info.balance:.2f}"
+                )
+                return True
+            finally:
+                session.close()
+        except Exception as e:
+            logger.debug(f"account_info sync failed ({account_type}): {e}")
+            return False
 
     def _write_equity_snapshot(self, snapshot_type: str = 'daily') -> None:
         """Write equity snapshots — one row per account_type (demo + live if configured)."""

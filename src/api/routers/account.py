@@ -166,61 +166,78 @@ class PositionsResponse(BaseModel):
 
 
 
+def _sync_account_from_etoro(mode: TradingMode, config: Configuration) -> bool:
+    """Synchronous upsert of an `account_info` row for the given mode.
+
+    Returns True on success, False on failure (client missing, API error, etc).
+    Safe to call from request threads — uses a short-lived session and commits
+    within this frame.
+    """
+    try:
+        etoro_client = get_etoro_client(mode, config)
+        if not etoro_client:
+            return False
+        account_info = etoro_client.get_account_info()
+
+        from src.models.database import get_database
+        db_instance = get_database()
+        session = db_instance.get_session()
+        try:
+            account_orm = session.query(AccountInfoORM).filter(
+                AccountInfoORM.mode == mode.value
+            ).first()
+            if not account_orm:
+                account_orm = session.query(AccountInfoORM).filter_by(
+                    account_id=account_info.account_id
+                ).first()
+
+            if account_orm:
+                account_orm.balance = account_info.balance
+                account_orm.equity = account_info.equity
+                account_orm.buying_power = account_info.buying_power
+                account_orm.margin_used = account_info.margin_used
+                account_orm.margin_available = account_info.margin_available
+                account_orm.daily_pnl = account_info.daily_pnl
+                account_orm.total_pnl = account_info.total_pnl
+                account_orm.positions_count = account_info.positions_count
+                account_orm.updated_at = account_info.updated_at
+            else:
+                account_orm = AccountInfoORM(
+                    account_id=account_info.account_id,
+                    mode=account_info.mode,
+                    balance=account_info.balance,
+                    equity=account_info.equity,
+                    buying_power=account_info.buying_power,
+                    margin_used=account_info.margin_used,
+                    margin_available=account_info.margin_available,
+                    daily_pnl=account_info.daily_pnl,
+                    total_pnl=account_info.total_pnl,
+                    positions_count=account_info.positions_count,
+                    updated_at=account_info.updated_at,
+                )
+                session.add(account_orm)
+            session.commit()
+            logger.debug(f"Account refresh complete for {mode.value}")
+            return True
+        finally:
+            session.close()
+    except Exception as e:
+        logger.debug(f"Account refresh failed for {mode.value}: {e}")
+        return False
+
+
 def _refresh_account_from_etoro(mode: TradingMode, config: Configuration):
-    """Background refresh of account info from eToro API (fire-and-forget)."""
+    """Fire-and-forget background refresh of account info from eToro API.
+
+    Delegates to `_sync_account_from_etoro` inside a daemon thread so the
+    request thread never blocks on eToro latency. Use `_sync_account_from_etoro`
+    directly (in-thread) when the caller needs the fresh row to be visible
+    within the same request.
+    """
     import threading
 
     def _do_refresh():
-        try:
-            etoro_client = get_etoro_client(mode, config)
-            if not etoro_client:
-                return
-            account_info = etoro_client.get_account_info()
-
-            from src.models.database import get_database
-            db_instance = get_database()
-            session = db_instance.get_session()
-            try:
-                account_orm = session.query(AccountInfoORM).filter(
-                    AccountInfoORM.mode == mode.value
-                ).first()
-                if not account_orm:
-                    account_orm = session.query(AccountInfoORM).filter_by(
-                        account_id=account_info.account_id
-                    ).first()
-
-                if account_orm:
-                    account_orm.balance = account_info.balance
-                    account_orm.equity = account_info.equity
-                    account_orm.buying_power = account_info.buying_power
-                    account_orm.margin_used = account_info.margin_used
-                    account_orm.margin_available = account_info.margin_available
-                    account_orm.daily_pnl = account_info.daily_pnl
-                    account_orm.total_pnl = account_info.total_pnl
-                    account_orm.positions_count = account_info.positions_count
-                    account_orm.updated_at = account_info.updated_at
-                else:
-                    # No record exists yet — create one so dashboard has data
-                    account_orm = AccountInfoORM(
-                        account_id=account_info.account_id,
-                        mode=account_info.mode,
-                        balance=account_info.balance,
-                        equity=account_info.equity,
-                        buying_power=account_info.buying_power,
-                        margin_used=account_info.margin_used,
-                        margin_available=account_info.margin_available,
-                        daily_pnl=account_info.daily_pnl,
-                        total_pnl=account_info.total_pnl,
-                        positions_count=account_info.positions_count,
-                        updated_at=account_info.updated_at,
-                    )
-                    session.add(account_orm)
-                session.commit()
-                logger.debug(f"Background account refresh complete for {mode.value}")
-            finally:
-                session.close()
-        except Exception as e:
-            logger.debug(f"Background account refresh failed: {e}")
+        _sync_account_from_etoro(mode, config)
 
     threading.Thread(target=_do_refresh, daemon=True).start()
 
@@ -1856,20 +1873,42 @@ async def get_dashboard_summary(
     week_start = today_start - timedelta(days=today_start.weekday())
     month_start = today_start.replace(day=1)
 
+    # Positions / orders / equity_snapshots all carry `account_type` since
+    # Phase 2A. Derive it once from the incoming `mode` and scope every
+    # aggregation below so LIVE never accidentally picks up DEMO rows.
+    account_type_str = "live" if mode == TradingMode.LIVE else "demo"
+
     # --- Account Info ---
     account = db.query(AccountInfoORM).filter(
         AccountInfoORM.mode == mode.value
     ).first()
     balance = account.balance if account else 0.0
 
-    # Trigger background refresh if equity looks stale (0 or same as balance)
+    # Trigger background refresh when the stored equity looks stale OR there's
+    # no row yet at all. Previously the `and account` guard meant the first
+    # LIVE fetch could never seed the account_info row because we short-
+    # circuited before refresh; the UI then showed DEMO leakage.
     stored_equity_val = (account.equity if account else 0.0) or 0.0
-    if account and (not stored_equity_val or stored_equity_val == balance):
-        _refresh_account_from_etoro(mode, config)
+    needs_refresh = (account is None) or (not stored_equity_val) or (stored_equity_val == balance)
+    if needs_refresh:
+        if account is None:
+            # No row at all — block briefly on the first fetch so the first
+            # render returns real numbers instead of zeros. Subsequent polls
+            # read the fresh row and don't need to wait.
+            if _sync_account_from_etoro(mode, config):
+                account = db.query(AccountInfoORM).filter(
+                    AccountInfoORM.mode == mode.value
+                ).first()
+                balance = account.balance if account else 0.0
+        else:
+            # Row exists but looks stale — fire-and-forget refresh, serve
+            # cached numbers now, next poll gets the fresh values.
+            _refresh_account_from_etoro(mode, config)
 
-    # --- Open Positions ---
+    # --- Open Positions (scoped by account_type) ---
     open_positions = db.query(PositionORM).filter(
-        PositionORM.closed_at.is_(None)
+        PositionORM.closed_at.is_(None),
+        PositionORM.account_type == account_type_str,
     ).all()
 
     total_unrealized = sum(p.unrealized_pnl or 0 for p in open_positions)
@@ -1911,10 +1950,12 @@ async def get_dashboard_summary(
     from src.models.orm import EquitySnapshotORM
     
     def get_snapshot_equity(target_date: str) -> float:
-        """Get equity from the most recent snapshot on or before target_date."""
+        """Get equity from the most recent snapshot on or before target_date,
+        scoped to the current account_type."""
         try:
             snapshot = db.query(EquitySnapshotORM).filter(
-                EquitySnapshotORM.date <= target_date
+                EquitySnapshotORM.date <= target_date,
+                EquitySnapshotORM.account_type == account_type_str,
             ).order_by(EquitySnapshotORM.date.desc()).first()
             return snapshot.equity if snapshot else 0.0
         except Exception:
@@ -1934,11 +1975,13 @@ async def get_dashboard_summary(
     
     # Fallback: if no snapshots exist yet, use realized + unrealized
     def get_realized_pnl_since(since: datetime) -> float:
-        """Get realized P&L from closed positions since a date."""
+        """Get realized P&L from closed positions since a date, scoped to
+        the current account_type."""
         try:
             result = db.query(func.sum(PositionORM.realized_pnl)).filter(
                 PositionORM.closed_at.isnot(None),
-                PositionORM.closed_at >= since
+                PositionORM.closed_at >= since,
+                PositionORM.account_type == account_type_str,
             ).scalar()
             return float(result) if result else 0.0
         except Exception:
@@ -1947,7 +1990,8 @@ async def get_dashboard_summary(
     all_time_realized = 0.0
     try:
         result = db.query(func.sum(PositionORM.realized_pnl)).filter(
-            PositionORM.closed_at.isnot(None)
+            PositionORM.closed_at.isnot(None),
+            PositionORM.account_type == account_type_str,
         ).scalar()
         all_time_realized = float(result) if result else 0.0
     except Exception:
@@ -1984,7 +2028,11 @@ async def get_dashboard_summary(
     # Save today's equity snapshot (updates on every dashboard load for freshness)
     try:
         today_str = now.strftime("%Y-%m-%d")
-        existing_snap = db.query(EquitySnapshotORM).filter_by(date=today_str).first()
+        existing_snap = db.query(EquitySnapshotORM).filter_by(
+            date=today_str,
+            account_type=account_type_str,
+            snapshot_type='daily',
+        ).first()
         if existing_snap:
             existing_snap.equity = equity
             existing_snap.balance = balance
@@ -1994,6 +2042,8 @@ async def get_dashboard_summary(
         else:
             db.add(EquitySnapshotORM(
                 date=today_str,
+                snapshot_type='daily',
+                account_type=account_type_str,
                 equity=equity,
                 balance=balance,
                 unrealized_pnl=total_unrealized,
@@ -2011,9 +2061,10 @@ async def get_dashboard_summary(
         ninety_days_ago = now - timedelta(days=90)
         ninety_days_str = ninety_days_ago.strftime("%Y-%m-%d")
 
-        # Fetch snapshots based on interval
+        # Fetch snapshots based on interval, scoped to the current account
         all_snaps = db.query(EquitySnapshotORM).filter(
-            EquitySnapshotORM.date >= ninety_days_str
+            EquitySnapshotORM.date >= ninety_days_str,
+            EquitySnapshotORM.account_type == account_type_str,
         ).order_by(EquitySnapshotORM.date.asc()).all()
 
         if interval in ('1h', '4h'):
@@ -2074,7 +2125,8 @@ async def get_dashboard_summary(
             # Fallback: build from closed positions (less accurate — realized only)
             closed_positions = db.query(PositionORM).filter(
                 PositionORM.closed_at.isnot(None),
-                PositionORM.closed_at >= ninety_days_ago
+                PositionORM.closed_at >= ninety_days_ago,
+                PositionORM.account_type == account_type_str,
             ).order_by(PositionORM.closed_at.asc()).all()
 
             daily_pnl_map: dict = {}
@@ -2224,19 +2276,22 @@ async def get_dashboard_summary(
 
     # --- Quick Stats ---
     pending_orders = db.query(OrderORM).filter(
-        or_(OrderORM.status == "PENDING", OrderORM.status == "SUBMITTED")
+        or_(OrderORM.status == "PENDING", OrderORM.status == "SUBMITTED"),
+        OrderORM.account_type == account_type_str,
     ).count()
 
     todays_trades = db.query(OrderORM).filter(
         OrderORM.status == "FILLED",
-        OrderORM.filled_at >= today_start
+        OrderORM.filled_at >= today_start,
+        OrderORM.account_type == account_type_str,
     ).count()
 
     # Win rate last 30 days
     thirty_days_ago = now - timedelta(days=30)
     recent_closed = db.query(PositionORM).filter(
         PositionORM.closed_at.isnot(None),
-        PositionORM.closed_at >= thirty_days_ago
+        PositionORM.closed_at >= thirty_days_ago,
+        PositionORM.account_type == account_type_str,
     ).all()
     wins = sum(1 for p in recent_closed if (p.realized_pnl or 0) > 0)
     win_rate = (wins / len(recent_closed) * 100) if recent_closed else 0
@@ -2246,7 +2301,8 @@ async def get_dashboard_summary(
     try:
         thirty_days_str = thirty_days_ago.strftime("%Y-%m-%d")
         snap_30d = db.query(EquitySnapshotORM).filter(
-            EquitySnapshotORM.date >= thirty_days_str
+            EquitySnapshotORM.date >= thirty_days_str,
+            EquitySnapshotORM.account_type == account_type_str,
         ).order_by(EquitySnapshotORM.date.asc()).all()
         if snap_30d and len(snap_30d) >= 10:
             daily_rets = []
@@ -2274,6 +2330,69 @@ async def get_dashboard_summary(
         win_rate_30d=round(win_rate, 1),
         sharpe_30d=sharpe_30d,
     )
+
+    # ── LIVE real-dollar conversion ────────────────────────────────────────
+    # Every dollar the handler computed so far is virtual (eToro reports the
+    # Agent Portfolio's virtual balance of ~$10K). The CIO cares about REAL
+    # money on the Command page, so multiply all dollar fields by the mirror
+    # ratio before returning. Percentages (P&L %, win rate, drawdown %,
+    # allocation %) are unit-less and don't need scaling — one ratio cancels
+    # out top and bottom.
+    #
+    # /live/summary still exposes both sides explicitly (virtual_* and real_*)
+    # for the Book → Live surface; this block only rescales the single-value
+    # dashboard shape.
+    if mode == TradingMode.LIVE:
+        mirror_ratio = 0.10  # default matches autonomous_trading.yaml
+        try:
+            import yaml
+            from pathlib import Path
+            cfg_path = Path("config/autonomous_trading.yaml")
+            if cfg_path.exists():
+                with open(cfg_path, 'r') as f:
+                    _lt_cfg = (yaml.safe_load(f) or {}).get('live_trading', {})
+                mirror_ratio = float(_lt_cfg.get('mirror_ratio', 0.10))
+        except Exception:
+            pass
+
+        balance = round(balance * mirror_ratio, 2)
+        equity = round(equity * mirror_ratio, 2)
+        available_cash = round(available_cash * mirror_ratio, 2)
+        total_unrealized = round(total_unrealized * mirror_ratio, 2)
+        total_invested = round(total_invested * mirror_ratio, 2)
+
+        # P&L periods — scale absolute dollars, leave percentages unchanged.
+        pnl_periods = [
+            PnLPeriod(
+                label=p.label,
+                pnl_absolute=round(p.pnl_absolute * mirror_ratio, 2),
+                pnl_percent=p.pnl_percent,
+            )
+            for p in pnl_periods
+        ]
+
+        # Equity curve — scale each point's equity + realized fields.
+        equity_curve = [
+            EquityPoint(
+                date=pt.date,
+                equity=round(pt.equity * mirror_ratio, 2),
+                realized=round(pt.realized * mirror_ratio, 2) if pt.realized is not None else None,
+                benchmark=pt.benchmark,
+            )
+            for pt in equity_curve
+        ]
+
+        # Sector exposure — pnl scales; allocation_pct and pnl_pct are ratios.
+        sector_exposure = [
+            SectorExposure(
+                sector=s.sector,
+                allocation_pct=s.allocation_pct,
+                pnl=round(s.pnl * mirror_ratio, 2),
+                pnl_pct=s.pnl_pct,
+                position_count=s.position_count,
+            )
+            for s in sector_exposure
+        ]
 
     return DashboardSummaryResponse(
         pnl_periods=pnl_periods,
@@ -2534,8 +2653,9 @@ async def get_metrics_bar(
     except Exception:
         pass
 
-    # Positions: no mode column on positions table — just count open ones
-    # Strategies: no mode column on strategies table either
+    # Positions: scope by account_type so LIVE doesn't count DEMO positions.
+    # Strategies: the library is shared across modes — no mode filter.
+    account_type_str = "live" if mode == TradingMode.LIVE else "demo"
     open_count = 0
     active_count = 0
     try:
@@ -2543,6 +2663,7 @@ async def get_metrics_bar(
         from src.models.orm import StrategyORM as _StrategyORM
         open_count = db.query(_func.count(PositionORM.id)).filter(
             PositionORM.closed_at.is_(None),
+            PositionORM.account_type == account_type_str,
         ).scalar() or 0
         active_count = db.query(_func.count(_StrategyORM.id)).filter(
             _StrategyORM.status.in_(["PAPER", "LIVE", "ACTIVE"]),
@@ -2561,6 +2682,24 @@ async def get_metrics_bar(
                 regime_str = (yaml.safe_load(f) or {}).get('market_regime', {}).get('current', 'unknown')
     except Exception:
         pass
+
+    # LIVE real-dollar conversion — mirror ratio applied at egress so the
+    # TopNavBar shows what the CIO's real account is worth. See the same
+    # block in /account/dashboard/summary for the rationale.
+    if mode == TradingMode.LIVE:
+        mirror_ratio = 0.10
+        try:
+            import yaml
+            from pathlib import Path
+            cfg_path = Path("config/autonomous_trading.yaml")
+            if cfg_path.exists():
+                with open(cfg_path, 'r') as f:
+                    _lt_cfg = (yaml.safe_load(f) or {}).get('live_trading', {})
+                mirror_ratio = float(_lt_cfg.get('mirror_ratio', 0.10))
+        except Exception:
+            pass
+        equity = equity * mirror_ratio
+        daily_pnl = daily_pnl * mirror_ratio
 
     return {
         "equity": round(equity, 2),
