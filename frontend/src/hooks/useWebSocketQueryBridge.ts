@@ -60,6 +60,28 @@ export function useWebSocketQueryBridge() {
       }),
     )
 
+    // Signal pushes: invalidate the /signals/recent cache so the SignalFeed
+    // seed stays honest across reconnects / rejections, on top of the direct
+    // subscription inside the feed component for the rolling buffer.
+    unsubs.push(
+      wsManager.on('signal_generated', () => {
+        qc.invalidateQueries({ queryKey: ['recent-signals'] })
+        qc.invalidateQueries({ queryKey: ['dashboard-recent-signals'] })
+      }),
+    )
+
+    // Live account rows are sensitive to position / order pushes.
+    unsubs.push(
+      wsManager.on('position_update', () => {
+        qc.invalidateQueries({ queryKey: ['live-summary'] })
+      }),
+    )
+    unsubs.push(
+      wsManager.on('order_update', () => {
+        qc.invalidateQueries({ queryKey: ['live-summary'] })
+      }),
+    )
+
     // On reconnect, refresh top-level queries and notify the user.
     let wasOpen = false
     let offlineSince: number | null = null
@@ -77,6 +99,10 @@ export function useWebSocketQueryBridge() {
           qc.invalidateQueries({ queryKey: ['account-info'] })
           qc.invalidateQueries({ queryKey: ['autonomous-status'] })
           qc.invalidateQueries({ queryKey: ['system-status'] })
+          qc.invalidateQueries({ queryKey: ['dashboard'] })
+          qc.invalidateQueries({ queryKey: ['analytics-performance'] })
+          qc.invalidateQueries({ queryKey: ['live-summary'] })
+          qc.invalidateQueries({ queryKey: ['recent-signals'] })
           offlineSince = null
         }
         wasOpen = state === 'open'
