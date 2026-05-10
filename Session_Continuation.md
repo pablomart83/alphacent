@@ -15,8 +15,18 @@
 | 0 | Foundation: design system, primitives, 5-surface IA shell, WS + Query client | ✅ SHIPPED | `1171d41` |
 | 1 | Command — Pulse + Equity + Stream (the "now" surface) | ✅ SHIPPED | `d297d85` |
 | 2 | Book / Positions — 4 sub-tabs, allocation panel, detail drill-down | ✅ SHIPPED | `ae2c78f` |
-| 3 | Book / Orders + Execution | Next |  |
-| 4-12 | per `FRONTEND_REBUILD_SPEC.md §3E` | Pending |  |
+| 3 | Book / Orders + Execution | ✅ SHIPPED | `c9006ee` |
+| 4 | Book / Live | Next |  |
+| 5-12 | per `FRONTEND_REBUILD_SPEC.md §3E` | Pending |  |
+
+Sprint 3 highlights:
+- Orders tab with 3 sub-tabs (All · Pending · Cancelled/Failed), full filter + bulk + CSV + per-row actions
+- Manual 2-step order dialog wired to `POST /orders`
+- Pending sub-tab shows market-status strip (Stocks/ETFs/Forex/Crypto/Indices/Commodities) via a client-side classifier in `lib/market-hours.ts`
+- Cancelled/Failed sub-tab surfaces the known market-closed-FAILED cosmetic honestly
+- Execution tab: 6 tiles, slippage trend (P50/P75/P95) Recharts line, Visx dow×hour heatmap with diverging colour scale, by-strategy bar, rejection reasons bar, fill-time buckets, per-asset-class strip, worst-20 table
+- All execution analytics are computed client-side from the orders list — single source of truth, no backend additions, honest sample-coverage strip when slippage data is sparse
+- Book chunk 114kB / 29kB gz; vendor-charts 562kB / 171kB gz (Recharts 3 first use)
 
 Sprint 2 highlights:
 - DataTable primitive: TanStack Table + Virtual, auto-virtualize >100 rows, sort, multi-select, sticky header, density, row menu — the foundation for every table in Sprints 3+
