@@ -14,7 +14,7 @@ const Command = lazy(() => import('./pages/command/Command').then((m) => ({ defa
 const Book = lazy(() => import('./pages/book/Book').then((m) => ({ default: m.Book })))
 const Strategies = lazy(() => import('./pages/strategies/Strategies').then((m) => ({ default: m.Strategies })))
 const Guard = lazy(() => import('./pages/guard/Guard').then((m) => ({ default: m.Guard })))
-const Research = lazy(() => import('./pages/ComingSoon').then((m) => ({ default: () => <m.ComingSoon surface="Research" sprint={10} description="Performance, attribution, regime, tear sheet, stress, journal." /> })))
+const Research = lazy(() => import('./pages/research/Research').then((m) => ({ default: m.Research })))
 const Settings = lazy(() => import('./pages/ComingSoon').then((m) => ({ default: () => <m.ComingSoon surface="Settings" sprint={12} /> })))
 const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })))
 
