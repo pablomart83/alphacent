@@ -891,6 +891,43 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
+  async getLiveTradingConfig(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>('/config/live-trading');
+    return this.handleResponse(response);
+  }
+
+  async updateLiveTradingConfig(config: any): Promise<any> {
+    const response = await this.client.put<ApiResponse<any>>('/config/live-trading', config);
+    return this.handleResponse(response);
+  }
+
+  async getGraduationQueue(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>('/strategies/graduation-queue');
+    return this.handleResponse(response);
+  }
+
+  async graduateStrategy(strategyId: string, payload: {
+    symbol: string;
+    position_size: number;
+    sl_pct: number;
+    tp_pct: number;
+    conviction_min: number;
+    notes?: string;
+  }): Promise<any> {
+    const response = await this.client.post<ApiResponse<any>>(`/strategies/${strategyId}/graduate`, payload);
+    return this.handleResponse(response);
+  }
+
+  async rejectGraduation(strategyId: string, payload: { symbol: string; notes?: string }): Promise<any> {
+    const response = await this.client.post<ApiResponse<any>>(`/strategies/${strategyId}/reject-graduation`, payload);
+    return this.handleResponse(response);
+  }
+
+  async getLiveStrategies(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>('/strategies/live');
+    return this.handleResponse(response);
+  }
+
   // Schedule endpoints
   async getAutonomousSchedule(): Promise<{
     success: boolean;

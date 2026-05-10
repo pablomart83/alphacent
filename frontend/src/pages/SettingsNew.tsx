@@ -280,6 +280,25 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
   // (cost model, validation rules, symbol counts, data source status).
   // Populated by the /config/autonomous GET response.
   const [autonomousAdvanced, setAutonomousAdvanced] = useState<any>(null);
+
+  // Live Trading config state
+  const [liveConfig, setLiveConfig] = useState<{
+    enabled: boolean;
+    virtual_balance: number;
+    real_investment: number;
+    mirror_ratio: number;
+    base_risk_pct: number;
+    min_order_size: number;
+    max_order_size: number;
+    symbol_cap_pct: number;
+    portfolio_heat_cap: number;
+    conviction_threshold: number;
+    real_per_virtual_order: number;
+    max_real_per_order: number;
+    live_client_configured: boolean;
+  } | null>(null);
+  const [liveConfigSaving, setLiveConfigSaving] = useState(false);
+  const [liveConfigDirty, setLiveConfigDirty] = useState(false);
   
   // Alert configuration state
   const [alertConfig, setAlertConfig] = useState({
@@ -563,6 +582,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         autonomousConfig,
         apiUsageData,
         alertConfigData,
+        liveConfigData,
       ] = await Promise.all([
         apiClient.getAppConfig().catch(err => { console.error('Failed to load app config:', err); return null; }),
         contextTradingMode ? apiClient.getRiskConfig(contextTradingMode).catch(err => { console.error('Failed to load risk config:', err); return null; }) as Promise<any> : Promise.resolve(null),
@@ -570,6 +590,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
         apiClient.getAutonomousConfig().catch(err => { console.error('Failed to load autonomous config:', err); return null; }),
         apiClient.getAlphaEdgeApiUsage().catch(err => { console.error('Failed to load API usage:', err); return null; }),
         apiClient.getAlertConfig().catch(() => null),
+        apiClient.getLiveTradingConfig().catch(() => null),
       ]);
 
       if (riskConfig) {
@@ -800,6 +821,11 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
 
       if (alertConfigData) {
         setAlertConfig(prev => ({ ...prev, ...alertConfigData }));
+      }
+
+      if (liveConfigData) {
+        setLiveConfig(liveConfigData);
+        setLiveConfigDirty(false);
       }
       
       setLastUpdated(new Date());
@@ -1373,6 +1399,10 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
             <TabsTrigger value="shortcuts" className="flex items-center gap-2">
               <Keyboard className="h-4 w-4" />
               <span className="hidden sm:inline">Shortcuts</span>
+            </TabsTrigger>
+            <TabsTrigger value="live-trading" className="flex items-center gap-2">
+              <Activity className="h-4 w-4 text-green-400" />
+              <span className="hidden sm:inline">Live Trading</span>
             </TabsTrigger>
           </TabsList>
             {headerActions}
@@ -3745,6 +3775,167 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                   })}
                 </div>
           </TabsContent>
+
+          {/* Live Trading Tab */}
+          <TabsContent value="live-trading" className="space-y-4">
+            <SectionLabel>Live Trading Configuration</SectionLabel>
+            <p className="text-xs text-gray-500 mb-3">
+              Configure the Agent Portfolio live trading parameters. These map directly to the <code className="bg-gray-800 px-1 rounded">live_trading</code> section of <code className="bg-gray-800 px-1 rounded">autonomous_trading.yaml</code>.
+            </p>
+
+            {!liveConfig?.live_client_configured && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-300 mb-4">
+                <div className="font-semibold mb-1">⚠ Live client not configured</div>
+                <div>No live credentials found. Configure eToro Agent Portfolio API keys in the API Config tab first.</div>
+              </div>
+            )}
+
+            {liveConfig && (
+              <div className="space-y-6">
+                {/* Master Switch */}
+                <div className="rounded-lg border border-border/40 p-4 space-y-3">
+                  <div className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Master Switch</div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm text-gray-200">Enable Live Trading</div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        When off, all signals paper-trade on DEMO only. When on, approved (template, symbol) pairs also fire real fills.
+                      </div>
+                    </div>
+                    <Switch
+                      checked={liveConfig.enabled}
+                      onCheckedChange={(v) => { setLiveConfig(c => c ? { ...c, enabled: v } : c); setLiveConfigDirty(true); }}
+                    />
+                  </div>
+                  {liveConfig.enabled && (
+                    <div className="rounded border border-green-500/30 bg-green-500/5 p-2 text-xs text-green-300">
+                      ● Live trading ACTIVE — fills will fire for approved strategies
+                    </div>
+                  )}
+                </div>
+
+                {/* Account Info (read-only) */}
+                <div className="rounded-lg border border-border/40 p-4 space-y-3">
+                  <div className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Agent Portfolio (read-only)</div>
+                  <div className="grid grid-cols-3 gap-4 text-xs">
+                    <div>
+                      <div className="text-gray-500">Virtual Balance</div>
+                      <div className="font-mono text-gray-200 mt-0.5">${liveConfig.virtual_balance.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">Real Investment</div>
+                      <div className="font-mono text-gray-200 mt-0.5">${liveConfig.real_investment.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">Mirror Ratio</div>
+                      <div className="font-mono text-gray-200 mt-0.5">{(liveConfig.mirror_ratio * 100).toFixed(0)}%</div>
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Every $1,000 virtual order = ${(1000 * liveConfig.mirror_ratio).toFixed(0)} real exposure
+                  </div>
+                </div>
+
+                {/* Order Sizing */}
+                <div className="rounded-lg border border-border/40 p-4 space-y-4">
+                  <div className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Order Sizing</div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px]">Min Order Size (virtual $)</Label>
+                      <Input type="number" min={100} max={2000} step={50}
+                        value={liveConfig.min_order_size}
+                        onChange={e => { setLiveConfig(c => c ? { ...c, min_order_size: Number(e.target.value) } : c); setLiveConfigDirty(true); }} />
+                      <p className="text-xs text-gray-500">Real: ${(liveConfig.min_order_size * liveConfig.mirror_ratio).toFixed(0)}</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px]">Max Order Size (virtual $)</Label>
+                      <Input type="number" min={200} max={5000} step={100}
+                        value={liveConfig.max_order_size}
+                        onChange={e => { setLiveConfig(c => c ? { ...c, max_order_size: Number(e.target.value) } : c); setLiveConfigDirty(true); }} />
+                      <p className="text-xs text-gray-500">Real: ${(liveConfig.max_order_size * liveConfig.mirror_ratio).toFixed(0)}</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px]">Symbol Cap (% of virtual balance)</Label>
+                      <Input type="number" min={5} max={50} step={1}
+                        value={liveConfig.symbol_cap_pct}
+                        onChange={e => { setLiveConfig(c => c ? { ...c, symbol_cap_pct: Number(e.target.value) } : c); setLiveConfigDirty(true); }} />
+                      <p className="text-xs text-gray-500">Max ${(liveConfig.virtual_balance * liveConfig.symbol_cap_pct / 100).toFixed(0)} virtual per symbol</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px]">Portfolio Heat Cap (% of virtual balance)</Label>
+                      <Input type="number" min={20} max={100} step={5}
+                        value={liveConfig.portfolio_heat_cap}
+                        onChange={e => { setLiveConfig(c => c ? { ...c, portfolio_heat_cap: Number(e.target.value) } : c); setLiveConfigDirty(true); }} />
+                      <p className="text-xs text-gray-500">Max ${(liveConfig.virtual_balance * liveConfig.portfolio_heat_cap / 100).toFixed(0)} virtual deployed</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Risk Parameters */}
+                <div className="rounded-lg border border-border/40 p-4 space-y-4">
+                  <div className="text-xs font-semibold text-gray-300 uppercase tracking-wide">Risk Parameters</div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px]">Base Risk % per Trade</Label>
+                      <Input type="number" min={0.1} max={5} step={0.1}
+                        value={liveConfig.base_risk_pct}
+                        onChange={e => { setLiveConfig(c => c ? { ...c, base_risk_pct: Number(e.target.value) } : c); setLiveConfigDirty(true); }} />
+                      <p className="text-xs text-gray-500">% of virtual equity risked per trade</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px]">Conviction Threshold (min score)</Label>
+                      <Input type="number" min={60} max={100} step={1}
+                        value={liveConfig.conviction_threshold}
+                        onChange={e => { setLiveConfig(c => c ? { ...c, conviction_threshold: Number(e.target.value) } : c); setLiveConfigDirty(true); }} />
+                      <p className="text-xs text-gray-500">Signals below this score skip live fills</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Save */}
+                <div className="flex gap-3">
+                  <Button
+                    disabled={!liveConfigDirty || liveConfigSaving}
+                    onClick={async () => {
+                      setLiveConfigSaving(true);
+                      try {
+                        await apiClient.updateLiveTradingConfig({
+                          enabled: liveConfig.enabled,
+                          min_order_size: liveConfig.min_order_size,
+                          max_order_size: liveConfig.max_order_size,
+                          symbol_cap_pct: liveConfig.symbol_cap_pct,
+                          portfolio_heat_cap: liveConfig.portfolio_heat_cap,
+                          base_risk_pct: liveConfig.base_risk_pct,
+                          conviction_threshold: liveConfig.conviction_threshold,
+                        });
+                        setLiveConfigDirty(false);
+                        toast.success('Live trading configuration saved');
+                      } catch (err: any) {
+                        toast.error(`Failed to save: ${err.message}`);
+                      } finally {
+                        setLiveConfigSaving(false);
+                      }
+                    }}
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {liveConfigSaving ? 'Saving...' : 'Save Live Config'}
+                  </Button>
+                  <Button variant="outline" disabled={!liveConfigDirty}
+                    onClick={() => { apiClient.getLiveTradingConfig().then(setLiveConfig).catch(() => {}); setLiveConfigDirty(false); }}>
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Reset
+                  </Button>
+                </div>
+
+                {/* TSL note */}
+                <div className="rounded border border-gray-700/40 bg-gray-800/20 p-3 text-xs text-gray-500 space-y-1">
+                  <div className="font-medium text-gray-400">Stop-Loss Architecture</div>
+                  <div>eToro LIVE API has no SL-update endpoint (confirmed 2026-05-10). Trailing stops are enforced DB-side — the monitoring service closes positions when price breaches the DB stop level. The initial SL set at order open time is the outage backstop only (eToro may widen it beyond your requested level).</div>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
         </Tabs>
       </div>
 

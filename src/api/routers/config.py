@@ -1688,3 +1688,129 @@ async def update_autonomous_config(
 
     return CredentialsResponse(success=True, message="Autonomous configuration updated")
 
+
+# ── Phase 2: Live Trading Config endpoints ────────────────────────────────────
+
+class LiveTradingConfigResponse(BaseModel):
+    """Live trading configuration response."""
+    enabled: bool = False
+    virtual_balance: float = 10000.0
+    real_investment: float = 1000.0
+    mirror_ratio: float = 0.10
+    base_risk_pct: float = 0.6          # percentage (yaml: 0.006)
+    min_order_size: float = 200.0
+    max_order_size: float = 1500.0
+    symbol_cap_pct: float = 20.0        # percentage (yaml: 0.20)
+    portfolio_heat_cap: float = 90.0    # percentage (yaml: 0.90)
+    conviction_threshold: int = 74
+    # Computed read-only fields
+    real_per_virtual_order: float = 0.0  # min_order_size * mirror_ratio
+    max_real_per_order: float = 0.0      # max_order_size * mirror_ratio
+    live_client_configured: bool = False
+
+
+class LiveTradingConfigRequest(BaseModel):
+    """Live trading configuration update request. All fields optional."""
+    enabled: Optional[bool] = None
+    virtual_balance: Optional[float] = None
+    real_investment: Optional[float] = None
+    mirror_ratio: Optional[float] = None
+    base_risk_pct: Optional[float] = None       # percentage (0-100)
+    min_order_size: Optional[float] = None
+    max_order_size: Optional[float] = None
+    symbol_cap_pct: Optional[float] = None      # percentage (0-100)
+    portfolio_heat_cap: Optional[float] = None  # percentage (0-100)
+    conviction_threshold: Optional[int] = None
+
+
+@router.get("/live-trading", response_model=LiveTradingConfigResponse)
+async def get_live_trading_config(
+    username: str = Depends(get_current_user),
+    config: Configuration = Depends(get_configuration),
+):
+    """Read live_trading section from autonomous_trading.yaml."""
+    import yaml
+    from pathlib import Path
+
+    config_file = Path(config.config_dir) / "autonomous_trading.yaml"
+    full_config: Dict[str, Any] = {}
+    if config_file.exists():
+        with open(config_file, "r") as f:
+            full_config = yaml.safe_load(f) or {}
+
+    lt = full_config.get("live_trading", {}) or {}
+
+    # Check if live client is actually configured
+    live_client_configured = False
+    try:
+        from src.api.app import get_live_etoro_client
+        live_client_configured = get_live_etoro_client() is not None
+    except Exception:
+        pass
+
+    min_order = float(lt.get("min_order_size", 200))
+    max_order = float(lt.get("max_order_size", 1500))
+    mirror = float(lt.get("mirror_ratio", 0.10))
+
+    return LiveTradingConfigResponse(
+        enabled=bool(lt.get("enabled", False)),
+        virtual_balance=float(lt.get("virtual_balance", 10000)),
+        real_investment=float(lt.get("real_investment", 1000)),
+        mirror_ratio=mirror,
+        base_risk_pct=float(lt.get("base_risk_pct", 0.006)) * 100,
+        min_order_size=min_order,
+        max_order_size=max_order,
+        symbol_cap_pct=float(lt.get("symbol_cap_pct", 0.20)) * 100,
+        portfolio_heat_cap=float(lt.get("portfolio_heat_cap", 0.90)) * 100,
+        conviction_threshold=int(lt.get("conviction_threshold", 74)),
+        real_per_virtual_order=round(min_order * mirror, 2),
+        max_real_per_order=round(max_order * mirror, 2),
+        live_client_configured=live_client_configured,
+    )
+
+
+@router.put("/live-trading", response_model=CredentialsResponse)
+async def update_live_trading_config(
+    request: LiveTradingConfigRequest,
+    username: str = Depends(get_current_user),
+    config: Configuration = Depends(get_configuration),
+):
+    """Update live_trading section in autonomous_trading.yaml."""
+    import yaml
+    from pathlib import Path
+
+    config_file = Path(config.config_dir) / "autonomous_trading.yaml"
+    full_config: Dict[str, Any] = {}
+    if config_file.exists():
+        with open(config_file, "r") as f:
+            full_config = yaml.safe_load(f) or {}
+
+    full_config.setdefault("live_trading", {})
+    lt = full_config["live_trading"]
+
+    if request.enabled is not None:
+        lt["enabled"] = request.enabled
+    if request.virtual_balance is not None:
+        lt["virtual_balance"] = float(request.virtual_balance)
+    if request.real_investment is not None:
+        lt["real_investment"] = float(request.real_investment)
+    if request.mirror_ratio is not None:
+        lt["mirror_ratio"] = float(request.mirror_ratio)
+    if request.base_risk_pct is not None:
+        lt["base_risk_pct"] = float(request.base_risk_pct) / 100.0
+    if request.min_order_size is not None:
+        lt["min_order_size"] = float(request.min_order_size)
+    if request.max_order_size is not None:
+        lt["max_order_size"] = float(request.max_order_size)
+    if request.symbol_cap_pct is not None:
+        lt["symbol_cap_pct"] = float(request.symbol_cap_pct) / 100.0
+    if request.portfolio_heat_cap is not None:
+        lt["portfolio_heat_cap"] = float(request.portfolio_heat_cap) / 100.0
+    if request.conviction_threshold is not None:
+        lt["conviction_threshold"] = int(request.conviction_threshold)
+
+    with open(config_file, "w") as f:
+        yaml.dump(full_config, f, default_flow_style=False, sort_keys=False)
+
+    logger.info(f"Live trading config updated by {username}: {request.model_dump(exclude_none=True)}")
+    return CredentialsResponse(success=True, message="Live trading configuration updated")

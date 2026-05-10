@@ -208,6 +208,9 @@ export const MetricsBar: FC = memo(() => {
         </>
       )}
 
+      {/* Live account pill — shows when live client is configured */}
+      <LivePill />
+
       {/* Condensed Multi-Timeframe at > 1440px */}
       <div className="hidden 2xl:flex items-center gap-1 ml-auto shrink-0">
         <Sep />
@@ -228,3 +231,45 @@ export const MetricsBar: FC = memo(() => {
 const Sep: FC<{ className?: string }> = ({ className }) => (
   <div className={cn('w-px h-3 bg-gray-700/60 shrink-0', className)} />
 );
+
+// Live account pill — fetches live config once on mount, shows when live client is configured
+const LivePill: FC = memo(() => {
+  const [liveConfig, setLiveConfig] = useState<{
+    enabled: boolean;
+    virtual_balance: number;
+    real_investment: number;
+    live_client_configured: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    apiClient.getLiveTradingConfig().then(setLiveConfig).catch(() => {});
+  }, []);
+
+  if (!liveConfig?.live_client_configured) return null;
+
+  return (
+    <>
+      <Sep />
+      <div className="flex items-center gap-1 shrink-0">
+        <span
+          className={cn(
+            'text-xs font-mono font-semibold px-1.5 py-0.5 rounded border',
+            liveConfig.enabled
+              ? 'bg-green-500/15 text-green-400 border-green-500/30'
+              : 'bg-gray-700/40 text-gray-500 border-gray-600/40'
+          )}
+          title={liveConfig.enabled
+            ? `Live trading ACTIVE — $${liveConfig.virtual_balance.toLocaleString()} virtual / $${liveConfig.real_investment.toLocaleString()} real`
+            : 'Live client configured but disabled (master switch off)'}
+        >
+          {liveConfig.enabled ? '● LIVE' : '○ LIVE OFF'}
+        </span>
+        {liveConfig.enabled && (
+          <span className="text-xs font-mono text-gray-500 hidden xl:inline">
+            ${liveConfig.real_investment.toLocaleString()} real
+          </span>
+        )}
+      </div>
+    </>
+  );
+});

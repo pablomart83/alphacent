@@ -296,6 +296,14 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   // Active tab state for main panel
   const [autoTab, setAutoTab] = useState<string>('control');
 
+  // Graduation Gate state
+  const [graduationQueue, setGraduationQueue] = useState<any[]>([]);
+  const [liveStrategies, setLiveStrategies] = useState<any[]>([]);
+  const [graduationLoading, setGraduationLoading] = useState(false);
+  const [selectedGradCandidate, setSelectedGradCandidate] = useState<any | null>(null);
+  const [gradForm, setGradForm] = useState({ position_size: 500, sl_pct: 6, tp_pct: 15, conviction_min: 74, notes: '' });
+  const [gradSubmitting, setGradSubmitting] = useState(false);
+
   // Schedule editing state — no longer needed (handled inline in SchedulerPanel)
 
   // Fetch all data
@@ -370,6 +378,14 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
       apiClient.getWalkForwardAnalytics(tradingMode, walkForwardPeriod).then((data) => {
         setWalkForwardData(data);
       }).catch(() => setWalkForwardData(null)).finally(() => setWalkForwardLoading(false));
+
+      // Fetch graduation queue in background
+      apiClient.getGraduationQueue().then((res) => {
+        setGraduationQueue(res?.queue ?? []);
+      }).catch(() => {});
+      apiClient.getLiveStrategies().then((res) => {
+        setLiveStrategies(res?.live_strategies ?? []);
+      }).catch(() => {});
     } catch (err) {
       console.error('Failed to fetch autonomous data:', err);
       setError(classifyError(err, 'autonomous data'));
@@ -632,6 +648,43 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
   // Legacy toggle removed — SchedulerPanel handles inline
 
   // Remove legacy handleSaveSchedule / useEffect for editFrequency etc.
+
+  const handleApproveGraduation = async () => {
+    if (!selectedGradCandidate) return;
+    if (!window.confirm(`Approve ${selectedGradCandidate.template_name} / ${selectedGradCandidate.symbol} for LIVE trading?\n\nVirtual order: $${gradForm.position_size} → Real: $${(gradForm.position_size * 0.10).toFixed(0)}`)) return;
+    setGradSubmitting(true);
+    try {
+      await apiClient.graduateStrategy(selectedGradCandidate.strategy_id, {
+        symbol: selectedGradCandidate.symbol,
+        position_size: gradForm.position_size,
+        sl_pct: gradForm.sl_pct / 100,
+        tp_pct: gradForm.tp_pct / 100,
+        conviction_min: gradForm.conviction_min,
+        notes: gradForm.notes || undefined,
+      });
+      toast.success(`✅ ${selectedGradCandidate.symbol} approved for live trading`);
+      setSelectedGradCandidate(null);
+      const [qRes, lRes] = await Promise.all([apiClient.getGraduationQueue(), apiClient.getLiveStrategies()]);
+      setGraduationQueue(qRes?.queue ?? []);
+      setLiveStrategies(lRes?.live_strategies ?? []);
+    } catch (err: any) {
+      toast.error(`Graduation failed: ${err.message}`);
+    } finally {
+      setGradSubmitting(false);
+    }
+  };
+
+  const handleRejectGraduation = async (candidate: any) => {
+    if (!window.confirm(`Reject ${candidate.template_name} / ${candidate.symbol}? 14-day cooldown applies.`)) return;
+    try {
+      await apiClient.rejectGraduation(candidate.strategy_id, { symbol: candidate.symbol });
+      toast.success(`Rejected — ${candidate.symbol} won't appear for 14 days`);
+      const res = await apiClient.getGraduationQueue();
+      setGraduationQueue(res?.queue ?? []);
+    } catch (err: any) {
+      toast.error(`Rejection failed: ${err.message}`);
+    }
+  };
 
   const handleRefreshSignals = async () => {
     if (!tradingMode) return;
@@ -928,6 +981,7 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
     { value: 'performance', label: 'Performance' },
     { value: 'walkforward', label: 'Walk-Forward' },
     { value: 'conviction', label: 'Conviction' },
+    { value: 'graduation', label: `🎓 Graduation${graduationQueue.length > 0 ? ` (${graduationQueue.length})` : ''}` },
   ];
 
   const mainPanel = (
@@ -1643,6 +1697,167 @@ export const AutonomousNew: FC<AutonomousNewProps> = ({ onLogout }) => {
                     );
                   })()}
             </TabsContent>
+
+            {/* Tab 8: Graduation Gate */}
+            <TabsContent value="graduation" className="space-y-3 p-2">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">🎓 Graduation Gate — Live Trading Approvals</div>
+                <button onClick={async () => {
+                  setGraduationLoading(true);
+                  try {
+                    const [qRes, lRes] = await Promise.all([apiClient.getGraduationQueue(), apiClient.getLiveStrategies()]);
+                    setGraduationQueue(qRes?.queue ?? []);
+                    setLiveStrategies(lRes?.live_strategies ?? []);
+                  } finally { setGraduationLoading(false); }
+                }} className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors">
+                  <RefreshCw size={12} className={cn(graduationLoading && 'animate-spin')} />
+                </button>
+              </div>
+
+              {/* HARD GATE warning */}
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-300 space-y-1">
+                <div className="font-semibold">⚠ HARD GATE</div>
+                <div>Live fills only fire when <code className="bg-gray-800 px-1 rounded">live_trading.enabled = true</code> in Settings → Live Trading. Approving a strategy here is necessary but not sufficient — the master switch must also be on.</div>
+              </div>
+
+              {/* Qualification Queue */}
+              <div className="text-xs font-medium text-gray-400 mt-3 mb-1">Qualified Candidates ({graduationQueue.length})</div>
+              {graduationQueue.length === 0 ? (
+                <div className="text-xs text-muted-foreground py-4 text-center">
+                  No strategies qualify yet. Criteria: ≥20 paper trades, paper Sharpe ≥60% of WF Sharpe, win rate ≥45%, P&L &gt; 0.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {graduationQueue.map((c: any) => (
+                    <div key={`${c.strategy_id}-${c.symbol}`}
+                      className={cn('rounded-lg border p-3 cursor-pointer transition-colors',
+                        selectedGradCandidate?.strategy_id === c.strategy_id && selectedGradCandidate?.symbol === c.symbol
+                          ? 'border-blue-500/60 bg-blue-500/10'
+                          : 'border-border/40 bg-muted/10 hover:border-border/70'
+                      )}
+                      onClick={() => {
+                        setSelectedGradCandidate(c);
+                        setGradForm({ position_size: 500, sl_pct: 6, tp_pct: 15, conviction_min: 74, notes: '' });
+                      }}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-gray-200 truncate">{c.template_name}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">{c.symbol}</div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-xs font-mono text-green-400 font-semibold">
+                            {c.qualification_ratio != null ? `${(c.qualification_ratio * 100).toFixed(0)}%` : '—'}
+                          </span>
+                          <span className="text-xs text-gray-500">ratio</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2 mt-2 text-xs">
+                        <div><span className="text-gray-500">Trades</span><div className="font-mono text-gray-200">{c.paper_trades}</div></div>
+                        <div><span className="text-gray-500">Sharpe</span><div className="font-mono text-gray-200">{c.paper_sharpe?.toFixed(2) ?? '—'}</div></div>
+                        <div><span className="text-gray-500">Win%</span><div className="font-mono text-gray-200">{c.paper_win_rate != null ? `${(c.paper_win_rate * 100).toFixed(0)}%` : '—'}</div></div>
+                        <div><span className="text-gray-500">P&L</span><div className={cn('font-mono', (c.paper_total_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>{c.paper_total_pnl != null ? formatCurrency(c.paper_total_pnl) : '—'}</div></div>
+                      </div>
+                      <div className="flex gap-2 mt-2">
+                        <button onClick={(e) => { e.stopPropagation(); handleRejectGraduation(c); }}
+                          className="flex-1 px-2 py-1 text-xs rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors">
+                          ✗ Reject
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); setSelectedGradCandidate(c); setGradForm({ position_size: 500, sl_pct: 6, tp_pct: 15, conviction_min: 74, notes: '' }); }}
+                          className="flex-1 px-2 py-1 text-xs rounded border border-green-500/30 text-green-400 hover:bg-green-500/10 transition-colors">
+                          ✓ Review
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* CIO Decision Card */}
+              {selectedGradCandidate && (
+                <div className="rounded-lg border border-blue-500/40 bg-blue-500/5 p-4 space-y-3 mt-3">
+                  <div className="text-xs font-semibold text-blue-300">CIO Decision — {selectedGradCandidate.template_name} / {selectedGradCandidate.symbol}</div>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="text-gray-400 block mb-1">Virtual Order Size ($)</label>
+                      <input type="number" min={200} max={1500} step={50}
+                        value={gradForm.position_size}
+                        onChange={e => setGradForm(f => ({ ...f, position_size: Number(e.target.value) }))}
+                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-200 text-xs" />
+                      <div className="text-gray-500 mt-0.5">Real: ${(gradForm.position_size * 0.10).toFixed(0)} (10% mirror)</div>
+                    </div>
+                    <div>
+                      <label className="text-gray-400 block mb-1">Conviction Min</label>
+                      <input type="number" min={60} max={100}
+                        value={gradForm.conviction_min}
+                        onChange={e => setGradForm(f => ({ ...f, conviction_min: Number(e.target.value) }))}
+                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-200 text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-gray-400 block mb-1">Stop Loss (%)</label>
+                      <input type="number" min={1} max={20} step={0.5}
+                        value={gradForm.sl_pct}
+                        onChange={e => setGradForm(f => ({ ...f, sl_pct: Number(e.target.value) }))}
+                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-200 text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-gray-400 block mb-1">Take Profit (%)</label>
+                      <input type="number" min={1} max={50} step={0.5}
+                        value={gradForm.tp_pct}
+                        onChange={e => setGradForm(f => ({ ...f, tp_pct: Number(e.target.value) }))}
+                        className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-200 text-xs" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-xs block mb-1">Notes (optional)</label>
+                    <input type="text" placeholder="Reason for approval..."
+                      value={gradForm.notes}
+                      onChange={e => setGradForm(f => ({ ...f, notes: e.target.value }))}
+                      className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-gray-200 text-xs" />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSelectedGradCandidate(null)}
+                      className="flex-1 px-3 py-1.5 text-xs rounded border border-gray-600 text-gray-400 hover:bg-gray-800 transition-colors">
+                      Cancel
+                    </button>
+                    <button onClick={handleApproveGraduation} disabled={gradSubmitting}
+                      className="flex-1 px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-700 text-white font-semibold transition-colors disabled:opacity-50">
+                      {gradSubmitting ? 'Approving...' : '✓ APPROVE → LIVE'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Active Live Strategies */}
+              {liveStrategies.length > 0 && (
+                <>
+                  <div className="text-xs font-medium text-gray-400 mt-4 mb-1">Active Live Strategies ({liveStrategies.length})</div>
+                  <div className="space-y-2">
+                    {liveStrategies.map((ls: any) => (
+                      <div key={ls.id} className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-semibold text-gray-200">{ls.template_name}</div>
+                            <div className="text-xs text-gray-400">{ls.symbol} · activated {ls.activated_at ? new Date(ls.activated_at).toLocaleDateString() : '—'}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className={cn('text-xs font-mono font-semibold', (ls.live_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
+                              {formatCurrency(ls.live_pnl ?? 0)}
+                            </div>
+                            <div className="text-xs text-gray-500">{ls.live_trades} trades</div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
+                          <div><span className="text-gray-500">Size</span><div className="font-mono text-gray-300">${ls.position_size}</div></div>
+                          <div><span className="text-gray-500">SL</span><div className="font-mono text-gray-300">{(ls.sl_pct * 100).toFixed(1)}%</div></div>
+                          <div><span className="text-gray-500">Divergence</span><div className={cn('font-mono', ls.divergence_pct != null && ls.divergence_pct < 50 ? 'text-red-400' : 'text-gray-300')}>{ls.divergence_pct != null ? `${ls.divergence_pct}%` : '—'}</div></div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </TabsContent>
+
         </div>
       </Tabs>
       </div>
