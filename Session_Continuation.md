@@ -6,45 +6,78 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Read this block first. Two parallel tracks are open.**
+**Frontend rebuild is Sprints 5-12 next. Read `.kiro/steering/trading-system-context.md` and `FRONTEND_REBUILD_SPEC.md` before touching code.**
 
 ### Frontend rebuild progress
 
 | Sprint | Surface / goal | Status | Commit |
 |---|---|---|---|
 | 0 | Foundation: design system, primitives, 5-surface IA shell, WS + Query client | ✅ SHIPPED | `1171d41` |
-| 1 | Command — Pulse + Equity + Stream (the "now" surface) | ✅ SHIPPED | `d297d85` |
+| 1 | Command — Pulse + Equity + Stream | ✅ SHIPPED | `d297d85` |
 | 2 | Book / Positions — 4 sub-tabs, allocation panel, detail drill-down | ✅ SHIPPED | `ae2c78f` |
-| 3 | Book / Orders + Execution | ✅ SHIPPED | `c9006ee` |
-| 4 | Book / Live — master switch, tiles, mirror strip, divergence | ✅ SHIPPED | `f22db70` |
-| 5 | Strategies / Library | Next |  |
-| 6-12 | per `FRONTEND_REBUILD_SPEC.md §3E` | Pending |  |
+| 3 | Book / Orders + Execution — 3 sub-tabs, slippage heatmap, manual order | ✅ SHIPPED | `c9006ee` |
+| 4 | Book / Live — master switch, tiles, mirror strip, divergence cards | ✅ SHIPPED | `f22db70` |
+| 5 | Strategies / Library | **Next** |  |
+| 6 | Strategies / Cycle (autonomous pipeline + funnel) | Pending |  |
+| 7 | Strategies / Templates + Symbols + Graduation (flagship) + Lab | Pending |  |
+| 8 | Guard / Risk + Gates | Pending |  |
+| 9 | Guard / System + Circuit Breakers + Alerts + Audit | Pending |  |
+| 10 | Research / Performance + Attribution + Trades | Pending |  |
+| 11 | Research / Regime + Alpha Edge + Tear Sheet + Stress + Journal | Pending |  |
+| 12 | Settings + cross-cutting polish (palette, shortcuts, a11y) | Pending |  |
 
-Sprint 4 highlights:
-- Live tab is a dedicated sub-surface with a permanent header (MasterSwitchBlock, AccountTiles, MirrorRatioStrip) and 4 URL-synced sub-tabs (Overview, Positions, Orders, Divergence)
-- MasterSwitchBlock: 3 visual states (OFF grey, ON-no-auth amber pulsing, ON-active emerald), confirmation dialogs that spell out mirror math for Enable and explicitly warn "existing positions stay open" for Disable
-- LivePositionsTab has Virtual/Real columns for invested + P&L, a DB-SL honesty banner, and wires close to `POST /live/positions/{id}/close`
-- Orders sub-tab reuses Sprint 3's `AllOrdersTab` with the new `pinMode="LIVE"` prop — no fork
-- Divergence tab: card per authorisation with Paper vs Live side-by-side stats, big divergence % readout, intensity bar with 50% and 100% reference lines, retire action per card
-- Consolidated duplicate `useLiveSummary` between Command and Book (Command now re-exports from useBookData)
-- No backend changes; YAML synced from EC2 first per steering-file exception
-- Book chunk 138kB / 35kB gz; useBookData extracted to its own 12kB chunk
+### Foundation already in place — do not rebuild
 
-Sprint 2 highlights:
-- DataTable primitive: TanStack Table + Virtual, auto-virtualize >100 rows, sort, multi-select, sticky header, density, row menu — the foundation for every table in Sprints 3+
-- Positions tab with 4 URL-synced sub-tabs (Open · Pending closures · Fundamental alerts · Closed) and 70/30 split with AllocationPanel
-- Bulk actions: close selected, close all, CSV export, sync with eToro
-- ModifyRiskDialog wired to a **real** new backend endpoint `PUT /account/positions/{id}/risk-levels` (see below) — no more "not supported" explainer
-- Position detail at `/book/position/:symbol` with TradingView LWC candlestick + order-annotation markers
-- Picked up a dormant bug: `trigger_fundamental_check` was defined without a `@router.post` decorator — registered it under `POST /account/positions/trigger-fundamental-check`
-- Book chunk 65kB / 17kB gzipped (vendor-table 67kB / 19kB gz new dep)
+- **Primitives**: Button, Input, Select, Tabs, Dialog, ConfirmDialog, Popover, DropdownMenu, Tooltip, Switch, Checkbox, Badge, Card, Skeleton, Spinner, EmptyState, ErrorState, Label, Separator, **DataTable** (TanStack Table + Virtual, auto-virtualize >100 rows, sort, multi-select, sticky header, density, row menu)
+- **Layout**: PageTemplate, PanelHeader, ResizablePanelLayout (Zustand-persisted), SectionLabel, MetricGrid, FilterBar, SaveBar
+- **Trading components**: AccountToggle, WebSocketIndicator, TopNavBar, **PnLNumber** (mono tabular-nums + 400 ms flash via keyframes in globals.css), **RegimePill**, **LivePill** (3 states), **ConvictionBar** (mini + default + large, threshold line), **EquityChart** (LWC v5 with drawdown pane, SPY overlay, realised line, period/interval, hover readout), **PriceChart** (LWC candlestick with signal markers), **ModifyRiskDialog**, **SignalFeed**, **OrderFillsTicker**, **LifecycleFeed**, **AlertsBadge**
+- **Hooks**: `useWebSocketQueryBridge` (invalidates `positions`, `orders`, `strategies`, `autonomous-status`, `system-status`, `autonomous-cycles`, `fundamental-alerts`, `recent-signals`, `live-summary`, `dashboard`, reconnect toast + full invalidation), `useKeyboardShortcuts` (g c/b/s/g/r/, + ⌘K), `useWebSocketState`
+- **Stores**: trading-mode, layout, theme, command-palette, filters, notifications, research
+- **Data hooks in `pages/book/useBookData.ts`**: positions (open/pending-open/pending-closures/fundamental-alerts/closed), close / close-all / approve-closure / bulk-approve / dismiss-closure / dismiss-fundamental-alert / sync-positions / modify-position-risk / delete-closed-positions; orders (list/execution-quality/cancel/delete/bulk-delete/close-position-from-order/sync/place); live (summary/config/update-config/divergence/retire-strategy/close-live-position). `AllOrdersTab` accepts `pinMode` so any surface can scope it to DEMO or LIVE without forking.
+- **CSV** (`lib/csv.ts`): RFC-4180 quoting, UTF-8 BOM for Excel
+- **Market hours** (`lib/market-hours.ts`): client-side classifier for UI hints only — not a trading gate
+- **Design tokens** (`lib/design-tokens.ts` + `styles/tokens.css`): every hex from spec §3A plus `regimeColor()` / `convictionColor()` / `pnlColor()` helpers
 
-Backend additions (this session):
-- `PUT /account/positions/{id}/risk-levels` — modify SL/TP with asset-class caps (commit `fccb40f`)
-- `src/risk/sl_caps.py` — shared SL/TP cap helper, single source of truth for stocks/ETFs/crypto/forex/indices/commodities/leveraged-ETF caps
-- `POST /account/positions/trigger-fundamental-check` — registered the existing handler
+### Backend additions since rebuild started (all shipped)
 
-### What was completed this session (2026-05-10)
+- `PUT /account/positions/{id}/risk-levels` — modify SL/TP; server validates asset-class caps, side-sanity, immediate-breach warnings; emits `position_update` WS (commit `fccb40f`)
+- `POST /account/positions/trigger-fundamental-check` — existing handler that was missing a `@router.post` decorator (commit `fccb40f`)
+- `src/risk/sl_caps.py` — shared SL/TP cap helper (stocks/ETFs 9%, leveraged ETFs 20%, crypto 15%, forex 4%, etc.) — single source of truth for both order_executor and the new endpoint
+
+### System state entering next session (as of Sprint 4 shipping)
+
+- **DEMO equity:** ~$491K | **Open positions:** ~63 | **Regime:** `trending_up_strong`
+- **DEMO strategies:** 50 PAPER + 68 BACKTESTED (counts move cycle-to-cycle; run the diagnostic query below for fresh numbers)
+- **LIVE account:** Agent Portfolio | Virtual: $10,000 | Real: $1,000 | Mirror: 10%
+- **LIVE positions:** 0 | **live_trading.enabled:** TRUE | **Live authorisations:** 0
+- **Latest commits on main:** `62c55b7` (Session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
+- **errors.log:** clean — most recent entry is 2026-05-09 23:24 stale `promoted_to_demo` (pre-rename, expected)
+
+### Session start checklist
+
+```bash
+# Health + recent cycles
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'tail -20 /home/ubuntu/alphacent/logs/errors.log'
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'tail -30 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
+
+# Fresh state counts
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT status, COUNT(*) FROM strategies GROUP BY status ORDER BY status;"'
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT balance, equity, updated_at FROM account_info ORDER BY updated_at DESC LIMIT 1;"'
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT COUNT(*) FROM live_strategies WHERE retired_at IS NULL;"'
+
+# Only sync autonomous_trading.yaml if the session will touch live config
+scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent/config/autonomous_trading.yaml config/autonomous_trading.yaml
+```
+
+---
+
+## Legacy notes — previous session history
+
+The sections below capture context from earlier sessions (Phase 2A/2B live trading infrastructure, eToro API research). They're preserved for reference but the frontend rebuild is the active track. Scroll past to find the older content if you need it.
+
+---
+
+### What was completed earlier (2026-05-10)
 
 **Phase 2A — Core live trading infrastructure (all 10 sprints shipped):**
 
@@ -68,8 +101,8 @@ Backend additions (this session):
 | 2B-1 | Live RiskManager uses live equity ($10K not $491K), enforces live order bounds | `c4b12db` |
 | 2B-2 | Live positions/orders endpoint filtering by `account_type` | `c4b12db` |
 | 2B-3 | `trade_journal.account_type` migration — paper/live P&L separation | `c4b12db` |
-| 2B-4 | Strategies page `● Live (N)` tab with Retire button | `814c2a1` |
-| 2B-5 | Dedicated `/live` page: Overview, Positions, Orders, Graduation Gate, Divergence | `814c2a1` |
+| 2B-4 | Strategies page `● Live (N)` tab with Retire button (this was frontend_v1) | `814c2a1` |
+| 2B-5 | Dedicated `/live` page in frontend_v1: Overview, Positions, Orders, Graduation Gate, Divergence | `814c2a1` |
 | 2B-6 | `● Live` nav item, `/live` route, permissions in `auth.py` | `814c2a1` |
 | + | Live conviction gate: separate thresholds DEMO vs LIVE (equity 74, crypto 68) | `814c2a1` |
 | + | Equity snapshot UniqueViolation fixed (dropped stale `ix_equity_snapshots_date`) | `d76d34c` |
@@ -81,49 +114,6 @@ Backend additions (this session):
 - TSL is DB-side enforcement only; eToro's initial SL is the outage backstop
 - eToro widens SL beyond requested level (~10% floor observed on BTC live account)
 - `InstrumentId` (lowercase d) for LIVE close, `InstrumentID` (uppercase D) for DEMO close
-
-### System state entering next session
-
-- **DEMO equity:** ~$491K | **Open positions:** ~65 | **Regime:** `trending_up_strong`
-- **DEMO strategies:** 50 PAPER + 66 BACKTESTED
-- **LIVE account:** Agent Portfolio | Virtual: $10,000 | Real: $1,000 | Mirror: 10%
-- **LIVE positions:** 0 | **live_trading.enabled:** TRUE
-- **Last commits:** `d76d34c` (bug fixes: equity snapshot, nav permissions, nginx, live switch)
-- **errors.log:** clean (stale `promoted_to_demo` entries from 2026-05-09 are pre-rename, not new)
-- **Live credentials:** `/home/ubuntu/alphacent/config/live_credentials.json` (encrypted)
-
-### Session start checklist
-
-```bash
-ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'tail -20 /home/ubuntu/alphacent/logs/errors.log'
-ssh ... 'tail -30 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
-ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT status, COUNT(*) FROM strategies GROUP BY status ORDER BY status;"'
-ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT balance, equity, updated_at FROM account_info ORDER BY updated_at DESC LIMIT 1;"'
-ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT COUNT(*) FROM live_strategies WHERE retired_at IS NULL;"'
-# IMPORTANT: sync autonomous_trading.yaml from EC2 before any session that touches it
-scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent/config/autonomous_trading.yaml config/autonomous_trading.yaml
-```
-
----
-
-## Two Open Tracks
-
-### Track A — Frontend Rebuild (new spec, next major initiative)
-
-The frontend has been built incrementally over many sessions. It works but is architecturally inconsistent — components added piecemeal, no unified design system, charts misaligned, pages with different patterns. The decision has been made to rebuild it from scratch as a proper spec.
-
-**See the frontend rebuild prompt at the bottom of this file.** This is a full spec session: requirements document first, then design, then implementation sprints.
-
-### Track B — Remaining Phase 2B items (small, can be done any session)
-
-| Item | Priority | Effort |
-|---|---|---|
-| Live conviction gate wiring: check `signal.conviction_score` against `live_trading.conviction_threshold` before firing live fill | P1 | 3 lines in `trading_scheduler.py` live fill block |
-| 2B-7: Remove Graduation Gate tab from Autonomous page (it has a proper home in `/live`) | P2 | 10 min |
-| 2B-7: Paper equity curve in CIO Decision Card | P2 | ~1h |
-| 2B-7: Re-graduation flow after retirement | P2 | ~1h |
-| P3: Cross-cycle signal dedup (TXN fires every 10 min) | P2 | ~1h |
-| P4: WF test-dominant regime-luck gate for LONG | P2 | ~1h |
 
 ---
 
