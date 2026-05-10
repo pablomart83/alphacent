@@ -20,13 +20,14 @@ logger = logging.getLogger(__name__)
 ROLE_PERMISSIONS = {
     "admin": {
         "pages": ["overview", "portfolio", "orders", "strategies", "autonomous",
-                  "risk", "analytics", "data", "watchlist", "settings"],
+                  "live", "risk", "analytics", "data", "watchlist",
+                  "system-health", "audit-log", "settings"],
         "actions": ["trade", "configure", "manage_users", "manage_strategies",
                     "run_autonomous", "modify_risk", "close_positions", "view_all"],
     },
     "trader": {
         "pages": ["overview", "portfolio", "orders", "strategies", "autonomous",
-                  "risk", "analytics", "data", "watchlist", "settings"],
+                  "live", "risk", "analytics", "data", "watchlist", "settings"],
         "actions": ["trade", "close_positions", "manage_strategies", "view_all"],
     },
     "viewer": {

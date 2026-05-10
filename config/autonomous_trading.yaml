@@ -742,24 +742,21 @@ autonomous_schedule:
   hour: 15
   minute: 15
   day_of_week: saturday
-
-# ── Phase 2: Live Trading Parameters ─────────────────────────────────────────
-# Agent Portfolio: $10,000 virtual / $1,000 real / 10% mirror ratio
-# Every $1,000 virtual order = $100 real exposure
 live_trading:
-  enabled: false                # Hard gate — set true only after Sprint 8 (Graduation Gate UI) complete
-  virtual_balance: 10000        # Agent Portfolio virtual balance
-  real_investment: 1000         # Your real money at risk
-  mirror_ratio: 0.10            # Real exposure = virtual_order * mirror_ratio
-  base_risk_pct: 0.006          # 0.6% of virtual equity per trade (same as DEMO)
-  min_order_size: 200           # Minimum virtual order ($20 real)
-  max_order_size: 1500          # Maximum virtual order ($150 real)
-  symbol_cap_pct: 0.20          # Max 20% of virtual balance per symbol ($2,000 virtual / $200 real)
-  portfolio_heat_cap: 0.90      # Max 90% of virtual balance deployed
-  conviction_threshold: 74      # Minimum conviction score for live fills (higher than DEMO 70)
-  conviction_threshold_crypto: 68  # Minimum conviction score for crypto live fills
-  sl_backstop_note: >
-    eToro LIVE API has no SL-update endpoint (confirmed 2026-05-10).
-    DB-side trailing enforcement is the primary stop path.
-    Initial SL set at order open time is the outage backstop only.
-    eToro may widen the initial SL beyond our requested level (observed ~10% floor on BTC).
+  enabled: true
+  virtual_balance: 10000
+  real_investment: 1000
+  mirror_ratio: 0.1
+  base_risk_pct: 0.006
+  min_order_size: 200
+  max_order_size: 1500
+  symbol_cap_pct: 0.2
+  portfolio_heat_cap: 0.9
+  conviction_threshold: 74
+  conviction_threshold_crypto: 68
+  sl_backstop_note: 'eToro LIVE API has no SL-update endpoint (confirmed 2026-05-10).
+    DB-side trailing enforcement is the primary stop path. Initial SL set at order
+    open time is the outage backstop only. eToro may widen the initial SL beyond our
+    requested level (observed ~10% floor on BTC).
+
+    '
