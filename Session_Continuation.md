@@ -4,32 +4,46 @@
 
 ---
 
-## ⚡ NEXT SESSION KICKOFF — Phase 2B: Live Trading Completeness
+## ⚡ NEXT SESSION KICKOFF
 
-**Read this block first.**
+**Read this block first. Two parallel tracks are open.**
 
 ### What was completed this session (2026-05-10)
 
-**Phase 2A — Core live trading infrastructure (all 10 original sprints shipped):**
+**Phase 2A — Core live trading infrastructure (all 10 sprints shipped):**
 
 | Sprint | What | Commit |
 |---|---|---|
-| 1 | DB migrations: `account_type` on positions/orders/equity_snapshots, `graduation_approvals`, `live_strategies` tables + ORM | `9d38017` |
-| 2 | `EToroAPIClient` refactor: `account_type='demo'/'live'`, backward-compat `mode=` kwarg, `get_trade_history()`, fixed LIVE endpoints | `d02c731` |
-| 3 | Dual-client startup in `app.py`: demo + optional live client, `get_demo/live_etoro_client()` globals | `fa56ca5` |
-| 4 | `MonitoringService` dual-sync: live position sync tagged `account_type='live'`, equity snapshots per account | `fa56ca5` |
-| 5 | `TradingScheduler` signal routing: after DEMO fill, checks `live_strategies` + `live_trading.enabled`, fires live fill | `fc5fd59` |
-| 6 | `autonomous_trading.yaml` `live_trading` section: enabled=false (HARD GATE), all sizing params | `fc5fd59` |
+| 1 | DB migrations: `account_type` on positions/orders/equity_snapshots, `graduation_approvals`, `live_strategies` + ORM | `9d38017` |
+| 2 | `EToroAPIClient` refactor: `account_type='demo'/'live'`, backward-compat `mode=` kwarg | `d02c731` |
+| 3 | Dual-client startup in `app.py`: demo + optional live client, global getters | `fa56ca5` |
+| 4 | `MonitoringService` dual-sync: live position sync, equity snapshots per account | `fa56ca5` |
+| 5 | `TradingScheduler` signal routing: DEMO fill always, LIVE fill if approved + enabled | `fc5fd59` |
+| 6 | `autonomous_trading.yaml` `live_trading` section: all sizing params | `fc5fd59` |
 | 7 | `graduation_gate.py` + 4 API endpoints: queue, approve, reject, list live | `fc5fd59` |
-| 8 | Graduation Gate UI: tab in AutonomousNew, CIO Decision Card, approve/reject flow | `cb6bed1` |
-| 9 | API client methods: `getLiveTradingConfig`, `updateLiveTradingConfig`, graduation methods | `cb6bed1` |
-| 10 | MetricsBar live pill: `● LIVE` / `○ LIVE OFF` badge, fetches `/config/live-trading` | `cb6bed1` |
-| + | Settings → Live Trading tab: master switch, order sizing, risk params, save/reset | `cb6bed1` |
+| 8 | Graduation Gate UI in AutonomousNew, CIO Decision Card | `cb6bed1` |
+| 9 | API client methods: live config, graduation, live strategies | `cb6bed1` |
+| 10 | MetricsBar live pill, Settings → Live Trading tab | `cb6bed1` |
+
+**Phase 2B — Live trading completeness (all P0 + P1 shipped):**
+
+| Sprint | What | Commit |
+|---|---|---|
+| 2B-1 | Live RiskManager uses live equity ($10K not $491K), enforces live order bounds | `c4b12db` |
+| 2B-2 | Live positions/orders endpoint filtering by `account_type` | `c4b12db` |
+| 2B-3 | `trade_journal.account_type` migration — paper/live P&L separation | `c4b12db` |
+| 2B-4 | Strategies page `● Live (N)` tab with Retire button | `814c2a1` |
+| 2B-5 | Dedicated `/live` page: Overview, Positions, Orders, Graduation Gate, Divergence | `814c2a1` |
+| 2B-6 | `● Live` nav item, `/live` route, permissions in `auth.py` | `814c2a1` |
+| + | Live conviction gate: separate thresholds DEMO vs LIVE (equity 74, crypto 68) | `814c2a1` |
+| + | Equity snapshot UniqueViolation fixed (dropped stale `ix_equity_snapshots_date`) | `d76d34c` |
+| + | nginx: `index.html` no-cache, `/live/` API proxy routing | `d76d34c` |
+| + | `auth.py` ROLE_PERMISSIONS: added `live`, `system-health`, `audit-log` | `d76d34c` |
 
 **eToro LIVE API — confirmed facts (do not re-research):**
 - SL update endpoint does NOT exist (all 5 candidates returned 404, confirmed 2026-05-10)
 - TSL is DB-side enforcement only; eToro's initial SL is the outage backstop
-- eToro widens SL beyond requested level (observed ~10% floor on BTC live account)
+- eToro widens SL beyond requested level (~10% floor observed on BTC live account)
 - `InstrumentId` (lowercase d) for LIVE close, `InstrumentID` (uppercase D) for DEMO close
 
 ### System state entering next session
@@ -37,8 +51,8 @@
 - **DEMO equity:** ~$491K | **Open positions:** ~65 | **Regime:** `trending_up_strong`
 - **DEMO strategies:** 50 PAPER + 66 BACKTESTED
 - **LIVE account:** Agent Portfolio | Virtual: $10,000 | Real: $1,000 | Mirror: 10%
-- **LIVE positions:** 0 (no live trades fired yet — `live_trading.enabled: false`)
-- **Last commits:** `cb6bed1` (Sprints 8-10 + Settings Live tab)
+- **LIVE positions:** 0 | **live_trading.enabled:** TRUE
+- **Last commits:** `d76d34c` (bug fixes: equity snapshot, nav permissions, nginx, live switch)
 - **errors.log:** clean (stale `promoted_to_demo` entries from 2026-05-09 are pre-rename, not new)
 - **Live credentials:** `/home/ubuntu/alphacent/config/live_credentials.json` (encrypted)
 
@@ -50,7 +64,30 @@ ssh ... 'tail -30 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
 ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT status, COUNT(*) FROM strategies GROUP BY status ORDER BY status;"'
 ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT balance, equity, updated_at FROM account_info ORDER BY updated_at DESC LIMIT 1;"'
 ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT COUNT(*) FROM live_strategies WHERE retired_at IS NULL;"'
+# IMPORTANT: sync autonomous_trading.yaml from EC2 before any session that touches it
+scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent/config/autonomous_trading.yaml config/autonomous_trading.yaml
 ```
+
+---
+
+## Two Open Tracks
+
+### Track A — Frontend Rebuild (new spec, next major initiative)
+
+The frontend has been built incrementally over many sessions. It works but is architecturally inconsistent — components added piecemeal, no unified design system, charts misaligned, pages with different patterns. The decision has been made to rebuild it from scratch as a proper spec.
+
+**See the frontend rebuild prompt at the bottom of this file.** This is a full spec session: requirements document first, then design, then implementation sprints.
+
+### Track B — Remaining Phase 2B items (small, can be done any session)
+
+| Item | Priority | Effort |
+|---|---|---|
+| Live conviction gate wiring: check `signal.conviction_score` against `live_trading.conviction_threshold` before firing live fill | P1 | 3 lines in `trading_scheduler.py` live fill block |
+| 2B-7: Remove Graduation Gate tab from Autonomous page (it has a proper home in `/live`) | P2 | 10 min |
+| 2B-7: Paper equity curve in CIO Decision Card | P2 | ~1h |
+| 2B-7: Re-graduation flow after retirement | P2 | ~1h |
+| P3: Cross-cycle signal dedup (TXN fires every 10 min) | P2 | ~1h |
+| P4: WF test-dominant regime-luck gate for LONG | P2 | ~1h |
 
 ---
 
@@ -65,10 +102,9 @@ ssh ... 'sudo -u postgres psql alphacent -t -A -c "SELECT COUNT(*) FROM live_str
 | Mirror ratio | `10%` — every agent $1,000 order = $100 real exposure |
 | Open order | `POST /api/v1/trading/execution/market-open-orders/by-amount` |
 | Close position | `POST /api/v1/trading/execution/market-close-orders/positions/{positionId}` body: `{"InstrumentId": id}` (lowercase d) |
-| Portfolio/balance | `GET /api/v1/trading/info/real/pnl` → `clientPortfolio.credit` |
+| Portfolio/balance | `GET /api/v1/trading/info/real/pnl` |
 | Order status | `GET /api/v1/trading/info/real/orders/{orderId}` |
 | Trade history | `GET /api/v1/trading/info/trade/history?minDate=YYYY-MM-DD` |
-| Identity | `GET /api/v1/me` → `{gcid: 48243427, realCid: 48239007, demoCid: 49422123}` |
 | SL update | **NOT SUPPORTED** — all candidate endpoints return 404 |
 
 **Position sizing for live account:**
@@ -88,188 +124,16 @@ PAPER strategy "4H EMA Ribbon Trend Long" — watchlist: [AAPL, MSFT, NVDA]
 
 Signal fires for AAPL:
   → DEMO client: paper fill (always)
-  → LIVE client: real fill (only if live_trading.enabled=true AND live_strategies row exists)
+  → LIVE client: real fill (only if live_trading.enabled=true AND live_strategies row exists
+                            AND signal.conviction_score >= live_trading.conviction_threshold)
 
 Signal fires for MSFT:
   → DEMO client: paper fill only
 ```
 
-**HARD GATE:** `live_trading.enabled: false` in `config/autonomous_trading.yaml` blocks ALL live fills regardless of graduation approvals. Flip to `true` only after Phase 2B is complete.
-
----
-
-## MISSION — Phase 2B: Live Trading Completeness (7 sprints)
-
-These sprints fix correctness bugs and build the operational visibility needed to actually run the live account safely. **Do not flip `live_trading.enabled: true` until Sprint 2B-3 (trade_journal migration) is complete.**
-
-### Sprint 2B-1 — P0: Live RiskManager uses correct equity
-
-**Problem:** `TradingScheduler._initialize_components` creates one `RiskManager` using DEMO credentials. When a live fill fires, `_order_executor` (live) calls `execute_signal` which internally calls `risk_manager.calculate_position_size(account_info)`. But `account_info` is fetched from the DEMO client (equity=$491K). Live position sizing should use live equity ($10K virtual), not DEMO equity.
-
-**Fix:** In `trading_scheduler.py`, when routing a live fill, pass the live `AccountInfo` (fetched from `live_etoro_client.get_account_info()`) to the live `OrderExecutor`. The live `OrderExecutor` already exists (`self._live_order_executor`) — it just needs the right account context.
-
-**Also:** The live `OrderExecutor` should enforce `min_order_size=200` and `max_order_size=1500` from `live_trading` yaml, not the DEMO `MINIMUM_ORDER_SIZE=2000`. Read these from `autonomous_trading.yaml` `live_trading` section at signal time.
-
-**File:** `src/core/trading_scheduler.py` — live fill routing block (around the `_live_order_executor.execute_signal` call added in Sprint 5).
-
-### Sprint 2B-2 — P0: Live positions/orders endpoint filtering
-
-**Problem:** `GET /account/positions?mode=LIVE` and `GET /orders?mode=LIVE` currently return DEMO data because the routers don't filter by `account_type`. The `account_type` column exists on both tables (added Sprint 1) but the query doesn't use it.
-
-**Fix:** In `src/api/routers/account.py` and `src/api/routers/orders.py`, add `account_type` filter:
-- `mode=DEMO` → `filter(PositionORM.account_type == 'demo')`
-- `mode=LIVE` → `filter(PositionORM.account_type == 'live')`
-
-**Also:** `GET /account/info?mode=LIVE` should return the live client's balance/equity. Currently `account_info` table has one row (DEMO). The live account sync (Sprint 4) writes a separate `account_id='live_account_001'` row — the endpoint needs to query by `account_id` based on mode.
-
-**Files:** `src/api/routers/account.py`, `src/api/routers/orders.py`
-
-### Sprint 2B-3 — P0: trade_journal account_type migration
-
-**Problem:** `trade_journal` has no `account_type` column. When live positions close, their P&L entries will mix into paper analytics — conviction calibration, performance metrics, Sharpe calculations, everything. This contaminates the paper validation layer.
-
-**DB migration (run before any live trades fire):**
-```sql
-ALTER TABLE trade_journal ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
-CREATE INDEX idx_trade_journal_account_type ON trade_journal(account_type);
-```
-
-**ORM:** Add `account_type = Column(String(10), nullable=False, default='demo')` to `TradeJournalORM` (or equivalent).
-
-**Write paths to update:**
-- `order_monitor.py` — when writing trade_journal on fill, tag with `account_type` from the order's `account_type` column
-- `portfolio_manager.py` — retirement close path
-- `monitoring_service.py` — pending closure path
-
-**Read paths to update:**
-- `graduation_gate.get_paper_stats_for_strategy()` — must filter `account_type='demo'` (paper stats only)
-- `trade_journal.get_performance_feedback()` — must filter `account_type='demo'` (don't penalise proposer based on live trades)
-- `conviction_scorer` calibration queries — `account_type='demo'` only
-
-**Files:** DB migration, `src/models/orm.py`, `src/core/order_monitor.py`, `src/strategy/portfolio_manager.py`, `src/core/monitoring_service.py`, `src/strategy/graduation_gate.py`, `src/strategy/trade_journal.py`
-
-### Sprint 2B-4 — P1: Strategies page — Live tab
-
-**Problem:** The Strategies page has tabs for Active (PAPER), Backtested, Retired, etc. There is no tab showing which (template, symbol) pairs are live-authorized. The `live_strategies` table exists but is only visible in the Graduation Gate tab inside Autonomous.
-
-**Fix:** Add a `Live (N)` tab to `StrategiesNew.tsx` — the 3rd tab after Active and Backtested.
-
-**Tab content — table with columns:**
-- Template | Symbol | Activated | Virtual Size | Real Size ($) | SL% | TP% | Conviction Min
-- Live Trades | Live P&L | Live Sharpe | Paper Sharpe | Divergence %
-- Status badge: `● Active` / `○ Retired`
-- Actions: `Retire` button (sets `retired_at` via new `POST /strategies/live/{id}/retire` endpoint)
-
-**Data source:** `GET /strategies/live` (already exists, returns `live_strategies` rows with paper stats).
-
-**New backend endpoint:** `POST /strategies/live/{id}/retire` — sets `retired_at = NOW()` on the `live_strategies` row. Stops live fills for that pair immediately.
-
-**Files:** `frontend/src/pages/StrategiesNew.tsx`, `src/api/routers/strategies.py`
-
-### Sprint 2B-5 — P1: Dedicated Live Trading page (`/live`)
-
-A top-level page in the nav for operational visibility of the live account. This is where real money is managed.
-
-**Route:** `/live` | **Nav label:** `● Live` (green dot when enabled, gray when disabled)
-
-**Layout:** Same 2-panel pattern as other pages (65/35 split).
-
-**Main panel — 5 tabs:**
-
-**Tab 1: Overview**
-- Live account summary card: virtual balance, real investment, mirror ratio, today's P&L (virtual + real)
-- Master kill switch: toggle `live_trading.enabled` without going to Settings (calls `PUT /config/live-trading`)
-- Live vs DEMO equity curve on same chart (two lines, different colors) — shows divergence visually
-- Active live authorizations count, live positions count, deployed capital %
-
-**Tab 2: Positions**
-- Live positions table filtered to `account_type='live'`
-- Columns: Symbol | Side | Virtual Size | Real Size | Entry | Current | P&L (virtual) | P&L (real) | SL | TP | Strategy | TSL Status
-- TSL Status: shows DB stop vs eToro backstop SL gap
-- Close button: fires `close_position` against live client
-
-**Tab 3: Orders**
-- Live order history filtered to `account_type='live'`
-- Columns: Symbol | Side | Virtual Size | Real Size | Status | Fill Price | Slippage | Fill Time | Strategy
-
-**Tab 4: Graduation Gate** (moved from Autonomous page)
-- Qualification queue with CIO Decision Card (same as current implementation)
-- Active live authorizations table (same as Strategies → Live tab but with more detail)
-- Rejection history with cooldown countdown
-
-**Tab 5: Live vs Paper Divergence**
-- Per-strategy: paper equity curve (blue) vs live equity curve (green) on same chart
-- Divergence metric: `live_sharpe / paper_sharpe × 100%`
-- Flag red when divergence < 50% (live underperforming paper badly)
-- Table: Template | Symbol | Paper Sharpe | Live Sharpe | Divergence | Paper Trades | Live Trades | Recommendation
-
-**Side panel:**
-- Live account health: balance, equity, unrealized P&L, positions count
-- Recent live fills (last 10 orders)
-- Divergence alerts (strategies where live < 50% of paper)
-
-**New backend endpoints needed:**
-- `GET /live/summary` — live account balance, P&L, positions count, deployed capital
-- `GET /live/positions` — alias for `GET /account/positions?mode=LIVE` (after Sprint 2B-2)
-- `GET /live/orders` — alias for `GET /orders?mode=LIVE` (after Sprint 2B-2)
-- `GET /live/divergence` — per live_strategies row: paper Sharpe vs live Sharpe from trade_journal
-- `POST /live/positions/{id}/close` — close a live position
-- `POST /strategies/live/{id}/retire` — retire a live authorization
-
-**Files:** New `frontend/src/pages/LiveNew.tsx`, `src/api/routers/live.py` (new router), `frontend/src/App.tsx` (add route), nav component (add link)
-
-### Sprint 2B-6 — P1: Existing pages DEMO/LIVE awareness
-
-**Problem:** Portfolio, Orders, Analytics, Performance pages all show DEMO data only. When live positions exist, they're invisible on these pages.
-
-**Pattern:** Each page already has `tradingMode` from `useTradingMode()`. The fix is to pass `account_type` to the backend queries and filter accordingly (Sprint 2B-2 makes this work).
-
-**Changes per page:**
-
-**PortfolioNew** — positions query already passes `mode=tradingMode`. After Sprint 2B-2, `mode=LIVE` will return live positions. No frontend change needed beyond ensuring the mode toggle is visible. Add `[DEMO] [LIVE]` toggle button if not already present.
-
-**OrdersNew** — same as Portfolio. Mode toggle already exists. After Sprint 2B-2, `mode=LIVE` returns live orders.
-
-**AnalyticsNew** — equity curve, daily P&L chart, drawdown chart all query `equity_snapshots`. After Sprint 2B-3, these are per `account_type`. Add mode toggle so LIVE shows the live equity curve (will be flat until first live trade, then grows).
-
-**PerformanceNew** — Sharpe, win rate, return metrics query `trade_journal`. After Sprint 2B-3, filter by `account_type`. Add mode toggle.
-
-**OverviewNew / Dashboard** — the main equity number is DEMO. When live is active, show both: `DEMO $491K | LIVE $10K virtual / $1K real`. This is a display-only change — read from `account_info` table which has separate rows per account after Sprint 4.
-
-**Note:** Most of these pages already have `mode` in their API calls. The backend filtering (Sprint 2B-2 and 2B-3) is the real work. Frontend changes are minimal — mostly ensuring the mode toggle is visible and wired.
-
-**Files:** `src/api/routers/account.py`, `src/api/routers/orders.py`, `src/api/routers/performance.py`, `src/api/routers/analytics.py` — add `account_type` filter to queries. Frontend pages: add mode toggle where missing.
-
-### Sprint 2B-7 — P2: Graduation Gate improvements
-
-**Remove from Autonomous page:** The graduation tab in `AutonomousNew.tsx` should be removed now that it has a proper home in the Live page (Sprint 2B-5). The Autonomous page is for strategy research, not live operations.
-
-**CIO Decision Card enhancements:**
-- Paper equity curve chart (actual trade-by-trade equity, not just summary stats) — shows consistency over time, not just aggregate numbers
-- Qualification ratio trend: is the ratio improving or degrading over the last 30 days?
-- Portfolio context: if approved, what % of live portfolio heat does this add?
-
-**Re-graduation flow:**
-- When a live strategy is retired, it should be removable from `live_strategies` (set `retired_at`) and re-enter the graduation queue after a 7-day cooldown
-- `POST /strategies/live/{id}/retire` endpoint (also needed for Sprint 2B-4)
-
-**Rejection history tab:** Show all rejected pairs with cooldown countdown (`rejected_at + 14 days`). Currently rejections are recorded but not visible anywhere.
-
----
-
-## Sprint 2B Sequencing
-
-| Sprint | What | Priority | Blocking? |
-|---|---|---|---|
-| **2B-1** | Live RiskManager uses live equity | 🔴 P0 | Blocks correct live sizing |
-| **2B-2** | Live positions/orders endpoint filtering | 🔴 P0 | Blocks 2B-5, 2B-6 |
-| **2B-3** | trade_journal account_type migration | 🔴 P0 | **Do before first live trade** |
-| **2B-4** | Strategies page — Live tab | 🟡 P1 | After 2B-2 |
-| **2B-5** | Dedicated Live Trading page | 🟡 P1 | After 2B-2, 2B-3 |
-| **2B-6** | Existing pages DEMO/LIVE awareness | 🟡 P1 | After 2B-2, 2B-3 |
-| **2B-7** | Graduation Gate improvements | 🟢 P2 | After 2B-5 |
-
-**Start next session with 2B-1, 2B-2, 2B-3 in order. These are correctness bugs that exist right now even before the first live trade fires.**
+**Conviction thresholds (independent for DEMO and LIVE):**
+- DEMO: 70 (equities) / 68 (crypto) — lower to collect more paper data
+- LIVE: 74 (equities) / 68 (crypto) — higher bar for real money
 
 ---
 
@@ -278,7 +142,7 @@ A top-level page in the nav for operational visibility of the live account. This
 - **DEMO Equity:** ~$491K | **Open positions:** ~65 | **Regime:** `trending_up_strong`
 - **DEMO Strategies:** 50 PAPER + 66 BACKTESTED
 - **LIVE Account:** Agent Portfolio | Virtual: $10,000 | Real: $1,000 | Mirror: 10%
-- **LIVE positions:** 0 | **live_trading.enabled:** false (HARD GATE — do not flip until 2B-3 done)
+- **LIVE positions:** 0 | **live_trading.enabled:** TRUE
 - **Service:** healthy | **errors.log:** clean
 
 ---
@@ -292,13 +156,11 @@ Stock/ETF: SL 6%, TP 15% | Forex: SL 2%, TP 5% | Crypto: SL 8%, TP 20% | Index: 
 - `BASE_RISK_PCT`: 0.6% | `MINIMUM_ORDER_SIZE`: $2,000 | Symbol cap: 5% | Sector soft cap: 30% | Portfolio heat: 30%
 - Drawdown sizing: 50% reduction >5% DD, 75% >10% DD (30d rolling peak)
 - Vol scaling: 0.10x–1.50x (target vol 16%)
-- Per-pair loser penalty: (template, symbol) with ≥3 net-losing trades halves size
 
 ### Position sizing (LIVE)
 - `BASE_RISK_PCT`: 0.6% of virtual equity ($10K) | `MIN_ORDER`: $200 virtual ($20 real) | `MAX_ORDER`: $1,500 virtual ($150 real)
-- Symbol cap: 20% of virtual balance ($2,000 virtual / $200 real)
-- Portfolio heat cap: 90% of virtual balance
-- Conviction threshold: 74 (higher than DEMO 70)
+- Symbol cap: 20% of virtual balance | Portfolio heat cap: 90%
+- Conviction threshold: 74 equities / 68 crypto
 
 ### Activation thresholds
 - `min_sharpe`: 1.0 | `min_sharpe_crypto`: 0.3 | `min_sharpe_commodity`: 0.5
@@ -308,12 +170,10 @@ Stock/ETF: SL 6%, TP 15% | Forex: SL 2%, TP 5% | Crypto: SL 8%, TP 20% | Index: 
 ### ATR stop floor (order_executor, hardcoded)
 - 1.5× ATR for daily strategies | 2.0× ATR for 4H strategies
 - Max SL clamps: stocks/ETFs 9%, crypto 15%, forex 4%
-- **LIVE note:** eToro may widen SL beyond requested level (~10% floor observed on BTC)
 
 ### Trailing Stop System
 - Per-class ATR multiplier: stock/etf/commodity 2.0x, crypto/index 1.5x, forex 1.0x
 - Timeframe-aware ATR (4H strategies use 4H bars)
-- Breach enforcement independent of historical-bar freshness
 - **LIVE:** DB-side enforcement only (eToro LIVE API has no SL-update endpoint)
 
 ### Signal-time gates
@@ -345,44 +205,32 @@ Stock/ETF: SL 6%, TP 15% | Forex: SL 2%, TP 5% | Crypto: SL 8%, TP 20% | Index: 
 -- Strategy status counts
 SELECT status, COUNT(*) FROM strategies GROUP BY status ORDER BY status;
 
--- Live strategies (graduation approvals)
+-- Live strategies
 SELECT ls.template_name, ls.symbol, ls.activated_at, ls.live_trades, ls.live_pnl,
        ga.qualification_ratio, ga.paper_sharpe, ga.wf_sharpe
 FROM live_strategies ls
 JOIN graduation_approvals ga ON ga.id = ls.graduation_id
-WHERE ls.retired_at IS NULL
-ORDER BY ls.activated_at DESC;
+WHERE ls.retired_at IS NULL ORDER BY ls.activated_at DESC;
 
--- Graduation queue candidates (quick check)
+-- Graduation queue candidates
 SELECT s.name, tj.symbol, COUNT(*) AS trades,
        ROUND((AVG(tj.pnl) / NULLIF(STDDEV(tj.pnl), 0) * SQRT(252))::numeric, 2) AS sharpe,
        ROUND(100.0 * SUM(CASE WHEN tj.pnl > 0 THEN 1 ELSE 0 END) / COUNT(*)::numeric, 1) AS win_pct
-FROM trade_journal tj
-JOIN strategies s ON s.id = tj.strategy_id
-WHERE s.status = 'PAPER' AND tj.pnl IS NOT NULL
-GROUP BY s.id, s.name, tj.symbol
-HAVING COUNT(*) >= 20
-ORDER BY sharpe DESC;
+FROM trade_journal tj JOIN strategies s ON s.id = tj.strategy_id
+WHERE s.status = 'PAPER' AND tj.pnl IS NOT NULL AND tj.account_type = 'demo'
+GROUP BY s.id, s.name, tj.symbol HAVING COUNT(*) >= 20 ORDER BY sharpe DESC;
 
--- Decision-log funnel for the last cycle
+-- Decision-log funnel (last cycle)
 SELECT stage, decision, COUNT(*) FROM signal_decisions
 WHERE timestamp > NOW() - INTERVAL '1 hour'
 GROUP BY stage, decision ORDER BY COUNT(*) DESC;
 
--- Why didn't we trade <SYMBOL>? (7-day lookback)
-SELECT timestamp, stage, decision, template_name, reason
-FROM signal_decisions
-WHERE symbol='AAPL' AND timestamp > NOW() - INTERVAL '7 days'
-ORDER BY timestamp DESC LIMIT 30;
-
--- Conviction score vs P&L (validation loop)
-SELECT
-  FLOOR(conviction_score / 5) * 5 AS bucket,
-  COUNT(*) AS trades,
-  ROUND(AVG(pnl)::numeric, 2) AS avg_pnl,
-  ROUND(100.0 * SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) AS win_pct
+-- Conviction score vs P&L
+SELECT FLOOR(conviction_score / 5) * 5 AS bucket, COUNT(*) AS trades,
+       ROUND(AVG(pnl)::numeric, 2) AS avg_pnl,
+       ROUND(100.0 * SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) / COUNT(*), 1) AS win_pct
 FROM trade_journal
-WHERE conviction_score IS NOT NULL AND pnl IS NOT NULL
+WHERE conviction_score IS NOT NULL AND pnl IS NOT NULL AND account_type = 'demo'
 GROUP BY bucket ORDER BY bucket;
 ```
 
@@ -390,53 +238,47 @@ GROUP BY bucket ORDER BY bucket;
 
 ## Open Items
 
-### 🔴 P0 — Phase 2B (start next session)
-See MISSION block above. 2B-1, 2B-2, 2B-3 are correctness bugs that exist right now.
-**Do not flip `live_trading.enabled: true` until 2B-3 (trade_journal migration) is complete.**
+### P1 — Live conviction gate wiring (3-line fix)
+In `trading_scheduler.py` live fill routing block, check `signal.metadata.conviction_score` against `_live_cfg.get("conviction_threshold")` before calling `_live_order_executor.execute_signal`. Currently the gate reads the threshold but doesn't block — the check was added but the `else:` block structure needs the actual comparison wired in.
 
-### P1 — Raise conviction threshold to 74
-Calibration monitor shows 74–76 is first clearly positive-EV bucket (+$21.72 avg, 49 trades). 70–74 range is negative EV. Change in Settings → Autonomous → Conviction Score Threshold. Monitor 1–2 weeks to confirm.
-
-### P2 — Conviction scorer component reweighting (needs 3-4 more weeks of data)
-`signal_quality` collapses to ~4-5 pts variance for 85% of DSL signals. `regime_fit` saturated at 20/20 in trending_up_strong. Wait until ~500+ scored trades per bucket, then regression-fit weights on live P&L.
+### P2 — Raise DEMO conviction threshold to 74
+Calibration monitor shows 74–76 is first clearly positive-EV bucket (+$21.72 avg, 49 trades). 70–74 range is negative EV. Change in Settings → Autonomous → Conviction Score Threshold.
 
 ### P3 — Cross-cycle signal dedup (~1h)
 TXN ENTER_LONG fires every 10 minutes for hours. 30-min TTL map on `(strategy_id, symbol, direction)` in `trading_scheduler`.
 
 ### P4 — WF test-dominant regime-luck gate for LONG (~1h)
-Add `(test_sharpe - train_sharpe) ≤ 1.5` consistency check to test-dominant bypass path. SHORT already tightened.
+Add `(test_sharpe - train_sharpe) ≤ 1.5` consistency check to test-dominant bypass path.
 
 ### P5 — GET /strategies 422 (pre-existing)
 Some component calls `/strategies` without `mode` param. Logs 422. Not crashing.
 
-### P6 — Settings page auto-revert on restart (low priority)
-Settings page re-fetches config on mount. If open during restart, may re-send stale values.
-
 ### Deferred
-- **Pairs Trading template rebuild** — needs cross-asset spread primitives (z-score of A/B ratio) in DSL first
-- **NATGAS 1h stale** — add to explicit-blocked set in fmp_ohlc.py
-- **trade_id convention unification** — `log_entry` uses `position.id`; `log_exit` uses order UUID
-- **Monday Asia Open template** — needs DSL `HOUR()` primitive
-- **ONCHAIN DSL primitive** — BTC dominance, stablecoin supply
+- **Frontend rebuild** — see prompt below (Track A)
+- **Pairs Trading template rebuild** — needs cross-asset spread primitives in DSL first
 - **Overview chart panel rewrite** — 3 chart components with misaligned axes
-- **CI/CD hardening** — GitHub Actions pipeline, automated deploy on push to main
+- **CI/CD hardening** — GitHub Actions pipeline
 - **SignalDecisionLogORM table drop** — scheduled 2026-06-03
 - **Commodity 1h coverage** — blocked on FMP Starter upgrade
-- **Forex 1d legacy FMP path cleanup** — ~15 min
 
 ---
 
 ## DB Migrations Applied to Prod (cumulative)
 
 ```sql
--- 2026-05-10: Phase 2A migrations
+-- 2026-05-10: Phase 2B-3
+ALTER TABLE trade_journal ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
+CREATE INDEX idx_trade_journal_account_type ON trade_journal(account_type);
+DROP INDEX ix_equity_snapshots_date;  -- stale unique index causing UniqueViolation on live snapshots
+
+-- 2026-05-10: Phase 2A
 ALTER TABLE positions ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
 ALTER TABLE orders ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
 ALTER TABLE equity_snapshots ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
 ALTER TABLE equity_snapshots DROP CONSTRAINT uq_equity_snapshot_date_type;
 CREATE UNIQUE INDEX uq_equity_snapshot_date_type_account ON equity_snapshots(date, snapshot_type, account_type);
-CREATE TABLE graduation_approvals (...);  -- see Sprint 1 SQL block
-CREATE TABLE live_strategies (...);       -- see Sprint 1 SQL block
+CREATE TABLE graduation_approvals (...);
+CREATE TABLE live_strategies (...);
 
 -- 2026-05-10: StrategyStatus rename
 UPDATE strategies SET status='PAPER' WHERE status='DEMO';
@@ -448,13 +290,93 @@ ALTER TABLE strategy_proposals ADD COLUMN symbols JSON, ADD COLUMN template_name
 CREATE TABLE signal_decisions (...);
 ALTER TABLE autonomous_cycle_runs ADD COLUMN proposals_pre_wf INTEGER;
 
--- Earlier: positions/orders enrichment
+-- Earlier
 ALTER TABLE positions ADD COLUMN invested_amount FLOAT;
 ALTER TABLE orders ADD COLUMN order_action VARCHAR, slippage FLOAT, fill_time_seconds FLOAT;
 ```
 
-**Next migrations (Sprint 2B-3):**
-```sql
-ALTER TABLE trade_journal ADD COLUMN account_type VARCHAR(10) NOT NULL DEFAULT 'demo';
-CREATE INDEX idx_trade_journal_account_type ON trade_journal(account_type);
+---
+
+## Frontend Rebuild — Spec Session Prompt
+
+Use this prompt to kick off the frontend rebuild as a new spec in the next session.
+
+---
+
+**PROMPT:**
+
+```
+I want to rebuild the AlphaCent frontend from scratch as a proper spec-driven project.
+
+AlphaCent is an autonomous trading platform. The backend is a FastAPI/Python system running on EC2 that:
+- Runs 50+ PAPER strategies simultaneously on a $491K eToro DEMO account (65 open positions)
+- Uses a full autonomous cycle: propose → walk-forward validate → Monte Carlo bootstrap → conviction score → activate → signal → execute
+- Has a LIVE trading account (Agent Portfolio, $10K virtual / $1K real, 10% mirror ratio) with a Graduation Gate for promoting paper-validated (template, symbol) pairs to real fills
+- Connects to eToro's public API for order execution, position sync, and market data
+- Uses TradingView Lightweight Charts for price charts (already integrated via npm package)
+- Has WebSocket for real-time updates (positions, orders, signals, cycle events)
+- Exposes ~80 REST endpoints covering: account, positions, orders, strategies, autonomous cycle, analytics, performance, risk, signals, config, live trading, graduation gate
+
+The current frontend was built incrementally over many sessions — it works but is architecturally inconsistent. I want to rebuild it from scratch as the best autonomous trading dashboard ever built.
+
+Before writing any code, I want you to:
+
+1. Research the state of the art in trading platform UI/UX design (2024-2026). Look at:
+   - Professional trading terminals (Bloomberg, Refinitiv Eikon, TradingView)
+   - Algorithmic trading dashboards (QuantConnect, Alpaca, Interactive Brokers TWS)
+   - Modern fintech dashboards (Robinhood, Webull, Composer, Collective2)
+   - Design systems optimized for data-dense financial interfaces
+   Focus on: information hierarchy for autonomous systems, real-time data visualization patterns, dark theme best practices for trading, how to surface AI/autonomous decision-making clearly to a human operator.
+
+2. Produce a comprehensive requirements document covering:
+
+   A. DESIGN PRINCIPLES
+   - Visual language: dark theme, typography, color system (green/red P&L, regime colors, conviction heat)
+   - Information density: how to show 65 positions + 50 strategies without overwhelming
+   - Real-time feel: what updates live vs what polls, flash animations, WebSocket integration
+   - Autonomous system transparency: making the AI's decisions legible to a human CIO
+
+   B. PAGE ARCHITECTURE (what pages exist and their purpose)
+   - Overview / Command Centre
+   - Portfolio (DEMO + LIVE accounts, positions, TSL status)
+   - Orders (DEMO + LIVE, execution quality, slippage)
+   - Strategies (PAPER/BACKTESTED/LIVE tabs, strategy detail, walk-forward evidence)
+   - Autonomous (cycle pipeline, signal funnel, conviction decomposition, scheduler)
+   - Live Trading (master switch, graduation gate, live positions, paper vs live divergence)
+   - Analytics (equity curve, drawdown, Sharpe, regime-conditional performance)
+   - Risk (portfolio heat map, sector exposure, VaR, signal-time gates status)
+   - Settings (API config, risk limits, autonomous params, live trading params)
+   - System Health (background threads, circuit breakers, data freshness)
+
+   C. COMPONENT LIBRARY
+   - What reusable components are needed (MetricsBar, DataTable, EquityChart, ConvictionBar, RegimePill, LivePill, GraduationCard, etc.)
+   - TradingView chart integration patterns (Lightweight Charts for price, custom overlays for signals/stops)
+   - Real-time update patterns (WebSocket subscriptions, optimistic updates, flash-on-change)
+
+   D. TECHNICAL STACK DECISIONS
+   - Keep: React 18, TypeScript, Vite, Tailwind CSS, TradingView Lightweight Charts, react-query or SWR for data fetching, Sonner for toasts
+   - Evaluate: whether to keep current component library (shadcn/ui) or switch
+   - State management: Context vs Zustand vs Jotai for trading state
+   - Table library: TanStack Table (keep) vs alternatives
+   - Chart library: TradingView Lightweight Charts (keep for price) + what for analytics charts
+
+   E. AUTONOMOUS SYSTEM SPECIFIC REQUIREMENTS
+   - How to visualize the full cycle pipeline (propose → validate → activate → signal → execute) as a live funnel
+   - Conviction score decomposition (stacked bar per strategy showing component weights)
+   - Walk-forward evidence display (train/test Sharpe, MC bootstrap distribution)
+   - Signal decision audit trail ("why didn't we trade AAPL today?")
+   - Regime-conditional performance matrix
+   - Graduation Gate CIO workflow (paper equity curve, qualification ratio trend, approve/reject)
+
+   F. LIVE TRADING SPECIFIC REQUIREMENTS
+   - DEMO vs LIVE account separation throughout (account toggle, separate equity curves)
+   - Mirror ratio display (always show virtual + real amounts)
+   - TSL status (DB stop vs eToro backstop gap)
+   - Divergence monitoring (live Sharpe vs paper Sharpe per authorized pair)
+
+3. Produce a prioritized implementation plan broken into sprints, where each sprint delivers a shippable increment.
+
+The backend API is fully functional. The rebuild is frontend-only. The existing backend endpoints, WebSocket events, and data models do not change.
+
+Start with the research and requirements document. Do not write any code yet.
 ```
