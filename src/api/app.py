@@ -32,6 +32,20 @@ logger = logging.getLogger(__name__)
 auth_manager: AuthenticationManager = None
 session_manager: SessionManager = None
 
+# Phase 2: dual eToro clients — set by _start_background_services at startup
+_demo_etoro_client = None
+_live_etoro_client = None
+
+
+def get_demo_etoro_client():
+    """Return the DEMO eToro client (always available after startup)."""
+    return _demo_etoro_client
+
+
+def get_live_etoro_client():
+    """Return the LIVE eToro client, or None if not configured."""
+    return _live_etoro_client
+
 
 # ── Sprint 6.2: Request Timeout Middleware ────────────────────────────────────
 # Wraps each request in asyncio.wait_for to prevent hung FMP/DB calls from
@@ -231,7 +245,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     import threading
 
     def _start_background_services():
-        """Initialize eToro client and start monitoring/trading in a background thread."""
+        """Initialize eToro clients (demo + optional live) and start monitoring/trading."""
         import asyncio
         print("[BG-SERVICES] Background services thread starting...", flush=True)
 
@@ -242,28 +256,54 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
             from src.core.config import get_config
 
             config = get_config()
-            credentials = config.load_credentials(TradingMode.DEMO)
 
+            # ── DEMO client (required) ────────────────────────────────────────
+            credentials = config.load_credentials(TradingMode.DEMO)
             if not credentials or not credentials.get("public_key"):
-                logger.warning("eToro credentials not configured — background services skipped")
-                print("[BG-SERVICES] No credentials — skipping", flush=True)
+                logger.warning("eToro DEMO credentials not configured — background services skipped")
+                print("[BG-SERVICES] No DEMO credentials — skipping", flush=True)
                 return
 
-            etoro_client = EToroAPIClient(
+            demo_client = EToroAPIClient(
                 public_key=credentials["public_key"],
                 user_key=credentials["user_key"],
-                mode=TradingMode.DEMO
+                account_type="demo",
             )
-            logger.info("eToro client initialized")
-            print("[BG-SERVICES] eToro client initialized", flush=True)
+            logger.info("eToro DEMO client initialized")
+            print("[BG-SERVICES] eToro DEMO client initialized", flush=True)
+
+            # ── LIVE client (optional — fail-open) ───────────────────────────
+            live_client: Optional[EToroAPIClient] = None
+            try:
+                live_creds = config.load_credentials(TradingMode.LIVE)
+                if live_creds and live_creds.get("public_key"):
+                    live_client = EToroAPIClient(
+                        public_key=live_creds["public_key"],
+                        user_key=live_creds["user_key"],
+                        account_type="live",
+                    )
+                    logger.info(
+                        "eToro LIVE client initialized "
+                        "(Agent Portfolio — $10K virtual / $1K real / 10% mirror)"
+                    )
+                    print("[BG-SERVICES] eToro LIVE client initialized", flush=True)
+            except Exception as _live_err:
+                logger.info(f"No live credentials — DEMO-only mode ({_live_err})")
+                print(f"[BG-SERVICES] No live credentials — DEMO-only ({_live_err})", flush=True)
+
+            # Expose clients globally so routers can reach them
+            from src.api import app as _app_module
+            _app_module._demo_etoro_client = demo_client
+            _app_module._live_etoro_client = live_client
 
             monitoring_service = MonitoringService(
-                etoro_client=etoro_client,
+                demo_etoro_client=demo_client,
+                live_etoro_client=live_client,
                 db=db,
                 pending_orders_interval=5,
                 order_status_interval=30,
                 position_sync_interval=60,
-                trailing_stops_interval=30
+                trailing_stops_interval=30,
             )
             set_monitoring_service(monitoring_service)
 

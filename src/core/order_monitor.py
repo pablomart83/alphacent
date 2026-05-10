@@ -1281,7 +1281,7 @@ class OrderMonitor:
         finally:
             session.close()
 
-    def sync_positions(self, force: bool = False) -> dict:
+    def sync_positions(self, force: bool = False, account_type: str = "demo") -> dict:
         """Sync positions from eToro to database (with smart caching).
         
         Only performs full sync when:
@@ -1294,6 +1294,7 @@ class OrderMonitor:
         
         Args:
             force: Force full sync regardless of cache
+            account_type: 'demo' or 'live' — tags all written rows
             
         Returns:
             Dictionary with counts of synced positions
@@ -1713,6 +1714,7 @@ class OrderMonitor:
                         take_profit=pos.take_profit,
                         closed_at=pos.closed_at,
                         invested_amount=pos.invested_amount,
+                        account_type=account_type,
                         # Record the match reason temporarily in closure_reason so we
                         # can audit how the strategy was resolved.  Cleared once the
                         # position closes normally.  Only set when a non-default match
@@ -1734,8 +1736,10 @@ class OrderMonitor:
                     all_etoro_ids_in_db.add(str(pos.etoro_position_id))
             
             # Close positions that are open in DB but no longer exist on eToro
+            # Only check positions belonging to this account_type
             open_db_positions = session.query(PositionORM).filter(
-                PositionORM.closed_at.is_(None)
+                PositionORM.closed_at.is_(None),
+                PositionORM.account_type == account_type,
             ).all()
             
             # SAFETY GUARD: If eToro returned 0 positions but we have many open in DB,

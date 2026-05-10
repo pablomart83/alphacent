@@ -41,7 +41,9 @@ class MonitoringService:
     
     def __init__(
         self,
-        etoro_client: EToroAPIClient,
+        etoro_client: Optional[EToroAPIClient] = None,
+        demo_etoro_client: Optional[EToroAPIClient] = None,
+        live_etoro_client: Optional[EToroAPIClient] = None,
         db: Optional[Database] = None,
         pending_orders_interval: int = 5,
         order_status_interval: int = 30,
@@ -50,18 +52,34 @@ class MonitoringService:
     ):
         """
         Initialize monitoring service.
-        
+
         Args:
-            etoro_client: eToro API client
+            demo_etoro_client: eToro DEMO account client (preferred, Phase 2)
+            live_etoro_client: eToro LIVE account client (optional, Phase 2)
+            etoro_client: Legacy alias for demo_etoro_client (backward compat)
             db: Database instance (creates new if not provided)
             pending_orders_interval: Seconds between pending order checks (default: 5s)
             order_status_interval: Seconds between order status checks (default: 30s)
             position_sync_interval: Seconds between position syncs (default: 60s)
-            trailing_stops_interval: Seconds between trailing stop checks (default: 60s — aligned with position sync price updates)
+            trailing_stops_interval: Seconds between trailing stop checks (default: 60s)
         """
-        self.etoro_client = etoro_client
+        # Normalise: accept either demo_etoro_client or legacy etoro_client kwarg
+        _demo = demo_etoro_client or etoro_client
+        if _demo is None:
+            raise ValueError("MonitoringService requires a demo_etoro_client (or etoro_client)")
+
+        # self.etoro_client = DEMO client — kept for all existing internal code
+        self.etoro_client = _demo
+        # Phase 2: live client (None = DEMO-only mode)
+        self.live_etoro_client: Optional[EToroAPIClient] = live_etoro_client
+
         self.db = db or Database()
-        self.order_monitor = OrderMonitor(etoro_client, self.db)
+        self.order_monitor = OrderMonitor(self.etoro_client, self.db)
+
+        # Phase 2: separate OrderMonitor for live account (None = DEMO-only)
+        self.live_order_monitor: Optional[OrderMonitor] = (
+            OrderMonitor(live_etoro_client, self.db) if live_etoro_client else None
+        )
         
         # Configurable intervals
         self.pending_orders_interval = pending_orders_interval
@@ -170,7 +188,8 @@ class MonitoringService:
             f"MonitoringService initialized (pending: {pending_orders_interval}s, "
             f"orders: {order_status_interval}s, positions: {position_sync_interval}s, "
             f"trailing: {trailing_stops_interval}s, "
-            f"fundamental: {self._fundamental_check_interval}s)"
+            f"fundamental: {self._fundamental_check_interval}s, "
+            f"live_client: {'yes' if live_etoro_client else 'no'})"
         )
     
     def _sync_broadcast_market_data(self, symbol: str, price: float) -> None:
@@ -369,6 +388,17 @@ class MonitoringService:
                     f"Position sync: {position_results['updated']} updated, "
                     f"{position_results['created']} created"
                 )
+                # Phase 2: sync live positions if live client is configured
+                if self.live_order_monitor is not None:
+                    try:
+                        live_results = self.live_order_monitor.sync_positions(account_type="live")
+                        logger.info(
+                            f"Live position sync: {live_results.get('updated', 0)} updated, "
+                            f"{live_results.get('created', 0)} created, "
+                            f"{live_results.get('closed', 0)} closed"
+                        )
+                    except Exception as _live_sync_err:
+                        logger.error(f"Live position sync failed: {_live_sync_err}")
                 self._last_position_sync = now
             except Exception as e:
                 logger.error(f"Error syncing positions: {e}")
@@ -2144,7 +2174,16 @@ class MonitoringService:
         self._write_equity_snapshot(snapshot_type='hourly')
 
     def _write_equity_snapshot(self, snapshot_type: str = 'daily') -> None:
-        """Write an equity snapshot with the given type (daily or hourly)."""
+        """Write equity snapshots — one row per account_type (demo + live if configured)."""
+        self._write_equity_snapshot_for_account(snapshot_type=snapshot_type, account_type='demo')
+        if self.live_etoro_client is not None:
+            try:
+                self._write_equity_snapshot_for_account(snapshot_type=snapshot_type, account_type='live')
+            except Exception as _live_snap_err:
+                logger.warning(f"Live equity snapshot failed: {_live_snap_err}")
+
+    def _write_equity_snapshot_for_account(self, snapshot_type: str = 'daily', account_type: str = 'demo') -> None:
+        """Write an equity snapshot for a single account_type."""
         from src.models.orm import EquitySnapshotORM, PositionORM, AccountInfoORM
         from sqlalchemy import func
 
@@ -2158,37 +2197,45 @@ class MonitoringService:
                 # Key: "YYYY-MM-DD" — one row per day
                 date_key = now.strftime("%Y-%m-%d")
 
-            # Get current account state
-            account = session.query(AccountInfoORM).first()
+            # Get current account state — filter by account_type
+            account = session.query(AccountInfoORM).filter_by(
+                account_id=f"{account_type}_account_001"
+            ).first()
             if not account:
-                logger.warning(f"  Equity snapshot ({snapshot_type}): no account info found")
+                # Fallback: any account row (handles legacy rows without account_type prefix)
+                account = session.query(AccountInfoORM).first()
+            if not account:
+                logger.warning(f"  Equity snapshot ({snapshot_type}/{account_type}): no account info found")
                 return
 
             equity = account.equity or account.balance
             balance = account.balance
 
-            # Current unrealized P&L
+            # Current unrealized P&L — scoped to this account_type
             unrealized = sum(
                 p.unrealized_pnl or 0
                 for p in session.query(PositionORM).filter(
-                    PositionORM.closed_at.is_(None)
+                    PositionORM.closed_at.is_(None),
+                    PositionORM.account_type == account_type,
                 ).all()
             )
 
-            # Cumulative realized P&L (all time)
+            # Cumulative realized P&L — scoped to this account_type
             realized_cum = float(
                 session.query(func.sum(PositionORM.realized_pnl)).filter(
-                    PositionORM.closed_at.isnot(None)
+                    PositionORM.closed_at.isnot(None),
+                    PositionORM.account_type == account_type,
                 ).scalar() or 0
             )
 
             positions_count = session.query(PositionORM).filter(
-                PositionORM.closed_at.is_(None)
+                PositionORM.closed_at.is_(None),
+                PositionORM.account_type == account_type,
             ).count()
 
-            # Upsert: update if this date+type snapshot exists, insert if not
+            # Upsert: update if this date+type+account snapshot exists, insert if not
             existing = session.query(EquitySnapshotORM).filter_by(
-                date=date_key, snapshot_type=snapshot_type
+                date=date_key, snapshot_type=snapshot_type, account_type=account_type
             ).first()
 
             # Compute market quality score to persist alongside equity data.
@@ -2271,6 +2318,7 @@ class MonitoringService:
                 snapshot = EquitySnapshotORM(
                     date=date_key,
                     snapshot_type=snapshot_type,
+                    account_type=account_type,
                     equity=equity,
                     balance=balance,
                     unrealized_pnl=unrealized,
@@ -2285,12 +2333,12 @@ class MonitoringService:
             session.commit()
             _mqs_str = f" MQS={_mqs_score:.0f} ({_mqs_grade})" if _mqs_score is not None else ""
             logger.info(
-                f"Equity snapshot ({snapshot_type}) saved: {date_key} "
+                f"Equity snapshot ({snapshot_type}/{account_type}) saved: {date_key} "
                 f"equity=${equity:,.2f} positions={positions_count}{_mqs_str}"
             )
         except Exception as e:
             session.rollback()
-            logger.warning(f"  Equity snapshot ({snapshot_type}) save failed: {e}")
+            logger.warning(f"  Equity snapshot ({snapshot_type}/{account_type}) save failed: {e}")
         finally:
             session.close()
     
