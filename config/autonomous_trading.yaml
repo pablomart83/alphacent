@@ -757,6 +757,7 @@ live_trading:
   symbol_cap_pct: 0.20          # Max 20% of virtual balance per symbol ($2,000 virtual / $200 real)
   portfolio_heat_cap: 0.90      # Max 90% of virtual balance deployed
   conviction_threshold: 74      # Minimum conviction score for live fills (higher than DEMO 70)
+  conviction_threshold_crypto: 68  # Minimum conviction score for crypto live fills
   sl_backstop_note: >
     eToro LIVE API has no SL-update endpoint (confirmed 2026-05-10).
     DB-side trailing enforcement is the primary stop path.

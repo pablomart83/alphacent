@@ -293,6 +293,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
     symbol_cap_pct: number;
     portfolio_heat_cap: number;
     conviction_threshold: number;
+    conviction_threshold_crypto: number;
     real_per_virtual_order: number;
     max_real_per_order: number;
     live_client_configured: boolean;
@@ -3883,11 +3884,18 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                       <p className="text-xs text-gray-500">% of virtual equity risked per trade</p>
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-[11px]">Conviction Threshold (min score)</Label>
+                      <Label className="text-[11px]">Conviction Threshold — Equities (min score)</Label>
                       <Input type="number" min={60} max={100} step={1}
                         value={liveConfig.conviction_threshold}
                         onChange={e => { setLiveConfig(c => c ? { ...c, conviction_threshold: Number(e.target.value) } : c); setLiveConfigDirty(true); }} />
-                      <p className="text-xs text-gray-500">Signals below this score skip live fills</p>
+                      <p className="text-xs text-gray-500">Stocks, ETFs, forex, indices — signals below skip live fills</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px]">Conviction Threshold — Crypto (min score)</Label>
+                      <Input type="number" min={60} max={100} step={1}
+                        value={liveConfig.conviction_threshold_crypto}
+                        onChange={e => { setLiveConfig(c => c ? { ...c, conviction_threshold_crypto: Number(e.target.value) } : c); setLiveConfigDirty(true); }} />
+                      <p className="text-xs text-gray-500">Crypto DSL signals — lower ceiling (~72 in ranging regime, no fundamentals component)</p>
                     </div>
                   </div>
                 </div>
@@ -3907,6 +3915,7 @@ export const SettingsNew: FC<SettingsNewProps> = ({ onLogout }) => {
                           portfolio_heat_cap: liveConfig.portfolio_heat_cap,
                           base_risk_pct: liveConfig.base_risk_pct,
                           conviction_threshold: liveConfig.conviction_threshold,
+                          conviction_threshold_crypto: liveConfig.conviction_threshold_crypto,
                         });
                         setLiveConfigDirty(false);
                         toast.success('Live trading configuration saved');

@@ -1703,6 +1703,7 @@ class LiveTradingConfigResponse(BaseModel):
     symbol_cap_pct: float = 20.0        # percentage (yaml: 0.20)
     portfolio_heat_cap: float = 90.0    # percentage (yaml: 0.90)
     conviction_threshold: int = 74
+    conviction_threshold_crypto: int = 68
     # Computed read-only fields
     real_per_virtual_order: float = 0.0  # min_order_size * mirror_ratio
     max_real_per_order: float = 0.0      # max_order_size * mirror_ratio
@@ -1721,6 +1722,7 @@ class LiveTradingConfigRequest(BaseModel):
     symbol_cap_pct: Optional[float] = None      # percentage (0-100)
     portfolio_heat_cap: Optional[float] = None  # percentage (0-100)
     conviction_threshold: Optional[int] = None
+    conviction_threshold_crypto: Optional[int] = None
 
 
 @router.get("/live-trading", response_model=LiveTradingConfigResponse)
@@ -1763,6 +1765,7 @@ async def get_live_trading_config(
         symbol_cap_pct=float(lt.get("symbol_cap_pct", 0.20)) * 100,
         portfolio_heat_cap=float(lt.get("portfolio_heat_cap", 0.90)) * 100,
         conviction_threshold=int(lt.get("conviction_threshold", 74)),
+        conviction_threshold_crypto=int(lt.get("conviction_threshold_crypto", 68)),
         real_per_virtual_order=round(min_order * mirror, 2),
         max_real_per_order=round(max_order * mirror, 2),
         live_client_configured=live_client_configured,
@@ -1808,6 +1811,8 @@ async def update_live_trading_config(
         lt["portfolio_heat_cap"] = float(request.portfolio_heat_cap) / 100.0
     if request.conviction_threshold is not None:
         lt["conviction_threshold"] = int(request.conviction_threshold)
+    if request.conviction_threshold_crypto is not None:
+        lt["conviction_threshold_crypto"] = int(request.conviction_threshold_crypto)
 
     with open(config_file, "w") as f:
         yaml.dump(full_config, f, default_flow_style=False, sort_keys=False)
