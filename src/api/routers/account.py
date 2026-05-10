@@ -1640,6 +1640,7 @@ async def dismiss_fundamental_alert(
         )
 
 
+@router.post("/positions/trigger-fundamental-check")
 async def trigger_fundamental_check(
     mode: TradingMode,
     username: str = Depends(get_current_user),
