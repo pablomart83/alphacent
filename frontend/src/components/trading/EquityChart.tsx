@@ -280,16 +280,38 @@ export function EquityChart({
       return
     }
 
-    const eqBase = equityData[0].equity
-    const spyBase = spyData[0].close
-    if (spyBase <= 0 || eqBase <= 0) return
+    const eqBase = Number(equityData[0].equity)
+    const spyBase = Number(spyData[0].close)
+    if (!Number.isFinite(spyBase) || spyBase <= 0) return
+    if (!Number.isFinite(eqBase) || eqBase <= 0) return
 
-    const rebased: LineData[] = spyData
-      .filter((p) => Number.isFinite(p.close) && p.close > 0)
-      .map((p) => ({
-        time: toChartTime(p.date) as any,
-        value: eqBase * (p.close / spyBase),
-      }))
+    // Dedup by time and enforce monotonically increasing order — LWC throws
+    // inside requestAnimationFrame if any point has a null/NaN value or if
+    // two points share the same time.
+    const seen = new Map<string | number, number>()
+    for (const p of spyData) {
+      const close = Number(p.close)
+      if (!Number.isFinite(close) || close <= 0) continue
+      const t = toChartTime(p.date)
+      const v = eqBase * (close / spyBase)
+      if (!Number.isFinite(v)) continue
+      seen.set(t as any, v)
+    }
+    const rebased: LineData[] = Array.from(seen.entries())
+      .map(([t, v]) => ({ time: t as any, value: v }))
+      .sort((a, b) =>
+        typeof a.time === 'number'
+          ? (a.time as number) - (b.time as number)
+          : String(a.time).localeCompare(String(b.time)),
+      )
+
+    if (rebased.length === 0) {
+      if (spySeriesRef.current) {
+        chart.removeSeries(spySeriesRef.current)
+        spySeriesRef.current = null
+      }
+      return
+    }
 
     if (!spySeriesRef.current) {
       spySeriesRef.current = chart.addSeries(
@@ -337,9 +359,21 @@ export function EquityChart({
       if (panes.length > 1) panes[1].setStretchFactor(0.35)
     }
 
-    const data: AreaData[] = drawdownData
-      .filter((d) => Number.isFinite(d.drawdown_pct))
-      .map((d) => ({ time: toChartTime(d.date) as any, value: d.drawdown_pct }))
+    // Dedup + sort to satisfy LWC's monotonically-increasing-time invariant.
+    const seen = new Map<string | number, number>()
+    for (const d of drawdownData) {
+      const v = Number(d.drawdown_pct)
+      if (!Number.isFinite(v)) continue
+      const t = toChartTime(d.date)
+      seen.set(t as any, v)
+    }
+    const data: AreaData[] = Array.from(seen.entries())
+      .map(([t, v]) => ({ time: t as any, value: v }))
+      .sort((a, b) =>
+        typeof a.time === 'number'
+          ? (a.time as number) - (b.time as number)
+          : String(a.time).localeCompare(String(b.time)),
+      )
 
     drawdownSeriesRef.current!.setData(data)
   }, [drawdownData, showDrawdown])
