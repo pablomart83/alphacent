@@ -6,7 +6,7 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Frontend rebuild is Sprints 8-12 next. Read `.kiro/steering/trading-system-context.md` and `FRONTEND_REBUILD_SPEC.md` before touching code.**
+**Frontend rebuild is Sprints 9-12 next. Read `.kiro/steering/trading-system-context.md` and `FRONTEND_REBUILD_SPEC.md` before touching code.**
 
 ### Frontend rebuild progress
 
@@ -19,9 +19,9 @@
 | 4 | Book / Live — master switch, tiles, mirror strip, divergence cards | ✅ SHIPPED | `f22db70` |
 | 5 | Strategies / Library | ✅ SHIPPED | `042c2c5` |
 | 6 | Strategies / Cycle (autonomous pipeline + funnel) | ✅ SHIPPED | `6d1aa89` |
-| 7 | Strategies / Templates + Symbols + Graduation (flagship) + Lab | ✅ SHIPPED | `b52ea72` |
-| 8 | Guard / Risk + Gates | **Next** |  |
-| 9 | Guard / System + Circuit Breakers + Alerts + Audit | Pending |  |
+| 7 | Strategies / Templates + Symbols + Blacklist + Graduation (flagship) + Lab | ✅ SHIPPED | `b52ea72` |
+| 8 | Guard / Risk + Gates | ✅ SHIPPED | `b4b11dc` |
+| 9 | Guard / System + Circuit Breakers + Alerts + Audit | **Next** |  |
 | 10 | Research / Performance + Attribution + Trades | Pending |  |
 | 11 | Research / Regime + Alpha Edge + Tear Sheet + Stress + Journal | Pending |  |
 | 12 | Settings + cross-cutting polish (palette, shortcuts, a11y) | Pending |  |
@@ -62,6 +62,15 @@
 - **Sprint 7 bundle:** `Strategies-*.js` ≈ 191 KB raw (44.5 KB gzip), still inside the 250 KB budget. Templates/Symbols/Graduation/Lab all mount on the same route split — revisit code-splitting if Sprint 8 pushes past 250 KB.
 - **Latest commits on main:** `b52ea72` (Sprint 7) ← `69fc07e` (Sprint 6 promote pipeline) ← `99157a8` (Session doc: Sprint 6) ← `6d1aa89` (Sprint 6) ← `a97e86f` (Session doc: LIVE dashboard fix) ← `15a5394` (LIVE dashboard fix) ← `042c2c5` (Sprint 5) ← `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
 - **errors.log:** clean — most recent entry is still 2026-05-09 23:24 stale `promoted_to_demo` (pre-rename, expected)
+
+### Sprint 8 notes
+
+- **Route-shadow discipline holds.** Guard's tabs under `/guard/*` never shadow other routes because the surface owns its whole subtree — but the lesson from Sprint 7 (static paths must precede `{id}` catch-alls) is documented in the strategies router and worth carrying forward into any new endpoint.
+- **30/70 Guard layout** — `ResizablePanelLayout` `layoutId="guard"` persists. Left panel is permanent: RiskScoreHero + RiskMetricTiles + LimitEditor + KillSwitchCard. Right tabs: Risk (shipped), Gates (shipped), System / Circuit Breakers / Alerts / Audit (ComingSoon with sprint: 9).
+- **LimitEditor breach-warning banner** compares every proposed limit against the matching current metric from `/risk/metrics` and lists each breach before Save. Stops the CIO from quietly tightening a ceiling the portfolio already exceeds.
+- **KillSwitchCard shows blast radius** — the success toast reports `positions_closed` and `orders_cancelled` from the response, so you see what the button actually did. Also flips to Reset From Emergency when `/control/system/status.state === EMERGENCY_HALT`.
+- **CorrelationHeatmap (Visx)** uses the `correlated_pairs` array from `/risk/advanced` — so the axis is just the union of symbols that have at least one correlation entry. Threshold slider fades cells below `|ρ|` instead of hiding them (preserves grid continuity). Unseen pairs render as "no data" not zero.
+- **Gates tab** reads `trading_gates[]` from `/control/system-health` directly — no new endpoint. Sorted so blocking gates float to the top and pulse; detail text rendered verbatim above the static descriptor paragraph. 10 gate descriptors ship; unknown gate names fall back to a generic descriptor so adding a gate on the backend just works.
 
 ### Sprint 7 notes
 
