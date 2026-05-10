@@ -296,3 +296,215 @@ export function useDeleteClosedPositions() {
     },
   })
 }
+
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  Orders — Sprint 3
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export type OrderSide = 'BUY' | 'SELL'
+export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_LOSS' | 'TAKE_PROFIT'
+export type OrderStatus =
+  | 'PENDING'
+  | 'SUBMITTED'
+  | 'FILLED'
+  | 'PARTIALLY_FILLED'
+  | 'CANCELLED'
+  | 'REJECTED'
+  | 'FAILED'
+
+export interface OrderRow {
+  id: string
+  strategy_id: string
+  strategy_name: string | null
+  symbol: string
+  side: OrderSide
+  order_type: OrderType
+  quantity: number
+  price: number | null
+  stop_price: number | null
+  status: OrderStatus
+  created_at: string | null
+  updated_at: string | null
+  filled_at: string | null
+  filled_price: number | null
+  filled_quantity: number | null
+  etoro_order_id: string | null
+  expected_price: number | null
+  slippage: number | null
+  fill_time_seconds: number | null
+  order_action: 'entry' | 'close' | 'retirement' | null
+}
+
+export interface OrdersPayload {
+  orders: OrderRow[]
+  total_count: number
+}
+
+export interface ExecutionQualityPayload {
+  avg_slippage: number
+  fill_rate: number
+  avg_fill_time_seconds: number
+  rejection_rate: number
+  total_orders: number
+  filled_orders: number
+  rejected_orders: number
+  pending_orders: number
+  slippage_by_strategy: Record<string, number>
+  rejection_reasons: Record<string, number>
+}
+
+export interface PlaceOrderBody {
+  strategy_id: string
+  symbol: string
+  side: OrderSide
+  order_type: OrderType
+  quantity: number
+  price?: number | null
+  stop_price?: number | null
+}
+
+export function useOrders(
+  opts: { status?: OrderStatus; limit?: number; pinMode?: TradingMode } = {},
+) {
+  const { status: statusFilter, limit = 0, pinMode } = opts
+  const active = useTradingMode((s) => s.mode)
+  const mode = pinMode ?? active
+  return useQuery<OrdersPayload>({
+    queryKey: ['orders', mode, { status: statusFilter ?? null, limit }],
+    queryFn: () =>
+      api.get<OrdersPayload>('/orders', {
+        mode,
+        status_filter: statusFilter,
+        limit: limit || undefined,
+      }),
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  })
+}
+
+export function useExecutionQuality(period: '1D' | '1W' | '1M' | '3M', pinMode?: TradingMode) {
+  const active = useTradingMode((s) => s.mode)
+  const mode = pinMode ?? active
+  return useQuery<ExecutionQualityPayload>({
+    queryKey: ['execution-quality', mode, period],
+    queryFn: () =>
+      api.get<ExecutionQualityPayload>('/orders/execution-quality', { mode, period }),
+    staleTime: 60_000,
+  })
+}
+
+export function useCancelOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      orderId,
+      mode,
+    }: {
+      orderId: string
+      mode: TradingMode
+    }) =>
+      api.delete<{ success: boolean; message: string; order_id: string }>(
+        `/orders/${orderId}`,
+        { mode },
+      ),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['orders', vars.mode] })
+    },
+  })
+}
+
+export function useDeleteOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      orderId,
+      mode,
+    }: {
+      orderId: string
+      mode: TradingMode
+    }) =>
+      api.delete<{ success: boolean; message: string; order_id: string }>(
+        `/orders/${orderId}/permanent`,
+        { mode },
+      ),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['orders', vars.mode] })
+    },
+  })
+}
+
+export function useBulkDeleteOrders() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      orderIds,
+      mode,
+    }: {
+      orderIds: string[]
+      mode: TradingMode
+    }) =>
+      api.post<{
+        success_count: number
+        fail_count: number
+        deleted_order_ids: string[]
+        failed_order_ids: string[]
+      }>('/orders/bulk-delete', { order_ids: orderIds }, { mode }),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['orders', vars.mode] })
+    },
+  })
+}
+
+export function useClosePositionFromOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      orderId,
+      mode,
+    }: {
+      orderId: string
+      mode: TradingMode
+    }) =>
+      api.post<{ success: boolean; message: string; order_id: string; position_closed: boolean }>(
+        `/orders/${orderId}/close-position`,
+        undefined,
+        { mode },
+      ),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['orders', vars.mode] })
+      qc.invalidateQueries({ queryKey: ['positions', vars.mode] })
+    },
+  })
+}
+
+export function useSyncOrders() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (mode: TradingMode) =>
+      api.post<{ synced: number; added: number; updated: number }>(
+        '/orders/sync',
+        undefined,
+        { mode },
+      ),
+    onSuccess: (_d, mode) => {
+      qc.invalidateQueries({ queryKey: ['orders', mode] })
+    },
+  })
+}
+
+export function usePlaceOrder() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ body, mode }: { body: PlaceOrderBody; mode: TradingMode }) =>
+      api.post<{ success: boolean; message: string; order_id: string }>(
+        '/orders',
+        body,
+        { mode },
+      ),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['orders', vars.mode] })
+      qc.invalidateQueries({ queryKey: ['positions', vars.mode] })
+    },
+  })
+}

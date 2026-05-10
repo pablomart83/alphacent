@@ -4,14 +4,15 @@ import { PageTemplate } from '@/components/layout'
 import { Tabs, TabsList, TabsTrigger, EmptyState } from '@/components/primitives'
 import { useTradingMode } from '@/stores'
 import { PositionsTab } from './positions/PositionsTab'
+import { OrdersTab } from './orders/OrdersTab'
+import { ExecutionTab } from './execution/ExecutionTab'
 import { PositionDetailPage } from './PositionDetailPage'
 
 /**
  * Book surface — /book.
  *
  * Tabs: Positions · Orders · Execution · Live.
- * Only Positions is live in Sprint 2; the others surface a Coming Soon
- * state so the surface shell and sprint boundaries are obvious.
+ * Positions, Orders, Execution are live. Live lands in Sprint 4.
  */
 
 const TABS = [
@@ -47,9 +48,9 @@ function BookShell() {
     current === 'positions'
       ? `Positions · ${mode}`
       : current === 'orders'
-        ? `Orders · Sprint 3`
+        ? `Orders · ${mode}`
         : current === 'execution'
-          ? `Execution · Sprint 3`
+          ? `Execution · ${mode}`
           : `Live · Sprint 4`
 
   return (
@@ -70,12 +71,16 @@ function BookShell() {
           <div className="flex-1 min-h-0">
             {current === 'positions' ? (
               <PositionsTab />
+            ) : current === 'orders' ? (
+              <OrdersTab />
+            ) : current === 'execution' ? (
+              <ExecutionTab />
             ) : (
               <div className="h-full flex items-center justify-center">
                 <EmptyState
                   icon={Hammer}
                   title={`${current[0].toUpperCase()}${current.slice(1)} — coming in Sprint ${TABS.find((t) => t.value === current)?.sprint}`}
-                  description="The Positions tab is live. Orders, Execution, and Live land in the next sprints."
+                  description="Positions, Orders, and Execution are live. Live tab lands in Sprint 4."
                 />
               </div>
             )}
