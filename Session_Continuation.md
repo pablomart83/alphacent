@@ -14,21 +14,23 @@
 |---|---|---|---|
 | 0 | Foundation: design system, primitives, 5-surface IA shell, WS + Query client | ✅ SHIPPED | `1171d41` |
 | 1 | Command — Pulse + Equity + Stream (the "now" surface) | ✅ SHIPPED | `d297d85` |
-| 2 | Book / Positions | Next |  |
-| 3-12 | per `FRONTEND_REBUILD_SPEC.md §3E` | Pending |  |
+| 2 | Book / Positions — 4 sub-tabs, allocation panel, detail drill-down | ✅ SHIPPED | `ae2c78f` |
+| 3 | Book / Orders + Execution | Next |  |
+| 4-12 | per `FRONTEND_REBUILD_SPEC.md §3E` | Pending |  |
 
-Sprint 1 highlights:
-- Real Command page at `/` replaces the ComingSoon placeholder
-- TradingView LWC v5 EquityChart with drawdown pane, SPY overlay, realized dashed line, period/interval selectors, hover readout with alpha-vs-SPY
-- PnLNumber with monospace tabular-nums + 400ms flash on change
-- SignalFeed seeded from `/signals/recent` + WS `signal_generated` rolling 50-event buffer
-- HealthScoreCard decomposed into 4 components (drawdown / concentration / margin / diversity) — no opaque single number
-- LivePill with 3 states; TopNavBar `liveEnabled` now wired from `/live/summary`
-- Page-local shortcuts: F fullscreen, B benchmark, 1-6 period, d/h/q interval
-- Period + interval persisted in URL for deep links
-- WS bridge extended: `signal_generated` invalidates `recent-signals`, `position_update`/`order_update` invalidate `live-summary`
-- Prod bundle: Command chunk 52kB (14kB gz), vendor-charts 170kB (55kB gz); no warnings
-- Deployed via staged swap pattern (`dist_next` → `dist`); prod 200, `/health` 200
+Sprint 2 highlights:
+- DataTable primitive: TanStack Table + Virtual, auto-virtualize >100 rows, sort, multi-select, sticky header, density, row menu — the foundation for every table in Sprints 3+
+- Positions tab with 4 URL-synced sub-tabs (Open · Pending closures · Fundamental alerts · Closed) and 70/30 split with AllocationPanel
+- Bulk actions: close selected, close all, CSV export, sync with eToro
+- ModifyRiskDialog wired to a **real** new backend endpoint `PUT /account/positions/{id}/risk-levels` (see below) — no more "not supported" explainer
+- Position detail at `/book/position/:symbol` with TradingView LWC candlestick + order-annotation markers
+- Picked up a dormant bug: `trigger_fundamental_check` was defined without a `@router.post` decorator — registered it under `POST /account/positions/trigger-fundamental-check`
+- Book chunk 65kB / 17kB gzipped (vendor-table 67kB / 19kB gz new dep)
+
+Backend additions (this session):
+- `PUT /account/positions/{id}/risk-levels` — modify SL/TP with asset-class caps (commit `fccb40f`)
+- `src/risk/sl_caps.py` — shared SL/TP cap helper, single source of truth for stocks/ETFs/crypto/forex/indices/commodities/leveraged-ETF caps
+- `POST /account/positions/trigger-fundamental-check` — registered the existing handler
 
 ### What was completed this session (2026-05-10)
 
