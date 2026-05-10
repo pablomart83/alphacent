@@ -9,7 +9,7 @@ import { Spinner } from '@/components/primitives'
 
 const Command = lazy(() => import('./pages/command/Command').then((m) => ({ default: m.Command })))
 const Book = lazy(() => import('./pages/book/Book').then((m) => ({ default: m.Book })))
-const Strategies = lazy(() => import('./pages/ComingSoon').then((m) => ({ default: () => <m.ComingSoon surface="Strategies" sprint={5} description="Library, cycle, templates, symbols, graduation, lab." /> })))
+const Strategies = lazy(() => import('./pages/strategies/Strategies').then((m) => ({ default: m.Strategies })))
 const Guard = lazy(() => import('./pages/ComingSoon').then((m) => ({ default: () => <m.ComingSoon surface="Guard" sprint={8} description="Risk, gates, system health, circuit breakers, alerts, audit." /> })))
 const Research = lazy(() => import('./pages/ComingSoon').then((m) => ({ default: () => <m.ComingSoon surface="Research" sprint={10} description="Performance, attribution, regime, tear sheet, stress, journal." /> })))
 const Settings = lazy(() => import('./pages/ComingSoon').then((m) => ({ default: () => <m.ComingSoon surface="Settings" sprint={12} /> })))
