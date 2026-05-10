@@ -84,6 +84,10 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
   // Tab state for main panel
   const [strategiesTab, setStrategiesTab] = useState('overview');
 
+  // Live strategies state (2B-4)
+  const [liveStrategiesData, setLiveStrategiesData] = useState<any[]>([]);
+  const [liveStrategiesLoading, setLiveStrategiesLoading] = useState(false);
+
   // Fetch strategies
   const fetchStrategies = useCallback(async () => {
     if (!tradingMode) return;
@@ -1415,6 +1419,7 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
     { value: 'overview', label: 'Overview' },
     { value: 'active', label: `Active (${filteredActiveStrategies.length})` },
     { value: 'backtested', label: `Backtested (${filteredBacktestedStrategies.length})` },
+    { value: 'live', label: `● Live (${liveStrategiesData.length})` },
     { value: 'retired', label: `Retired (${filteredRetiredStrategies.length})` },
     { value: 'templates', label: 'DSL Templates' },
     { value: 'ae-templates', label: 'AE Templates' },
@@ -1435,6 +1440,12 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
               onClick={() => {
                 setStrategiesTab(tab.value);
                 if (tab.value === 'retired') fetchRetiredStrategies();
+                if (tab.value === 'live') {
+                  setLiveStrategiesLoading(true);
+                  apiClient.getLiveStrategies().then(res => {
+                    setLiveStrategiesData(res?.live_strategies ?? []);
+                  }).catch(() => {}).finally(() => setLiveStrategiesLoading(false));
+                }
               }}
               className={cn(
                 'px-3 py-1 text-[13px] font-medium rounded whitespace-nowrap transition-colors shrink-0',
@@ -1460,7 +1471,16 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
 
       {/* Tab content */}
       <div className="flex-1 min-h-0 overflow-auto">
-        <Tabs value={strategiesTab} onValueChange={(v) => { setStrategiesTab(v); if (v === 'retired') fetchRetiredStrategies(); }} className="flex flex-col h-full">
+        <Tabs value={strategiesTab} onValueChange={(v) => {
+          setStrategiesTab(v);
+          if (v === 'retired') fetchRetiredStrategies();
+          if (v === 'live') {
+            setLiveStrategiesLoading(true);
+            apiClient.getLiveStrategies().then(res => {
+              setLiveStrategiesData(res?.live_strategies ?? []);
+            }).catch(() => {}).finally(() => setLiveStrategiesLoading(false));
+          }
+        }} className="flex flex-col h-full">
           {/* Hidden TabsList — we use custom buttons above */}
           <TabsList className="hidden">
             {strategyTabButtons.map((tab) => (
@@ -1766,6 +1786,125 @@ export const StrategiesNew: FC<StrategiesNewProps> = ({ onLogout }) => {
                 setSelectedStrategies(new Set(Object.keys(newSelection).filter(key => newSelection[key])));
               }}
             />
+          </TabsContent>
+
+          {/* Live Strategies Tab (2B-4) */}
+          <TabsContent value="live" className="p-2 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+                Live Authorizations — Agent Portfolio ($10K virtual / $1K real)
+              </div>
+              <button
+                onClick={() => {
+                  setLiveStrategiesLoading(true);
+                  apiClient.getLiveStrategies().then(res => setLiveStrategiesData(res?.live_strategies ?? [])).catch(() => {}).finally(() => setLiveStrategiesLoading(false));
+                }}
+                className="p-1 rounded text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+              >
+                <RefreshCw size={12} className={cn(liveStrategiesLoading && 'animate-spin')} />
+              </button>
+            </div>
+
+            {liveStrategiesLoading ? (
+              <div className="flex items-center justify-center h-24 text-xs text-gray-500">Loading...</div>
+            ) : liveStrategiesData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 gap-2 text-xs text-gray-500">
+                <div>No live authorizations yet.</div>
+                <div>Use the Graduation Gate in Autonomous → Graduation tab to approve strategies.</div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs font-mono table-dense">
+                  <thead>
+                    <tr className="border-b border-[var(--color-dark-border)] text-gray-500">
+                      <th className="py-1.5 px-2 text-left">Template</th>
+                      <th className="py-1.5 px-2 text-left">Symbol</th>
+                      <th className="py-1.5 px-2 text-right">Activated</th>
+                      <th className="py-1.5 px-2 text-right">Size (V)</th>
+                      <th className="py-1.5 px-2 text-right">Size (R)</th>
+                      <th className="py-1.5 px-2 text-right">SL%</th>
+                      <th className="py-1.5 px-2 text-right">TP%</th>
+                      <th className="py-1.5 px-2 text-right">Trades</th>
+                      <th className="py-1.5 px-2 text-right">Live P&L</th>
+                      <th className="py-1.5 px-2 text-right">Paper Sharpe</th>
+                      <th className="py-1.5 px-2 text-right">Divergence</th>
+                      <th className="py-1.5 px-2 text-center">Status</th>
+                      <th className="py-1.5 px-2 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {liveStrategiesData.map((ls: any) => {
+                      const isActive = !ls.retired_at;
+                      const divPct = ls.divergence_pct;
+                      const divColor = divPct == null ? 'text-gray-500'
+                        : divPct < 50 ? 'text-red-400'
+                        : divPct < 80 ? 'text-yellow-400'
+                        : 'text-green-400';
+                      return (
+                        <tr key={ls.id} className="border-b border-[var(--color-dark-border)]/30 hover:bg-gray-800/40">
+                          <td className="py-1.5 px-2 text-gray-200 max-w-[160px] truncate">{ls.template_name}</td>
+                          <td className="py-1.5 px-2 text-gray-300 font-semibold">{ls.symbol}</td>
+                          <td className="py-1.5 px-2 text-right text-gray-500">
+                            {ls.activated_at ? new Date(ls.activated_at).toLocaleDateString() : '—'}
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-gray-300">${ls.position_size}</td>
+                          <td className="py-1.5 px-2 text-right text-gray-400">${(ls.position_size * 0.10).toFixed(0)}</td>
+                          <td className="py-1.5 px-2 text-right text-gray-400">{(ls.sl_pct * 100).toFixed(1)}%</td>
+                          <td className="py-1.5 px-2 text-right text-gray-400">{(ls.tp_pct * 100).toFixed(1)}%</td>
+                          <td className="py-1.5 px-2 text-right text-gray-300">{ls.live_trades ?? 0}</td>
+                          <td className={cn('py-1.5 px-2 text-right', (ls.live_pnl ?? 0) >= 0 ? 'text-green-400' : 'text-red-400')}>
+                            {ls.live_pnl != null ? formatCurrency(ls.live_pnl) : '—'}
+                          </td>
+                          <td className="py-1.5 px-2 text-right text-gray-400">
+                            {ls.current_paper_sharpe != null ? ls.current_paper_sharpe.toFixed(2) : '—'}
+                          </td>
+                          <td className={cn('py-1.5 px-2 text-right', divColor)}>
+                            {divPct != null ? `${divPct}%` : ls.live_trades > 0 ? 'N/A' : '—'}
+                          </td>
+                          <td className="py-1.5 px-2 text-center">
+                            <span className={cn(
+                              'px-1.5 py-0.5 rounded text-xs font-semibold',
+                              isActive ? 'bg-green-500/15 text-green-400' : 'bg-gray-700/40 text-gray-500'
+                            )}>
+                              {isActive ? '● Active' : '○ Retired'}
+                            </span>
+                          </td>
+                          <td className="py-1.5 px-2 text-center">
+                            {isActive && (
+                              <button
+                                onClick={async () => {
+                                  if (!window.confirm(`Retire ${ls.template_name} / ${ls.symbol} from live trading? The strategy continues paper-trading on DEMO.`)) return;
+                                  try {
+                                    await apiClient.retireLiveStrategy(ls.id);
+                                    toast.success(`${ls.symbol} retired from live trading`);
+                                    const res = await apiClient.getLiveStrategies();
+                                    setLiveStrategiesData(res?.live_strategies ?? []);
+                                  } catch (err: any) {
+                                    toast.error(`Failed: ${err.message}`);
+                                  }
+                                }}
+                                className="px-2 py-0.5 text-xs rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                              >
+                                Retire
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Summary row */}
+            {liveStrategiesData.length > 0 && (
+              <div className="flex gap-4 text-xs text-gray-500 pt-1 border-t border-[var(--color-dark-border)]/30">
+                <span>Active: <span className="text-green-400 font-mono">{liveStrategiesData.filter((ls: any) => !ls.retired_at).length}</span></span>
+                <span>Total live trades: <span className="text-gray-300 font-mono">{liveStrategiesData.reduce((s: number, ls: any) => s + (ls.live_trades ?? 0), 0)}</span></span>
+                <span>Total live P&L: <span className={cn('font-mono', liveStrategiesData.reduce((s: number, ls: any) => s + (ls.live_pnl ?? 0), 0) >= 0 ? 'text-green-400' : 'text-red-400')}>{formatCurrency(liveStrategiesData.reduce((s: number, ls: any) => s + (ls.live_pnl ?? 0), 0))}</span></span>
+              </div>
+            )}
           </TabsContent>
 
           {/* Retired Strategies Tab */}

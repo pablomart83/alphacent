@@ -29,6 +29,7 @@ const WatchlistPage = lazy(() => import('./pages/WatchlistPage').then(m => ({ de
 const PositionDetail = lazy(() => import('./pages/PositionDetailView').then(m => ({ default: m.PositionDetailView })));
 const SystemHealth  = lazy(() => import('./pages/SystemHealthPage').then(m => ({ default: m.SystemHealthPage })));
 const AuditLog      = lazy(() => import('./pages/AuditLogPage').then(m => ({ default: m.AuditLogPage })));
+const LivePage      = lazy(() => import('./pages/LiveNew').then(m => ({ default: m.LiveNew })));
 
 // Wrap a lazy page in Suspense + PageErrorBoundary
 function Page({ name, children }: { name: string; children: React.ReactNode }) {
@@ -161,6 +162,7 @@ function App() {
                     <Route path="/settings" element={<Page name="Settings"><Settings onLogout={handleLogout} /></Page>} />
                     <Route path="/system-health" element={<Page name="System Health"><SystemHealth onLogout={handleLogout} /></Page>} />
                     <Route path="/audit-log" element={<Page name="Audit Log"><AuditLog onLogout={handleLogout} /></Page>} />
+                    <Route path="/live" element={<Page name="Live Trading"><LivePage onLogout={handleLogout} /></Page>} />
                   </Route>
 
                   <Route path="*" element={<Navigate to="/" replace />} />

@@ -928,6 +928,26 @@ class ApiClient {
     return this.handleResponse(response);
   }
 
+  async getLiveSummary(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>('/live/summary');
+    return this.handleResponse(response);
+  }
+
+  async getLiveDivergence(): Promise<any> {
+    const response = await this.client.get<ApiResponse<any>>('/live/divergence');
+    return this.handleResponse(response);
+  }
+
+  async retireLiveStrategy(liveId: number): Promise<any> {
+    const response = await this.client.post<ApiResponse<any>>(`/live/strategies/${liveId}/retire`, {});
+    return this.handleResponse(response);
+  }
+
+  async closeLivePosition(positionId: string): Promise<any> {
+    const response = await this.client.post<ApiResponse<any>>(`/live/positions/${positionId}/close`, {});
+    return this.handleResponse(response);
+  }
+
   // Schedule endpoints
   async getAutonomousSchedule(): Promise<{
     success: boolean;

@@ -438,6 +438,9 @@ def create_app() -> FastAPI:
     from src.api.routers import dashboard
     app.include_router(dashboard.router)
     
+    from src.api.routers import live as live_router
+    app.include_router(live_router.router)
+    
     logger.info("FastAPI application configured")
     
     return app

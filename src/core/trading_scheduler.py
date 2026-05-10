@@ -1392,49 +1392,63 @@ class TradingScheduler:
                                             _live_max = float(_live_cfg.get("max_order_size", 1500))
                                             _live_size = max(_live_min, min(_live_max, float(_approval.position_size)))
 
-                                            # Override risk params with CIO-approved values
-                                            _live_order = self._live_order_executor.execute_signal(
-                                                signal=signal,
-                                                position_size=_live_size,
-                                                stop_loss_pct=_approval.sl_pct,
-                                                take_profit_pct=_approval.tp_pct,
-                                            )
-                                            # Persist live order with account_type='live'
-                                            _live_order_orm = OrderORM(
-                                                id=_live_order.id,
-                                                strategy_id=_live_order.strategy_id,
-                                                symbol=_live_order.symbol,
-                                                side=_live_order.side,
-                                                order_type=_live_order.order_type,
-                                                quantity=_live_order.quantity,
-                                                status=_live_order.status,
-                                                price=_live_order.price,
-                                                stop_price=_live_order.stop_price,
-                                                take_profit_price=_live_order.take_profit_price,
-                                                submitted_at=_live_order.submitted_at or datetime.now(),
-                                                filled_at=_live_order.filled_at,
-                                                filled_price=_live_order.filled_price,
-                                                filled_quantity=_live_order.filled_quantity,
-                                                etoro_order_id=_live_order.etoro_order_id,
-                                                expected_price=_live_order.expected_price,
-                                                slippage=_live_order.slippage,
-                                                fill_time_seconds=_live_order.fill_time_seconds,
-                                                order_action='entry',
-                                                account_type='live',
-                                                order_metadata=(
-                                                    signal.metadata
-                                                    if isinstance(getattr(signal, 'metadata', None), dict)
-                                                    else None
-                                                ),
-                                            )
-                                            session.add(_live_order_orm)
-                                            session.commit()
-                                            logger.info(
-                                                f"LIVE FILL: {_sig_sym} {_sig_dir} "
-                                                f"${_live_size:.0f} virtual "
-                                                f"(${_live_size * _live_cfg.get('mirror_ratio', 0.10):.0f} real) "
-                                                f"order_id={_live_order.id}"
-                                            )
+                                            # Conviction gate: live threshold is independent of DEMO threshold.
+                                            # Allows DEMO to run looser (more data) while live stays selective.
+                                            _meta_conv = (signal.metadata or {}).get("conviction_score") if isinstance(getattr(signal, 'metadata', None), dict) else None
+                                            _sig_conv = float(_meta_conv or getattr(signal, 'confidence', 0) or 0)
+                                            _is_crypto = _sig_sym.upper() in {'BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOT', 'LINK', 'AVAX', 'NEAR', 'LTC', 'BCH', 'DOGE', 'SUI', 'APT', 'ARB', 'OP', 'RENDER', 'INJ'}
+                                            _live_conv_min = int(_live_cfg.get("conviction_threshold_crypto", 68) if _is_crypto else _live_cfg.get("conviction_threshold", 74))
+                                            if _sig_conv < _live_conv_min:
+                                                logger.info(
+                                                    f"Live conviction gate blocked: {_sig_sym} score={_sig_conv:.1f} < "
+                                                    f"live_min={_live_conv_min} ({'crypto' if _is_crypto else 'equity'}) — DEMO only"
+                                                )
+                                                # Skip live fill — DEMO fill already happened above
+                                            else:
+                                                # Override risk params with CIO-approved values
+                                                _live_order = self._live_order_executor.execute_signal(
+                                                    signal=signal,
+                                                    position_size=_live_size,
+                                                    stop_loss_pct=_approval.sl_pct,
+                                                    take_profit_pct=_approval.tp_pct,
+                                                )
+                                                # Persist live order with account_type='live'
+                                                _live_order_orm = OrderORM(
+                                                    id=_live_order.id,
+                                                    strategy_id=_live_order.strategy_id,
+                                                    symbol=_live_order.symbol,
+                                                    side=_live_order.side,
+                                                    order_type=_live_order.order_type,
+                                                    quantity=_live_order.quantity,
+                                                    status=_live_order.status,
+                                                    price=_live_order.price,
+                                                    stop_price=_live_order.stop_price,
+                                                    take_profit_price=_live_order.take_profit_price,
+                                                    submitted_at=_live_order.submitted_at or datetime.now(),
+                                                    filled_at=_live_order.filled_at,
+                                                    filled_price=_live_order.filled_price,
+                                                    filled_quantity=_live_order.filled_quantity,
+                                                    etoro_order_id=_live_order.etoro_order_id,
+                                                    expected_price=_live_order.expected_price,
+                                                    slippage=_live_order.slippage,
+                                                    fill_time_seconds=_live_order.fill_time_seconds,
+                                                    order_action='entry',
+                                                    account_type='live',
+                                                    order_metadata=(
+                                                        signal.metadata
+                                                        if isinstance(getattr(signal, 'metadata', None), dict)
+                                                        else None
+                                                    ),
+                                                )
+                                                session.add(_live_order_orm)
+                                                session.commit()
+                                                logger.info(
+                                                    f"LIVE FILL: {_sig_sym} {_sig_dir} "
+                                                    f"${_live_size:.0f} virtual "
+                                                    f"(${_live_size * _live_cfg.get('mirror_ratio', 0.10):.0f} real) "
+                                                    f"conviction={_sig_conv:.1f}>={_live_conv_min} "
+                                                    f"order_id={_live_order.id}"
+                                                )
                                         else:
                                             logger.debug(
                                                 f"Live routing: no approval for ({strategy_id}, {_sig_sym}) — DEMO only"
