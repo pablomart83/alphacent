@@ -1,9 +1,13 @@
 /**
  * Typed fetch wrapper. Session cookie is sent automatically via
  * `credentials: 'include'`. Every non-2xx response becomes an `ApiError`.
+ *
+ * On 401, the client emits a single auth-error event (rate-limited to one
+ * every 2s) so the app can react once — not once per in-flight query.
  */
 
 import { ApiError } from '@/lib/errors'
+import { notifyAuthError } from './auth-events'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -67,6 +71,15 @@ export async function request<T = unknown>(
       (payload && typeof payload === 'object' && 'detail' in payload
         ? String((payload as { detail: unknown }).detail)
         : null) || res.statusText || `HTTP ${res.status}`
+
+    // Broadcast auth failures once. The handler (installed in App.tsx) is
+    // responsible for clearing queries, disconnecting the WS, and letting
+    // ProtectedRoute redirect to /login — so call sites don't each need
+    // to reason about 401s.
+    if (res.status === 401) {
+      notifyAuthError('api-401')
+    }
+
     throw new ApiError(res.status, message, payload)
   }
 

@@ -11,7 +11,7 @@ import {
 } from '@/components/primitives'
 import { ResizablePanelLayout } from '@/components/layout'
 import { downloadCsv } from '@/lib/csv'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { useTradingMode } from '@/stores'
 import {
   hasNegativeLivePnl,
@@ -249,8 +249,7 @@ export function LibraryTab() {
         toast.success(`Backtest complete — ${target.name}`)
       }
     } catch (err) {
-      const info = classifyError(err, kind)
-      toast.error(info.title, { description: info.message })
+      notifyError(err, kind)
     } finally {
       setConfirmAction(null)
     }

@@ -11,7 +11,7 @@ import {
 } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
 import { PnLNumber } from '@/components/trading/PnLNumber'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { formatTimestamp } from '@/lib/utils'
 import {
   useLiveStrategies,
@@ -43,8 +43,7 @@ export function ActiveLiveTable() {
       )
       setConfirmRetire(null)
     } catch (err) {
-      const info = classifyError(err, 'retire live')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'retire live')
     }
   }
 

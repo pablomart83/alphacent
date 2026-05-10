@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { Wand2 } from 'lucide-react'
 import { Button, Label } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import { useGenerateStrategy, type StrategyRow } from '../useStrategiesData'
 
@@ -26,8 +26,7 @@ export function GenerateStrategyPanel() {
       setResult(res)
       toast.success('Strategy proposed — see library')
     } catch (err) {
-      const info = classifyError(err, 'generate strategy')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'generate strategy')
     }
   }
 

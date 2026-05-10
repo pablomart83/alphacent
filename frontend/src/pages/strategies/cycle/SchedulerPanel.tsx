@@ -13,7 +13,7 @@ import {
   Switch,
 } from '@/components/primitives'
 import { SectionLabel, SaveBar } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn, formatTimestamp, parseUtcIso } from '@/lib/utils'
 import {
   useAutonomousSchedules,
@@ -133,8 +133,7 @@ export function SchedulerPanel() {
       const res = await mutation.mutateAsync(draft)
       toast.success(res.message || 'Schedules saved')
     } catch (err) {
-      const info = classifyError(err, 'save schedules')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'save schedules')
     }
   }
 

@@ -13,7 +13,7 @@ import {
 } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
 import { PnLNumber } from '@/components/trading/PnLNumber'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { formatTimestamp } from '@/lib/utils'
 import {
   useStrategies,
@@ -54,8 +54,7 @@ export function BacktestRunnerPanel() {
       setResults(res)
       toast.success('Backtest complete')
     } catch (err) {
-      const info = classifyError(err, 'backtest')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'backtest')
     }
   }
 

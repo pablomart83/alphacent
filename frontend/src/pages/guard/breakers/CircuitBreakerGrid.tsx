@@ -14,7 +14,7 @@ import {
   Skeleton,
 } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import {
   useResetCircuitBreaker,
@@ -56,8 +56,7 @@ export function CircuitBreakerGrid({ health, loading }: CircuitBreakerGridProps)
       toast.success('Circuit breaker reset')
       setConfirmOpen(false)
     } catch (err) {
-      const info = classifyError(err, 'reset circuit breaker')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'reset circuit breaker')
     }
   }
 

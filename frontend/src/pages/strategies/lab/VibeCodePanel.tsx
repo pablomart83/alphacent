@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { Sparkles } from 'lucide-react'
 import { Button, Label } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import { useVibeCodeTranslate } from '../useStrategiesData'
 
@@ -24,8 +23,7 @@ export function VibeCodePanel() {
       const res = await translate.mutateAsync({ naturalLanguage: text })
       setResult(res)
     } catch (err) {
-      const info = classifyError(err, 'vibe code translate')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'vibe code translate')
     }
   }
 

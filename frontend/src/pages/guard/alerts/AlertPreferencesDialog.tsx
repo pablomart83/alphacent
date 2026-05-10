@@ -11,7 +11,7 @@ import {
   Label,
   Switch,
 } from '@/components/primitives'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import {
   useAlertConfig,
   useUpdateAlertConfig,
@@ -46,8 +46,7 @@ export function AlertPreferencesDialog({ open, onOpenChange }: AlertPreferencesD
       toast.success('Alert preferences saved')
       onOpenChange(false)
     } catch (err) {
-      const info = classifyError(err, 'save alert preferences')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'save alert preferences')
     }
   }
 

@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from '@/components/primitives'
 import { api } from '@/services/api'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useTradingMode } from '@/stores'
@@ -136,8 +136,7 @@ export function PlaceOrderDialog({ open, onOpenChange }: PlaceOrderDialogProps) 
       toast.success(res.message || `Submitted ${form.side} ${form.symbol}`)
       handleClose(false)
     } catch (e) {
-      const info = classifyError(e, 'place order')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'place order')
     }
   }
 

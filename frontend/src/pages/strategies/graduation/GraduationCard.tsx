@@ -17,7 +17,7 @@ import {
 import { SectionLabel } from '@/components/layout'
 import { PnLNumber } from '@/components/trading/PnLNumber'
 import { RegimePill } from '@/components/trading/RegimePill'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
 import {
   assetClassForSymbol,
@@ -143,8 +143,7 @@ export function GraduationCard({
       setConfirmApproveOpen(false)
       onClose()
     } catch (err) {
-      const info = classifyError(err, 'approve graduation')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'approve graduation')
       setConfirmApproveOpen(false)
     }
   }
@@ -164,8 +163,7 @@ export function GraduationCard({
       setRejectDialogOpen(false)
       onClose()
     } catch (err) {
-      const info = classifyError(err, 'reject graduation')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'reject graduation')
     }
   }
 

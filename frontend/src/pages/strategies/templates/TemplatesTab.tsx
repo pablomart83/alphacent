@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from '@/components/primitives'
 import { FilterBar } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import {
   useBulkToggleTemplates,
   useTemplateRankings,
@@ -90,8 +90,7 @@ export function TemplatesTab() {
       await toggleOne.mutateAsync({ name, enabled })
       toast.success(`${enabled ? 'Enabled' : 'Disabled'} ${name}`)
     } catch (err) {
-      const info = classifyError(err, 'toggle template')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'toggle template')
     } finally {
       setPendingToggleName(null)
     }
@@ -107,8 +106,7 @@ export function TemplatesTab() {
       )
       clearSelection()
     } catch (err) {
-      const info = classifyError(err, 'bulk toggle')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'bulk toggle')
     }
   }
 

@@ -9,7 +9,7 @@ import {
 } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
 import { PnLNumber } from '@/components/trading/PnLNumber'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { cn, formatAge } from '@/lib/utils'
 import { toast } from 'sonner'
 import { AlertTriangle, GitCompare, ShieldAlert } from 'lucide-react'
@@ -45,8 +45,7 @@ export function LiveDivergenceTab() {
       const res = await retire.mutateAsync(row.id)
       toast.success(res.message || `Retired live authorisation for ${row.symbol}`)
     } catch (e) {
-      const info = classifyError(e, 'retire live')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'retire live')
     } finally {
       setRetireTarget(null)
     }

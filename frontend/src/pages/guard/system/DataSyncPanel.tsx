@@ -2,7 +2,7 @@ import { toast } from 'sonner'
 import { PlayCircle, Zap, Database, Newspaper } from 'lucide-react'
 import { Button, Skeleton } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn, formatAge, formatNumber, formatTimestamp } from '@/lib/utils'
 import {
   useFmpCacheStatus,
@@ -40,8 +40,7 @@ export function DataSyncPanel({ sync, loading }: DataSyncPanelProps) {
       const res = await mutation.mutateAsync()
       toast.success(`${label}: ${res.message}`)
     } catch (err) {
-      const info = classifyError(err, label.toLowerCase())
-      toast.error(info.title, { description: info.message })
+      notifyError(err, label.toLowerCase())
     }
   }
 

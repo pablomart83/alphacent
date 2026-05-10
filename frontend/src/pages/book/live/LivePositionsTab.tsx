@@ -17,7 +17,7 @@ import {
   ErrorState,
 } from '@/components/primitives'
 import { PnLNumber } from '@/components/trading/PnLNumber'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { downloadCsv, type CsvColumn } from '@/lib/csv'
 import { cn, formatCurrency, formatTimestamp } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -63,8 +63,7 @@ export function LivePositionsTab() {
         const res = await closeMutation.mutateAsync(row.id)
         toast.success(res.message || `Close submitted — ${row.symbol}`)
       } catch (e) {
-        const info = classifyError(e, 'close live position')
-        toast.error(info.title, { description: info.message })
+        notifyError(e, 'close live position')
       } finally {
         setCloseTarget(null)
       }
@@ -300,8 +299,7 @@ export function LivePositionsTab() {
       const res = await syncMutation.mutateAsync('LIVE')
       toast.success(`Synced — ${res.synced} live positions`)
     } catch (e) {
-      const info = classifyError(e, 'sync live positions')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'sync live positions')
     }
   }
 

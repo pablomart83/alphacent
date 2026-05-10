@@ -6,7 +6,7 @@ import {
   ConfirmDialog,
 } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import {
   useKillSwitch,
   useResetSystem,
@@ -37,8 +37,7 @@ export function KillSwitchCard() {
       })
       setKillOpen(false)
     } catch (err) {
-      const info = classifyError(err, 'kill switch')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'kill switch')
     }
   }
 
@@ -48,8 +47,7 @@ export function KillSwitchCard() {
       toast.success('System reset — returned to STOPPED')
       setResetOpen(false)
     } catch (err) {
-      const info = classifyError(err, 'reset system')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'reset system')
     }
   }
 

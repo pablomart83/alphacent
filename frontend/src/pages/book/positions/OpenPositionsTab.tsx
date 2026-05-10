@@ -8,7 +8,7 @@ import {
   EmptyState,
   ErrorState,
 } from '@/components/primitives'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { downloadCsv, type CsvColumn } from '@/lib/csv'
 import { useTradingMode } from '@/stores'
 import { toast } from 'sonner'
@@ -112,8 +112,7 @@ export function OpenPositionsTab() {
       })
       toast.success(`Closed ${res.closed_count} position${res.closed_count === 1 ? '' : 's'}`)
     } catch (err) {
-      const info = classifyError(err, 'close position')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'close position')
     } finally {
       setCloseTarget(null)
     }
@@ -128,8 +127,7 @@ export function OpenPositionsTab() {
       toast.success(`Closed ${res.closed_count} of ${selectedIds.length} selected`)
       setRowSelection({})
     } catch (err) {
-      const info = classifyError(err, 'close selected')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'close selected')
     } finally {
       setConfirmCloseSelected(false)
     }
@@ -141,8 +139,7 @@ export function OpenPositionsTab() {
       toast.success(res.message || `Closed ${res.closed_count} positions`)
       setRowSelection({})
     } catch (err) {
-      const info = classifyError(err, 'close all')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'close all')
     } finally {
       setConfirmCloseAll(false)
     }
@@ -153,8 +150,7 @@ export function OpenPositionsTab() {
       const res = await syncMutation.mutateAsync(mode)
       toast.success(`Synced — ${res.synced} positions (${res.added} added, ${res.updated} updated)`)
     } catch (err) {
-      const info = classifyError(err, 'sync positions')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'sync positions')
     }
   }
 

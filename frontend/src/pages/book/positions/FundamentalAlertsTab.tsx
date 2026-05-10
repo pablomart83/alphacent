@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, CheckCheck, TrendingDown, X } from 'lucide-react'
 import { Button, EmptyState, ErrorState, Skeleton } from '@/components/primitives'
 import { PnLNumber } from '@/components/trading/PnLNumber'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { cn, formatAge, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
 import { useTradingMode } from '@/stores'
@@ -33,8 +33,7 @@ export function FundamentalAlertsTab() {
       toast.success(`Fundamental scan complete — ${res.flagged ?? 0} positions flagged`)
       qc.invalidateQueries({ queryKey: ['fundamental-alerts', mode] })
     } catch (e) {
-      const info = classifyError(e, 'trigger fundamental check')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'trigger fundamental check')
     }
   }
 
@@ -43,8 +42,7 @@ export function FundamentalAlertsTab() {
       await approve.mutateAsync({ positionId: row.id, mode })
       toast.success(`Closed ${row.symbol} on fundamental signal`)
     } catch (e) {
-      const info = classifyError(e, 'approve closure')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'approve closure')
     }
   }
 
@@ -53,8 +51,7 @@ export function FundamentalAlertsTab() {
       await dismiss.mutateAsync({ positionId: row.id, mode })
       toast.success(`Dismissed alert — keeping ${row.symbol}`)
     } catch (e) {
-      const info = classifyError(e, 'dismiss alert')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'dismiss alert')
     }
   }
 

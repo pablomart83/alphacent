@@ -24,7 +24,7 @@ import {
   Switch,
 } from '@/components/primitives'
 import { FilterBar, SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { formatAge, formatTimestamp } from '@/lib/utils'
 import {
   useAcknowledgeAlert,
@@ -172,8 +172,7 @@ export function AlertsTab() {
                       await ack.mutateAsync(r.id)
                       toast.success('Acknowledged')
                     } catch (err) {
-                      const info = classifyError(err, 'acknowledge')
-                      toast.error(info.title, { description: info.message })
+                      notifyError(err, 'acknowledge')
                     }
                   }}
                 >
@@ -188,8 +187,7 @@ export function AlertsTab() {
                     try {
                       await markRead.mutateAsync(r.id)
                     } catch (err) {
-                      const info = classifyError(err, 'mark read')
-                      toast.error(info.title, { description: info.message })
+                      notifyError(err, 'mark read')
                     }
                   }}
                 >
@@ -249,8 +247,7 @@ export function AlertsTab() {
                 await markAllRead.mutateAsync()
                 toast.success('All alerts marked read')
               } catch (err) {
-                const info = classifyError(err, 'mark all read')
-                toast.error(info.title, { description: info.message })
+                notifyError(err, 'mark all read')
               }
             }}
             loading={markAllRead.isPending}
@@ -329,8 +326,7 @@ export function AlertsTab() {
             toast.success('Alert history cleared')
             setClearOpen(false)
           } catch (err) {
-            const info = classifyError(err, 'clear alerts')
-            toast.error(info.title, { description: info.message })
+            notifyError(err, 'clear alerts')
           }
         }}
       />

@@ -4,12 +4,16 @@
  * Design:
  * - One connection per session, shared across the app.
  * - Exponential backoff reconnection (1s → 30s, max 10 attempts in 5min).
+ * - Auth failures (close code 1008 / 4001) STOP reconnection and emit
+ *   a single auth-error event — no point retrying with a dead cookie.
  * - Channel+event messages (`{channel, event, data}`) are normalised to a
  *   flat `type` string so consumers subscribe by type.
  * - Connection state is observable for UI indicators.
  * - On reconnect, callers should `queryClient.invalidateQueries(...)` on
  *   the top-level keys to resync data. This file is queue-agnostic.
  */
+
+import { notifyAuthError } from './auth-events'
 
 const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || ''
 
@@ -91,10 +95,24 @@ class WebSocketManager {
         // onclose will fire next
       }
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
         this.setState('closed')
         this.ws = null
-        if (!this.intentionallyClosed) this.scheduleReconnect()
+        if (this.intentionallyClosed) return
+
+        // Auth failures: backend closes with 1008 (Policy Violation) on
+        // missing or invalid session. Don't retry with a dead cookie —
+        // ping the app so it can clear state and redirect. 4001 is
+        // reserved for future app-level auth codes.
+        if (event.code === 1008 || event.code === 4001) {
+          this.intentionallyClosed = true
+          // Reset so a fresh login can reconnect cleanly.
+          this.reconnectAttempts = 0
+          notifyAuthError(event.code === 4001 ? 'ws-4001' : 'ws-1008')
+          return
+        }
+
+        this.scheduleReconnect()
       }
     } catch (e) {
       console.error('[ws] connect failed', e)

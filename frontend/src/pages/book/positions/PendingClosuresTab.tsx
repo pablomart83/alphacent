@@ -3,7 +3,7 @@ import { CheckCheck, Flag, XCircle } from 'lucide-react'
 import { Button, Checkbox, EmptyState, ErrorState, Skeleton } from '@/components/primitives'
 import { PnLNumber } from '@/components/trading/PnLNumber'
 import { toast } from 'sonner'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { cn, formatAge, formatCurrency } from '@/lib/utils'
 import { useTradingMode } from '@/stores'
 import {
@@ -44,8 +44,7 @@ export function PendingClosuresTab() {
       await approve.mutateAsync({ positionId: row.id, mode })
       toast.success(`Approved closure — ${row.symbol}`)
     } catch (e) {
-      const info = classifyError(e, 'approve closure')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'approve closure')
     }
   }
 
@@ -57,8 +56,7 @@ export function PendingClosuresTab() {
       toast.success(`Approved ${res.success_count} closures · ${res.fail_count} failed`)
       setSelected(new Set())
     } catch (e) {
-      const info = classifyError(e, 'bulk approve')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'bulk approve')
     }
   }
 
@@ -67,8 +65,7 @@ export function PendingClosuresTab() {
       await dismiss.mutateAsync({ positionId: row.id, mode })
       toast.success(`Dismissed closure — ${row.symbol} stays open`)
     } catch (e) {
-      const info = classifyError(e, 'dismiss closure')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'dismiss closure')
     }
   }
 

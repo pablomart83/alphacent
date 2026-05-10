@@ -6,7 +6,7 @@ import {
 } from '@/components/primitives'
 import { toast } from 'sonner'
 import { cn, formatCurrency } from '@/lib/utils'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import {
   useLiveConfig,
   useLiveSummary,
@@ -87,8 +87,7 @@ export function MasterSwitchBlock() {
       await update.mutateAsync({ enabled: next })
       toast.success(next ? 'Live trading enabled' : 'Live trading disabled')
     } catch (e) {
-      const info = classifyError(e, 'update live config')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'update live config')
     } finally {
       setConfirming(null)
     }

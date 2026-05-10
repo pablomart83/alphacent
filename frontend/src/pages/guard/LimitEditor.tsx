@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { AlertTriangle } from 'lucide-react'
 import { Label, Input, Skeleton } from '@/components/primitives'
 import { SaveBar, SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import { useTradingMode } from '@/stores'
 import {
@@ -150,8 +150,7 @@ export function LimitEditor({ limits, metrics, loading }: LimitEditorProps) {
       await update.mutateAsync({ mode, body })
       toast.success(`Risk limits updated — ${changes.length} change${changes.length === 1 ? '' : 's'}`)
     } catch (err) {
-      const info = classifyError(err, 'update risk limits')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'update risk limits')
     }
   }
 

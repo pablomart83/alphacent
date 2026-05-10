@@ -1,11 +1,14 @@
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Toaster } from 'sonner'
+import { toast, Toaster } from 'sonner'
 import { AppShell } from '@/components/AppShell'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { Spinner } from '@/components/primitives'
+import { AUTH_QUERY_KEY } from '@/hooks/useAuth'
+import { setAuthErrorHandler } from '@/services/auth-events'
+import { wsManager } from '@/services/websocket'
 
 const Command = lazy(() => import('./pages/command/Command').then((m) => ({ default: m.Command })))
 const Book = lazy(() => import('./pages/book/Book').then((m) => ({ default: m.Book })))
@@ -109,6 +112,32 @@ function AppRoutes() {
 }
 
 export default function App() {
+  useEffect(() => {
+    // Single global handler for session-invalidation events fired by the
+    // API client (401) or WebSocket (close 1008/4001). Clears all cached
+    // queries so the redirect to /login shows no stale data; disconnects
+    // the WS so it stops retrying with a dead cookie; invalidates the
+    // auth-status query so ProtectedRoute navigates away immediately.
+    setAuthErrorHandler((reason) => {
+      try {
+        wsManager.disconnect()
+      } catch {
+        /* ignore */
+      }
+      queryClient.clear()
+      queryClient.invalidateQueries({ queryKey: AUTH_QUERY_KEY })
+      toast.info('Signed out', {
+        description:
+          reason === 'api-401'
+            ? 'Your session ended. Sign in again to continue.'
+            : 'Connection ended. Sign in again to continue.',
+      })
+    })
+    return () => {
+      setAuthErrorHandler(null)
+    }
+  }, [])
+
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>

@@ -16,7 +16,7 @@ import {
   type PositionRow,
 } from '@/pages/book/useBookData'
 import { useTradingMode } from '@/stores'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -159,8 +159,7 @@ export function ModifyRiskDialog({ position, open, onOpenChange }: ModifyRiskDia
       }
       onOpenChange(false)
     } catch (err) {
-      const info = classifyError(err, 'modify SL/TP')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'modify SL/TP')
     }
   }
 

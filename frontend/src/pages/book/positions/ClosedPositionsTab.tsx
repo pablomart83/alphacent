@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from '@/components/primitives'
 import { PnLNumber } from '@/components/trading/PnLNumber'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { downloadCsv, type CsvColumn } from '@/lib/csv'
 import { cn, formatCurrency, formatTimestamp, parseUtcIso } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -244,8 +244,7 @@ export function ClosedPositionsTab() {
       toast.success(`Deleted ${res.deleted} closed position record${res.deleted === 1 ? '' : 's'}`)
       setRowSelection({})
     } catch (e) {
-      const info = classifyError(e, 'delete records')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'delete records')
     } finally {
       setConfirmDelete(false)
     }

@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { PlayCircle } from 'lucide-react'
 import { Button, ConfirmDialog } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import { useTriggerCycle, type TriggerCycleBody } from '../useStrategiesData'
 
@@ -56,8 +56,7 @@ export function ManualCycleTrigger() {
         description: res.cycle_id ? `Cycle ID: ${res.cycle_id}` : undefined,
       })
     } catch (err) {
-      const info = classifyError(err, 'trigger cycle')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'trigger cycle')
     } finally {
       setConfirmOpen(false)
     }

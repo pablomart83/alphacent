@@ -9,7 +9,7 @@ import {
   Switch,
 } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { useBootstrap, type BootstrapPayload } from '../useStrategiesData'
 
 const AVAILABLE_TYPES = [
@@ -46,8 +46,7 @@ export function BootstrapPanel() {
       setResult(res)
       toast.success(res.message)
     } catch (err) {
-      const info = classifyError(err, 'bootstrap')
-      toast.error(info.title, { description: info.message })
+      notifyError(err, 'bootstrap')
     }
   }
 

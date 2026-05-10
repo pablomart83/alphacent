@@ -9,7 +9,7 @@ import {
   EmptyState,
   ErrorState,
 } from '@/components/primitives'
-import { classifyError } from '@/lib/errors'
+import { classifyError, notifyError } from '@/lib/errors'
 import { downloadCsv, type CsvColumn } from '@/lib/csv'
 import { cn, parseUtcIso } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -134,8 +134,7 @@ export function AllOrdersTab({
         const res = await cancelMutation.mutateAsync({ orderId: row.id, mode })
         toast.success(res.message || `Cancelled order ${row.id.slice(0, 8)}`)
       } catch (e) {
-        const info = classifyError(e, 'cancel order')
-        toast.error(info.title, { description: info.message })
+        notifyError(e, 'cancel order')
       } finally {
         setCancelTarget(null)
       }
@@ -149,8 +148,7 @@ export function AllOrdersTab({
         const res = await deleteMutation.mutateAsync({ orderId: row.id, mode })
         toast.success(res.message || 'Order deleted')
       } catch (e) {
-        const info = classifyError(e, 'delete order')
-        toast.error(info.title, { description: info.message })
+        notifyError(e, 'delete order')
       } finally {
         setDeleteTarget(null)
       }
@@ -164,8 +162,7 @@ export function AllOrdersTab({
         const res = await closePositionMutation.mutateAsync({ orderId: row.id, mode })
         toast.success(res.message || 'Closing resulting position')
       } catch (e) {
-        const info = classifyError(e, 'close position from order')
-        toast.error(info.title, { description: info.message })
+        notifyError(e, 'close position from order')
       } finally {
         setClosePositionTarget(null)
       }
@@ -206,8 +203,7 @@ export function AllOrdersTab({
       toast.success(`Deleted ${res.success_count} of ${selectedIds.length} orders`)
       setRowSelection({})
     } catch (e) {
-      const info = classifyError(e, 'bulk delete')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'bulk delete')
     } finally {
       setConfirmBulkDelete(false)
     }
@@ -218,8 +214,7 @@ export function AllOrdersTab({
       const res = await syncMutation.mutateAsync(mode)
       toast.success(`Synced — ${res.synced} orders (${res.added} added, ${res.updated} updated)`)
     } catch (e) {
-      const info = classifyError(e, 'sync orders')
-      toast.error(info.title, { description: info.message })
+      notifyError(e, 'sync orders')
     }
   }
 

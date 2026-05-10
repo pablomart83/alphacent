@@ -83,3 +83,43 @@ export function classifyError(err: unknown, context?: string): ClassifiedError {
     raw: err,
   }
 }
+
+/**
+ * notifyError — the single canonical way to surface a caught error to
+ * the operator. Suppresses auth-failure toasts (the /login redirect
+ * triggered by the API client's auth-events pipeline carries the
+ * message). Everything else gets a toast with classified copy.
+ *
+ * Usage:
+ *   try { await mutation.mutateAsync(...) }
+ *   catch (err) { notifyError(err, 'retire live') }
+ *
+ * Falls back to a console warning when sonner isn't available (tests).
+ */
+
+import type { ExternalToast } from 'sonner'
+
+type ToastFn = (message: string, options?: ExternalToast) => void
+
+let toastImpl: { error: ToastFn } | null = null
+
+// Lazy import to avoid making `errors.ts` pull in sonner at test time.
+async function getToast(): Promise<{ error: ToastFn } | null> {
+  if (toastImpl) return toastImpl
+  try {
+    const mod = await import('sonner')
+    toastImpl = { error: mod.toast.error.bind(mod.toast) as ToastFn }
+    return toastImpl
+  } catch {
+    return null
+  }
+}
+
+export function notifyError(err: unknown, context?: string): ClassifiedError {
+  const info = classifyError(err, context)
+  if (info.isAuth) return info
+  void getToast().then((t) => {
+    if (t) t.error(info.title, { description: info.message })
+  })
+  return info
+}

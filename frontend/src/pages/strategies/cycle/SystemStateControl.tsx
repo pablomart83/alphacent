@@ -15,7 +15,7 @@ import {
   Skeleton,
 } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
-import { classifyError } from '@/lib/errors'
+import { notifyError } from '@/lib/errors'
 import { cn, formatAge } from '@/lib/utils'
 import {
   useSystemStateTransition,
@@ -91,8 +91,7 @@ export function SystemStateControl() {
       const res = await transition.mutateAsync({ action })
       toast.success(`System ${res.state.toLowerCase()} — ${res.message}`)
     } catch (err) {
-      const info = classifyError(err, `system ${action}`)
-      toast.error(info.title, { description: info.message })
+      notifyError(err, `system ${action}`)
     } finally {
       setConfirmAction(null)
     }
