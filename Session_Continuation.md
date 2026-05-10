@@ -6,7 +6,7 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Frontend rebuild is Sprints 10-12 next. Read `.kiro/steering/trading-system-context.md` and `FRONTEND_REBUILD_SPEC.md` before touching code.**
+**Frontend rebuild v2 is complete. Sprints 0-12 shipped. All 5 surfaces + Settings are live at https://alphacent.co.uk.**
 
 ### Frontend rebuild progress
 
@@ -22,9 +22,9 @@
 | 7 | Strategies / Templates + Symbols + Blacklist + Graduation (flagship) + Lab | ✅ SHIPPED | `b52ea72` |
 | 8 | Guard / Risk + Gates | ✅ SHIPPED | `b4b11dc` |
 | 9 | Guard / System + Circuit Breakers + Alerts + Audit | ✅ SHIPPED | `3f40f8e` |
-| 10 | Research / Performance + Attribution + Trades | **Next** |  |
-| 11 | Research / Regime + Alpha Edge + Tear Sheet + Stress + Journal | Pending |  |
-| 12 | Settings + cross-cutting polish (palette, shortcuts, a11y) | Pending |  |
+| 10 | Research / Performance + Attribution + Trades | ✅ SHIPPED | `aebff39` |
+| 11 | Research / Regime + Alpha Edge + Tear Sheet + Stress + Journal | ✅ SHIPPED | `020933c` |
+| 12 | Settings (10 tabs) + Command Palette + Shortcuts | ✅ SHIPPED | `e3a8300` |
 
 ### Foundation already in place — do not rebuild
 
@@ -62,6 +62,34 @@
 - **Sprint 7 bundle:** `Strategies-*.js` ≈ 191 KB raw (44.5 KB gzip), still inside the 250 KB budget. Templates/Symbols/Graduation/Lab all mount on the same route split — revisit code-splitting if Sprint 8 pushes past 250 KB.
 - **Latest commits on main:** `b52ea72` (Sprint 7) ← `69fc07e` (Sprint 6 promote pipeline) ← `99157a8` (Session doc: Sprint 6) ← `6d1aa89` (Sprint 6) ← `a97e86f` (Session doc: LIVE dashboard fix) ← `15a5394` (LIVE dashboard fix) ← `042c2c5` (Sprint 5) ← `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
 - **errors.log:** clean — most recent entry is still 2026-05-09 23:24 stale `promoted_to_demo` (pre-rename, expected)
+
+### Sprint 12 notes
+
+- **Zero new backend endpoints.** All 10 Settings tabs wire existing /config, /auth, /alerts routes. Same approach as Sprint 9 — "honesty over invention".
+- **AutonomousTab schema-driven.** `autonomous-config-schema.ts` defines every editable field (~65 across 16 collapsible sections). Adding a field = one schema row. Search (Fuse.js) hits label + help + section, and matching sections auto-expand so finding a knob is one keystroke away. `pickEditableFields` narrows the 300+-key response to just what the form edits; on save we merge the form onto the full server payload so read-only nested blocks (direction_aware_thresholds, advanced_readonly) round-trip unchanged.
+- **Every Autonomous field has a FieldInfoTooltip** with help text and an optional `gates:` pointer — the steering doc's "every threshold is tied to the log line it gates" made concrete.
+- **Alerts tab doesn't fork the dialog.** Surfaces the existing AlertPreferencesDialog from Guard so there's exactly one codepath to AlertConfigORM. Saves a lot of duplicate form logic.
+- **Users tab degrades gracefully on 403.** Non-admin sessions see a friendly "manage_users permission required" banner instead of a raw 403 error.
+- **CommandPalette mounted in AppShell.** Lives in `frontend/src/components/CommandPalette.tsx`. ⌘K anywhere, Fuse fuzzy search across navigation + surface subroutes + theme + logout, recent-commands persisted via the existing command-palette store. Keyboard nav (↑↓ / Enter) parity with mouse.
+- **Settings chunk 58 KB raw / 15 KB gzip** (inside budget). index chunk grew ~35 KB because CommandPalette has to mount before any tab loads — acceptable for global keyboard access.
+
+### Sprint 11 notes
+
+- **Regime tab pulls from the single `/analytics/regime-comprehensive` endpoint.** Four asset-class regime cards, perf-by-regime table, transitions timeline, strategy×regime Visx heatmap, market context (VIX / yield curve / fed funds / CPI / GDP / PMI), crypto cycle, forex carry rates, and MQS card. Regime chips use the existing `regime-*` badge variants so colour semantics are consistent with Command / Guard.
+- **Alpha Edge tab uses `/analytics/alpha-edge/*` (fundamental, ML, conviction distribution, template performance, TCA).** ConvictionDistributionChart is a Recharts ComposedChart: Bar for counts, Line for win-rate overlay when present, ReferenceLines at 65 (DEMO) and 74 (LIVE) thresholds, bars coloured by which threshold they cross. Degrades cleanly to a plain BarChart when win_rate isn't available.
+- **Tear sheet** is fully wired to `/analytics/tear-sheet`. UnderwaterPlot is Visx AreaClosed + LinePath; ReturnDistribution computes annualised σ from the backend's bucketed histogram so the header stat is consistent with the skew/kurtosis it's paired with. The AnnualReturnsGrid uses one-tile-per-year with a signed mini-bar rather than a traditional column chart — much denser at desktop widths.
+- **Stress tab.** Backend returns three hardcoded historical scenarios (COVID / Lehman / SVB) with simulated portfolio curves computed via portfolio-beta ≈ 0.70. The CustomScenarioBuilder is client-side — reads the current open positions from /account/positions, applies `shock × vol × (1+Δρ) × √(H/5)` per-position, and short positions profit on negative shocks. Banner flags this as a what-if, not VaR — we don't pretend it's a Monte Carlo engine.
+- **Journal tab.** Virtualised DataTable (500-row client cap; backend supports pagination when needed). MAE/MFE scatter with a 45° break-even guide: dots above = winner that left money on the table, dots below = trailing stop was too tight. CSV export via `buildTradeJournalExportUrl` direct href (same blob-less pattern as Sprint 9 audit).
+
+### Sprint 10 notes
+
+- **Research is read-only.** No mutations, no WS subscriptions — it's cold analytics data, pollers beat events here. Every hook polls on 2min / 5min intervals per the spec.
+- **Period + interval** selectors live in the existing `research` Zustand store so switching tabs keeps selection. Only the Performance tab shows the interval selector (spec §Surface 5 defers intraday-resolution on other views). Number keys 1..8 jump between tabs.
+- **MonthlyReturnsHeatmap** uses the ParentSize + custom SVG rects pattern from Sprint 8's CorrelationHeatmap rather than @visx/heatmap. Same reason: diverging scale with "no data" cells needs a custom fill path. Reused cleanly by the TearSheet tab (wrapper component, same data shape).
+- **Annual returns compounded** via ∏(1+r/100) − 1 from the monthly_returns map rather than summed — simple correctness win, matches how returns work.
+- **PerStrategyAttributionTable** renders a signed mini-bar scaled to the portfolio's max |contribution|, centred on a 50% baseline so positives and negatives read at a glance.
+- **SectorAttributionPanel** uses a custom stacked horizontal bar rather than Recharts' stacked bar because Brinson decomposition has three signed effects and Recharts' divergence behaviour is awkward; the CumulativeEffects area chart below does use Recharts.
+- **HoldingPeriodHistogram bug fix before ship.** Earlier draft synthesised a Gaussian distribution around the mean, which violates the "don't invent data" rule. Rewired to real per-trade buckets from /analytics/trade-journal with the backend mean plotted as a ReferenceLine. Less flashy but honest.
 
 ### Sprint 9 notes
 
