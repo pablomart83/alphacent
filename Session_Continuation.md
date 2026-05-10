@@ -44,6 +44,10 @@
 - `PUT /account/positions/{id}/risk-levels` — modify SL/TP; server validates asset-class caps, side-sanity, immediate-breach warnings; emits `position_update` WS (commit `fccb40f`)
 - `POST /account/positions/trigger-fundamental-check` — existing handler that was missing a `@router.post` decorator (commit `fccb40f`)
 - `src/risk/sl_caps.py` — shared SL/TP cap helper (stocks/ETFs 9%, leveraged ETFs 20%, crypto 15%, forex 4%, etc.) — single source of truth for both order_executor and the new endpoint
+- `GET /account/dashboard/summary` + `/account/metrics-bar` — every aggregation now scoped by `account_type` (positions, orders, equity_snapshots). LIVE dollar fields are rescaled by `live_trading.mirror_ratio` (0.10) at egress so the Command page shows real money (~$1K on Agent Portfolio) rather than virtual (~$10K). `/live/summary` stays unchanged — it exposes both sides explicitly. Commit `15a5394`.
+- `_sync_account_from_etoro` — synchronous companion to the fire-and-forget `_refresh_account_from_etoro`. Dashboard handler blocks briefly on it when `account_info` has no row for the requested mode, so the first LIVE view renders real numbers instead of zeros.
+- `MonitoringService._sync_account_info(account_type)` — called for both demo and live alongside the 60s position sync. Keeps `account_info` fresh proactively instead of waiting for the UI to poke it.
+- `etoro_client.get_account_info` — unified LIVE + DEMO parsing. eToro returns the same `{"clientPortfolio": {...}}` nested shape for both accounts; the old LIVE branch looked for flat `"Credit"/"Equity"` keys that don't exist, so every LIVE field silently parsed as 0.
 
 ### Infra adjustments
 
@@ -55,7 +59,7 @@
 - **DEMO strategies:** 49 PAPER + 74 BACKTESTED (counts move cycle-to-cycle; run the diagnostic query below for fresh numbers)
 - **LIVE account:** Agent Portfolio | Virtual: $10,000 | Real: $1,000 | Mirror: 10%
 - **LIVE positions:** 0 | **live_trading.enabled:** TRUE | **Live authorisations:** 0
-- **Latest commits on main:** `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
+- **Latest commits on main:** `15a5394` (LIVE dashboard fix) ← `042c2c5` (Sprint 5) ← `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
 - **errors.log:** clean — most recent entry is 2026-05-09 23:24 stale `promoted_to_demo` (pre-rename, expected)
 
 ### Session start checklist
