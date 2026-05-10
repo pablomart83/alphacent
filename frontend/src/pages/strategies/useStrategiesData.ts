@@ -704,3 +704,409 @@ export function mapBackendStageToSpec(backendStage: string): SpecStageId | null 
       return null
   }
 }
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  Sprint 7 — Templates, Symbols, Graduation, Lab data hooks
+ * ═════════════════════════════════════════════════════════════════════ */
+
+/* ──── Template types ──── */
+
+export interface TemplateRow {
+  name: string
+  description: string
+  market_regimes: string[]
+  indicators: string[]
+  entry_rules: string[]
+  exit_rules: string[]
+  success_rate: number
+  usage_count: number
+  strategy_type?: string | null
+  direction?: string | null
+  asset_classes: string[]
+  expected_trade_frequency?: string | null
+  expected_holding_period?: string | null
+  risk_reward_ratio?: number | null
+  enabled: boolean
+  active_strategies: number
+  total_strategies_ever: number
+  avg_sharpe?: number | null
+  avg_win_rate?: number | null
+  avg_return?: number | null
+  total_trades_live: number
+  total_pnl?: number | null
+  best_symbol?: string | null
+  worst_symbol?: string | null
+  last_proposed?: string | null
+  last_activated?: string | null
+  is_intraday: boolean
+  is_4h: boolean
+  interval: '1d' | '4h' | '1h' | string
+  activated_count: number
+  traded_count: number
+  proposed_count: number
+  approved_count: number
+  strategy_category?: string | null
+}
+
+export interface TemplatesListPayload {
+  templates: TemplateRow[]
+  total: number
+}
+
+export interface TemplateRankingRow {
+  name: string
+  win_rate?: number | null
+  avg_sharpe?: number | null
+  total_trades: number
+  active_count: number
+  last_proposal_date?: string | null
+}
+
+export interface TemplateRankingsPayload {
+  rankings: TemplateRankingRow[]
+  total: number
+}
+
+/* ──── Symbol types ──── */
+
+export interface SymbolStatsRow {
+  symbol: string
+  asset_class: string
+  sector: string
+  active_strategies: number
+  activated_count: number
+  traded_count: number
+  usage_count: number
+  proposed_count: number
+  approved_count: number
+  avg_sharpe?: number | null
+  avg_win_rate?: number | null
+  total_pnl?: number | null
+  total_trades_live: number
+  open_positions: number
+  best_template?: string | null
+  worst_template?: string | null
+  last_signal?: string | null
+  last_trade?: string | null
+}
+
+export interface SymbolsListPayload {
+  symbols: SymbolStatsRow[]
+  total: number
+}
+
+export interface BlacklistEntry {
+  template: string
+  symbol: string
+  count: number
+  timestamp: string
+  type: string
+}
+
+export interface BlacklistPayload {
+  entries: BlacklistEntry[]
+  total: number
+}
+
+export interface IdleDemotionEntry {
+  name: string
+  strategy_id: string
+  timestamp: string
+  reason: string
+}
+
+export interface IdleDemotionsPayload {
+  entries: IdleDemotionEntry[]
+  total: number
+}
+
+/* ──── Graduation types ──── */
+
+export interface GraduationQueueRow {
+  strategy_id: string
+  strategy_name: string
+  template_name?: string | null
+  symbol: string
+  paper_trades: number
+  paper_sharpe?: number | null
+  paper_win_rate?: number | null
+  paper_total_pnl?: number | null
+  wf_sharpe?: number | null
+  qualification_ratio?: number | null
+  first_paper_trade?: string | null
+}
+
+export interface GraduationQueuePayload {
+  queue: GraduationQueueRow[]
+  count: number
+}
+
+export interface LiveStrategyRow {
+  id: number
+  graduation_id?: number | null
+  strategy_id: string
+  template_name?: string | null
+  symbol: string
+  activated_at: string
+  retired_at?: string | null
+  retirement_reason?: string | null
+  position_size?: number | null
+  sl_pct?: number | null
+  tp_pct?: number | null
+  conviction_min?: number | null
+  live_trades?: number | null
+  live_pnl?: number | null
+  live_sharpe?: number | null
+  current_paper_sharpe?: number | null
+  current_paper_win_rate?: number | null
+  current_paper_pnl?: number | null
+  divergence_pct?: number | null
+}
+
+export interface LiveStrategiesPayload {
+  live_strategies: LiveStrategyRow[]
+  count: number
+}
+
+/* ──── Lab types ──── */
+
+export interface VibeCodePayload {
+  action: string
+  symbol: string
+  quantity?: number | null
+  price?: number | null
+  reason: string
+  translated_from: string
+}
+
+export interface BootstrapStrategyInfo {
+  id: string
+  name: string
+  description: string
+  status: StrategyStatus
+  symbols: string[]
+  allocation_percent: number
+  backtest_results?: {
+    total_return: number
+    sharpe_ratio: number
+    sortino_ratio: number
+    max_drawdown: number
+    win_rate: number
+    total_trades: number
+  } | null
+}
+
+export interface BootstrapPayload {
+  success: boolean
+  message: string
+  strategies: BootstrapStrategyInfo[]
+  summary: {
+    total_generated?: number
+    total_backtested?: number
+    total_activated?: number
+    errors?: unknown[]
+    [key: string]: unknown
+  }
+}
+
+/* ──── Queries ──── */
+
+export function useTemplates(marketRegime?: string | null) {
+  return useQuery<TemplatesListPayload>({
+    queryKey: ['strategy-templates', marketRegime ?? 'all'],
+    queryFn: () =>
+      api.get<TemplatesListPayload>('/strategies/templates', {
+        market_regime: marketRegime || undefined,
+      }),
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  })
+}
+
+export function useTemplateRankings(pinMode?: TradingMode) {
+  const mode = useMode(pinMode)
+  return useQuery<TemplateRankingsPayload>({
+    queryKey: ['template-rankings', mode],
+    queryFn: () =>
+      api.get<TemplateRankingsPayload>('/strategies/template-rankings', {
+        mode,
+      }),
+    staleTime: 60_000,
+  })
+}
+
+export function useSymbolStats() {
+  return useQuery<SymbolsListPayload>({
+    queryKey: ['symbol-stats'],
+    queryFn: () => api.get<SymbolsListPayload>('/strategies/symbols'),
+    staleTime: 60_000,
+  })
+}
+
+export function useBlacklistedCombos() {
+  return useQuery<BlacklistPayload>({
+    queryKey: ['blacklisted-combos'],
+    queryFn: () => api.get<BlacklistPayload>('/strategies/blacklisted-combos'),
+    staleTime: 120_000,
+  })
+}
+
+export function useIdleDemotions() {
+  return useQuery<IdleDemotionsPayload>({
+    queryKey: ['idle-demotions'],
+    queryFn: () => api.get<IdleDemotionsPayload>('/strategies/idle-demotions'),
+    staleTime: 120_000,
+  })
+}
+
+export function useGraduationQueue() {
+  return useQuery<GraduationQueuePayload>({
+    queryKey: ['graduation-queue'],
+    queryFn: () => api.get<GraduationQueuePayload>('/strategies/graduation-queue'),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+export function useLiveStrategies() {
+  return useQuery<LiveStrategiesPayload>({
+    queryKey: ['live-strategies'],
+    queryFn: () => api.get<LiveStrategiesPayload>('/strategies/live'),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+/* ──── Mutations ──── */
+
+export function useToggleTemplate() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ name, enabled }: { name: string; enabled: boolean }) =>
+      api.put<StrategyActionResponse>(
+        `/strategies/templates/${encodeURIComponent(name)}/toggle`,
+        { enabled },
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['strategy-templates'] })
+      qc.invalidateQueries({ queryKey: ['template-rankings'] })
+    },
+  })
+}
+
+export function useBulkToggleTemplates() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      names,
+      enabled,
+    }: {
+      names: string[]
+      enabled: boolean
+    }) =>
+      api.put<StrategyActionResponse>('/strategies/templates/bulk-toggle', {
+        template_names: names,
+        enabled,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['strategy-templates'] })
+      qc.invalidateQueries({ queryKey: ['template-rankings'] })
+    },
+  })
+}
+
+/* Retire a LIVE authorisation — same endpoint the Book / Live surface uses.
+ * Mirrored here for the Graduation tab's ActiveLiveTable. */
+export function useRetireLiveStrategy() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ liveId }: { liveId: number }) =>
+      api.post<{ success: boolean; retired_at: string }>(
+        `/live/strategies/${liveId}/retire`,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['live-strategies'] })
+      qc.invalidateQueries({ queryKey: ['live-summary'] })
+      qc.invalidateQueries({ queryKey: ['live-divergence'] })
+      qc.invalidateQueries({ queryKey: ['graduation-queue'] })
+    },
+  })
+}
+
+/* Lab — vibe code / generate / bootstrap.
+ * LLM endpoints can be slow (20-60s). We don't add refetchInterval. */
+
+export function useVibeCodeTranslate() {
+  return useMutation({
+    mutationFn: async ({ naturalLanguage }: { naturalLanguage: string }) =>
+      api.post<VibeCodePayload>('/strategies/vibe-code/translate', {
+        natural_language: naturalLanguage,
+      }),
+  })
+}
+
+export function useGenerateStrategy() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      prompt,
+      constraints = {},
+    }: {
+      prompt: string
+      constraints?: Record<string, unknown>
+    }) =>
+      api.post<StrategyRow>('/strategies/generate', {
+        prompt,
+        constraints,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['strategies'] })
+    },
+  })
+}
+
+export function useBootstrap() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      strategy_types,
+      auto_activate = false,
+      min_sharpe = 1.0,
+      backtest_days = 90,
+    }: {
+      strategy_types?: string[]
+      auto_activate?: boolean
+      min_sharpe?: number
+      backtest_days?: number
+    }) =>
+      api.post<BootstrapPayload>('/strategies/bootstrap', {
+        strategy_types,
+        auto_activate,
+        min_sharpe,
+        backtest_days,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['strategies'] })
+      qc.invalidateQueries({ queryKey: ['strategy-templates'] })
+    },
+  })
+}
+
+/* ──── Derived helpers ──── */
+
+/** LIVE conviction threshold lookup — spec §3A / autonomous_trading.yaml. */
+export function liveConvictionThresholdFor(assetClass?: string | null): number {
+  const c = (assetClass ?? '').toLowerCase()
+  if (c === 'crypto') return 68
+  return 74
+}
+
+/** Crypto / equity symbol detection from asset_class or symbol pattern. */
+export function assetClassForSymbol(symbol: string, explicit?: string | null): string {
+  if (explicit && explicit !== 'unknown') return explicit.toLowerCase()
+  const s = symbol.toUpperCase()
+  if (['BTC', 'ETH', 'XRP', 'LTC', 'BCH', 'ADA', 'DOT', 'SOL', 'DOGE', 'MATIC', 'AVAX', 'LINK'].includes(s))
+    return 'crypto'
+  if (/^(EUR|GBP|USD|JPY|AUD|CAD|CHF|NZD)(EUR|GBP|USD|JPY|AUD|CAD|CHF|NZD)$/.test(s)) return 'forex'
+  return 'stock'
+}

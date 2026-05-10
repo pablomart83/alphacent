@@ -1,28 +1,29 @@
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Hammer } from 'lucide-react'
 import { PageTemplate } from '@/components/layout'
-import { Tabs, TabsList, TabsTrigger, EmptyState } from '@/components/primitives'
+import { Tabs, TabsList, TabsTrigger } from '@/components/primitives'
 import { useTradingMode } from '@/stores'
 import { LibraryTab } from './library/LibraryTab'
 import { CycleTab } from './cycle/CycleTab'
+import { TemplatesTab } from './templates/TemplatesTab'
+import { SymbolsTab } from './symbols/SymbolsTab'
+import { GraduationTab } from './graduation/GraduationTab'
+import { LabTab } from './lab/LabTab'
 
 /**
  * Strategies surface — /strategies.
  *
  * Tabs: Library · Cycle · Templates · Symbols · Graduation · Lab.
- * Library (Sprint 5) and Cycle (Sprint 6) are live. Templates / Symbols /
- * Graduation / Lab render scoped ComingSoon cards with their sprint numbers.
  */
 
 type TabValue = 'library' | 'cycle' | 'templates' | 'symbols' | 'graduation' | 'lab'
 
-const TABS: Array<{ value: TabValue; label: string; sprint?: number }> = [
+const TABS: Array<{ value: TabValue; label: string }> = [
   { value: 'library', label: 'Library' },
   { value: 'cycle', label: 'Cycle' },
-  { value: 'templates', label: 'Templates', sprint: 7 },
-  { value: 'symbols', label: 'Symbols', sprint: 7 },
-  { value: 'graduation', label: 'Graduation', sprint: 7 },
-  { value: 'lab', label: 'Lab', sprint: 7 },
+  { value: 'templates', label: 'Templates' },
+  { value: 'symbols', label: 'Symbols' },
+  { value: 'graduation', label: 'Graduation' },
+  { value: 'lab', label: 'Lab' },
 ]
 
 export function Strategies() {
@@ -54,7 +55,7 @@ function StrategiesShell() {
           : current === 'symbols'
             ? 'Symbol analytics'
             : current === 'graduation'
-              ? 'Graduation queue'
+              ? 'CIO promotion workflow'
               : 'Research lab'
 
   return (
@@ -77,37 +78,18 @@ function StrategiesShell() {
               <LibraryTab />
             ) : current === 'cycle' ? (
               <CycleTab />
+            ) : current === 'templates' ? (
+              <TemplatesTab />
+            ) : current === 'symbols' ? (
+              <SymbolsTab />
+            ) : current === 'graduation' ? (
+              <GraduationTab />
             ) : (
-              <ComingSoonCard
-                tab={current}
-                sprint={TABS.find((t) => t.value === current)?.sprint ?? 7}
-              />
+              <LabTab />
             )}
           </div>
         </Tabs>
       </div>
     </PageTemplate>
-  )
-}
-
-function ComingSoonCard({ tab, sprint }: { tab: string; sprint: number }) {
-  const copy: Record<string, string> = {
-    templates:
-      'Template grid + TemplateRankings leaderboard. Bulk toggle per template, direction filter. Ships with Sprint 7.',
-    symbols:
-      'Current vs Lifetime view of symbol usage. Historical proposals + trades per symbol. Ships with Sprint 7.',
-    graduation:
-      'CIO promotion workflow — graduation queue, flagship GraduationCard, active live authorizations, post-retirement re-graduation. Ships with Sprint 7.',
-    lab:
-      'BacktestRunner, VibeCodeTranslator, GenerateStrategy, BootstrapRunner. Ships with Sprint 7.',
-  }
-  return (
-    <div className="flex h-full items-center justify-center bg-[var(--bg-0)]">
-      <EmptyState
-        icon={Hammer}
-        title={`${tab.charAt(0).toUpperCase() + tab.slice(1)} — Sprint ${sprint}`}
-        description={copy[tab] ?? `Lands in Sprint ${sprint}.`}
-      />
-    </div>
   )
 }

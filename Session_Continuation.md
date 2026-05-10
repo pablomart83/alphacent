@@ -6,7 +6,7 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Frontend rebuild is Sprints 5-12 next. Read `.kiro/steering/trading-system-context.md` and `FRONTEND_REBUILD_SPEC.md` before touching code.**
+**Frontend rebuild is Sprints 8-12 next. Read `.kiro/steering/trading-system-context.md` and `FRONTEND_REBUILD_SPEC.md` before touching code.**
 
 ### Frontend rebuild progress
 
@@ -19,8 +19,8 @@
 | 4 | Book / Live — master switch, tiles, mirror strip, divergence cards | ✅ SHIPPED | `f22db70` |
 | 5 | Strategies / Library | ✅ SHIPPED | `042c2c5` |
 | 6 | Strategies / Cycle (autonomous pipeline + funnel) | ✅ SHIPPED | `6d1aa89` |
-| 7 | Strategies / Templates + Symbols + Graduation (flagship) + Lab | **Next** |  |
-| 8 | Guard / Risk + Gates | Pending |  |
+| 7 | Strategies / Templates + Symbols + Graduation (flagship) + Lab | ✅ SHIPPED | _pending_ |
+| 8 | Guard / Risk + Gates | **Next** |  |
 | 9 | Guard / System + Circuit Breakers + Alerts + Audit | Pending |  |
 | 10 | Research / Performance + Attribution + Trades | Pending |  |
 | 11 | Research / Regime + Alpha Edge + Tear Sheet + Stress + Journal | Pending |  |
@@ -34,7 +34,7 @@
 - **Hooks**: `useWebSocketQueryBridge` (invalidates `positions`, `orders`, `strategies`, `autonomous-status`, `system-status`, `autonomous-cycles`, `fundamental-alerts`, `recent-signals`, `live-summary`, `dashboard`, reconnect toast + full invalidation), `useKeyboardShortcuts` (g c/b/s/g/r/, + ⌘K), `useWebSocketState`
 - **Stores**: trading-mode, layout, theme, command-palette, filters, notifications, research
 - **Data hooks in `pages/book/useBookData.ts`**: positions (open/pending-open/pending-closures/fundamental-alerts/closed), close / close-all / approve-closure / bulk-approve / dismiss-closure / dismiss-fundamental-alert / sync-positions / modify-position-risk / delete-closed-positions; orders (list/execution-quality/cancel/delete/bulk-delete/close-position-from-order/sync/place); live (summary/config/update-config/divergence/retire-strategy/close-live-position). `AllOrdersTab` accepts `pinMode` so any surface can scope it to DEMO or LIVE without forking.
-- **Data hooks in `pages/strategies/useStrategiesData.ts`** (Sprint 5): `useStrategies({ slim, include_retired, status_filter })`, `useStrategy(id)` for detail, `useStrategyBacktest`, `useActivateStrategy`, `useDeactivateStrategy`, `useRetireStrategy`, `useDeleteStrategyPermanent`, `useGraduateStrategy`, `useRejectGraduation`. Derived helpers `isGraduationEligible`, `isIdle7d`, `hasSignalToday`, `hasNegativeLivePnl`, `hasPaper20Plus` for the Library quick-pill filters. Sprint 6 adds `useSystemStatus`, `useAutonomousSchedules`, `useUpdateSchedules`, `useAutonomousCycles`, `useGraduationFunnel`, `useTriggerCycle`, `useSystemStateTransition` + the `SPEC_STAGES` / `mapBackendStageToSpec` helpers that bridge backend stage names onto the spec's 9 business-logic stages.
+- **Data hooks in `pages/strategies/useStrategiesData.ts`** (Sprint 5): `useStrategies({ slim, include_retired, status_filter })`, `useStrategy(id)` for detail, `useStrategyBacktest`, `useActivateStrategy`, `useDeactivateStrategy`, `useRetireStrategy`, `useDeleteStrategyPermanent`, `useGraduateStrategy`, `useRejectGraduation`. Derived helpers `isGraduationEligible`, `isIdle7d`, `hasSignalToday`, `hasNegativeLivePnl`, `hasPaper20Plus` for the Library quick-pill filters. Sprint 6 adds `useSystemStatus`, `useAutonomousSchedules`, `useUpdateSchedules`, `useAutonomousCycles`, `useGraduationFunnel`, `useTriggerCycle`, `useSystemStateTransition` + the `SPEC_STAGES` / `mapBackendStageToSpec` helpers that bridge backend stage names onto the spec's 9 business-logic stages. Sprint 7 adds `useTemplates`, `useToggleTemplate`, `useBulkToggleTemplates`, `useTemplateRankings`, `useSymbolStats`, `useBlacklistedCombos`, `useIdleDemotions`, `useGraduationQueue`, `useLiveStrategies`, `useRetireLiveStrategy`, `useVibeCodeTranslate`, `useGenerateStrategy`, `useBootstrap` — plus `liveConvictionThresholdFor` and `assetClassForSymbol` derived helpers for the GraduationCard's live gate lookup.
 - **CSV** (`lib/csv.ts`): RFC-4180 quoting, UTF-8 BOM for Excel
 - **Market hours** (`lib/market-hours.ts`): client-side classifier for UI hints only — not a trading gate
 - **Design tokens** (`lib/design-tokens.ts` + `styles/tokens.css`): every hex from spec §3A plus `regimeColor()` / `convictionColor()` / `pnlColor()` helpers
@@ -53,14 +53,26 @@
 
 - `deploy/nginx-alphacent.conf` (Sprint 5) — SPA routes that share a prefix with backend API paths (`/strategies/*`, `/account/*`, `/orders/*`, etc.) now fall through to `index.html` when the request `Accept` header contains `text/html`. API clients always send `Accept: application/json`, browsers always send `text/html` on top-level navigation, so this cleanly separates the two without forking the IA. Installed at `/etc/nginx/sites-enabled/alphacent` on EC2 (backup at `/tmp/nginx-alphacent.prev.conf`).
 
-### System state entering next session (as of Sprint 4 shipping)
+### System state entering next session (as of Sprint 7 shipping)
 
 - **DEMO equity:** ~$491K | **Open positions:** ~63 | **Regime:** `trending_up_strong`
 - **DEMO strategies:** 49 PAPER + 74 BACKTESTED (counts move cycle-to-cycle; run the diagnostic query below for fresh numbers)
 - **LIVE account:** Agent Portfolio | Virtual: $10,000 | Real: $1,000 | Mirror: 10%
 - **LIVE positions:** 0 | **live_trading.enabled:** TRUE | **Live authorisations:** 0
-- **Latest commits on main:** `6d1aa89` (Sprint 6) ← `a97e86f` (Session doc: LIVE dashboard fix) ← `15a5394` (LIVE dashboard fix) ← `042c2c5` (Sprint 5) ← `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
-- **errors.log:** clean — most recent entry is 2026-05-09 23:24 stale `promoted_to_demo` (pre-rename, expected)
+- **Sprint 7 bundle:** `Strategies-*.js` ≈ 191 KB raw (44.5 KB gzip), still inside the 250 KB budget. Templates/Symbols/Graduation/Lab all mount on the same route split — revisit code-splitting if Sprint 8 pushes past 250 KB.
+- **Latest commits on main:** _Sprint 7 commit pending_ ← `69fc07e` (Sprint 6 promote pipeline) ← `99157a8` (Session doc: Sprint 6) ← `6d1aa89` (Sprint 6) ← `a97e86f` (Session doc: LIVE dashboard fix) ← `15a5394` (LIVE dashboard fix) ← `042c2c5` (Sprint 5) ← `aa1f171` (Session kickoff restructure) ← `62c55b7` (Sprint 4 session doc) ← `f22db70` (Sprint 4) ← `c9006ee` (Sprint 3) ← `fccb40f` (SL/TP backend) ← `ae2c78f` (Sprint 2) ← `d297d85` (Sprint 1) ← `1171d41` (Sprint 0)
+- **errors.log:** clean — most recent entry is still 2026-05-09 23:24 stale `promoted_to_demo` (pre-rename, expected)
+
+### Sprint 7 notes
+
+- **Flagship is Graduation.** `GraduationCard` renders paper KPIs, conviction decomposition (9-component stacked bar against the 74/68 live threshold), live-config form (size / SL / TP / conviction_min / notes), and an impact preview that turns `$500 virtual` into `$50 real` via the mirror ratio from `/live/summary`. Approval invalidates `graduation-queue`, `live-strategies`, `live-divergence`, `live-summary`, `strategies`.
+- **Defaults sourced from `/config/live-trading`**, not hardcoded. The card uses `min_order_size`/`max_order_size` for the sizing slider bounds, and `conviction_threshold`/`conviction_threshold_crypto` for the default live-gate minimum. Equity defaults 6% SL / 15% TP; crypto 8% SL / 20% TP. Asset class inferred from `strategy.metadata.asset_class` and a symbol-pattern fallback.
+- **One endpoint gap surfaced honestly.** `/strategies/live` returns `retired_at IS NULL` rows only, so the post-retirement re-graduation countdown has nowhere to pull from. Rather than invent a list I rendered a scoped gap panel on the Graduation tab and flagged it as a backend extension candidate before Sprint 8.
+- **Templates tab** uses the full `/strategies/templates` response (active / activated / traded / proposed counts, best/worst symbol, avg perf). Bulk-toggle selects one template at a time via checkboxes in card headers; direction + asset-class + enabled filters; TemplateRankingsTable joins `/strategies/template-rankings` with template metadata for the family/timeframe filter.
+- **Symbols tab** ships both Current (active_strategies + usage + open positions) and Lifetime (proposed + traded + Sharpe + P&L + best_template) views as a pill toggle that also updates the default sort. Row click opens a `SymbolDetailDrawer` with a gap section acknowledging the missing per-symbol timeseries endpoint. Blacklists + Idle Demotions render as accordion tables below.
+- **Lab tab** hosts `BacktestRunnerPanel`, `VibeCodePanel`, `GenerateStrategyPanel`, `BootstrapPanel`. 2×2 grid at ≥1280px, stacked below. Number keys 1-4 jump between panels. Backtest results render as a KPI grid; the LWC equity curve overlay lands with Sprint 11 when the trade-journal series is wired.
+- **Keyboard in Graduation:** j/k moves queue selection, Esc closes the card. Enter is reserved (approval requires the deliberate Approve button to avoid single-keystroke live approvals).
+- `sprint: 7` markers removed from the TABS config in `Strategies.tsx`. All six tabs now render real content.
 
 ### Session start checklist
 
