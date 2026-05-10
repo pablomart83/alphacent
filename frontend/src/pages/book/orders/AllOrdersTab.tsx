@@ -56,11 +56,20 @@ interface AllOrdersTabProps {
   banner?: React.ReactNode
   /** ID to make the footnote identify the tab (rare). */
   dataTestId?: string
+  /** Pin the data source to a specific account — overrides the global toggle. */
+  pinMode?: 'DEMO' | 'LIVE'
 }
 
-export function AllOrdersTab({ initialStatus, lockStatus, clientFilter, banner }: AllOrdersTabProps = {}) {
+export function AllOrdersTab({
+  initialStatus,
+  lockStatus,
+  clientFilter,
+  banner,
+  pinMode,
+}: AllOrdersTabProps = {}) {
   const navigate = useNavigate()
-  const mode = useTradingMode((s) => s.mode)
+  const activeMode = useTradingMode((s) => s.mode)
+  const mode = pinMode ?? activeMode
 
   const [filters, setFilters] = useState<OrderFilters>({
     ...DEFAULT_FILTERS,
@@ -78,7 +87,7 @@ export function AllOrdersTab({ initialStatus, lockStatus, clientFilter, banner }
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
   const [showPlaceDialog, setShowPlaceDialog] = useState(false)
 
-  const ordersQuery = useOrders({ limit: 2000 })
+  const ordersQuery = useOrders({ limit: 2000, pinMode })
   const cancelMutation = useCancelOrder()
   const deleteMutation = useDeleteOrder()
   const bulkDeleteMutation = useBulkDeleteOrders()

@@ -508,3 +508,141 @@ export function usePlaceOrder() {
     },
   })
 }
+
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  Live trading — Sprint 4
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export interface LiveSummary {
+  virtual_balance: number
+  virtual_equity: number
+  real_equity: number
+  mirror_ratio: number
+  unrealized_pnl_virtual: number
+  unrealized_pnl_real: number
+  today_pnl_virtual: number
+  today_pnl_real: number
+  open_positions: number
+  deployed_capital_virtual: number
+  deployed_capital_real: number
+  deployed_pct: number
+  active_live_authorizations: number
+  live_enabled: boolean
+}
+
+export interface LiveConfig {
+  enabled: boolean
+  virtual_balance: number
+  real_investment: number
+  mirror_ratio: number
+  /** Percentage (e.g. 0.6 = 0.6%). */
+  base_risk_pct: number
+  min_order_size: number
+  max_order_size: number
+  /** Percentage. */
+  symbol_cap_pct: number
+  /** Percentage. */
+  portfolio_heat_cap: number
+  conviction_threshold: number
+  conviction_threshold_crypto: number
+  real_per_virtual_order: number
+  max_real_per_order: number
+  live_client_configured: boolean
+}
+
+/** Divergence row shape returned by /live/divergence. */
+export interface LiveDivergenceRow {
+  id: number
+  strategy_id: string
+  template_name: string
+  symbol: string
+  activated_at: string | null
+  position_size: number | null
+  sl_pct: number | null
+  tp_pct: number | null
+  conviction_min: number | null
+  paper_trades: number
+  paper_sharpe: number | null
+  paper_win_rate: number | null
+  paper_pnl: number | null
+  live_trades: number
+  live_sharpe: number | null
+  live_win_rate: number | null
+  live_pnl: number | null
+  divergence_pct: number | null
+  divergence_flag: boolean
+}
+
+export interface LiveDivergencePayload {
+  divergence: LiveDivergenceRow[]
+  count: number
+}
+
+export function useLiveSummary() {
+  return useQuery<LiveSummary>({
+    queryKey: ['live-summary'],
+    queryFn: () => api.get<LiveSummary>('/live/summary'),
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  })
+}
+
+export function useLiveConfig() {
+  return useQuery<LiveConfig>({
+    queryKey: ['live-config'],
+    queryFn: () => api.get<LiveConfig>('/config/live-trading'),
+    staleTime: 60_000,
+  })
+}
+
+export function useUpdateLiveConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: Partial<Omit<LiveConfig, 'real_per_virtual_order' | 'max_real_per_order' | 'live_client_configured'>>) =>
+      api.put<{ success: boolean; message: string }>('/config/live-trading', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['live-config'] })
+      qc.invalidateQueries({ queryKey: ['live-summary'] })
+    },
+  })
+}
+
+export function useLiveDivergence() {
+  return useQuery<LiveDivergencePayload>({
+    queryKey: ['live-divergence'],
+    queryFn: () => api.get<LiveDivergencePayload>('/live/divergence'),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+export function useRetireLiveStrategy() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (liveId: number) =>
+      api.post<{ success: boolean; message: string; retired_at: string }>(
+        `/live/strategies/${liveId}/retire`,
+        undefined,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['live-divergence'] })
+      qc.invalidateQueries({ queryKey: ['live-summary'] })
+    },
+  })
+}
+
+export function useCloseLivePosition() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (positionId: string) =>
+      api.post<{ success: boolean; message: string }>(
+        `/live/positions/${positionId}/close`,
+        undefined,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions', 'LIVE'] })
+      qc.invalidateQueries({ queryKey: ['live-summary'] })
+    },
+  })
+}

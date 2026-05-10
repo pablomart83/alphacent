@@ -7,6 +7,11 @@ import type { PnLPeriodEntry } from './MultiTimeframeReturns'
 import type { HealthScore } from './HealthScoreCard'
 import type { AutonomousStatusShape } from './CycleStatusCard'
 import type { PipelineCounts } from './StrategyPipelineCounts'
+import { useLiveSummary as useLiveSummaryBase, type LiveSummary } from '@/pages/book/useBookData'
+
+// Re-export for callers so nothing breaks.
+export { useLiveSummaryBase as useLiveSummary }
+export type LiveSummaryPayload = LiveSummary
 
 /* ───────────── Response shapes ───────────── */
 
@@ -83,23 +88,6 @@ export interface SPYBenchmarkPayload {
   data: Array<{ date: string; close: number }>
 }
 
-export interface LiveSummaryPayload {
-  virtual_balance: number
-  virtual_equity: number
-  real_equity: number
-  mirror_ratio: number
-  unrealized_pnl_virtual: number
-  unrealized_pnl_real: number
-  today_pnl_virtual: number
-  today_pnl_real: number
-  open_positions: number
-  deployed_capital_virtual: number
-  deployed_capital_real: number
-  deployed_pct: number
-  active_live_authorizations: number
-  live_enabled: boolean
-}
-
 interface StrategySlim {
   id: string
   status: string
@@ -154,15 +142,6 @@ export function useAutonomousStatus() {
     queryFn: () => api.get<AutonomousStatusShape>('/strategies/autonomous/status'),
     refetchInterval: 10_000,
     staleTime: 5_000,
-  })
-}
-
-export function useLiveSummary() {
-  return useQuery<LiveSummaryPayload>({
-    queryKey: ['live-summary'],
-    queryFn: () => api.get<LiveSummaryPayload>('/live/summary'),
-    refetchInterval: 15_000,
-    staleTime: 10_000,
   })
 }
 

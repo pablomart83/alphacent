@@ -1,25 +1,24 @@
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Hammer } from 'lucide-react'
 import { PageTemplate } from '@/components/layout'
-import { Tabs, TabsList, TabsTrigger, EmptyState } from '@/components/primitives'
+import { Tabs, TabsList, TabsTrigger } from '@/components/primitives'
 import { useTradingMode } from '@/stores'
 import { PositionsTab } from './positions/PositionsTab'
 import { OrdersTab } from './orders/OrdersTab'
 import { ExecutionTab } from './execution/ExecutionTab'
+import { LiveTab } from './live/LiveTab'
 import { PositionDetailPage } from './PositionDetailPage'
 
 /**
  * Book surface — /book.
  *
- * Tabs: Positions · Orders · Execution · Live.
- * Positions, Orders, Execution are live. Live lands in Sprint 4.
+ * Tabs: Positions · Orders · Execution · Live. All live as of Sprint 4.
  */
 
 const TABS = [
-  { value: 'positions', label: 'Positions', sprint: 2 },
-  { value: 'orders', label: 'Orders', sprint: 3 },
-  { value: 'execution', label: 'Execution', sprint: 3 },
-  { value: 'live', label: 'Live', sprint: 4 },
+  { value: 'positions', label: 'Positions' },
+  { value: 'orders', label: 'Orders' },
+  { value: 'execution', label: 'Execution' },
+  { value: 'live', label: 'Live' },
 ] as const
 
 type TabValue = (typeof TABS)[number]['value']
@@ -51,7 +50,7 @@ function BookShell() {
         ? `Orders · ${mode}`
         : current === 'execution'
           ? `Execution · ${mode}`
-          : `Live · Sprint 4`
+          : 'Live trading'
 
   return (
     <PageTemplate title="Book" description={tabDescription}>
@@ -76,13 +75,7 @@ function BookShell() {
             ) : current === 'execution' ? (
               <ExecutionTab />
             ) : (
-              <div className="h-full flex items-center justify-center">
-                <EmptyState
-                  icon={Hammer}
-                  title={`${current[0].toUpperCase()}${current.slice(1)} — coming in Sprint ${TABS.find((t) => t.value === current)?.sprint}`}
-                  description="Positions, Orders, and Execution are live. Live tab lands in Sprint 4."
-                />
-              </div>
+              <LiveTab />
             )}
           </div>
         </Tabs>
