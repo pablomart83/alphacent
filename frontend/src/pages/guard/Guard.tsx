@@ -1,7 +1,5 @@
-import { Hammer } from 'lucide-react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
-  EmptyState,
   Tabs,
   TabsList,
   TabsTrigger,
@@ -14,26 +12,29 @@ import { RiskMetricTiles } from './RiskMetricTiles'
 import { RiskScoreHero } from './RiskScoreHero'
 import { GatesTab } from './gates/GatesTab'
 import { RiskTab } from './risk/RiskTab'
+import { SystemTab } from './system/SystemTab'
+import { CircuitBreakersTab } from './breakers/CircuitBreakersTab'
+import { AlertsTab } from './alerts/AlertsTab'
+import { AuditTab } from './audit/AuditTab'
 import { useRiskLimits, useRiskMetrics } from './useGuardData'
 
 /**
  * Guard surface — /guard.
  *
  * Tabs: Risk · Gates · System · Circuit Breakers · Alerts · Audit.
- * Sprint 8 ships Risk + Gates; the remaining four render scoped ComingSoon
- * cards pointing at Sprint 9. Left panel (RiskScoreHero + RiskMetricTiles
- * + LimitEditor + KillSwitchCard) is permanent across all tabs.
+ * Left panel (RiskScoreHero + RiskMetricTiles + LimitEditor + KillSwitchCard)
+ * is permanent across all tabs.
  */
 
 type TabValue = 'risk' | 'gates' | 'system' | 'circuit-breakers' | 'alerts' | 'audit'
 
-const TABS: Array<{ value: TabValue; label: string; sprint?: number }> = [
+const TABS: Array<{ value: TabValue; label: string }> = [
   { value: 'risk', label: 'Risk' },
   { value: 'gates', label: 'Gates' },
-  { value: 'system', label: 'System', sprint: 9 },
-  { value: 'circuit-breakers', label: 'Circuit breakers', sprint: 9 },
-  { value: 'alerts', label: 'Alerts', sprint: 9 },
-  { value: 'audit', label: 'Audit', sprint: 9 },
+  { value: 'system', label: 'System' },
+  { value: 'circuit-breakers', label: 'Circuit breakers' },
+  { value: 'alerts', label: 'Alerts' },
+  { value: 'audit', label: 'Audit' },
 ]
 
 export function Guard() {
@@ -63,7 +64,7 @@ function GuardShell() {
       : current === 'gates'
         ? 'Trading gates'
         : current === 'system'
-          ? 'System health'
+          ? 'System health · data sync'
           : current === 'circuit-breakers'
             ? 'Circuit breakers'
             : current === 'alerts'
@@ -106,11 +107,14 @@ function GuardShell() {
             <RiskTab />
           ) : current === 'gates' ? (
             <GatesTab />
+          ) : current === 'system' ? (
+            <SystemTab />
+          ) : current === 'circuit-breakers' ? (
+            <CircuitBreakersTab />
+          ) : current === 'alerts' ? (
+            <AlertsTab />
           ) : (
-            <ComingSoonCard
-              tab={current}
-              sprint={TABS.find((t) => t.value === current)?.sprint ?? 9}
-            />
+            <AuditTab />
           )}
         </div>
       </Tabs>
@@ -138,27 +142,5 @@ function GuardShell() {
         ]}
       />
     </PageTemplate>
-  )
-}
-
-function ComingSoonCard({ tab, sprint }: { tab: string; sprint: number }) {
-  const copy: Record<string, string> = {
-    system:
-      'HealthTiles, WebSocket health, MonitoringServiceCard, BackgroundThreadsTable, DataSyncPanel with live log tail, DbStatsCard, DataQualityTable, EventTimeline24h. Ships with Sprint 9.',
-    'circuit-breakers':
-      'CircuitBreakerGrid (per CB state + trip timeline + reset action). Ships with Sprint 9.',
-    alerts:
-      'AlertsList, per-alert card with acknowledge/read, bulk actions, AlertPreferences. Ships with Sprint 9.',
-    audit:
-      'AuditLogVirtualized, filter bar, TradeLifecycleChain drill-down, CSV export. Ships with Sprint 9.',
-  }
-  return (
-    <div className="flex h-full items-center justify-center bg-[var(--bg-0)] p-4">
-      <EmptyState
-        icon={Hammer}
-        title={`${tab === 'circuit-breakers' ? 'Circuit breakers' : tab.charAt(0).toUpperCase() + tab.slice(1)} — Sprint ${sprint}`}
-        description={copy[tab] ?? `Lands in Sprint ${sprint}.`}
-      />
-    </div>
   )
 }
