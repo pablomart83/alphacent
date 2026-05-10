@@ -93,7 +93,10 @@ export function DataTable<TData extends object>({
     getRowId: (row, index) => rowKey(row, index),
     state: {
       sorting: sorting?.state,
-      rowSelection: selection?.selected,
+      // TanStack Table indexes into `rowSelection` unconditionally inside
+      // `row.getIsSelected()`. Omitting it raises a TypeError on every row.
+      // Keep an empty dict when the caller doesn't wire selection.
+      rowSelection: selection?.selected ?? {},
     },
     onSortingChange: sorting?.onChange,
     onRowSelectionChange: selection?.onChange,

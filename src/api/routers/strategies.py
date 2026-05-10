@@ -1609,6 +1609,58 @@ async def get_idle_demotions(
     return IdleDemotionsResponse(entries=entries, total=len(entries))
 
 
+@router.get("/graduation-queue")
+async def get_graduation_queue(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Return all (strategy, symbol) pairs that qualify for live trading.
+
+    Qualification criteria:
+    - paper_trades >= 20
+    - paper_sharpe >= 60% of WF sharpe
+    - paper_win_rate >= 45%
+    - paper_pnl > 0
+    - Not already active in live_strategies
+    - Not rejected in the last 14 days
+
+    NOTE: Registered before `/{strategy_id}` so FastAPI does not match
+    `/graduation-queue` as `strategy_id="graduation-queue"` (which would 422
+    on the missing `mode` query).
+    """
+    from src.strategy.graduation_gate import get_graduation_queue as _get_queue
+    try:
+        queue = _get_queue(session)
+        return {"queue": queue, "count": len(queue)}
+    except Exception as e:
+        logger.error(f"Error fetching graduation queue: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/live")
+async def get_live_strategies(
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Return all active live_strategies rows with current paper stats for divergence monitoring.
+
+    Columns: template, symbol, activated_at, live_trades, live_pnl, live_sharpe,
+             current_paper_sharpe, divergence_pct, position_size, sl_pct, tp_pct
+
+    NOTE: Registered before `/{strategy_id}` for the same reason as
+    `/graduation-queue` — avoids the catch-all shadowing single-segment statics.
+    """
+    from src.strategy.graduation_gate import get_live_strategies as _get_live
+    try:
+        strategies = _get_live(session)
+        return {"live_strategies": strategies, "count": len(strategies)}
+    except Exception as e:
+        logger.error(f"Error fetching live strategies: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{strategy_id}", response_model=StrategyResponse)
 async def get_strategy(
     strategy_id: str,
@@ -3835,6 +3887,11 @@ async def get_risk_attribution(
 
 
 # ── Phase 2: Graduation Gate endpoints ───────────────────────────────────────
+# Pydantic models live here; the two GET handlers (/graduation-queue, /live)
+# are registered earlier in the file — above `/{strategy_id}` — to avoid the
+# catch-all shadowing them (422). POST /{strategy_id}/graduate and
+# POST /{strategy_id}/reject-graduation remain here — their `/graduate` /
+# `/reject-graduation` suffix makes them unambiguous.
 
 class GraduateRequest(BaseModel):
     """Approve a (strategy, symbol) pair for live trading."""
@@ -3850,31 +3907,6 @@ class RejectGraduationRequest(BaseModel):
     """Reject a (strategy, symbol) pair with 14-day cooldown."""
     symbol: str
     notes: Optional[str] = None
-
-
-@router.get("/graduation-queue")
-async def get_graduation_queue(
-    username: str = Depends(get_current_user),
-    session: Session = Depends(get_db_session),
-):
-    """
-    Return all (strategy, symbol) pairs that qualify for live trading.
-
-    Qualification criteria:
-    - paper_trades >= 20
-    - paper_sharpe >= 60% of WF sharpe
-    - paper_win_rate >= 45%
-    - paper_pnl > 0
-    - Not already active in live_strategies
-    - Not rejected in the last 14 days
-    """
-    from src.strategy.graduation_gate import get_graduation_queue as _get_queue
-    try:
-        queue = _get_queue(session)
-        return {"queue": queue, "count": len(queue)}
-    except Exception as e:
-        logger.error(f"Error fetching graduation queue: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{strategy_id}/graduate")
@@ -3935,24 +3967,4 @@ async def reject_graduation(
         return {"success": True, "rejection": result}
     except Exception as e:
         logger.error(f"Error rejecting graduation: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/live")
-async def get_live_strategies(
-    username: str = Depends(get_current_user),
-    session: Session = Depends(get_db_session),
-):
-    """
-    Return all active live_strategies rows with current paper stats for divergence monitoring.
-
-    Columns: template, symbol, activated_at, live_trades, live_pnl, live_sharpe,
-             current_paper_sharpe, divergence_pct, position_size, sl_pct, tp_pct
-    """
-    from src.strategy.graduation_gate import get_live_strategies as _get_live
-    try:
-        strategies = _get_live(session)
-        return {"live_strategies": strategies, "count": len(strategies)}
-    except Exception as e:
-        logger.error(f"Error fetching live strategies: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
