@@ -8,6 +8,28 @@
 
 **Read this block first. Two parallel tracks are open.**
 
+### Frontend rebuild progress
+
+| Sprint | Surface / goal | Status | Commit |
+|---|---|---|---|
+| 0 | Foundation: design system, primitives, 5-surface IA shell, WS + Query client | ✅ SHIPPED | `1171d41` |
+| 1 | Command — Pulse + Equity + Stream (the "now" surface) | ✅ SHIPPED | `d297d85` |
+| 2 | Book / Positions | Next |  |
+| 3-12 | per `FRONTEND_REBUILD_SPEC.md §3E` | Pending |  |
+
+Sprint 1 highlights:
+- Real Command page at `/` replaces the ComingSoon placeholder
+- TradingView LWC v5 EquityChart with drawdown pane, SPY overlay, realized dashed line, period/interval selectors, hover readout with alpha-vs-SPY
+- PnLNumber with monospace tabular-nums + 400ms flash on change
+- SignalFeed seeded from `/signals/recent` + WS `signal_generated` rolling 50-event buffer
+- HealthScoreCard decomposed into 4 components (drawdown / concentration / margin / diversity) — no opaque single number
+- LivePill with 3 states; TopNavBar `liveEnabled` now wired from `/live/summary`
+- Page-local shortcuts: F fullscreen, B benchmark, 1-6 period, d/h/q interval
+- Period + interval persisted in URL for deep links
+- WS bridge extended: `signal_generated` invalidates `recent-signals`, `position_update`/`order_update` invalidate `live-summary`
+- Prod bundle: Command chunk 52kB (14kB gz), vendor-charts 170kB (55kB gz); no warnings
+- Deployed via staged swap pattern (`dist_next` → `dist`); prod 200, `/health` 200
+
 ### What was completed this session (2026-05-10)
 
 **Phase 2A — Core live trading infrastructure (all 10 sprints shipped):**
@@ -320,7 +342,42 @@ The new frontend goes in `frontend/`. Nginx serves `frontend/dist` — that path
 **PROMPT:**
 
 ```
-I want to build a brand new AlphaCent frontend from scratch. The existing frontend is being archived — no code, no components, no patterns carry forward. This is a greenfield design.
+Start this session by reading, in this exact order:
+
+(1) .kiro/steering/trading-system-context.md
+
+(2) Session_Continuation.md — full file
+
+Confirm you've read both, then begin.
+
+==========================================================================
+
+CONTEXT
+
+==========================================================================
+
+System: ~$491K DEMO equity, 65 open positions, trending_up_strong.
+
+Live Agent Portfolio: $10K virtual / $1K real / 10% mirror ratio.
+check last commmits
+
+Service: healthy. errors.log: clean.
+
+This session shipped (all working and deployed):
+
+- StrategyStatus.DEMO → PAPER (17 Python files + DB migration)
+
+- Frontend PAPER fix (8 files)
+
+- eToro LIVE API tested and confirmed working
+
+- Live credentials stored encrypted at config/live_credentials.json
+
+- Full Phase 2 architecture designed (10 sprints)
+
+==========================================================================
+
+MISSION — I want to build a brand new AlphaCent frontend from scratch. The existing frontend is being archived — no code, no components, no patterns carry forward. This is a greenfield design.
 
 ## WHAT WE'RE BUILDING
 
