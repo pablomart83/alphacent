@@ -4,6 +4,7 @@ import { GraduationCap } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Badge,
+  ConfirmDialog,
   EmptyState,
   ErrorState,
 } from '@/components/primitives'
@@ -13,11 +14,15 @@ import { api } from '@/services/api'
 import { useLiveSummary } from '@/pages/book/useBookData'
 import {
   useGraduationQueue,
+  useRetireLiveStrategy,
+  type LiveStrategyRow,
 } from '../useStrategiesData'
 import { GraduationQueueTable } from './GraduationQueueTable'
 import { GraduationCard } from './GraduationCard'
-import { ActiveLiveTable } from './ActiveLiveTable'
+import { ActiveLiveTable, LiveStrategyDetailPanel } from './ActiveLiveTable'
 import { ApproachingGraduationPanel } from './ApproachingGraduationPanel'
+import { toast } from 'sonner'
+import { notifyError } from '@/lib/errors'
 
 /* Live-trading config shape — mirrors /config/live-trading. */
 interface LiveTradingConfigPayload {
@@ -51,17 +56,45 @@ export function GraduationTab() {
   const queueQuery = useGraduationQueue()
   const liveSummary = useLiveSummary()
   const liveConfig = useLiveTradingConfig()
+  const retire = useRetireLiveStrategy()
 
   const [sorting, setSorting] = useState<SortingState>([
     { id: 'qualification_ratio', desc: true },
   ])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  // Selected live strategy for the side panel (independent of queue selection)
+  const [selectedLive, setSelectedLive] = useState<LiveStrategyRow | null>(null)
+  const [confirmRetireLive, setConfirmRetireLive] = useState<LiveStrategyRow | null>(null)
 
   const queue = queueQuery.data?.queue ?? []
   const selectedRow = useMemo(
     () => queue.find((r) => `${r.strategy_id}::${r.symbol}` === selectedKey) ?? null,
     [queue, selectedKey],
   )
+
+  // When a queue row is selected, clear the live selection and vice versa
+  const handleQueueSelect = (row: typeof selectedRow) => {
+    setSelectedKey(row ? `${row.strategy_id}::${row.symbol}` : null)
+    setSelectedLive(null)
+  }
+  const handleLiveSelect = (row: LiveStrategyRow | null) => {
+    setSelectedLive(row)
+    setSelectedKey(null)
+  }
+
+  const handleRetireLive = async () => {
+    if (!confirmRetireLive) return
+    try {
+      await retire.mutateAsync({ liveId: confirmRetireLive.id })
+      toast.success(
+        `Retired ${confirmRetireLive.template_name ?? confirmRetireLive.strategy_id} × ${confirmRetireLive.symbol}`,
+      )
+      if (selectedLive?.id === confirmRetireLive.id) setSelectedLive(null)
+      setConfirmRetireLive(null)
+    } catch (err) {
+      notifyError(err, 'retire live')
+    }
+  }
 
   /* Keyboard: j/k navigation over queue, Enter opens, Esc closes. */
   useEffect(() => {
@@ -76,8 +109,9 @@ export function GraduationTab() {
         return
       if (e.metaKey || e.ctrlKey || e.altKey) return
 
-      if (e.key === 'Escape' && selectedKey) {
-        setSelectedKey(null)
+      if (e.key === 'Escape') {
+        if (selectedKey) setSelectedKey(null)
+        if (selectedLive) setSelectedLive(null)
         return
       }
 
@@ -93,18 +127,14 @@ export function GraduationTab() {
             ? Math.min(queue.length - 1, currentIdx + 1)
             : Math.max(0, currentIdx - 1)
         const nextRow = queue[nextIdx]
-        if (nextRow) setSelectedKey(`${nextRow.strategy_id}::${nextRow.symbol}`)
-        return
-      }
-
-      if (e.key === 'Enter' && selectedKey) {
-        /* Already open; no-op — approval requires Approve button. */
+        if (nextRow) handleQueueSelect(nextRow)
         return
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [queue, selectedKey])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, selectedKey, selectedLive])
 
   if (queueQuery.isError) {
     const info = classifyError(queueQuery.error, 'graduation queue')
@@ -143,13 +173,16 @@ export function GraduationTab() {
           queue={queue}
           loading={queueQuery.isLoading}
           selectedKey={selectedKey}
-          onSelect={(row) => setSelectedKey(`${row.strategy_id}::${row.symbol}`)}
+          onSelect={(row) => handleQueueSelect(row)}
           sorting={sorting}
           onSortingChange={setSorting}
         />
       </div>
 
-      <ActiveLiveTable />
+      <ActiveLiveTable
+        selectedId={selectedLive?.id ?? null}
+        onSelect={handleLiveSelect}
+      />
 
       <div className="px-2 pb-2">
         <ApproachingGraduationPanel />
@@ -159,7 +192,14 @@ export function GraduationTab() {
     </div>
   )
 
-  const right = selectedRow ? (
+  // Right panel: live detail takes priority over queue card when both could show
+  const right = selectedLive ? (
+    <LiveStrategyDetailPanel
+      row={selectedLive}
+      onClose={() => setSelectedLive(null)}
+      onRetire={() => setConfirmRetireLive(selectedLive)}
+    />
+  ) : selectedRow ? (
     <GraduationCard
       row={selectedRow}
       onClose={() => setSelectedKey(null)}
@@ -184,21 +224,42 @@ export function GraduationTab() {
     <div className="flex h-full items-center justify-center bg-[var(--bg-0)]">
       <EmptyState
         title="Select a candidate"
-        description="Click a row in the queue to review evidence and approve for live."
+        description="Click a queue row to review and approve, or a live authorisation to inspect its history."
       />
     </div>
   )
 
-  return selectedRow ? (
-    <ResizablePanelLayout
-      layoutId="strategies.graduation"
-      panels={[
-        { id: 'grad-queue', defaultSize: 55, minSize: 40, content: left },
-        { id: 'grad-card', defaultSize: 45, minSize: 30, maxSize: 70, content: right },
-      ]}
-    />
-  ) : (
-    left
+  const hasRightPanel = !!(selectedRow || selectedLive)
+
+  return (
+    <>
+      {hasRightPanel ? (
+        <ResizablePanelLayout
+          layoutId="strategies.graduation"
+          panels={[
+            { id: 'grad-queue', defaultSize: 55, minSize: 40, content: left },
+            { id: 'grad-card', defaultSize: 45, minSize: 30, maxSize: 70, content: right },
+          ]}
+        />
+      ) : (
+        left
+      )}
+
+      <ConfirmDialog
+        open={!!confirmRetireLive}
+        onOpenChange={(o) => !o && setConfirmRetireLive(null)}
+        title="Retire live authorisation"
+        description={
+          confirmRetireLive
+            ? `Retire ${confirmRetireLive.template_name ?? confirmRetireLive.strategy_id} × ${confirmRetireLive.symbol}? Future signals stop firing live orders. Open live positions are NOT closed automatically.`
+            : ''
+        }
+        confirmLabel="Retire"
+        confirmVariant="destructive"
+        isLoading={retire.isPending}
+        onConfirm={handleRetireLive}
+      />
+    </>
   )
 }
 
