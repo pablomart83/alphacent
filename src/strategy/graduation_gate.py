@@ -519,7 +519,7 @@ def reject_graduation(
 
 def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
     """Return all active live_strategies rows with paper stats for comparison."""
-    from src.models.orm import LiveStrategyORM
+    from src.models.orm import LiveStrategyORM, StrategyORM
 
     rows = (
         session.query(LiveStrategyORM)
@@ -531,11 +531,17 @@ def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
     result = []
     for row in rows:
         d = row.to_dict()
-        # Attach current paper stats for divergence monitoring
-        paper = get_paper_stats_for_strategy(session, row.strategy_id, row.symbol)
+        # Use cross-version aggregated stats (same as graduation queue) so the
+        # paper Sharpe reflects the full (template, symbol) history, not just
+        # the single strategy_id that happens to be the representative version.
+        paper = get_aggregated_paper_stats(session, row.template_name, row.symbol)
+        if not paper.get("paper_trades"):
+            # Fallback: single-strategy stats if aggregation returns nothing
+            paper = get_paper_stats_for_strategy(session, row.strategy_id, row.symbol)
         d["current_paper_sharpe"] = paper.get("paper_sharpe")
         d["current_paper_win_rate"] = paper.get("paper_win_rate")
         d["current_paper_pnl"] = paper.get("paper_total_pnl")
+        d["current_paper_trades"] = paper.get("paper_trades")
         # Divergence: live_sharpe vs paper_sharpe
         if row.live_sharpe and paper.get("paper_sharpe") and paper["paper_sharpe"] > 0:
             d["divergence_pct"] = round(row.live_sharpe / paper["paper_sharpe"] * 100, 1)

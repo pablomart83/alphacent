@@ -872,6 +872,7 @@ export interface LiveStrategyRow {
   current_paper_sharpe?: number | null
   current_paper_win_rate?: number | null
   current_paper_pnl?: number | null
+  current_paper_trades?: number | null
   divergence_pct?: number | null
 }
 

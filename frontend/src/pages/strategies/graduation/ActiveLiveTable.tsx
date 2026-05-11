@@ -320,9 +320,9 @@ export function LiveStrategyDetailPanel({
           ) : (
             <>
               <div className="grid grid-cols-3 gap-1.5 mb-3">
-                <Metric label="Trades" value={String(paperStats.count)} />
-                <Metric label="Win %" value={paperWinRate != null ? `${paperWinRate.toFixed(0)}%` : '—'} tone={paperWinRate != null && paperWinRate >= 55 ? 'up' : 'neutral'} />
-                <Metric label="Total P&L" value={formatCurrency(paperStats.total, { signed: true, precision: 0 })} tone={paperStats.total >= 0 ? 'up' : 'down'} />
+                <Metric label="Trades" value={String(row.current_paper_trades ?? paperStats.count)} />
+                <Metric label="Win %" value={row.current_paper_win_rate != null ? `${(row.current_paper_win_rate * 100).toFixed(0)}%` : paperWinRate != null ? `${paperWinRate.toFixed(0)}%` : '—'} tone={(row.current_paper_win_rate ?? (paperWinRate != null ? paperWinRate / 100 : null)) != null && ((row.current_paper_win_rate ?? 0) >= 0.55 || (paperWinRate ?? 0) >= 55) ? 'up' : 'neutral'} />
+                <Metric label="Total P&L" value={formatCurrency(row.current_paper_pnl ?? paperStats.total, { signed: true, precision: 0 })} tone={(row.current_paper_pnl ?? paperStats.total) >= 0 ? 'up' : 'down'} />
                 <Metric label="Sharpe" value={row.current_paper_sharpe != null ? formatNumber(row.current_paper_sharpe, 2) : '—'} tone={row.current_paper_sharpe != null && row.current_paper_sharpe >= 1 ? 'up' : 'neutral'} />
               </div>
               {paperTrades.length > 0 && (
