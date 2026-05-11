@@ -100,7 +100,7 @@ export function DataSyncPanel({ sync, loading }: DataSyncPanelProps) {
           elapsed={null}
           lastRun={fmp.data?.last_warm_at ?? null}
           lastDuration={null}
-          success={typeof fmp.data?.coverage_pct === 'number' ? fmp.data.coverage_pct >= 95 : undefined}
+          success={typeof fmp.data?.coverage_pct === 'number' ? fmp.data.coverage_pct >= 80 : undefined}
           intervalLabel={
             typeof fmp.data?.coverage_pct === 'number'
               ? `${fmp.data.coverage_pct.toFixed(0)}% coverage`
