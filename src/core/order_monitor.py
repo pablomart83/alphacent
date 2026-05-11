@@ -1482,14 +1482,17 @@ class OrderMonitor:
                                         break
                                     else:
                                         # Position already exists for this strategy+symbol.
-                                        # If eToro is returning a different position ID for the
-                                        # same position (ID oscillation), update the etoro_position_id
-                                        # on the existing row rather than skipping and creating a
-                                        # duplicate. This is the fix for the oscillation between
-                                        # order ID and position ID that eToro returns across syncs.
+                                        # Only update etoro_position_id if the existing position's
+                                        # current ID is NOT in eToro's response (ID oscillation).
+                                        # If the existing ID IS in eToro's response, this is a
+                                        # genuinely new second position — don't merge, fall through
+                                        # to create a new row.
                                         existing_etoro_id = str(already_has.etoro_position_id or '')
                                         incoming_etoro_id = str(pos.etoro_position_id)
-                                        if existing_etoro_id != incoming_etoro_id:
+                                        existing_still_on_etoro = existing_etoro_id in etoro_position_ids
+                                        if existing_etoro_id != incoming_etoro_id and not existing_still_on_etoro:
+                                            # Existing ID gone from eToro — this is ID oscillation.
+                                            # Update the existing row's ID to the new one.
                                             id_taken = (
                                                 incoming_etoro_id in all_etoro_ids_in_db
                                                 and incoming_etoro_id != existing_etoro_id
@@ -1508,20 +1511,24 @@ class OrderMonitor:
                                                     f"Skipping ID update for {normalized_symbol} — "
                                                     f"incoming ID {incoming_etoro_id} already held by another row"
                                                 )
-                                        already_has.current_price = pos.current_price
-                                        already_has.unrealized_pnl = pos.unrealized_pnl
-                                        if pos.invested_amount:
-                                            already_has.invested_amount = pos.invested_amount
-                                        updated_count += 1
-                                        logger.debug(
-                                            f"Skipping order {order.id} for {normalized_symbol} — "
-                                            f"strategy {order.strategy_id} already has open position (updated)"
-                                        )
-                                        # Mark as handled so we don't fall through to create a new row
-                                        matched_strategy_id = order.strategy_id
-                                        matched_order_id = order.id
-                                        match_reason = f"existing_position_updated:{already_has.id}"
-                                        break
+                                            already_has.current_price = pos.current_price
+                                            already_has.unrealized_pnl = pos.unrealized_pnl
+                                            if pos.invested_amount:
+                                                already_has.invested_amount = pos.invested_amount
+                                            updated_count += 1
+                                            matched_strategy_id = order.strategy_id
+                                            matched_order_id = order.id
+                                            match_reason = f"existing_position_updated:{already_has.id}"
+                                            break
+                                        else:
+                                            # Existing position is still on eToro — this is a
+                                            # genuinely new second position for the same strategy+symbol.
+                                            # Don't merge. Fall through to create a new row.
+                                            logger.debug(
+                                                f"Skipping order {order.id} for {normalized_symbol} — "
+                                                f"strategy {order.strategy_id} already has open position "
+                                                f"(existing ID {existing_etoro_id} still on eToro — new position)"
+                                            )
 
                         # Pass 2 (defence-in-depth): if no FILLED match, look for a
                         # CANCELLED or FAILED order within ±24h of position.opened_at.
