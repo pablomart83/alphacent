@@ -54,10 +54,218 @@
 9. **Research / Attribution strategy deep-dive** — click any row to open trade journal + metrics drawer
 10. **Guard / Live trading health card** — virtual equity, real equity, live positions, today's real P&L
 
-### Current system state (2026-05-11)
+## ⚡ NEXT SESSION KICKOFF
 
-- **DEMO equity:** ~$9,995 (account_info) | **Open positions:** 61 | **Regime:** trending_up_strong
-- **DEMO strategies:** 48 PAPER + 56 BACKTESTED
+**Frontend rebuild v2 is complete (Sprints 0-12 + polish). All 5 surfaces + Settings are live at https://alphacent.co.uk. The platform is now in active iteration — fixing bugs, improving analytics, and tuning the graduation/live trading pipeline.**
+
+**🔴 FIRST LIVE TRADE EXECUTED: 4H EMA Ribbon Trend Long × GOOGL — $850 virtual / $85 real on eToro Agent Portfolio. Position open as of 2026-05-11 14:10 UTC.**
+
+---
+
+## SESSION 2026-05-11 — WHAT WAS DONE
+
+### P0 Frontend fixes (all shipped)
+
+| Commit | What |
+|---|---|
+| `148e581` | LIVE/DEMO data separation in analytics (account_type filter on equity_snapshots + positions) · equity chart % mode · attribution overlap fix · returns histogram bar width |
+| `7a0dc7e` | Equity chart: drawdown sign fix · realized rebase fix · hover alpha double-rebase · stale series on mode switch · DemoLiveSplitTile independent DEMO query |
+| `42fc92d` | Graduation: fix paper metrics snapshot (aggregated cross-version) · LIVE badge in library |
+| `8a911e5` | Walk-forward data: synthesize from strategy_metadata for autonomous strategies (was showing "No walk-forward data" for all strategies) |
+
+### Live trading architecture (all shipped)
+
+| Commit | What |
+|---|---|
+| `9634798` | Signal gen: pre-filter scoped to account_type · live-independent pass in scheduler |
+| `a8a1883` | Graduation creates new LIVE strategy row (single symbol) instead of promoting source |
+| `0f6e22c` | LIVE strategies excluded from DEMO cycle, run exclusively in live-independent pass |
+| `6f3108e` | eToro Agent Portfolio endpoints fixed · min order size · routing · retirement guards |
+| `8019867` | FMP cache warm threshold 95%→80% |
+| `cc52d75` | Graduation paper Sharpe uses aggregated cross-version stats · DB record patched |
+| `3e35cd8` | Live authorisations: compact rows + side panel detail (no dialog) |
+| `2625ef4` | Live authorisations: prominent cards + WF/Paper/Live deep-dive drawer |
+
+### Current system state (2026-05-11 end of session)
+
+- **DEMO equity:** ~$491K | **Open positions:** 57 | **Regime:** trending_up_strong
+- **DEMO strategies:** 47 PAPER + 64 BACKTESTED
+- **LIVE strategy:** `4H EMA Ribbon Trend Long GOOGL LIVE` (id: `918b0c99`) — status LIVE, symbols `["GOOGL"]`
+- **LIVE positions:** 1 open — GOOGL LONG, entry $394.96, `account_type='live'`
+- **live_strategies row:** id=1, conviction_min=73, size=$850, SL=6%, TP=15%
+- **Trade journal:** 1,041 closed DEMO trades
+- **Latest commit:** `6f3108e`
+
+---
+
+## LIVE TRADING ARCHITECTURE — HOW IT WORKS NOW
+
+### Graduation flow (proper)
+1. CIO approves (template, symbol) pair from Graduation tab
+2. `approve_graduation()` creates:
+   - New `strategies` row: `status=LIVE`, `symbols=[symbol]` (single symbol only), inherits rules/risk from source
+   - `graduation_approvals` row with aggregated cross-version paper stats
+   - `live_strategies` row with CIO-approved size/SL/TP/conviction_min
+3. Source PAPER/BACKTESTED strategy is **untouched** — continues generating DEMO trades
+4. New LIVE strategy is excluded from DEMO signal cycle
+
+### Signal generation (two independent paths)
+- **DEMO cycle**: runs PAPER + BACKTESTED strategies, `account_type='demo'` pre-filter, fires DEMO orders on eToro Demo
+- **Live-independent pass** (Phase 2B): runs after every DEMO cycle, loads LIVE strategies from DB, calls `generate_signals(account_type='live', conviction_override=live_strategies.conviction_min)`, fires live orders on eToro Agent Portfolio
+
+### Key invariants
+- DEMO positions never block LIVE entries (pre-filter scoped to account_type)
+- LIVE strategies never appear in DEMO cycle (excluded from active_strategies query)
+- LIVE strategies never auto-retired by autonomous cycle (explicit skip in `_check_and_retire_strategies`)
+- LIVE strategies don't count against DEMO max_active_strategies cap
+- Pending closures route to correct eToro client (live vs demo) based on `position.account_type`
+- Live order status checked by live_order_monitor (not DEMO monitor)
+
+### eToro Agent Portfolio endpoints (official API v1.158.0)
+- **Positions**: `GET /api/v1/trading/info/real/pnl` → `clientPortfolio.positions` (camelCase)
+- **Order status**: `GET /api/v1/trading/info/real/orders/{orderId}`
+- **Place order**: `POST /api/v1/trading/execution/market-open-orders/by-amount`
+- **Close position**: `POST /api/v1/trading/execution/market-close-orders/positions/{positionId}`
+- **Min order size**: $10 (eToro actual minimum) — live executor uses `min_position_size=10`
+
+---
+
+## OPEN ITEMS FOR NEXT SESSION
+
+### 🔴 P0 — Critical bugs
+
+**1. Duplicate live orders on pre-market placement**
+When a live order is placed pre-market, eToro queues it. The order is marked CANCELLED by the DEMO monitor (wrong client) before the position appears. The live pass fires again next cycle → duplicate orders. Fix needed:
+- Live pass must check for existing live pending orders/positions before firing
+- Check `orders WHERE account_type='live' AND status='PENDING' AND symbol=_live_sym` before generating signal
+- Also check `positions WHERE account_type='live' AND symbol=_live_sym AND closed_at IS NULL`
+
+**2. eToro position ID oscillation**
+eToro returns different position IDs for the same position across sync calls (order ID vs position ID). The sync oscillates between IDs causing spurious "closed" events. Fix: match by `(symbol, strategy_id, opened_at proximity)` as fallback when `etoro_position_id` not found.
+
+**3. live_strategies.live_trades / live_pnl not updating**
+The `live_strategies` row has `live_trades=0, live_pnl=0` even though a position is open. Need to update these from `positions WHERE account_type='live'` on each sync.
+
+### 🟡 P1 — Important
+
+**4. Conviction threshold not persisted across restarts (YAML vs DB)**
+The live pass uses `_appr.conviction_min` from DB (correct). But the YAML `conviction_threshold=74` is still the global default for DEMO. If someone changes conviction in Settings, it writes YAML — that's correct for DEMO. For LIVE, the per-strategy `conviction_min` in `live_strategies` is the source of truth. This is now correct but worth documenting clearly.
+
+**5. Graduation min_trades lowered to 15 (temporary)**
+`graduation_gate` YAML section doesn't exist — defaults to hardcoded 20. Was lowered to 15 via Settings for this session. Should add `graduation_gate` section to YAML with `min_trades: 15` to persist across restarts.
+
+**6. P0 frontend items not fully resolved**
+- Conviction Score Calibration chart in Execution/Analytics — check if it renders correctly
+- Annual Returns chart in Research/Performance — verify with real data
+- Attribution tab overlap — verify fix worked
+
+**7. Graduation queue shows "Missing: no WF sharpe on record"**
+The approaching graduation panel shows this for strategies without `wf_test_sharpe` in metadata. The WF synthesis fix (commit `8a911e5`) should help but verify.
+
+### 🟢 P2 — Polish / improvements
+
+**8. Live position in UI**
+Book → Live should now show the GOOGL position. Verify the live P&L, entry price, SL/TP display correctly. The `live_strategies.live_trades` counter needs wiring to increment when a live position closes.
+
+**9. Session continuation doc update**
+Update `graduation_gate` thresholds in YAML to persist the min_trades=15 change.
+
+**10. P1-P6 from previous session**
+- P1: Graduation threshold calibration (min time span + min avg P&L per trade) — GOOGL is at 15 trades, 22-day span, $53.59 avg P&L. Consider adding `min_span_days=14` and `min_avg_pnl=10` gates.
+- P2: YAML race condition proper fix (store market_regime in DB) — still open
+- P3: AutonomousStrategyManager config reload — still open
+- P5: Raise DEMO conviction threshold to 74 — still at 65 (DEMO), 73 (LIVE for GOOGL)
+- P6: Strategy deep-dive drawer aggregation across versions — still open
+
+---
+
+## GRADUATION GATE STATE
+
+- **Thresholds (active):** min_trades=15 (via Settings, not persisted in YAML), min_win_rate=55%, min_qualification_ratio=0.60, rejection_cooldown=14d
+- **Active live pair:** 4H EMA Ribbon Trend Long / GOOGL — 15 trades, 80% WR, Sharpe 6.59, P&L +$803.87
+- **live_strategies id=1:** conviction_min=73, size=$850, SL=6%, TP=15%
+- **LIVE strategy id:** `918b0c99-c31e-4395-a434-cee5e07163d5`
+- **Source BACKTESTED strategy:** `4b777482-4458-406b-ab96-41d2c89ad2eb` (continues running DEMO)
+
+---
+
+## KNOWN ISSUES / TECHNICAL DEBT
+
+- **errors.log**: pre-existing graduation SQL transaction error (graduation_approvals query in failed transaction block) — cosmetic, doesn't affect trading
+- **MQS persistence**: `_save_hourly_equity_snapshot` wraps MQS computation in `except: pass` — NULL values in recent snapshots
+- **Triple EMA Alignment DSL bug**: `EMA(10) > EMA(10)` always false — Batch 4 fix pending
+- **Sector Rotation + Pairs Trading templates**: structurally broken — design session needed
+- **Entry order 82% FAILED rate**: cosmetic — market-closed deferrals written as FAILED then re-fired
+
+---
+
+## SESSION START CHECKLIST
+
+```bash
+# Health + errors
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'tail -20 /home/ubuntu/alphacent/logs/errors.log'
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'tail -10 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
+
+# Live position status
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT id, symbol, side, entry_price, current_price, unrealized_pnl, account_type, opened_at FROM positions WHERE account_type='"'"'live'"'"' AND closed_at IS NULL;"'
+
+# Live strategy signal gen (check for LIVE FILL or conviction gate)
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'grep -n "LIVE FILL\|conviction.*gate\|GOOGL LIVE\|live.*independent" /home/ubuntu/alphacent/logs/alphacent.log | tail -10'
+
+# Strategy counts
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT status, COUNT(*) FROM strategies GROUP BY status ORDER BY status;"'
+
+# DEMO account state
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT mode, balance, equity, positions_count, updated_at FROM account_info ORDER BY updated_at DESC;"'
+
+# Sync autonomous_trading.yaml (always do this — Settings page writes it live)
+scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent/config/autonomous_trading.yaml config/autonomous_trading.yaml
+```
+
+---
+
+## NEXT SESSION PROMPT
+
+Use this prompt to start the next session:
+
+```
+Read .kiro/steering/trading-system-context.md and Session_Continuation.md in full before doing anything.
+
+System state:
+- DEMO: ~$491K equity, 57 open positions, trending_up_strong, 47 PAPER + 64 BACKTESTED strategies
+- LIVE: 1 open position — GOOGL LONG entry $394.96 (4H EMA Ribbon Trend Long, conviction_min=73)
+- Latest commit: 6f3108e
+
+Priority items this session:
+
+P0 — Fix duplicate live orders on pre-market placement:
+The live-independent pass in trading_scheduler.py fires even when a live order is already pending/filled. Before calling generate_signals for a live strategy, check: (a) positions WHERE account_type='live' AND symbol=_live_sym AND closed_at IS NULL — if exists, skip entry signals; (b) orders WHERE account_type='live' AND symbol=_live_sym AND status='PENDING' — if exists, skip. This prevents the 3-order problem we saw on 2026-05-11.
+
+P0 — Fix eToro position ID oscillation:
+The live sync oscillates between position IDs (3438564904 ↔ 3438608761 ↔ 3438627355) for the same GOOGL position. The sync uses etoro_position_id as the match key but eToro returns different IDs. Fix: in sync_positions, when a position is not found by etoro_position_id, also try matching by (symbol, strategy_id, opened_at within ±5 minutes) before creating a new row.
+
+P0 — Wire live_strategies.live_trades and live_pnl:
+Currently always 0. Should update from positions/trade_journal WHERE account_type='live' on each sync cycle.
+
+P1 — Persist graduation min_trades=15 in YAML:
+Add graduation_gate section to autonomous_trading.yaml: min_trades: 15, min_win_rate_pct: 55, min_qualification_ratio: 0.60, rejection_cooldown_days: 14
+
+P1 — Frontend: verify P0 fixes from last session work correctly:
+(a) Conviction Score Calibration chart in Execution/Analytics — does it render?
+(b) Annual Returns in Research/Performance — does it show data?
+(c) Attribution tab overlap — is it fixed?
+(d) Command equity chart % mode — does LIVE show flat line vs DEMO growing?
+(e) DemoLiveSplitTile — does it stay stable when switching DEMO/LIVE?
+
+P2 — Live position display in Book/Live:
+Verify GOOGL position shows correctly with entry price, current P&L, SL/TP. Check that the live_strategies detail panel in Graduation shows live_trades incrementing when position closes.
+
+P2 — YAML race condition (P2 from previous sessions):
+Store market_regime in DB (equity_snapshots or autonomous_cycle_runs) instead of YAML. The autonomous_strategy_manager writes market_regime to autonomous_trading.yaml after every cycle — this creates a race condition with the Settings page.
+
+Ongoing — Watch live signal generation:
+Check alphacent.log for "LIVE FILL (independent pass)" entries. The GOOGL position is open so the pre-filter should block new ENTER_LONG signals until it closes. When it closes (via SL/TP/exit condition), the next signal cycle should fire a new live order if conditions are met.
+```
 - **LIVE account:** Agent Portfolio | Virtual: $10K | Real: $1K | Mirror: 10%
 - **LIVE positions:** 0 | **live_trading.enabled:** TRUE | **Live authorisations:** 0
 - **Trade journal:** 1,003 closed trades (DEMO) across 380 strategy IDs
