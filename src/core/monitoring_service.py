@@ -5204,12 +5204,30 @@ class MonitoringService:
                     pass
 
                 if not has_positions and not has_pending and not has_recent_fill:
-                    # Skip pending_retirement strategies — they must be handled by
-                    # _process_pending_retirements (which does NOT resurrect
-                    # activation_approved). Resurrecting activation_approved here
-                    # allows zombie strategies to re-enter signal generation via
-                    # the BACKTESTED branch of trading_scheduler's filter.
+                    # Handle pending_retirement strategies: demote to BACKTESTED with
+                    # activation_approved=False so they must pass WF again before trading.
+                    # Previously these were skipped here and left to _check_strategy_decay,
+                    # but that path was not reliably firing — strategies sat in PAPER for weeks.
                     if isinstance(s.strategy_metadata, dict) and s.strategy_metadata.get('pending_retirement'):
+                        meta = s.strategy_metadata
+                        reason = meta.get('pending_retirement_reason', 'Pending retirement — all positions closed')
+                        s.status = StrategyStatus.BACKTESTED
+                        s.retired_at = None
+                        meta['activation_approved'] = False  # Must pass WF again
+                        meta['demoted_from_active'] = True
+                        meta['demoted_at'] = datetime.now().isoformat()
+                        meta['demotion_reason'] = reason
+                        meta.pop('pending_retirement', None)
+                        meta.pop('pending_retirement_reason', None)
+                        meta.pop('pending_retirement_at', None)
+                        s.strategy_metadata = meta
+                        from sqlalchemy.orm.attributes import flag_modified as _flag_mod
+                        _flag_mod(s, 'strategy_metadata')
+                        demoted += 1
+                        logger.info(
+                            f"Demoted pending-retirement PAPER strategy to BACKTESTED: "
+                            f"{s.name} (all positions closed, activation_approved=False)"
+                        )
                         continue
 
                     # SAFETY DOUBLE-CHECK: raw SQL query on a fresh connection to
