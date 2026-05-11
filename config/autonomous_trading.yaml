@@ -760,3 +760,8 @@ live_trading:
     requested level (observed ~10% floor on BTC).
 
     '
+graduation_gate:
+  min_trades: 15
+  min_win_rate_pct: 55
+  min_qualification_ratio: 0.60
+  rejection_cooldown_days: 14

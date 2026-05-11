@@ -1960,6 +1960,51 @@ class TradingScheduler:
                                 )
                                 continue
 
+                            # ── P0 DUPLICATE GUARD ────────────────────────────────────────
+                            # Before generating any entry signals, check whether a live
+                            # position or pending order already exists for this symbol.
+                            # This prevents the 3-order problem: pre-market placement queues
+                            # an order on eToro, the DEMO monitor mis-classifies it as
+                            # CANCELLED, and the next live pass fires again.
+                            #
+                            # (a) Open live position — skip entry signals entirely.
+                            # (b) Pending live order — skip entry signals entirely.
+                            # Exit signals are NOT blocked — they must still fire to close
+                            # the position when the DSL exit conditions trigger.
+                            _skip_live_entries = False
+                            try:
+                                _live_open_pos = session.query(PositionORM).filter(
+                                    PositionORM.account_type == 'live',
+                                    PositionORM.symbol == _live_sym,
+                                    PositionORM.closed_at.is_(None),
+                                ).first()
+                                if _live_open_pos:
+                                    logger.debug(
+                                        f"Live pass: open position exists for {_live_sym} "
+                                        f"(id={_live_open_pos.id[:8]}) — skipping entry signals"
+                                    )
+                                    _skip_live_entries = True
+
+                                if not _skip_live_entries:
+                                    _live_pending_order = session.query(OrderORM).filter(
+                                        OrderORM.account_type == 'live',
+                                        OrderORM.symbol == _live_sym,
+                                        OrderORM.status == OrderStatus.PENDING,
+                                    ).first()
+                                    if _live_pending_order:
+                                        logger.info(
+                                            f"Live pass: pending order exists for {_live_sym} "
+                                            f"(order={_live_pending_order.id[:8]}, "
+                                            f"etoro_order_id={_live_pending_order.etoro_order_id}) "
+                                            f"— skipping entry signals"
+                                        )
+                                        _skip_live_entries = True
+                            except Exception as _dup_check_err:
+                                logger.warning(
+                                    f"Live pass: duplicate guard check failed for {_live_sym}: "
+                                    f"{_dup_check_err} — proceeding (fail-open)"
+                                )
+
                             try:
                                 # Generate signals scoped to live account.
                                 # The LIVE strategy already has symbols=[_live_sym] so the
@@ -1977,6 +2022,15 @@ class TradingScheduler:
                                     if _lsig.symbol != _live_sym:
                                         continue
                                     if _lsig.action not in [_LiveSignalAction.ENTER_LONG, _LiveSignalAction.ENTER_SHORT]:
+                                        continue
+
+                                    # Duplicate guard: skip entry signals when a live
+                                    # position or pending order already exists.
+                                    if _skip_live_entries:
+                                        logger.info(
+                                            f"Live pass: skipping {_lsig.action.value} {_live_sym} "
+                                            f"— position/pending order already exists (duplicate guard)"
+                                        )
                                         continue
 
                                     # Conviction gate

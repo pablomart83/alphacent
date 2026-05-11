@@ -5022,7 +5022,7 @@ class StrategyEngine:
         
         return entries, exits
     
-    def generate_signals(self, strategy: Strategy, include_dynamic: bool = True, account_type: str = 'demo') -> List[TradingSignal]:
+    def generate_signals(self, strategy: Strategy, include_dynamic: bool = True, account_type: str = 'demo', conviction_override: int = None) -> List[TradingSignal]:
         """
         Generate trading signals based on strategy rules and current market data.
         
@@ -5040,6 +5040,9 @@ class StrategyEngine:
             include_dynamic: Whether to include dynamic symbol additions
             account_type: 'demo' or 'live' — scopes the pre-filter position/order check
                           so DEMO positions never block LIVE signal generation and vice versa.
+            conviction_override: When set, replaces the config conviction threshold.
+                                 Used by the live-independent pass to apply the CIO-approved
+                                 per-strategy conviction_min from live_strategies.
         
         Returns:
             List of trading signals
@@ -5571,6 +5574,12 @@ class StrategyEngine:
             # Crypto-specific threshold — calibrated to what crypto DSL strategies
             # can realistically achieve (no fundamentals component, cycle adjustments).
             min_conviction_crypto = _ae_config.get('min_conviction_score_crypto', 68)
+
+            # Apply per-strategy conviction override (used by live-independent pass
+            # to enforce the CIO-approved conviction_min from live_strategies).
+            if conviction_override is not None:
+                min_conviction = conviction_override
+                min_conviction_crypto = conviction_override
 
             # Resolve crypto symbol set once for the loop
             _crypto_symbols: set = set()

@@ -122,7 +122,7 @@ class OrderMonitor:
         #   (a) eToro SL/TP hit — price will confirm it
         #   (b) Brief API glitch — position reappears next sync
         #   (c) DEMO account reset — mass closure guard catches this
-        self._position_miss_count: dict = {}  # etoro_position_id -> consecutive_misses
+        self._position_miss_count: dict = {}  # db_position_id (UUID) -> consecutive_misses
         self._miss_threshold = 5  # default: 5 consecutive misses (~5 min at 60s sync)
 
     def _load_risk_config(self):
@@ -1477,10 +1477,47 @@ class OrderMonitor:
                                         )
                                         break
                                     else:
+                                        # Position already exists for this strategy+symbol.
+                                        # If eToro is returning a different position ID for the
+                                        # same position (ID oscillation), update the etoro_position_id
+                                        # on the existing row rather than skipping and creating a
+                                        # duplicate. This is the fix for the oscillation between
+                                        # order ID and position ID that eToro returns across syncs.
+                                        existing_etoro_id = str(already_has.etoro_position_id or '')
+                                        incoming_etoro_id = str(pos.etoro_position_id)
+                                        if existing_etoro_id != incoming_etoro_id:
+                                            id_taken = (
+                                                incoming_etoro_id in all_etoro_ids_in_db
+                                                and incoming_etoro_id != existing_etoro_id
+                                            )
+                                            if not id_taken:
+                                                logger.info(
+                                                    f"Position ID oscillation fix: {normalized_symbol} "
+                                                    f"(strategy={order.strategy_id[:8]}) "
+                                                    f"etoro_position_id {existing_etoro_id} → {incoming_etoro_id}"
+                                                )
+                                                already_has.etoro_position_id = pos.etoro_position_id
+                                                all_etoro_ids_in_db.add(incoming_etoro_id)
+                                                db_by_etoro_id[incoming_etoro_id] = already_has
+                                            else:
+                                                logger.debug(
+                                                    f"Skipping ID update for {normalized_symbol} — "
+                                                    f"incoming ID {incoming_etoro_id} already held by another row"
+                                                )
+                                        already_has.current_price = pos.current_price
+                                        already_has.unrealized_pnl = pos.unrealized_pnl
+                                        if pos.invested_amount:
+                                            already_has.invested_amount = pos.invested_amount
+                                        updated_count += 1
                                         logger.debug(
                                             f"Skipping order {order.id} for {normalized_symbol} — "
-                                            f"strategy {order.strategy_id} already has open position"
+                                            f"strategy {order.strategy_id} already has open position (updated)"
                                         )
+                                        # Mark as handled so we don't fall through to create a new row
+                                        matched_strategy_id = order.strategy_id
+                                        matched_order_id = order.id
+                                        match_reason = f"existing_position_updated:{already_has.id}"
+                                        break
 
                         # Pass 2 (defence-in-depth): if no FILLED match, look for a
                         # CANCELLED or FAILED order within ±24h of position.opened_at.
@@ -1539,6 +1576,11 @@ class OrderMonitor:
                     except Exception as e:
                         logger.warning(f"Could not match position to order: {e}")
                     
+                    # If the position was already updated inline during Pass 1
+                    # (ID oscillation fix path), skip the rest of the creation logic.
+                    if match_reason and match_reason.startswith("existing_position_updated:"):
+                        continue
+
                     from src.models.enums import PositionSide
                     existing_by_strategy = None
                     if matched_strategy_id and matched_strategy_id != pos.strategy_id:
@@ -1755,12 +1797,19 @@ class OrderMonitor:
                 seen_this_sync = set()
                 
                 for db_pos in open_db_positions:
-                    pos_key = str(db_pos.etoro_position_id)
+                    # Key the miss counter by the stable DB row ID (UUID), NOT the
+                    # eToro position ID. eToro oscillates between IDs for the same
+                    # position across sync calls (order ID vs position ID). Keying
+                    # by etoro_position_id caused the old ID to accumulate misses
+                    # after each oscillation, eventually triggering a spurious close.
+                    # The DB row ID never changes — it's the correct stable key.
+                    pos_key = db_pos.id
+                    etoro_id_key = str(db_pos.etoro_position_id)
                     
-                    if pos_key in etoro_position_ids:
+                    if etoro_id_key in etoro_position_ids:
                         # Position found on eToro — reset miss counter
                         self._position_miss_count.pop(pos_key, None)
-                        seen_this_sync.add(pos_key)
+                        seen_this_sync.add(etoro_id_key)
                         continue
                     
                     # Position missing from eToro — increment miss counter
@@ -1796,7 +1845,7 @@ class OrderMonitor:
 
                     if misses < dynamic_threshold:
                         logger.info(
-                            f"Position {db_pos.symbol} (eToro: {pos_key}) missing from eToro "
+                            f"Position {db_pos.symbol} (eToro: {etoro_id_key}) missing from eToro "
                             f"({misses}/{dynamic_threshold} consecutive misses — not closing yet)"
                         )
                         continue
@@ -2026,7 +2075,7 @@ class OrderMonitor:
                     self._position_miss_count.pop(pos_key, None)
                 
                 # Clean up miss counter for positions no longer in DB
-                active_keys = {p.etoro_position_id for p in open_db_positions}
+                active_keys = {p.id for p in open_db_positions}
                 stale = [k for k in self._position_miss_count if k not in active_keys]
                 for k in stale:
                     del self._position_miss_count[k]
@@ -2042,6 +2091,80 @@ class OrderMonitor:
             
             # Update last sync time
             self._last_full_sync = time.time()
+
+            # ── Wire live_strategies.live_trades and live_pnl ────────────────────
+            # Update the live_strategies row with current live trade counts and P&L.
+            # This runs on every sync cycle so the Graduation panel shows live progress.
+            # Only runs when syncing live account (account_type='live') to avoid
+            # unnecessary DB work on every DEMO sync.
+            if account_type == 'live':
+                try:
+                    from src.models.orm import LiveStrategyORM as _LiveStratORM
+                    from sqlalchemy import text as _text_ls
+                    _ls_session = self.db.get_session()
+                    try:
+                        _live_rows = _ls_session.query(_LiveStratORM).filter(
+                            _LiveStratORM.retired_at.is_(None)
+                        ).all()
+                        for _lr in _live_rows:
+                            # Count closed live trades from trade_journal
+                            _tj_row = _ls_session.execute(
+                                _text_ls("""
+                                    SELECT
+                                        COUNT(*)                                    AS trades,
+                                        COALESCE(SUM(pnl), 0)                       AS total_pnl,
+                                        CASE WHEN STDDEV(pnl) > 0
+                                             THEN (AVG(pnl) / STDDEV(pnl)) * SQRT(252)
+                                             ELSE NULL
+                                        END                                         AS sharpe
+                                    FROM trade_journal
+                                    WHERE strategy_id = :sid
+                                      AND symbol = :sym
+                                      AND account_type = 'live'
+                                      AND pnl IS NOT NULL
+                                """),
+                                {"sid": _lr.strategy_id, "sym": _lr.symbol},
+                            ).fetchone()
+
+                            # Also count open live positions (not yet in trade_journal)
+                            _open_pos_count = _ls_session.execute(
+                                _text_ls("""
+                                    SELECT COUNT(*), COALESCE(SUM(unrealized_pnl), 0) AS open_pnl
+                                    FROM positions
+                                    WHERE strategy_id = :sid
+                                      AND symbol = :sym
+                                      AND account_type = 'live'
+                                      AND closed_at IS NULL
+                                """),
+                                {"sid": _lr.strategy_id, "sym": _lr.symbol},
+                            ).fetchone()
+
+                            _closed_trades = int(_tj_row.trades) if _tj_row and _tj_row.trades else 0
+                            _closed_pnl = float(_tj_row.total_pnl) if _tj_row and _tj_row.total_pnl else 0.0
+                            _open_pnl = float(_open_pos_count.open_pnl) if _open_pos_count and _open_pos_count.open_pnl else 0.0
+                            _sharpe = float(_tj_row.sharpe) if _tj_row and _tj_row.sharpe is not None else None
+
+                            # live_trades = closed trades; live_pnl = closed + open unrealized
+                            _lr.live_trades = _closed_trades
+                            _lr.live_pnl = round(_closed_pnl + _open_pnl, 2)
+                            if _sharpe is not None:
+                                _lr.live_sharpe = round(_sharpe, 4)
+
+                        _ls_session.commit()
+                        logger.debug(
+                            f"live_strategies updated: "
+                            + ", ".join(
+                                f"{r.symbol} trades={r.live_trades} pnl={r.live_pnl:.2f}"
+                                for r in _live_rows
+                            )
+                        )
+                    except Exception as _ls_err:
+                        _ls_session.rollback()
+                        logger.warning(f"live_strategies update failed (non-fatal): {_ls_err}")
+                    finally:
+                        _ls_session.close()
+                except Exception as _ls_outer_err:
+                    logger.warning(f"live_strategies wire failed (non-fatal): {_ls_outer_err}")
             
             # Broadcast price updates via WebSocket (fire-and-forget)
             if _price_updates:
