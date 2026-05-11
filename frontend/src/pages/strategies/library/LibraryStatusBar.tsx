@@ -10,6 +10,7 @@ import type { PipelineCounts } from '@/pages/command/StrategyPipelineCounts'
 
 interface LibraryStatusBarProps {
   counts: PipelineCounts
+  liveAuthorizedCount?: number
   loading?: boolean
   onStatusFilter: (status: string) => void
   activeStatus: string
@@ -29,10 +30,17 @@ const STATUSES: Array<{
 
 export function LibraryStatusBar({
   counts,
+  liveAuthorizedCount,
   loading,
   onStatusFilter,
   activeStatus,
 }: LibraryStatusBarProps) {
+  // Override the 'live' count with the live_authorized count from actual strategy rows
+  // (strategies.status is never set to LIVE — live_strategies is the gate).
+  const displayCounts: PipelineCounts = {
+    ...counts,
+    live: liveAuthorizedCount ?? counts.live,
+  }
   return (
     <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--bg-1)] shrink-0 overflow-x-auto">
       <span className="text-[10px] text-[var(--text-3)] uppercase tracking-wider shrink-0">
@@ -40,7 +48,7 @@ export function LibraryStatusBar({
       </span>
       <div className="flex items-center gap-1 flex-wrap">
         {STATUSES.map((s) => {
-          const count = counts[s.key]
+          const count = displayCounts[s.key]
           const isActive = activeStatus === s.filter
           return (
             <button

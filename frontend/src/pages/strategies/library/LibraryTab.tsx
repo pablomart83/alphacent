@@ -138,6 +138,13 @@ export function LibraryTab() {
   const strategiesQuery = useStrategies({ slim: true, include_retired: true })
   const allRows: StrategyRow[] = strategiesQuery.data?.strategies ?? []
 
+  // Count live-authorized strategies from the actual row data (not pipeline counts
+  // which use strategies.status — that's never set to LIVE by graduation).
+  const liveAuthorizedCount = useMemo(
+    () => allRows.filter((r) => r.is_live_authorized).length,
+    [allRows],
+  )
+
   /* ─── Derived: filter option lists ─── */
   const templateOptions = useMemo(
     () =>
@@ -362,6 +369,7 @@ export function LibraryTab() {
     <div className="flex flex-col h-full min-h-0" ref={tableBodyRef}>
       <LibraryStatusBar
         counts={pipelineQuery.counts}
+        liveAuthorizedCount={liveAuthorizedCount}
         loading={pipelineQuery.isLoading}
         onStatusFilter={(status) =>
           setFilters((prev) => ({ ...prev, status: status as StrategyStatus | 'all' }))
@@ -529,10 +537,14 @@ function uniqueSorted(values: string[]): string[] {
 function applyFilters(rows: StrategyRow[], filters: LibraryFilters): StrategyRow[] {
   const q = filters.search.trim().toLowerCase()
   return rows.filter((r) => {
-    // Status
+    // Status — 'LIVE' filter matches is_live_authorized, not strategies.status
     if (filters.status !== 'all') {
-      const normalizedStatus = r.status === 'DEMO' ? 'PAPER' : r.status
-      if (normalizedStatus !== filters.status) return false
+      if (filters.status === 'LIVE') {
+        if (!r.is_live_authorized) return false
+      } else {
+        const normalizedStatus = r.status === 'DEMO' ? 'PAPER' : r.status
+        if (normalizedStatus !== filters.status) return false
+      }
     }
     if (filters.template) {
       const t = r.template_name ?? r.metadata?.template_name

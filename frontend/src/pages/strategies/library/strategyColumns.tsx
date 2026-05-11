@@ -130,14 +130,23 @@ export function buildStrategyColumns(
       id: 'status',
       header: 'Status',
       accessorKey: 'status',
-      size: 96,
+      size: 110,
       cell: ({ row }) => {
         const status = row.original.status
         const variant = STATUS_VARIANT[status] ?? 'muted'
+        const isLive = row.original.is_live_authorized
         return (
-          <Badge variant={variant} size="sm">
-            {statusLabel(status)}
-          </Badge>
+          <div className="flex items-center gap-1">
+            <Badge variant={variant} size="sm">
+              {statusLabel(status)}
+            </Badge>
+            {isLive && (
+              <Badge variant="live" size="sm" className="gap-0.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
+                LIVE
+              </Badge>
+            )}
+          </div>
         )
       },
     },

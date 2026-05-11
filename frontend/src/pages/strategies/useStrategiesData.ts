@@ -130,6 +130,8 @@ export interface StrategyRow {
   alpha_vs_spy?: number | null
   deployed_capital?: number | null
   allocated_capital?: number | null
+  /** True when this strategy has an active live_strategies authorization row. */
+  is_live_authorized?: boolean | null
 }
 
 export interface StrategiesPayload {

@@ -112,6 +112,63 @@ def get_paper_stats_for_strategy(
     }
 
 
+def get_aggregated_paper_stats(
+    session: Session,
+    template_name: str,
+    symbol: str,
+) -> Dict[str, Any]:
+    """
+    Compute paper trading stats aggregated across ALL strategy versions for a
+    (template_name, symbol) pair — the same cross-version view used by the
+    graduation queue.  This is the correct denominator for the approval record
+    because the queue qualifies pairs on aggregate history, not single-version.
+    """
+    from sqlalchemy import text
+
+    row = session.execute(
+        text("""
+            SELECT
+                COUNT(*)                                                AS trades,
+                ROUND(
+                    CASE WHEN STDDEV(tj.pnl) > 0
+                         THEN (AVG(tj.pnl) / STDDEV(tj.pnl)) * SQRT(252)
+                         ELSE 0
+                    END::numeric, 4
+                )                                                       AS sharpe,
+                ROUND(
+                    100.0 * SUM(CASE WHEN tj.pnl > 0 THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0)::numeric, 2
+                )                                                       AS win_rate_pct,
+                ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2)            AS total_pnl
+            FROM trade_journal tj
+            JOIN strategies s ON s.id = tj.strategy_id
+            WHERE tj.pnl IS NOT NULL
+              AND tj.account_type = 'demo'
+              AND tj.symbol = :sym
+              AND COALESCE(
+                    s.strategy_metadata->>'template_name',
+                    REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                  ) = :tname
+        """),
+        {"tname": template_name, "sym": symbol},
+    ).fetchone()
+
+    if not row or not row.trades:
+        return {
+            "paper_trades": 0,
+            "paper_sharpe": None,
+            "paper_win_rate": None,
+            "paper_total_pnl": None,
+        }
+
+    return {
+        "paper_trades": int(row.trades),
+        "paper_sharpe": float(row.sharpe) if row.sharpe is not None else None,
+        "paper_win_rate": float(row.win_rate_pct) / 100.0 if row.win_rate_pct is not None else None,
+        "paper_total_pnl": float(row.total_pnl) if row.total_pnl is not None else None,
+    }
+
+
 def is_qualified(
     paper_stats: Dict[str, Any],
     wf_sharpe: Optional[float],
@@ -356,7 +413,13 @@ def approve_graduation(
         or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
     )
 
-    paper_stats = get_paper_stats_for_strategy(session, strategy_id, symbol)
+    # Use cross-version aggregated stats (same query as the graduation queue) so
+    # the approval record reflects the full (template_name, symbol) history, not
+    # just the single strategy_id that happens to be the representative version.
+    paper_stats = get_aggregated_paper_stats(session, template_name, symbol)
+    if not paper_stats.get("paper_trades"):
+        # Fallback: single-strategy stats if aggregation returns nothing.
+        paper_stats = get_paper_stats_for_strategy(session, strategy_id, symbol)
     ratio = None
     if wf_sharpe and wf_sharpe > 0 and paper_stats["paper_sharpe"] is not None:
         ratio = round(paper_stats["paper_sharpe"] / wf_sharpe, 3)

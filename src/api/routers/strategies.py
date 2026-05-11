@@ -280,6 +280,8 @@ class StrategyResponse(BaseModel):
     # Sprint 7.4: Deployed capital
     deployed_capital: Optional[float] = None  # Sum of open position invested_amounts
     allocated_capital: Optional[float] = None  # equity * allocation_pct
+    # Graduation: whether this strategy has an active live_strategies authorization
+    is_live_authorized: bool = False
 
 
 class StrategiesResponse(BaseModel):
@@ -615,6 +617,16 @@ async def get_strategies(
     ).group_by(PositionORM.strategy_id).all()
     deployed_capital_map = {sid: float(amt) for sid, amt in deployed_rows}
 
+    # Graduation: bulk-query which strategy_ids have an active live_strategies row.
+    # Used to set is_live_authorized on each StrategyResponse.
+    from src.models.orm import LiveStrategyORM
+    live_authorized_ids: set = set(
+        row.strategy_id
+        for row in session.query(LiveStrategyORM.strategy_id)
+        .filter(LiveStrategyORM.retired_at.is_(None))
+        .all()
+    )
+
     # Sprint 7.3: Fetch current equity for allocation_pct → dollar conversion
     # and SPY price series for alpha computation.
     # Skipped in slim mode — these are the most expensive queries (SPY fetches
@@ -800,6 +812,7 @@ async def get_strategies(
             alpha_vs_spy=alpha_vs_spy,
             deployed_capital=round(deployed_cap, 2),
             allocated_capital=allocated_cap,
+            is_live_authorized=strategy_id in live_authorized_ids,
         ))
     
     return StrategiesResponse(
