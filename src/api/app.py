@@ -94,7 +94,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     logger.info("AlphaCent Backend Service starting...")
 
     # Initialize authentication (fast, no network)
-    auth_manager = AuthenticationManager(session_timeout_minutes=30)
+    # Session timeout matches the cookie max_age (8 hours). The session is
+    # rolling — every validated request extends expires_at by another 8 hours,
+    # so an active user never gets logged out mid-session.
+    auth_manager = AuthenticationManager(session_timeout_minutes=480)
     session_manager = SessionManager(auth_manager, cleanup_interval_seconds=300)
     session_manager.start_automatic_cleanup()
 
