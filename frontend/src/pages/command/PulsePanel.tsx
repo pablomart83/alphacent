@@ -3,10 +3,15 @@ import { MetricsStrip } from './MetricsStrip'
 import { MultiTimeframeReturns } from './MultiTimeframeReturns'
 import type { PnLPeriodEntry } from './MultiTimeframeReturns'
 import { RegimeBlock } from './RegimeBlock'
-import { HealthScoreCard, type HealthScore } from './HealthScoreCard'
+import { FundScorecardCard } from './FundScorecardCard'
+import { DemoLiveSplitTile } from './DemoLiveSplitTile'
+import { AlphaGenTile } from './AlphaGenTile'
+import { DailyBriefingCard } from './DailyBriefingCard'
 import { CycleStatusCard, type AutonomousStatusShape } from './CycleStatusCard'
 import { StrategyPipelineCounts, type PipelineCounts } from './StrategyPipelineCounts'
 import type { EquityPeriod } from '@/components/trading/EquityChart'
+import type { DashboardSummaryPayload, PerformanceAnalyticsPayload } from './useCommandData'
+import type { LiveSummary } from '@/pages/book/useBookData'
 
 interface PulsePanelProps {
   equity: number | null | undefined
@@ -26,10 +31,15 @@ interface PulsePanelProps {
   regimeConfidence?: number | null
   regimeDataQuality?: string | null
   regimeDescription?: string | null
-  health: HealthScore | null | undefined
   autonomousStatus: AutonomousStatusShape | null | undefined
   pipelineCounts: PipelineCounts
   pipelineLoading?: boolean
+  // New props for enhanced panels
+  dashboard?: DashboardSummaryPayload | undefined
+  performance?: PerformanceAnalyticsPayload | undefined
+  liveSummary?: LiveSummary | undefined
+  dashboardLoading?: boolean
+  performanceLoading?: boolean
 }
 
 export function PulsePanel(props: PulsePanelProps) {
@@ -43,6 +53,17 @@ export function PulsePanel(props: PulsePanelProps) {
         liveEnabled={props.liveEnabled}
         liveAuthorisations={props.liveAuthorisations}
       />
+
+      {/* DEMO vs LIVE split — Item 1 */}
+      <DemoLiveSplitTile
+        dashboard={props.dashboard}
+        liveSummary={props.liveSummary}
+        loading={props.dashboardLoading}
+      />
+
+      {/* Alpha generation 7d / 30d — Item 2 */}
+      <AlphaGenTile />
+
       <MetricsStrip
         equity={props.equity}
         dailyPnl={props.todayPnl}
@@ -53,22 +74,40 @@ export function PulsePanel(props: PulsePanelProps) {
         maxDrawdown={props.maxDrawdown}
         cash={props.availableCash}
       />
+
       <MultiTimeframeReturns
         periods={props.pnlPeriods}
         selectedChartPeriod={props.chartPeriod}
         onChartPeriodChange={props.onChartPeriodChange}
       />
+
       <RegimeBlock
         regime={props.regime}
         confidence={props.regimeConfidence}
         dataQuality={props.regimeDataQuality}
         description={props.regimeDescription}
       />
-      <HealthScoreCard health={props.health} />
+
+      {/* Fund Scorecard — Item 5 (replaces HealthScoreCard) */}
+      <FundScorecardCard
+        performance={props.performance}
+        loading={props.performanceLoading}
+      />
+
       <CycleStatusCard status={props.autonomousStatus} />
+
       <StrategyPipelineCounts
         counts={props.pipelineCounts}
         loading={props.pipelineLoading}
+      />
+
+      {/* Daily Briefing — Item 8 */}
+      <DailyBriefingCard
+        dashboard={props.dashboard}
+        performance={props.performance}
+        autonomousStatus={props.autonomousStatus}
+        pipelineCounts={props.pipelineCounts}
+        liveSummary={props.liveSummary}
       />
     </div>
   )

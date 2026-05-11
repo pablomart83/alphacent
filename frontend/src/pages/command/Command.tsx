@@ -248,10 +248,14 @@ export function Command() {
                   regimeConfidence={autonomousQuery.data?.market_confidence}
                   regimeDataQuality={autonomousQuery.data?.data_quality}
                   regimeDescription={dashboard?.market_regime?.regime_description}
-                  health={dashboard?.health_score}
                   autonomousStatus={autonomousQuery.data}
                   pipelineCounts={pipelineQuery.counts}
                   pipelineLoading={pipelineQuery.isLoading}
+                  dashboard={dashboard}
+                  performance={performance}
+                  liveSummary={liveSummaryQuery.data}
+                  dashboardLoading={dashboardQuery.isLoading || dashboardQuery.isFetching}
+                  performanceLoading={performanceQuery.isLoading || performanceQuery.isFetching}
                 />
               ),
             },

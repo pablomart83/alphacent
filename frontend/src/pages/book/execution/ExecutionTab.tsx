@@ -3,6 +3,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/primitives'
 import { SlippageTab } from './SlippageTab'
 import { TCATab } from './TCATab'
 import { PaperLiveAnalyticsTab } from './PaperLiveAnalyticsTab'
+import { ExecutionSummaryStrip } from './ExecutionSummaryStrip'
 
 type SubTab = 'slippage' | 'tca' | 'analytics'
 
@@ -13,24 +14,21 @@ const SUB_TABS: Array<{ value: SubTab; label: string }> = [
 ]
 
 /**
- * Execution tab — three sub-tabs:
- *   Slippage  — client-side execution quality (slippage trend, heatmap,
- *               by-strategy, fill-time distribution, worst 20)
- *   TCA       — server-side transaction cost analysis (/analytics/tca):
- *               implementation shortfall, cost as % of alpha, per-symbol
- *               shortfall table, execution quality trend
- *   Analytics — strategy attribution + conviction calibration for the
- *               active mode (DEMO paper trading or LIVE)
+ * Execution tab — summary strip + three sub-tabs:
+ *   Slippage  — client-side execution quality
+ *   TCA       — server-side transaction cost analysis
+ *   Analytics — strategy attribution + conviction calibration
  */
 export function ExecutionTab() {
   const [sub, setSub] = useState<SubTab>('slippage')
 
   return (
     <div className="flex flex-col h-full min-h-0">
+      <ExecutionSummaryStrip />
       <Tabs
         value={sub}
         onValueChange={(v) => setSub(v as SubTab)}
-        className="flex flex-col h-full min-h-0"
+        className="flex flex-col flex-1 min-h-0"
       >
         <TabsList className="shrink-0 px-2 pt-1 border-b border-[var(--border-subtle)] bg-[var(--bg-0)]">
           {SUB_TABS.map((t) => (

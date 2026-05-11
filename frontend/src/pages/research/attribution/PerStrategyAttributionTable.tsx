@@ -9,11 +9,15 @@ import type { StrategyAttribution } from '../useResearchData'
 interface PerStrategyAttributionTableProps {
   rows: StrategyAttribution[] | undefined
   loading?: boolean
+  onRowClick?: (row: StrategyAttribution) => void
+  activeStrategyId?: string | null
 }
 
 export function PerStrategyAttributionTable({
   rows,
   loading,
+  onRowClick,
+  activeStrategyId,
 }: PerStrategyAttributionTableProps) {
   const data = rows ?? []
 
@@ -163,6 +167,8 @@ export function PerStrategyAttributionTable({
             rowKey={(r) => r.strategy_id}
             loading={loading}
             density="default"
+            onRowClick={onRowClick}
+            activeRowId={activeStrategyId}
           />
         </div>
       )}

@@ -10,6 +10,7 @@ import { KillSwitchCard } from './KillSwitchCard'
 import { LimitEditor } from './LimitEditor'
 import { RiskMetricTiles } from './RiskMetricTiles'
 import { RiskScoreHero } from './RiskScoreHero'
+import { LiveTradingHealthCard } from './LiveTradingHealthCard'
 import { GatesTab } from './gates/GatesTab'
 import { RiskTab } from './risk/RiskTab'
 import { SystemTab } from './system/SystemTab'
@@ -84,6 +85,7 @@ function GuardShell() {
         metrics={metrics.data}
         loading={limits.isLoading}
       />
+      <LiveTradingHealthCard />
       <KillSwitchCard />
     </div>
   )

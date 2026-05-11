@@ -8,6 +8,7 @@ import { EquityCurvePanel } from './EquityCurvePanel'
 import { ReturnsDistributionHistogram } from './ReturnsDistributionHistogram'
 import { MonthlyReturnsHeatmap } from './MonthlyReturnsHeatmap'
 import { AnnualReturnsBar } from './AnnualReturnsBar'
+import { PipelineFunnelPanel } from './PipelineFunnelPanel'
 
 /**
  * Performance tab — the default landing tab.
@@ -82,6 +83,7 @@ export function PerformanceTab() {
         showDrawdown={showDrawdown}
         onShowDrawdownChange={setShowDrawdown}
       />
+      <PipelineFunnelPanel />
       <ReturnsDistributionHistogram
         equityCurve={performance.data?.equity_curve}
         loading={performance.isLoading}

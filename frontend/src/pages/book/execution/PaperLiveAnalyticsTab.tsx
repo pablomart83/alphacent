@@ -52,8 +52,16 @@ interface ConvictionCalibration {
   message?: string
 }
 
-function useStrategyAttribution(period: Period) {
-  const mode = useTradingMode((s) => s.mode)
+interface AccountSummary {
+  total_trades: number
+  win_rate: number
+  avg_pnl: number
+  total_pnl: number
+  sharpe: number
+  profit_factor: number
+}
+
+function useStrategyAttribution(period: Period, mode: string) {
   return useQuery<StrategyAttribution[]>({
     queryKey: ['strategy-attribution', mode, period],
     queryFn: () =>
@@ -71,31 +79,55 @@ function useConvictionCalibration() {
   })
 }
 
+function deriveAccountSummary(rows: StrategyAttribution[]): AccountSummary {
+  if (!rows.length) return { total_trades: 0, win_rate: 0, avg_pnl: 0, total_pnl: 0, sharpe: 0, profit_factor: 0 }
+  const totalTrades = rows.reduce((a, r) => a + r.total_trades, 0)
+  const totalPnl = rows.reduce((a, r) => a + r.total_return, 0)
+  const avgWinRate = rows.reduce((a, r) => a + r.win_rate, 0) / rows.length
+  const avgSharpe = rows.reduce((a, r) => a + r.sharpe_ratio, 0) / rows.length
+  return {
+    total_trades: totalTrades,
+    win_rate: avgWinRate,
+    avg_pnl: totalTrades > 0 ? totalPnl / rows.length : 0,
+    total_pnl: totalPnl,
+    sharpe: avgSharpe,
+    profit_factor: 0, // not available from attribution endpoint
+  }
+}
+
 /**
- * PaperLiveAnalyticsTab — strategy-level attribution and conviction
- * calibration. Answers "which strategies are actually contributing?" and
- * "is our conviction score predictive of outcomes?".
+ * PaperLiveAnalyticsTab — DEMO vs LIVE split + strategy attribution +
+ * conviction calibration.
+ *
+ * The top section shows a side-by-side summary of DEMO and LIVE accounts
+ * so the CIO can compare paper performance vs real fills at a glance.
  */
 export function PaperLiveAnalyticsTab() {
   const [period, setPeriod] = useState<Period>('3M')
   const mode = useTradingMode((s) => s.mode)
-  const attribution = useStrategyAttribution(period)
+
+  const demoAttribution = useStrategyAttribution(period, 'DEMO')
+  const liveAttribution = useStrategyAttribution(period, 'LIVE')
   const calibration = useConvictionCalibration()
 
-  if (attribution.isError) {
-    const info = classifyError(attribution.error, 'strategy attribution')
+  const activeAttribution = mode === 'LIVE' ? liveAttribution : demoAttribution
+  const rows = activeAttribution.data ?? []
+  const top15 = [...rows].sort((a, b) => Math.abs(b.total_return) - Math.abs(a.total_return)).slice(0, 15)
+  const calBuckets = calibration.data?.buckets ?? []
+
+  const demoSummary = deriveAccountSummary(demoAttribution.data ?? [])
+  const liveSummary = deriveAccountSummary(liveAttribution.data ?? [])
+
+  if (activeAttribution.isError) {
+    const info = classifyError(activeAttribution.error, 'strategy attribution')
     return (
       <ErrorState
         title="Couldn't load analytics"
         message={info.message}
-        onRetry={() => attribution.refetch()}
+        onRetry={() => activeAttribution.refetch()}
       />
     )
   }
-
-  const rows = attribution.data ?? []
-  const top15 = [...rows].sort((a, b) => Math.abs(b.total_return) - Math.abs(a.total_return)).slice(0, 15)
-  const calBuckets = calibration.data?.buckets ?? []
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-auto bg-[var(--bg-0)]">
@@ -113,14 +145,34 @@ export function PaperLiveAnalyticsTab() {
           </SelectContent>
         </Select>
         <span className="ml-auto text-[10px] text-[var(--text-3)] mono">
-          {mode} · {rows.length} strategies
+          {rows.length} strategies
         </span>
       </div>
 
-      {/* Strategy contribution bar */}
+      {/* DEMO vs LIVE split — Item 7 */}
       <div className="px-3 pt-3 pb-2 shrink-0">
+        <Section title="DEMO vs LIVE · account summary">
+          <div className="grid grid-cols-2 gap-3">
+            <AccountSummaryCard
+              label="DEMO"
+              summary={demoSummary}
+              loading={demoAttribution.isLoading}
+              accent="var(--accent-secondary)"
+            />
+            <AccountSummaryCard
+              label="LIVE"
+              summary={liveSummary}
+              loading={liveAttribution.isLoading}
+              accent="var(--pnl-up)"
+            />
+          </div>
+        </Section>
+      </div>
+
+      {/* Strategy contribution bar */}
+      <div className="px-3 pb-2 shrink-0">
         <Section title={`Top 15 strategy contributors · ${mode}`}>
-          {attribution.isLoading ? (
+          {activeAttribution.isLoading ? (
             <Skeleton variant="chart" className="h-[280px]" />
           ) : !top15.length ? (
             <EmptyState icon={BarChart3} title="No attribution data" description="Strategies need closed positions in the selected period." className="py-6" />
@@ -192,7 +244,7 @@ export function PaperLiveAnalyticsTab() {
       {/* Full attribution table */}
       <div className="px-3 pb-4 shrink-0">
         <Section title="Full strategy attribution">
-          {attribution.isLoading ? (
+          {activeAttribution.isLoading ? (
             <Skeleton className="h-[200px]" />
           ) : !rows.length ? (
             <EmptyState icon={BarChart3} title="No attribution" description="No strategies with positions in this period." className="py-4" />
@@ -229,6 +281,80 @@ export function PaperLiveAnalyticsTab() {
             </div>
           )}
         </Section>
+      </div>
+    </div>
+  )
+}
+
+function AccountSummaryCard({
+  label,
+  summary,
+  loading,
+  accent,
+}: {
+  label: string
+  summary: AccountSummary
+  loading: boolean
+  accent: string
+}) {
+  const metrics: Array<{ key: string; label: string; value: string; tone?: 'up' | 'down' | 'neutral' }> = [
+    {
+      key: 'trades',
+      label: 'Trades',
+      value: loading ? '…' : summary.total_trades.toLocaleString('en-US'),
+    },
+    {
+      key: 'wr',
+      label: 'Win rate',
+      value: loading ? '…' : `${formatNumber(summary.win_rate, 1)}%`,
+      tone: summary.win_rate >= 55 ? 'up' : summary.win_rate >= 45 ? 'neutral' : 'down',
+    },
+    {
+      key: 'sharpe',
+      label: 'Sharpe',
+      value: loading ? '…' : formatNumber(summary.sharpe, 2),
+      tone: summary.sharpe >= 1 ? 'up' : summary.sharpe >= 0 ? 'neutral' : 'down',
+    },
+    {
+      key: 'pnl',
+      label: 'Total return',
+      value: loading ? '…' : `${summary.total_pnl >= 0 ? '+' : ''}${formatNumber(summary.total_pnl, 1)}%`,
+      tone: summary.total_pnl > 0 ? 'up' : summary.total_pnl < 0 ? 'down' : 'neutral',
+    },
+  ]
+
+  return (
+    <div
+      className="rounded-[3px] border p-2 space-y-2"
+      style={{
+        borderColor: `color-mix(in oklab, ${accent} 30%, var(--border-subtle))`,
+        backgroundColor: `color-mix(in oklab, ${accent} 4%, var(--bg-1))`,
+      }}
+    >
+      <div
+        className="text-[10px] font-semibold uppercase tracking-wider"
+        style={{ color: accent }}
+      >
+        {label}
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {metrics.map((m) => (
+          <div key={m.key}>
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text-3)]">{m.label}</div>
+            <div
+              className={cn(
+                'mono tabular-nums text-[12px] font-semibold',
+                m.tone === 'up'
+                  ? 'text-[var(--pnl-up)]'
+                  : m.tone === 'down'
+                    ? 'text-[var(--pnl-down)]'
+                    : 'text-[var(--text-0)]',
+              )}
+            >
+              {m.value}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

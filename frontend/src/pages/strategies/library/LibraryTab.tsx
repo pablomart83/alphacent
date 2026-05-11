@@ -38,12 +38,14 @@ import {
   type QuickPillId,
 } from './LibraryFilterBar'
 import { LibraryBulkBar } from './LibraryBulkBar'
+import { LibraryStatusBar } from './LibraryStatusBar'
 import {
   StrategyDetailPanel,
   nextSubTab,
   type DetailSubTab,
 } from './StrategyDetailPanel'
 import { CompareDialog } from './CompareDialog'
+import { usePipelineCounts } from '@/pages/command/useCommandData'
 
 /* ─────────────────────────── URL + filter state ─────────────────────────── */
 
@@ -109,6 +111,7 @@ function syncFiltersToUrl(
 export function LibraryTab() {
   const mode = useTradingMode((s) => s.mode)
   const [params, setParams] = useSearchParams()
+  const pipelineQuery = usePipelineCounts()
 
   const [filters, setFilters] = useState<LibraryFilters>(() => filtersFromUrl(params))
   const [sorting, setSorting] = useState<SortingState>([{ id: 'conviction', desc: true }])
@@ -357,6 +360,14 @@ export function LibraryTab() {
 
   const tableContent = (
     <div className="flex flex-col h-full min-h-0" ref={tableBodyRef}>
+      <LibraryStatusBar
+        counts={pipelineQuery.counts}
+        loading={pipelineQuery.isLoading}
+        onStatusFilter={(status) =>
+          setFilters((prev) => ({ ...prev, status: status as StrategyStatus | 'all' }))
+        }
+        activeStatus={filters.status}
+      />
       <LibraryFilterBar
         filters={filters}
         onChange={setFilters}

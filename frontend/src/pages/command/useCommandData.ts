@@ -137,6 +137,34 @@ export function useSpyBenchmark(period: EquityPeriod, enabled: boolean) {
   })
 }
 
+/** Lightweight 7d + 30d performance for the alpha generation tiles. */
+export function useAlphaGeneration() {
+  const mode = useTradingMode((s) => s.mode)
+  const q7d = useQuery<PerformanceAnalyticsPayload>({
+    queryKey: ['analytics-performance', mode, '1W', '1d'],
+    queryFn: () =>
+      api.get<PerformanceAnalyticsPayload>('/analytics/performance', {
+        mode,
+        period: '1W',
+        interval: '1d',
+      }),
+    refetchInterval: 120_000,
+    staleTime: 60_000,
+  })
+  const q30d = useQuery<PerformanceAnalyticsPayload>({
+    queryKey: ['analytics-performance', mode, '1M', '1d'],
+    queryFn: () =>
+      api.get<PerformanceAnalyticsPayload>('/analytics/performance', {
+        mode,
+        period: '1M',
+        interval: '1d',
+      }),
+    refetchInterval: 120_000,
+    staleTime: 60_000,
+  })
+  return { q7d, q30d }
+}
+
 export function useAutonomousStatus() {
   return useQuery<AutonomousStatusShape>({
     queryKey: ['autonomous-status'],
