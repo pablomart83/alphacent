@@ -111,6 +111,15 @@ export function EquityChart({
   const spySeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const drawdownSeriesRef = useRef<ISeriesApi<'Area'> | null>(null)
 
+  // Refs for values read inside the crosshair handler (created once on mount,
+  // so it can't close over changing props directly).
+  const percentModeRef = useRef(percentMode)
+  const equityDataRef = useRef(equityData)
+  const spyDataRef = useRef(spyData)
+  useEffect(() => { percentModeRef.current = percentMode }, [percentMode])
+  useEffect(() => { equityDataRef.current = equityData }, [equityData])
+  useEffect(() => { spyDataRef.current = spyData }, [spyData])
+
   const [hover, setHover] = useState<{
     time: string | null
     equity: number | null
@@ -182,15 +191,27 @@ export function EquityChart({
         ? new Date((param.time as number) * 1000).toISOString()
         : String(param.time)
 
-      // Alpha vs SPY: (equity_return - spy_return) anchored to first point
+      // Alpha vs SPY.
+      // In percent mode both series are already rebased to % return — alpha is
+      // simply the difference. In dollar mode we compute returns from raw values.
       let spyAlpha: number | null = null
-      if (spyPoint && eqData && equityData.length && spyData && spyData.length) {
-        const eqBase = equityData[0].equity
-        const spyBase = spyData[0].close
-        if (eqBase > 0 && spyBase > 0) {
-          const eqRet = ((eqData.value as number) - eqBase) / eqBase
-          const spyRet = ((spyPoint.value as number) - spyBase) / spyBase
-          spyAlpha = (eqRet - spyRet) * 100
+      if (spyPoint && eqData) {
+        const eqVal = eqData.value as number
+        const spyVal = spyPoint.value as number
+        if (Number.isFinite(eqVal) && Number.isFinite(spyVal)) {
+          // percentMode: both values are already % returns → alpha = difference
+          // dollarMode: rebase on the fly using first data points
+          if (percentModeRef.current) {
+            spyAlpha = eqVal - spyVal
+          } else if (equityDataRef.current.length && spyDataRef.current && spyDataRef.current.length) {
+            const eqBase = equityDataRef.current[0].equity
+            const spyBase = spyDataRef.current[0].close
+            if (eqBase > 0 && spyBase > 0) {
+              const eqRet = ((eqVal - eqBase) / eqBase) * 100
+              const spyRet = ((spyVal - spyBase) / spyBase) * 100
+              spyAlpha = eqRet - spyRet
+            }
+          }
         }
       }
 
@@ -222,6 +243,11 @@ export function EquityChart({
     if (!equitySeries) return
     if (!equityData || equityData.length === 0) {
       equitySeries.setData([])
+      // Clear realized series too — no data means no realized line.
+      if (realizedSeriesRef.current) {
+        chartRef.current?.removeSeries(realizedSeriesRef.current)
+        realizedSeriesRef.current = null
+      }
       return
     }
 
@@ -233,17 +259,29 @@ export function EquityChart({
     }
     const ordered = Array.from(seen.entries())
       .map(([t, p]) => ({ time: t as any, value: Number(p.equity), realized: p.realized }))
-      .filter((d) => Number.isFinite(d.value))
+      .filter((d) => Number.isFinite(d.value) && d.value > 0)
       .sort((a, b) =>
         typeof a.time === 'number'
           ? (a.time as number) - (b.time as number)
           : String(a.time).localeCompare(String(b.time)),
       )
 
-    // In percent mode rebase equity to % return from first point.
-    const eqBase = percentMode && ordered.length > 0 ? ordered[0].value : null
-    const toDisplayValue = (v: number) =>
-      eqBase != null && eqBase > 0 ? ((v - eqBase) / eqBase) * 100 : v
+    if (ordered.length === 0) {
+      equitySeries.setData([])
+      if (realizedSeriesRef.current) {
+        chartRef.current?.removeSeries(realizedSeriesRef.current)
+        realizedSeriesRef.current = null
+      }
+      return
+    }
+
+    // Base equity value for % rebasing — always the first valid equity point.
+    const eqBase = ordered[0].value
+
+    // In percent mode: equity % return from first point.
+    // In dollar mode: raw equity value.
+    const toEquityDisplay = (v: number) =>
+      percentMode ? ((v - eqBase) / eqBase) * 100 : v
 
     // Update price format to match mode.
     equitySeries.applyOptions(
@@ -252,11 +290,19 @@ export function EquityChart({
         : { priceFormat: { type: 'price', precision: 0, minMove: 1 } },
     )
 
-    equitySeries.setData(ordered.map((d) => ({ time: d.time, value: toDisplayValue(d.value) })))
+    equitySeries.setData(ordered.map((d) => ({ time: d.time, value: toEquityDisplay(d.value) })))
 
-    // Realized cumulative as a dashed overlay.
+    // Realized cumulative overlay.
+    // In percent mode: realized P&L as % of starting equity (same denominator as equity line).
+    //   → gap between equity line and realized line = unrealized P&L as % of starting equity.
+    // In dollar mode: raw realized_pnl_cumulative value.
+    // Guard: skip if realized values are all zero/null (no closed trades yet).
     if (showRealized) {
-      const hasRealized = ordered.some((d) => d.realized != null)
+      const realizedPoints = ordered.filter(
+        (d) => d.realized != null && Number.isFinite(d.realized as number),
+      )
+      const hasRealized = realizedPoints.length > 0 && realizedPoints.some((d) => (d.realized as number) !== 0)
+
       if (hasRealized) {
         if (!realizedSeriesRef.current) {
           realizedSeriesRef.current = chartRef.current!.addSeries(
@@ -271,32 +317,33 @@ export function EquityChart({
             0,
           )
         }
-        // Rebase realized the same way as equity.
-        const realBase = percentMode && ordered.length > 0 ? (ordered[0].realized ?? null) : null
         realizedSeriesRef.current!.applyOptions(
           percentMode
             ? { priceFormat: { type: 'percent', precision: 2, minMove: 0.01 } }
             : { priceFormat: { type: 'price', precision: 0, minMove: 1 } },
         )
+        // realized as % of starting equity (eqBase), not % of its own first value.
+        const toRealizedDisplay = (rv: number) =>
+          percentMode && eqBase > 0 ? (rv / eqBase) * 100 : rv
+
         realizedSeriesRef.current!.setData(
-          ordered
-            .filter((d) => d.realized != null && Number.isFinite(d.realized as number))
-            .map((d) => {
-              const rv = d.realized as number
-              const displayRv =
-                percentMode && realBase != null && realBase > 0
-                  ? ((rv - realBase) / realBase) * 100
-                  : rv
-              return { time: d.time, value: displayRv }
-            }),
+          realizedPoints.map((d) => ({
+            time: d.time,
+            value: toRealizedDisplay(d.realized as number),
+          })),
         )
-      } else if (realizedSeriesRef.current) {
+      } else {
+        // No realized data — remove the series if it exists from a previous mode.
+        if (realizedSeriesRef.current) {
+          chartRef.current?.removeSeries(realizedSeriesRef.current)
+          realizedSeriesRef.current = null
+        }
+      }
+    } else {
+      if (realizedSeriesRef.current) {
         chartRef.current?.removeSeries(realizedSeriesRef.current)
         realizedSeriesRef.current = null
       }
-    } else if (realizedSeriesRef.current) {
-      chartRef.current?.removeSeries(realizedSeriesRef.current)
-      realizedSeriesRef.current = null
     }
 
     chartRef.current?.timeScale().fitContent()
@@ -374,6 +421,9 @@ export function EquityChart({
   }, [spyData, showBenchmark, equityData, percentMode])
 
   // Drawdown pane (separate pane 1 — 30% stretch).
+  // Values must be ≤ 0 for the area to fill downward from the zero baseline.
+  // The backend emits positive drawdown_pct (e.g. 5.2 = 5.2% drawdown).
+  // We negate here so LWC renders the area below zero.
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
@@ -391,12 +441,12 @@ export function EquityChart({
         AreaSeries,
         {
           lineColor: resolveVar('--pnl-down', '#ef4444'),
-          topColor: 'rgba(239, 68, 68, 0.35)',
-          bottomColor: 'rgba(239, 68, 68, 0.0)',
+          topColor: 'rgba(239, 68, 68, 0.0)',
+          bottomColor: 'rgba(239, 68, 68, 0.35)',
           lineWidth: 1,
           priceLineVisible: false,
           lastValueVisible: false,
-          priceFormat: { type: 'percent' },
+          priceFormat: { type: 'percent', precision: 2, minMove: 0.01 },
         },
         1,
       )
@@ -405,12 +455,13 @@ export function EquityChart({
     }
 
     // Dedup + sort to satisfy LWC's monotonically-increasing-time invariant.
+    // Negate so values are ≤ 0 (area fills downward from 0 baseline).
     const seen = new Map<string | number, number>()
     for (const d of drawdownData) {
       const v = Number(d.drawdown_pct)
       if (!Number.isFinite(v)) continue
       const t = toChartTime(d.date)
-      seen.set(t as any, v)
+      seen.set(t as any, -Math.abs(v))  // always negative
     }
     const data: AreaData[] = Array.from(seen.entries())
       .map(([t, v]) => ({ time: t as any, value: v }))

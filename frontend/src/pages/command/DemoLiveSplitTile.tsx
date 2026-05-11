@@ -1,38 +1,58 @@
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { SectionLabel } from '@/components/layout'
 import { cn, formatCurrency, formatNumber } from '@/lib/utils'
-import type { DashboardSummaryPayload } from './useCommandData'
+import { api } from '@/services/api'
 import type { LiveSummary } from '@/pages/book/useBookData'
 
 /**
  * DemoLiveSplitTile — side-by-side DEMO and LIVE account summary.
  *
- * DEMO: equity, open positions, win rate 30d, unrealized P&L.
- * LIVE: virtual equity, real equity, live positions, today's real P&L.
- *
- * Clicking DEMO navigates to Book/Positions (DEMO).
- * Clicking LIVE navigates to Book/Live.
+ * Always shows both accounts regardless of the active mode toggle.
+ * Uses its own independent DEMO query (never inherits the mode-reactive
+ * dashboard from the parent) so switching DEMO ↔ LIVE in the top nav
+ * does not mutate either card.
  */
 
 interface DemoLiveSplitTileProps {
-  dashboard: DashboardSummaryPayload | undefined
+  /** liveSummary is passed in from the parent (already fetched there). */
   liveSummary: LiveSummary | undefined
   loading?: boolean
   className?: string
 }
 
+// Minimal shape we need from the dashboard response.
+interface DashboardMini {
+  account_equity: number
+  total_unrealized_pnl: number
+  quick_stats: { open_positions: number; win_rate_30d: number }
+}
+
+/** Always fetches DEMO — query key never includes the active mode. */
+function useDemoDashboard() {
+  return useQuery<DashboardMini>({
+    queryKey: ['dashboard-mini', 'DEMO'],
+    queryFn: () =>
+      api.get<DashboardMini>('/account/dashboard/summary', { mode: 'DEMO', interval: '1d' }),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  })
+}
+
 export function DemoLiveSplitTile({
-  dashboard,
   liveSummary,
   loading,
   className,
 }: DemoLiveSplitTileProps) {
   const navigate = useNavigate()
+  const demoQuery = useDemoDashboard()
+  const demo = demoQuery.data
+  const isLoading = loading || demoQuery.isLoading
 
-  const demoEquity = dashboard?.account_equity
-  const demoPositions = dashboard?.quick_stats?.open_positions
-  const demoWinRate = dashboard?.quick_stats?.win_rate_30d
-  const demoUnrealized = dashboard?.total_unrealized_pnl
+  const demoEquity = demo?.account_equity
+  const demoPositions = demo?.quick_stats?.open_positions
+  const demoWinRate = demo?.quick_stats?.win_rate_30d
+  const demoUnrealized = demo?.total_unrealized_pnl
 
   const liveVirtual = liveSummary?.virtual_equity
   const liveReal = liveSummary?.real_equity
@@ -44,7 +64,7 @@ export function DemoLiveSplitTile({
     <div className={cn('p-2 border-b border-[var(--border-subtle)]', className)}>
       <SectionLabel>Accounts</SectionLabel>
       <div className="grid grid-cols-2 gap-1.5">
-        {/* DEMO */}
+        {/* DEMO — always shows DEMO data */}
         <button
           type="button"
           onClick={() => navigate('/book/positions')}
@@ -55,18 +75,31 @@ export function DemoLiveSplitTile({
               DEMO
             </span>
             <span className="text-[9px] text-[var(--text-3)] mono">
-              {loading ? '…' : `${demoPositions ?? 0} pos`}
+              {isLoading ? '…' : `${demoPositions ?? 0} pos`}
             </span>
           </div>
           <div className="mono tabular-nums text-[13px] font-bold text-[var(--text-0)]">
-            {loading ? '…' : formatCurrency(demoEquity ?? 0, { precision: 0 })}
+            {isLoading ? '…' : formatCurrency(demoEquity ?? 0, { precision: 0 })}
           </div>
           <div className="grid grid-cols-2 gap-x-1 text-[9px]">
-            <Stat label="WR 30d" value={demoWinRate != null ? `${formatNumber(demoWinRate, 1)}%` : '—'} />
+            <Stat
+              label="WR 30d"
+              value={demoWinRate != null ? `${formatNumber(demoWinRate, 1)}%` : '—'}
+            />
             <Stat
               label="Unrealized"
-              value={demoUnrealized != null ? formatCurrency(demoUnrealized, { signed: true, precision: 0 }) : '—'}
-              tone={demoUnrealized != null && demoUnrealized > 0 ? 'up' : demoUnrealized != null && demoUnrealized < 0 ? 'down' : 'neutral'}
+              value={
+                demoUnrealized != null
+                  ? formatCurrency(demoUnrealized, { signed: true, precision: 0 })
+                  : '—'
+              }
+              tone={
+                demoUnrealized != null && demoUnrealized > 0
+                  ? 'up'
+                  : demoUnrealized != null && demoUnrealized < 0
+                    ? 'down'
+                    : 'neutral'
+              }
             />
           </div>
         </button>
@@ -92,11 +125,11 @@ export function DemoLiveSplitTile({
               LIVE {liveEnabled ? '●' : '○'}
             </span>
             <span className="text-[9px] text-[var(--text-3)] mono">
-              {loading ? '…' : `${livePositions ?? 0} pos`}
+              {`${livePositions ?? 0} pos`}
             </span>
           </div>
           <div className="mono tabular-nums text-[13px] font-bold text-[var(--text-0)]">
-            {loading ? '…' : formatCurrency(liveVirtual ?? 0, { precision: 0 })}
+            {formatCurrency(liveVirtual ?? 0, { precision: 0 })}
           </div>
           <div className="grid grid-cols-2 gap-x-1 text-[9px]">
             <Stat
@@ -105,8 +138,18 @@ export function DemoLiveSplitTile({
             />
             <Stat
               label="Today"
-              value={liveTodayReal != null ? formatCurrency(liveTodayReal, { signed: true, precision: 0 }) : '—'}
-              tone={liveTodayReal != null && liveTodayReal > 0 ? 'up' : liveTodayReal != null && liveTodayReal < 0 ? 'down' : 'neutral'}
+              value={
+                liveTodayReal != null
+                  ? formatCurrency(liveTodayReal, { signed: true, precision: 0 })
+                  : '—'
+              }
+              tone={
+                liveTodayReal != null && liveTodayReal > 0
+                  ? 'up'
+                  : liveTodayReal != null && liveTodayReal < 0
+                    ? 'down'
+                    : 'neutral'
+              }
             />
           </div>
         </button>

@@ -47,7 +47,7 @@ export function EquityCurvePanel({
       equity: p.equity,
       realized: p.realized ?? null,
     }))
-    const dd = curve.map((p) => ({ date: p.timestamp, drawdown_pct: -Math.abs(p.drawdown) }))
+    const dd = curve.map((p) => ({ date: p.timestamp, drawdown_pct: Math.abs(p.drawdown) }))
     return { points, dd }
   }, [equityCurve])
 

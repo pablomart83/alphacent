@@ -56,7 +56,6 @@ export function PulsePanel(props: PulsePanelProps) {
 
       {/* DEMO vs LIVE split — Item 1 */}
       <DemoLiveSplitTile
-        dashboard={props.dashboard}
         liveSummary={props.liveSummary}
         loading={props.dashboardLoading}
       />
