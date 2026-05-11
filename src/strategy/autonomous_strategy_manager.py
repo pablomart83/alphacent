@@ -1259,11 +1259,29 @@ class AutonomousStrategyManager:
             
             # Progress callback for sub-stage updates
             def on_proposal_progress(phase: str, pct: int):
-                # Map 0-100% of proposals to 22-65% of overall pipeline
-                overall_pct = 22 + int(pct * 0.43)  # 22% to 65%
-                self._emit_stage_event("strategy_proposals", "running", overall_pct, {
-                    "phase": phase
-                })
+                # Map 0-100% of proposals to 22-80% of overall pipeline.
+                # The proposer runs WF validation internally — when the phase
+                # text indicates WF is running, emit walk_forward_backtesting
+                # so the pipeline visual advances to the correct stage.
+                phase_lower = phase.lower()
+                is_wf_phase = (
+                    'walk-forward' in phase_lower
+                    or 'validating' in phase_lower
+                    or 'walk_forward' in phase_lower
+                    or 'backtest' in phase_lower
+                )
+                if is_wf_phase:
+                    # WF phase: map to 68-80% range
+                    overall_pct = 68 + int(pct * 0.12)
+                    self._emit_stage_event("walk_forward_backtesting", "running", overall_pct, {
+                        "phase": phase
+                    })
+                else:
+                    # Proposal generation phase: map to 22-65% range
+                    overall_pct = 22 + int(pct * 0.43)
+                    self._emit_stage_event("strategy_proposals", "running", overall_pct, {
+                        "phase": phase
+                    })
             
             proposals = self.strategy_proposer.propose_strategies(
                 count=proposal_count,

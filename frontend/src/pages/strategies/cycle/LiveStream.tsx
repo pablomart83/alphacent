@@ -163,7 +163,12 @@ export function LiveStream() {
         const phase = metrics?.phase as string | undefined
 
         if (status === 'running') {
-          pushLog(`▶ ${label}${phase ? ` — ${phase}` : ''}`, 'info')
+          // Suppress per-strategy iteration messages (e.g. "Walk-forward X (79/192)")
+          // — they flood the log. Only log stage starts (no phase) or meaningful phases.
+          const isIterationMsg = phase && /\(\d+\/\d+\)/.test(phase)
+          if (!isIterationMsg) {
+            pushLog(`▶ ${label}${phase ? ` — ${phase}` : ''}`, 'info')
+          }
         } else if (status === 'complete') {
           const detail = metricsLine(metrics)
           pushLog(`✓ ${label}${detail ? ` — ${detail}` : ''}`, 'success')
