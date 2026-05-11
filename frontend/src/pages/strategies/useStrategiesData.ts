@@ -546,8 +546,14 @@ export function useAutonomousCycles(limit = 30) {
   return useQuery<CyclesPayload>({
     queryKey: ['autonomous-cycles', { limit }],
     queryFn: () => api.get<CyclesPayload>('/control/autonomous/cycles', { limit }),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    // Poll faster while a cycle might be running — the WS events are the
+    // primary update path but DB polling catches any missed events.
+    refetchInterval: (query) => {
+      const rows = (query.state.data as CyclesPayload | undefined)?.data ?? []
+      const isRunning = rows.some((r) => r.status?.toLowerCase() === 'running')
+      return isRunning ? 5_000 : 60_000
+    },
+    staleTime: 5_000,
   })
 }
 
@@ -674,9 +680,10 @@ export function mapBackendStageToSpec(backendStage: string): SpecStageId | null 
     case 'performance_feedback':
     case 'market_analysis':
     case 'regime_detection':
-    case 'data_validation':
     case 'cache_warming':
       return 'market_analysis'
+    // data_validation validates the proposals list — it belongs in the proposal stage
+    case 'data_validation':
     case 'strategy_proposals':
     case 'proposal':
       return 'proposal'

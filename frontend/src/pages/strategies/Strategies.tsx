@@ -26,8 +26,8 @@ type TabValue =
   | 'lab'
 
 const TABS: Array<{ value: TabValue; label: string }> = [
-  { value: 'library', label: 'Library' },
   { value: 'cycle', label: 'Cycle' },
+  { value: 'library', label: 'Library' },
   { value: 'templates', label: 'Templates' },
   { value: 'symbols', label: 'Symbols' },
   { value: 'blacklist', label: 'Blacklist' },
@@ -38,7 +38,7 @@ const TABS: Array<{ value: TabValue; label: string }> = [
 export function Strategies() {
   return (
     <Routes>
-      <Route index element={<Navigate to="/strategies/library" replace />} />
+      <Route index element={<Navigate to="/strategies/cycle" replace />} />
       <Route path=":tab/*" element={<StrategiesShell />} />
     </Routes>
   )

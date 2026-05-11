@@ -17,6 +17,7 @@ import {
 import { GraduationQueueTable } from './GraduationQueueTable'
 import { GraduationCard } from './GraduationCard'
 import { ActiveLiveTable } from './ActiveLiveTable'
+import { ApproachingGraduationPanel } from './ApproachingGraduationPanel'
 
 /* Live-trading config shape — mirrors /config/live-trading. */
 interface LiveTradingConfigPayload {
@@ -149,6 +150,10 @@ export function GraduationTab() {
       </div>
 
       <ActiveLiveTable />
+
+      <div className="px-2 pb-2">
+        <ApproachingGraduationPanel />
+      </div>
 
       <RetiredSection />
     </div>

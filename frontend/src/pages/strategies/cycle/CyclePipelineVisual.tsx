@@ -68,15 +68,37 @@ export function CyclePipelineVisual({ lastCycle, isRunning, className }: CyclePi
       if (data.cycle_id) setLiveCycleId(data.cycle_id)
 
       const status = normaliseStatus(data.status)
-      setLiveStates((prev) => ({
-        ...prev,
-        [stageId]: {
+
+      setLiveStates((prev) => {
+        const next = { ...prev }
+
+        // Auto-complete all spec stages that come before this one when it
+        // starts running. This ensures the pipeline never stays stuck on an
+        // earlier stage when the backend has already moved past it.
+        if (status === 'running' || status === 'complete') {
+          const currentIdx = SPEC_STAGES.findIndex((s) => s.id === stageId)
+          for (let i = 0; i < currentIdx; i++) {
+            const priorId = SPEC_STAGES[i].id
+            const priorState = next[priorId]
+            // Only auto-complete if the prior stage isn't already complete/error.
+            if (!priorState || priorState.status === 'pending' || priorState.status === 'running') {
+              next[priorId] = {
+                status: 'complete',
+                count: priorState?.count ?? null,
+                error: null,
+              }
+            }
+          }
+        }
+
+        next[stageId] = {
           status,
           count: extractCount(data.metrics) ?? prev[stageId]?.count ?? null,
           error: data.error ?? null,
           metrics: data.metrics,
-        },
-      }))
+        }
+        return next
+      })
     })
     return off
   }, [])

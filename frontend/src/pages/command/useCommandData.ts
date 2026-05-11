@@ -78,6 +78,7 @@ export interface PerformanceAnalyticsPayload {
     equity: number
     return_pct?: number
     drawdown?: number
+    realized?: number | null
   }>
   monthly_returns: Record<string, number>
   returns_distribution: Record<string, number>

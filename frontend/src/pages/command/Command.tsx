@@ -174,8 +174,8 @@ export function Command() {
       dashboard={dashboard}
       analytics={performance}
       spy={spyQuery.data}
-      isLoadingDashboard={dashboardQuery.isLoading}
-      isLoadingAnalytics={performanceQuery.isLoading}
+      isLoadingDashboard={dashboardQuery.isLoading || dashboardQuery.isFetching}
+      isLoadingAnalytics={performanceQuery.isLoading || performanceQuery.isFetching}
       error={dashboardQuery.error ?? performanceQuery.error}
       onRetry={() => {
         dashboardQuery.refetch()

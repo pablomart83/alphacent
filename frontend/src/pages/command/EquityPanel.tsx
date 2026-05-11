@@ -50,6 +50,7 @@ export function EquityPanel(props: EquityPanelProps) {
       return analytics.equity_curve.map((p) => ({
         date: p.timestamp,
         equity: p.equity,
+        realized: p.realized ?? null,
       }))
     }
     if (dashboard?.equity_curve?.length) {
