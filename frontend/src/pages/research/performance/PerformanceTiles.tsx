@@ -1,11 +1,12 @@
 import { MetricGrid, SectionLabel } from '@/components/layout'
 import { Skeleton } from '@/components/primitives'
 import { formatNumber, formatPercentage, cn } from '@/lib/utils'
-import type { PerformanceAnalyticsPayload } from '../useResearchData'
+import type { PerformanceAnalyticsPayload, SpyBenchmarkPoint } from '../useResearchData'
 
 interface PerformanceTilesProps {
   data: PerformanceAnalyticsPayload | undefined
   loading: boolean
+  spyData?: SpyBenchmarkPoint[]
 }
 
 interface Tile {
@@ -28,13 +29,13 @@ function toneColor(tone: Tile['tone']): string {
   }
 }
 
-export function PerformanceTiles({ data, loading }: PerformanceTilesProps) {
+export function PerformanceTiles({ data, loading, spyData }: PerformanceTilesProps) {
   if (loading && !data) {
     return (
       <section className="space-y-1.5">
         <SectionLabel>Headline metrics</SectionLabel>
         <MetricGrid cols={8}>
-          {Array.from({ length: 7 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <Skeleton key={i} variant="metric-tile" />
           ))}
         </MetricGrid>
@@ -51,11 +52,29 @@ export function PerformanceTiles({ data, loading }: PerformanceTilesProps) {
   const drc = data?.daily_returns_count ?? 0
   const totalTrades = data?.total_trades ?? 0
 
+  // Compute alpha vs SPY from benchmark data
+  let spyReturn: number | null = null
+  let alpha: number | null = null
+  if (spyData && spyData.length >= 2) {
+    const first = spyData[0].close
+    const last = spyData[spyData.length - 1].close
+    if (first > 0) {
+      spyReturn = ((last - first) / first) * 100
+      alpha = totalReturn - spyReturn
+    }
+  }
+
   const tiles: Tile[] = [
     {
       label: 'Total return',
       value: formatPercentage(totalReturn),
       tone: totalReturn > 0 ? 'up' : totalReturn < 0 ? 'down' : 'neutral',
+    },
+    {
+      label: 'Alpha vs SPY',
+      value: alpha != null ? `${alpha >= 0 ? '+' : ''}${formatNumber(alpha, 2)}%` : '—',
+      tone: alpha == null ? 'neutral' : alpha > 0 ? 'up' : alpha < 0 ? 'down' : 'neutral',
+      hint: spyReturn != null ? `SPY ${spyReturn >= 0 ? '+' : ''}${formatNumber(spyReturn, 2)}%` : undefined,
     },
     {
       label: 'Sharpe (ann.)',

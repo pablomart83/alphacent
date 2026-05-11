@@ -4,15 +4,10 @@ import { cn, formatPercentage } from '@/lib/utils'
 import { useAlphaGeneration } from './useCommandData'
 
 /**
- * AlphaGenTile — 7d and 30d total return (alpha generation proxy).
+ * AlphaGenTile — 7d and 30d total return + win rate.
  *
  * Uses the analytics/performance endpoint for 1W and 1M periods.
  * Clicking navigates to Research/Performance.
- *
- * Note: this is total return, not alpha vs SPY. True alpha requires
- * aligning the equity curve with SPY returns over the same period —
- * that computation lives in Research/Performance where the full chart
- * context is available.
  */
 export function AlphaGenTile({ className }: { className?: string }) {
   const navigate = useNavigate()
@@ -20,6 +15,7 @@ export function AlphaGenTile({ className }: { className?: string }) {
 
   const ret7d = q7d.data?.total_return
   const ret30d = q30d.data?.total_return
+  const wr30d = q30d.data?.win_rate
   const loading = q7d.isLoading || q30d.isLoading
 
   return (
@@ -31,9 +27,10 @@ export function AlphaGenTile({ className }: { className?: string }) {
         className="w-full text-left rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] p-2 hover:bg-[var(--bg-hover)] transition-colors"
         title="Open Research / Performance"
       >
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <ReturnCell label="7d return" value={ret7d} loading={loading} />
           <ReturnCell label="30d return" value={ret30d} loading={loading} />
+          <ReturnCell label="30d win rate" value={wr30d != null ? wr30d / 100 : null} loading={loading} isPercent />
         </div>
       </button>
     </div>
@@ -44,10 +41,12 @@ function ReturnCell({
   label,
   value,
   loading,
+  isPercent = false,
 }: {
   label: string
   value: number | null | undefined
   loading: boolean
+  isPercent?: boolean
 }) {
   const tone =
     value == null ? 'neutral' : value > 0 ? 'up' : value < 0 ? 'down' : 'neutral'
@@ -58,6 +57,14 @@ function ReturnCell({
         ? 'var(--pnl-down)'
         : 'var(--text-0)'
 
+  const display = loading
+    ? '…'
+    : value != null
+      ? isPercent
+        ? `${(value * 100).toFixed(1)}%`
+        : formatPercentage(value)
+      : '—'
+
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)]">{label}</span>
@@ -65,7 +72,7 @@ function ReturnCell({
         className="mono tabular-nums text-[15px] font-bold"
         style={{ color: loading ? 'var(--text-3)' : color }}
       >
-        {loading ? '…' : value != null ? formatPercentage(value) : '—'}
+        {display}
       </span>
     </div>
   )

@@ -72,7 +72,11 @@ export function PerformanceTab() {
 
   return (
     <div className="flex flex-col h-full min-h-0 overflow-auto bg-[var(--bg-0)] px-3 py-3 space-y-4">
-      <PerformanceTiles data={performance.data} loading={performance.isLoading} />
+      <PerformanceTiles
+        data={performance.data}
+        loading={performance.isLoading}
+        spyData={spy.data?.data}
+      />
       <EquityCurvePanel
         equityCurve={performance.data?.equity_curve}
         spyData={spy.data?.data}

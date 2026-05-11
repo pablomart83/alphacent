@@ -3,17 +3,25 @@ import { cn } from '@/lib/utils'
 import { useTradingMode } from '@/stores'
 import { useOrders } from '../useBookData'
 import { computeExecutionAnalytics } from './computeMetrics'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/services/api'
 
 /**
- * ExecutionSummaryStrip — 6 key execution metrics above the sub-tabs.
- *
- * Computed client-side from the orders list (same source as SlippageTab)
- * so no extra network request. Uses the 1M window as the default.
+ * ExecutionSummaryStrip — execution metrics + win rate above the sub-tabs.
  */
 export function ExecutionSummaryStrip() {
   const mode = useTradingMode((s) => s.mode)
   const ordersQuery = useOrders({ limit: 2000 })
   const orders = ordersQuery.data?.orders ?? []
+
+  // Win rate from performance analytics (lightweight, already cached by Command page)
+  const perfQuery = useQuery({
+    queryKey: ['analytics-performance', mode, '1M', '1d'],
+    queryFn: () => api.get<{ win_rate?: number }>('/analytics/performance', { mode, period: '1M', interval: '1d' }),
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  })
+  const winRate = perfQuery.data?.win_rate
 
   const analytics = useMemo(
     () => computeExecutionAnalytics(orders, '1M'),
@@ -24,6 +32,11 @@ export function ExecutionSummaryStrip() {
   const loading = ordersQuery.isLoading
 
   const metrics: Array<{ label: string; value: string; tone?: 'up' | 'down' | 'warn' | 'neutral' }> = [
+    {
+      label: 'Win rate (30d)',
+      value: winRate != null ? `${winRate.toFixed(1)}%` : loading ? '…' : '—',
+      tone: winRate == null ? 'neutral' : winRate >= 55 ? 'up' : winRate >= 45 ? 'neutral' : 'down',
+    },
     {
       label: 'Filled (30d)',
       value: loading ? '…' : tiles.filledCount.toLocaleString('en-US'),

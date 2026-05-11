@@ -24,7 +24,7 @@ const PIPELINE_STAGES = [
   { key: 'cleanup_retirement',      label: 'Cleanup' },
   { key: 'performance_feedback',    label: 'Feedback' },
   { key: 'strategy_proposals',      label: 'Proposals' },
-  { key: 'walk_forward_backtesting',label: 'Walk-forward' },
+  { key: 'walk_forward_backtesting',label: 'Walk-fwd' },
   { key: 'strategy_activation',     label: 'Activation' },
   { key: 'signal_generation',       label: 'Signals' },
   { key: 'order_submission',        label: 'Orders' },
