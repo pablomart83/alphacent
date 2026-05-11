@@ -73,6 +73,12 @@
 - **CommandPalette mounted in AppShell.** Lives in `frontend/src/components/CommandPalette.tsx`. ⌘K anywhere, Fuse fuzzy search across navigation + surface subroutes + theme + logout, recent-commands persisted via the existing command-palette store. Keyboard nav (↑↓ / Enter) parity with mouse.
 - **Settings chunk 58 KB raw / 15 KB gzip** (inside budget). index chunk grew ~35 KB because CommandPalette has to mount before any tab loads — acceptable for global keyboard access.
 
+**Polish (post-Sprint-12 commit `b89106d`):**
+- **Notification drawer** — `useAutonomousNotifications` hook bridges `autonomous_notifications` + `autonomous_cycle` WS events into the notifications Zustand store. `NotificationDrawer` is a Radix Dialog positioned as a right side-sheet (420px). Groups by Today/Yesterday/date. Bell button in TopNavBar with unread badge.
+- **? keyboard shortcut help** — `KeyboardShortcutHelp` dialog opened by `?` / `Shift+/` from anywhere outside a text input. `useKeyboardShortcuts` wired.
+- **⌘K strategy + symbol search** — CommandPalette lazy-fetches `/strategies?slim=true` and `/strategies/symbols` when open. Results appear as Strategies and Symbols sections. Each item navigates to the relevant library/symbols route.
+- **Backend tear-sheet fix** — `/analytics/tear-sheet` crashed with `autodetected range of [-1.0, inf] is not finite` when equity_snapshots contained rows with equity = 0. Fixed by replacing zero/negative equities with NaN before computing returns, stripping non-finite values via finite_mask, and using `np.fmax.accumulate` (NaN-safe) for the underwater plot.
+
 ### Sprint 11 notes
 
 - **Regime tab pulls from the single `/analytics/regime-comprehensive` endpoint.** Four asset-class regime cards, perf-by-regime table, transitions timeline, strategy×regime Visx heatmap, market context (VIX / yield curve / fed funds / CPI / GDP / PMI), crypto cycle, forex carry rates, and MQS card. Regime chips use the existing `regime-*` badge variants so colour semantics are consistent with Command / Guard.
