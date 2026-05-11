@@ -1,9 +1,8 @@
 name: Deploy to EC2
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:  # Manual trigger from GitHub UI
+  workflow_dispatch:  # Manual trigger from GitHub UI only — never auto-deploy on push.
+                      # A live trading system must not restart mid-cycle on every commit.
 
 jobs:
   deploy:
