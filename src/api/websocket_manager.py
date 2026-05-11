@@ -26,6 +26,9 @@ class WebSocketManager:
         """Initialize WebSocket manager."""
         # Map of session_id -> WebSocket connection
         self.active_connections: Dict[str, WebSocket] = {}
+        # The main asyncio event loop — captured on first connect so background
+        # threads can use run_coroutine_threadsafe to schedule broadcasts safely.
+        self._loop = None
         logger.info("WebSocketManager initialized")
     
     async def connect(self, websocket: WebSocket, session_id: str):
@@ -36,6 +39,14 @@ class WebSocketManager:
             websocket: WebSocket connection
             session_id: User session ID
         """
+        import asyncio
+        # Capture the running loop on first connection — this is always the
+        # main uvicorn event loop, which is what background threads need.
+        if self._loop is None:
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
         await websocket.accept()
         self.active_connections[session_id] = websocket
         logger.info(f"WebSocket connected: session {session_id[:8]}...")

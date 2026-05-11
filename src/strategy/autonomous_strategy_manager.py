@@ -102,7 +102,14 @@ class AutonomousStrategyManager:
                 logger.warning(f"Failed to broadcast WebSocket event: {e}")
 
     def _emit_stage_event(self, stage: str, status: str, progress_pct: int, metrics: Optional[Dict] = None, error: Optional[str] = None):
-        """Emit a structured stage event via WebSocket for the cycle pipeline UI."""
+        """Emit a structured stage event via WebSocket for the cycle pipeline UI.
+
+        The autonomous cycle runs in a background thread (not the uvicorn event
+        loop). The correct way to schedule a coroutine from a thread onto a
+        running event loop is asyncio.run_coroutine_threadsafe — NOT
+        ensure_future, which is not thread-safe and silently drops events when
+        called from a non-loop thread.
+        """
         if not self.websocket_manager:
             return
         event_data = {
@@ -117,40 +124,57 @@ class AutonomousStrategyManager:
             event_data["error"] = error
         try:
             import asyncio
-            try:
-                loop = asyncio.get_running_loop()
-                asyncio.ensure_future(
+            # Use the main event loop captured by WebSocketManager on first
+            # client connect — this is the uvicorn loop that owns the WS connections.
+            loop = getattr(self.websocket_manager, '_loop', None)
+            if loop is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(
                     self.websocket_manager.broadcast_cycle_progress(event_data),
-                    loop=loop
+                    loop,
                 )
-            except RuntimeError:
-                # No running event loop — create one temporarily
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(
-                    self.websocket_manager.broadcast_cycle_progress(event_data)
-                )
-                loop.close()
+            else:
+                # Fallback: try get_running_loop (works if called from async context)
+                try:
+                    running = asyncio.get_running_loop()
+                    asyncio.ensure_future(
+                        self.websocket_manager.broadcast_cycle_progress(event_data),
+                        loop=running,
+                    )
+                except RuntimeError:
+                    # No loop at all — create a temporary one (last resort)
+                    tmp = asyncio.new_event_loop()
+                    try:
+                        tmp.run_until_complete(
+                            self.websocket_manager.broadcast_cycle_progress(event_data)
+                        )
+                    finally:
+                        tmp.close()
         except Exception as e:
             logger.warning(f"Failed to emit stage event: {e}")
+
     def _safe_broadcast(self, coro_func, *args, **kwargs):
         """Safely call an async WebSocket broadcast method from sync context.
 
-        Works both when there's a running event loop (async context) and when
-        there isn't (background thread context).
+        Uses run_coroutine_threadsafe when called from a background thread
+        (the normal case for the autonomous cycle).
         """
         if not self.websocket_manager:
             return
         try:
-            loop = asyncio.get_running_loop()
-            asyncio.ensure_future(coro_func(*args, **kwargs), loop=loop)
-        except RuntimeError:
-            # No running event loop — create one temporarily
-            try:
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(coro_func(*args, **kwargs))
-                loop.close()
-            except Exception as e:
-                logger.warning(f"Failed to broadcast WS event: {e}")
+            import asyncio
+            loop = getattr(self.websocket_manager, '_loop', None)
+            if loop is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(coro_func(*args, **kwargs), loop)
+            else:
+                try:
+                    running = asyncio.get_running_loop()
+                    asyncio.ensure_future(coro_func(*args, **kwargs), loop=running)
+                except RuntimeError:
+                    tmp = asyncio.new_event_loop()
+                    try:
+                        tmp.run_until_complete(coro_func(*args, **kwargs))
+                    finally:
+                        tmp.close()
         except Exception as e:
             logger.warning(f"Failed to broadcast WS event: {e}")
 
