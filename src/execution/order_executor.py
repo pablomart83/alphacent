@@ -62,7 +62,8 @@ class OrderExecutor:
         etoro_client: EToroAPIClient,
         market_hours: MarketHoursManager,
         poll_interval: float = 1.0,
-        max_poll_attempts: int = 300
+        max_poll_attempts: int = 300,
+        min_position_size: float = 1000.0,
     ):
         """Initialize order executor.
         
@@ -71,11 +72,18 @@ class OrderExecutor:
             market_hours: Market hours manager for checking market status
             poll_interval: Seconds between order status polls
             max_poll_attempts: Maximum number of polling attempts
+            min_position_size: Minimum virtual position size in USD.
+                               DEMO default: $1,000 (internal policy).
+                               LIVE: set to eToro's actual minimum ($10) since
+                               the virtual size is scaled by mirror_ratio before
+                               reaching eToro — $850 virtual × 0.10 = $85 real.
         """
         self.etoro_client = etoro_client
         self.market_hours = market_hours
         self.poll_interval = poll_interval
         self.max_poll_attempts = max_poll_attempts
+        self._min_position_size = min_position_size
+        self._min_position_size = min_position_size
 
         # Track orders and positions
         self._orders: Dict[str, Order] = {}
@@ -168,10 +176,13 @@ class OrderExecutor:
             logger.debug(f"Trend-consistency gate skipped for {normalized_symbol}: {_tc_err}")
 
         try:
-            # Validate minimum order size ($2000 for stocks/ETFs/crypto, $1000 for commodities/forex/indices)
-            if position_size < 1000.0:
+            # Validate minimum order size.
+            # DEMO default: $1,000 (internal policy — prevents noise positions on a large account).
+            # LIVE: $10 (eToro Agent Portfolio actual minimum). The live pass enforces its own
+            # bounds via min_order_size/max_order_size from the YAML config before reaching here.
+            if position_size < self._min_position_size:
                 raise OrderExecutionError(
-                    f"Order size must be at least $1,000.00 (minimum position size). "
+                    f"Order size must be at least ${self._min_position_size:.0f} (minimum position size). "
                     f"Requested: ${position_size:.2f} for {normalized_symbol}"
                 )
             

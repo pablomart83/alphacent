@@ -1163,7 +1163,7 @@ class EToroAPIClient:
 
         try:
             # Use demo-specific endpoints for DEMO mode
-            portfolio_endpoint = "/api/v1/trading/info/demo/portfolio" if self.account_type == "demo" else "/api/v1/trading/info/portfolio"
+            portfolio_endpoint = "/api/v1/trading/info/demo/portfolio" if self.account_type == "demo" else "/api/v1/trading/info/real/pnl"
             pnl_endpoint = "/api/v1/trading/info/demo/pnl" if self.account_type == "demo" else "/api/v1/trading/info/real/pnl"
             
             # Get full portfolio data
@@ -1276,7 +1276,7 @@ class EToroAPIClient:
 
         try:
             # Use demo-specific endpoints for DEMO mode
-            portfolio_endpoint = "/api/v1/trading/info/demo/portfolio" if self.account_type == "demo" else "/api/v1/trading/info/portfolio"
+            portfolio_endpoint = "/api/v1/trading/info/demo/portfolio" if self.account_type == "demo" else "/api/v1/trading/info/real/pnl"
             
             # Get full portfolio data
             portfolio_data = self._make_request(
@@ -1289,54 +1289,27 @@ class EToroAPIClient:
             # Extract positions based on mode
             # Demo mode returns nested structure: { "clientPortfolio": { "positions": [...] } }
             # Live mode returns flat structure: { "Positions": [...] }
-            if self.account_type == "demo":
-                position_list = portfolio_data.get("clientPortfolio", {}).get("positions", [])
-            else:
-                position_list = portfolio_data.get("Positions", [])
+            # Both DEMO and LIVE use clientPortfolio.positions (official API v1.158.0)
+            position_list = portfolio_data.get("clientPortfolio", {}).get("positions", [])
             
             for item in position_list:
-                # Parse position data from eToro format
-                # Demo uses lowercase keys, Live uses PascalCase
-                if self.account_type == "demo":
-                    is_buy = item.get("isBuy", True)
-                    position_id = str(item.get("positionID", ""))
-                    instrument_id = int(item.get("instrumentID", 0))
-                    amount = float(item.get("amount", 0))
-                    open_rate = float(item.get("openRate", 0))
-                    current_rate = float(item.get("currentRate", open_rate))
-                    open_datetime = item.get("openDateTime")
-                    stop_loss = float(item.get("stopLossRate", 0)) if item.get("stopLossRate") and not item.get("isNoStopLoss", False) else None
-                    take_profit = float(item.get("takeProfitRate", 0)) if item.get("takeProfitRate") and not item.get("isNoTakeProfit", False) else None
-                    
-                    # Get actual units (quantity) - this is the correct field for position size
-                    units = float(item.get("units", 0))
-                    
-                    # Calculate PnL for demo
-                    # units = amount (dollars invested) in demo mode, not actual shares
-                    # P&L = invested_amount * price_change_pct
-                    if open_rate > 0:
-                        if is_buy:
-                            net_profit = amount * (current_rate - open_rate) / open_rate
-                        else:
-                            net_profit = amount * (open_rate - current_rate) / open_rate
-                    else:
-                        net_profit = 0.0
-                else:
-                    is_buy = item.get("IsBuy", True)
-                    position_id = str(item.get("PositionID", ""))
-                    instrument_id_raw = item.get("InstrumentID", "")
-                    instrument_id = int(instrument_id_raw) if instrument_id_raw else 0  # Keep as int for mapping
-                    amount = float(item.get("Amount", 0))
-                    open_rate = float(item.get("OpenRate", 0))
-                    current_rate = float(item.get("CurrentRate", open_rate))
-                    open_datetime = item.get("OpenDateTime")
-                    stop_loss = float(item["StopLossRate"]) if item.get("StopLossRate") else None
-                    take_profit = float(item["TakeProfitRate"]) if item.get("TakeProfitRate") else None
-                    net_profit = float(item.get("NetProfit", 0))
-                    
-                    # Calculate units from amount and open rate for live mode
-                    units = amount / open_rate if open_rate > 0 else 0
-                
+                # Parse position data — both DEMO and LIVE use camelCase keys
+                # (PascalCase fallbacks for backward compat with any legacy responses)
+                is_buy = item.get("isBuy", item.get("IsBuy", True))
+                position_id = str(item.get("positionID", item.get("PositionID", "")))
+                instrument_id = int(item.get("instrumentID", item.get("InstrumentID", 0)) or 0)
+                amount = float(item.get("amount", item.get("Amount", 0)) or 0)
+                open_rate = float(item.get("openRate", item.get("OpenRate", 0)) or 0)
+                current_rate = float(item.get("currentRate", item.get("CurrentRate", open_rate)) or open_rate)
+                open_datetime = item.get("openDateTime", item.get("OpenDateTime"))
+                _sl = item.get("stopLossRate", item.get("StopLossRate"))
+                stop_loss = float(_sl) if _sl and not item.get("isNoStopLoss", item.get("IsNoStopLoss", False)) else None
+                _tp = item.get("takeProfitRate", item.get("TakeProfitRate"))
+                take_profit = float(_tp) if _tp and not item.get("isNoTakeProfit", item.get("IsNoTakeProfit", False)) else None
+                units = float(item.get("units", item.get("Units", 0)) or 0)
+                net_profit = float(item.get("pnL", item.get("NetProfit", 0)) or 0)
+                if net_profit == 0 and open_rate > 0 and amount > 0:
+                    net_profit = amount * (current_rate - open_rate) / open_rate if is_buy else amount * (open_rate - current_rate) / open_rate
                 position = Position(
                     id=position_id,
                     strategy_id="etoro_position",  # Default strategy for eToro positions

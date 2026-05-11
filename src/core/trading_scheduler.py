@@ -1964,15 +1964,19 @@ class TradingScheduler:
                                 # Generate signals scoped to live account.
                                 # The LIVE strategy already has symbols=[_live_sym] so the
                                 # pre-filter and signal gen only touch the approved symbol.
+                                # Pass conviction_override from the live_strategies row so
+                                # the CIO-approved threshold is used, not the YAML default.
                                 _live_signals = self._strategy_engine.generate_signals(
                                     _strat_obj,
                                     include_dynamic=False,
                                     account_type='live',
+                                    conviction_override=int(_appr.conviction_min) if _appr.conviction_min is not None else None,
                                 )
+                                from src.models.enums import SignalAction as _LiveSignalAction
                                 for _lsig in _live_signals:
                                     if _lsig.symbol != _live_sym:
                                         continue
-                                    if _lsig.action not in [SignalAction.ENTER_LONG, SignalAction.ENTER_SHORT]:
+                                    if _lsig.action not in [_LiveSignalAction.ENTER_LONG, _LiveSignalAction.ENTER_SHORT]:
                                         continue
 
                                     # Conviction gate
@@ -1982,21 +1986,23 @@ class TradingScheduler:
                                         else None
                                     )
                                     _sig_conv2 = float(_meta_conv2 or getattr(_lsig, 'confidence', 0) or 0)
-                                    _is_crypto2 = _live_sym.upper() in {
-                                        'BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOT', 'LINK',
-                                        'AVAX', 'NEAR', 'LTC', 'BCH', 'DOGE', 'SUI', 'APT',
-                                        'ARB', 'OP', 'RENDER', 'INJ',
-                                    }
-                                    _live_conv_min2 = int(
+                                    # Use the CIO-approved conviction_min from live_strategies,
+                                    # not the YAML global threshold — the per-strategy value
+                                    # persists across restarts in the DB.
+                                    _live_conv_min2 = int(_appr.conviction_min) if _appr.conviction_min is not None else int(
                                         _live_cfg2.get("conviction_threshold_crypto", 68)
-                                        if _is_crypto2
+                                        if _live_sym.upper() in {
+                                            'BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOT', 'LINK',
+                                            'AVAX', 'NEAR', 'LTC', 'BCH', 'DOGE', 'SUI', 'APT',
+                                            'ARB', 'OP', 'RENDER', 'INJ',
+                                        }
                                         else _live_cfg2.get("conviction_threshold", 74)
                                     )
                                     if _sig_conv2 < _live_conv_min2:
                                         logger.info(
                                             f"Live pass conviction gate blocked: {_live_sym} "
                                             f"score={_sig_conv2:.1f} < {_live_conv_min2} "
-                                            f"({'crypto' if _is_crypto2 else 'equity'})"
+                                            f"(live_strategies.conviction_min)"
                                         )
                                         continue
 
@@ -3128,7 +3134,12 @@ class TradingScheduler:
                 from src.api.app import get_live_etoro_client
                 _live_client = get_live_etoro_client()
                 if _live_client is not None:
-                    self._live_order_executor = OrderExecutor(_live_client, market_hours)
+                    # Live executor uses eToro's actual minimum ($10), not the DEMO
+                    # internal policy ($1,000). The live pass enforces its own bounds
+                    # via min_order_size/max_order_size from the YAML config.
+                    self._live_order_executor = OrderExecutor(
+                        _live_client, market_hours, min_position_size=10.0
+                    )
                     logger.info("TradingScheduler: live OrderExecutor initialized")
             except Exception as _live_init_err:
                 logger.info(f"TradingScheduler: no live executor ({_live_init_err})")

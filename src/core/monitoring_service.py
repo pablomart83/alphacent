@@ -363,6 +363,14 @@ class MonitoringService:
                 pending_results = self.order_monitor.process_pending_orders()
                 if pending_results["submitted"] > 0:
                     logger.info(f"Pending orders: {pending_results['submitted']} submitted")
+                # Also process live pending orders via the live order monitor
+                if self.live_order_monitor is not None:
+                    try:
+                        live_pending = self.live_order_monitor.process_pending_orders()
+                        if live_pending.get("submitted", 0) > 0:
+                            logger.info(f"Live pending orders: {live_pending['submitted']} submitted")
+                    except Exception as _lp_err:
+                        logger.error(f"Error processing live pending orders: {_lp_err}")
                 self._last_pending_check = now
             except Exception as e:
                 logger.error(f"Error processing pending orders: {e}")
@@ -376,6 +384,18 @@ class MonitoringService:
                         f"Order status: {order_results['filled']} filled, "
                         f"{order_results['cancelled']} cancelled"
                     )
+                # Also check live submitted orders — the live_order_monitor uses the
+                # live eToro client so it can resolve live order IDs correctly.
+                if self.live_order_monitor is not None:
+                    try:
+                        live_order_results = self.live_order_monitor.check_submitted_orders()
+                        if live_order_results.get("filled", 0) > 0 or live_order_results.get("cancelled", 0) > 0:
+                            logger.info(
+                                f"Live order status: {live_order_results['filled']} filled, "
+                                f"{live_order_results['cancelled']} cancelled"
+                            )
+                    except Exception as _live_ord_err:
+                        logger.error(f"Error checking live order status: {_live_ord_err}")
                 self._last_order_check = now
             except Exception as e:
                 logger.error(f"Error checking order status: {e}")
@@ -3307,7 +3327,16 @@ class MonitoringService:
             # Look up instrument ID for the symbol (required for demo close endpoint)
             from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
             instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(pos.symbol)
-            self.etoro_client.close_position(
+            # Route to the correct eToro client based on position account_type.
+            # LIVE positions must use the live client — the demo client has no
+            # knowledge of live position IDs and will return 404.
+            _pos_account_type = getattr(pos, 'account_type', 'demo') or 'demo'
+            _close_client = (
+                self.live_etoro_client
+                if _pos_account_type == 'live' and self.live_etoro_client is not None
+                else self.etoro_client
+            )
+            _close_client.close_position(
                 pos.etoro_position_id,
                 instrument_id=instrument_id,
                 amount=close_dollar_amount,

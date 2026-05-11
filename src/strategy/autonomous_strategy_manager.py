@@ -2262,11 +2262,15 @@ class AutonomousStrategyManager:
                         })
                         continue
 
-                # Check if we can activate (not at max strategies)
+                # Check if we can activate (not at max strategies).
+                # LIVE strategies are excluded from the cap — they are a separate
+                # pipeline and should not consume DEMO paper-trading slots.
                 active_strategies = self.strategy_engine.get_active_strategies()
+                from src.models.enums import StrategyStatus as _SS
+                demo_active = [s for s in active_strategies if s.status != _SS.LIVE]
                 max_strategies = self.config["autonomous"]["max_active_strategies"]
 
-                if len(active_strategies) >= max_strategies:
+                if len(demo_active) >= max_strategies:
                     logger.warning(
                         f"      Cannot activate: already at maximum of "
                         f"{max_strategies} active strategies"
@@ -2556,7 +2560,9 @@ class AutonomousStrategyManager:
 
         # Check max strategies limit
         max_strategies = self.config["autonomous"]["max_active_strategies"]
-        if len(active_strategies) >= max_strategies:
+        from src.models.enums import StrategyStatus as _SS_dir
+        demo_active_dir = [s for s in active_strategies if s.status != _SS_dir.LIVE]
+        if len(demo_active_dir) >= max_strategies:
             logger.warning(
                 f"Cannot force-activate {missing_direction} strategy — "
                 f"already at max {max_strategies} active strategies"
@@ -2706,7 +2712,9 @@ class AutonomousStrategyManager:
 
         # Check max strategies limit
         max_strategies = self.config["autonomous"]["max_active_strategies"]
-        if len(active_strategies) >= max_strategies:
+        from src.models.enums import StrategyStatus as _SS_ae
+        demo_active_ae = [s for s in active_strategies if s.status != _SS_ae.LIVE]
+        if len(demo_active_ae) >= max_strategies:
             logger.warning(
                 f"Cannot force-activate Alpha Edge fallback — "
                 f"already at max {max_strategies} active strategies"
@@ -2834,6 +2842,14 @@ class AutonomousStrategyManager:
 
             for i, strategy in enumerate(active_strategies, 1):
                 try:
+                    # LIVE strategies are managed exclusively by the CIO via the Graduation
+                    # tab. The autonomous cycle must never auto-retire them — doing so would
+                    # silently close a real-money position without CIO approval.
+                    from src.models.enums import StrategyStatus as _SS_ret
+                    if strategy.status == _SS_ret.LIVE:
+                        logger.debug(f"  [{i}/{len(active_strategies)}] ⏭ {strategy.name} skipped (LIVE — CIO-managed)")
+                        continue
+
                     # Skip strategies activated in this cycle — they just passed activation
                     # thresholds and have no live trade data yet. Re-checking backtest metrics
                     # against retirement thresholds in the same cycle is contradictory.
