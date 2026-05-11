@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { PlayCircle } from 'lucide-react'
+import { PlayCircle, Trash2 } from 'lucide-react'
 import { Button, ConfirmDialog } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
 import { notifyError } from '@/lib/errors'
 import { cn } from '@/lib/utils'
+import { api } from '@/services/api'
 import { useTriggerCycle, type TriggerCycleBody } from '../useStrategiesData'
 
 /**
@@ -55,6 +56,7 @@ export function ManualCycleTrigger() {
   const [strategyTypes, setStrategyTypes] = useState<string[]>(() => loadPrefs().strategyTypes)
   const [force, setForce] = useState<boolean>(() => loadPrefs().force)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [clearingCache, setClearingCache] = useState(false)
 
   const toggle = (list: string[], setter: (l: string[]) => void, value: string, key: 'assetClasses' | 'intervals' | 'strategyTypes') => {
     const next = list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
@@ -65,6 +67,24 @@ export function ManualCycleTrigger() {
       strategyTypes: key === 'strategyTypes' ? next : strategyTypes,
       force,
     })
+  }
+
+  const handleClearCache = async () => {
+    setClearingCache(true)
+    try {
+      const res = await api.post<{ success: boolean; message: string }>(
+        '/control/autonomous/clear-blacklists',
+      )
+      if (res.success) {
+        toast.success('Caches cleared', { description: res.message })
+      } else {
+        toast.error('Clear failed', { description: res.message })
+      }
+    } catch (err) {
+      notifyError(err, 'clear caches')
+    } finally {
+      setClearingCache(false)
+    }
   }
 
   const handleConfirm = async () => {
@@ -130,6 +150,16 @@ export function ManualCycleTrigger() {
         >
           <PlayCircle className="h-3.5 w-3.5" />
           Run cycle now
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleClearCache}
+          loading={clearingCache}
+          className="gap-1.5 text-[var(--status-warning)] hover:text-[var(--status-warning)] border border-[var(--status-warning)]/20 hover:bg-[var(--status-warning)]/10"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Clear caches &amp; blacklists
         </Button>
         <div className="text-[10px] text-[var(--text-3)]">
           {hasFilters
