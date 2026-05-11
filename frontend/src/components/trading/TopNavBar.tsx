@@ -1,9 +1,9 @@
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Command, LogOut, Settings as SettingsIcon } from 'lucide-react'
+import { Bell, Command, HelpCircle, LogOut, Settings as SettingsIcon } from 'lucide-react'
 import { Button } from '@/components/primitives'
 import { AccountToggle } from './AccountToggle'
 import { WebSocketIndicator } from './WebSocketIndicator'
-import { useCommandPalette } from '@/stores'
+import { useCommandPalette, useNotificationsStore, useUiOverlays } from '@/stores'
 import { useLogout } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 
@@ -22,6 +22,9 @@ interface TopNavBarProps {
 export function TopNavBar({ liveEnabled = false }: TopNavBarProps) {
   const navigate = useNavigate()
   const openPalette = useCommandPalette((s) => s.setOpen)
+  const setNotificationsOpen = useUiOverlays((s) => s.setNotificationsOpen)
+  const setShortcutHelpOpen = useUiOverlays((s) => s.setShortcutHelpOpen)
+  const unreadCount = useNotificationsStore((s) => s.unreadCount)
   const logout = useLogout()
 
   const handleLogout = async () => {
@@ -90,9 +93,44 @@ export function TopNavBar({ liveEnabled = false }: TopNavBarProps) {
           size="sm"
           onClick={() => openPalette(true)}
           className="gap-1.5 text-[var(--text-2)]"
+          aria-label="Open command palette"
         >
           <Command className="h-3 w-3" />
           <span className="mono text-[10px]">{isMac ? '⌘K' : 'Ctrl+K'}</span>
+        </Button>
+
+        <button
+          type="button"
+          onClick={() => setNotificationsOpen(true)}
+          aria-label={
+            unreadCount > 0
+              ? `Notifications — ${unreadCount} unread`
+              : 'Notifications'
+          }
+          className={cn(
+            'relative inline-flex items-center justify-center h-7 w-7 rounded-[2px] transition-colors',
+            'text-[var(--text-2)] hover:text-[var(--text-0)] hover:bg-[var(--bg-hover)]',
+            'focus-visible:outline-2 focus-visible:outline-[var(--border-focus)]',
+          )}
+        >
+          <Bell className="h-3.5 w-3.5" />
+          {unreadCount > 0 && (
+            <span
+              className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] px-1 rounded-full bg-[var(--pnl-down)] text-[9px] font-semibold mono tabular-nums text-white flex items-center justify-center"
+              aria-hidden
+            >
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </button>
+
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => setShortcutHelpOpen(true)}
+          aria-label="Keyboard shortcut help"
+        >
+          <HelpCircle className="h-3.5 w-3.5" />
         </Button>
 
         <AccountToggle liveEnabled={liveEnabled} />

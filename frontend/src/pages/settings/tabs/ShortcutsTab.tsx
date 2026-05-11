@@ -30,7 +30,7 @@ export function ShortcutsTab() {
         <Group title="Global utilities">
           <Row keys={['⌘', 'K']} label="Command palette" />
           <Row keys={['/']} label="Focus page search" />
-          <Row keys={['?']} label="Keyboard shortcut help (coming soon)" />
+          <Row keys={['?']} label="Keyboard shortcut help" />
           <Row keys={['Esc']} label="Close modal / dropdown / drawer" />
         </Group>
 

@@ -1,16 +1,18 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useCommandPalette } from '@/stores'
+import { useCommandPalette, useUiOverlays } from '@/stores'
 
 /**
  * Registers global keyboard shortcuts.
  *
  * Navigation: g then c/b/s/g/r (matching the 5 surfaces) + g , for settings.
  * Utility:    ⌘K / Ctrl+K opens the command palette.
+ *             ?            toggles the shortcut help overlay.
  */
 export function useKeyboardShortcuts() {
   const navigate = useNavigate()
   const toggleCommandPalette = useCommandPalette((s) => s.toggle)
+  const toggleShortcutHelp = useUiOverlays((s) => s.toggleShortcutHelp)
 
   useEffect(() => {
     let prefixPressed = false
@@ -32,6 +34,14 @@ export function useKeyboardShortcuts() {
       }
 
       if (inField) return
+
+      // ? opens keyboard-shortcut help. Most browsers render `?` on Shift+/;
+      // we match either form so the shortcut works across layouts.
+      if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
+        e.preventDefault()
+        toggleShortcutHelp()
+        return
+      }
 
       // g prefix navigation
       if (!prefixPressed && e.key.toLowerCase() === 'g') {
@@ -71,5 +81,5 @@ export function useKeyboardShortcuts() {
       window.removeEventListener('keydown', handler)
       if (prefixTimer) window.clearTimeout(prefixTimer)
     }
-  }, [navigate, toggleCommandPalette])
+  }, [navigate, toggleCommandPalette, toggleShortcutHelp])
 }

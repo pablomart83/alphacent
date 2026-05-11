@@ -1,25 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import Fuse from 'fuse.js'
 import { useCommandPalette } from '@/stores'
 import {
+  Briefcase,
   ChevronRight,
   Command as CommandIcon,
   Compass,
   Database,
+  Hash,
   LineChart,
-  Shield,
-  Rocket,
   ListTree,
-  Settings as SettingsIcon,
-  Moon,
-  Sun,
   LogOut,
-  History,
+  Moon,
+  Rocket,
+  Settings as SettingsIcon,
+  Shield,
+  Sun,
   TerminalSquare,
-  Briefcase,
+  TrendingUp,
+  History,
 } from 'lucide-react'
 import { useTheme } from '@/stores'
+import { api } from '@/services/api'
 import { Dialog, DialogContent, DialogTitle } from '@/components/primitives'
 
 /**
@@ -32,8 +36,9 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/primitives'
 type CommandItem = {
   id: string
   label: string
+  sublabel?: string
   keywords?: string
-  section: 'Navigate' | 'Surfaces' | 'Actions' | 'Settings'
+  section: 'Navigate' | 'Surfaces' | 'Strategies' | 'Symbols' | 'Actions' | 'Settings'
   icon: React.ComponentType<{ className?: string }>
   run: (ctx: RunContext) => void
 }
@@ -267,22 +272,78 @@ export function CommandPalette() {
   const [activeIdx, setActiveIdx] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Lazy strategy + symbol jumps — fetched once the palette opens so they
+  // don't cost a query on every app load.
+  const strategies = useQuery<StrategiesSlim>({
+    queryKey: ['palette-strategies'],
+    queryFn: () =>
+      api.get<StrategiesSlim>('/strategies', { slim: true, include_retired: false }),
+    enabled: open,
+    staleTime: 60_000,
+  })
+  const symbols = useQuery<SymbolsSlim>({
+    queryKey: ['palette-symbols'],
+    queryFn: () => api.get<SymbolsSlim>('/strategies/symbols'),
+    enabled: open,
+    staleTime: 5 * 60_000,
+  })
+
+  const dynamicItems = useMemo<CommandItem[]>(() => {
+    const out: CommandItem[] = []
+    for (const s of strategies.data?.strategies ?? []) {
+      out.push({
+        id: `strategy-${s.id}`,
+        label: s.name,
+        sublabel: s.status,
+        section: 'Strategies',
+        icon: TrendingUp,
+        keywords: `strategy ${s.status}`,
+        run: ({ navigate, close }) => {
+          navigate(`/strategies/library?strategy=${encodeURIComponent(s.id)}`)
+          close()
+        },
+      })
+    }
+    for (const sym of symbols.data?.symbols ?? []) {
+      out.push({
+        id: `symbol-${sym.symbol}`,
+        label: sym.symbol,
+        sublabel: sym.asset_class,
+        section: 'Symbols',
+        icon: Hash,
+        keywords: `symbol ${sym.asset_class}`,
+        run: ({ navigate, close }) => {
+          navigate(`/strategies/symbols?symbol=${encodeURIComponent(sym.symbol)}`)
+          close()
+        },
+      })
+    }
+    return out
+  }, [strategies.data?.strategies, symbols.data?.symbols])
+
+  const allCommands = useMemo(() => [...COMMANDS, ...dynamicItems], [dynamicItems])
+
   const fuse = useMemo(
     () =>
-      new Fuse(COMMANDS, {
-        keys: ['label', 'keywords', 'section'],
+      new Fuse(allCommands, {
+        keys: ['label', 'sublabel', 'keywords', 'section'],
         threshold: 0.4,
       }),
-    [],
+    [allCommands],
   )
 
   const grouped = useMemo(() => {
     const items = query.trim()
       ? fuse.search(query).map((r) => r.item)
-      : orderByRecent(COMMANDS, recent)
+      : orderByRecent(COMMANDS, recent) // only static items on the empty state
     const groups: Record<string, CommandItem[]> = {}
     for (const it of items) {
-      const key = query.trim() ? it.section : isRecent(it.id, recent) ? 'Recent' : it.section
+      const key =
+        query.trim()
+          ? it.section
+          : isRecent(it.id, recent)
+            ? 'Recent'
+            : it.section
       groups[key] = groups[key] ?? []
       groups[key].push(it)
     }
@@ -366,6 +427,11 @@ export function CommandPalette() {
                   >
                     <item.icon className="h-3.5 w-3.5 text-[var(--text-3)]" />
                     <span className="text-[12px] flex-1 truncate">{item.label}</span>
+                    {item.sublabel && (
+                      <span className="text-[10px] text-[var(--text-3)] mono uppercase tracking-wider shrink-0">
+                        {item.sublabel}
+                      </span>
+                    )}
                     {active && (
                       <ChevronRight className="h-3 w-3 text-[var(--accent-primary)]" />
                     )}
@@ -408,4 +474,14 @@ function orderByRecent(items: CommandItem[], recent: string[]): CommandItem[] {
     .filter((v): v is CommandItem => v != null)
   const rest = items.filter((i) => !recentSet.has(i.id))
   return [...recentItems, ...rest]
+}
+
+interface StrategiesSlim {
+  strategies: Array<{ id: string; name: string; status: string }>
+  total_count?: number
+}
+
+interface SymbolsSlim {
+  symbols: Array<{ symbol: string; asset_class: string }>
+  total?: number
 }

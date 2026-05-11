@@ -3,9 +3,13 @@ import { Outlet } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { TopNavBar } from './trading/TopNavBar'
 import { CommandPalette } from './CommandPalette'
+import { NotificationDrawer } from './NotificationDrawer'
+import { KeyboardShortcutHelp } from './KeyboardShortcutHelp'
 import { useAuthStatus } from '@/hooks/useAuth'
 import { useWebSocketQueryBridge } from '@/hooks/useWebSocketQueryBridge'
+import { useAutonomousNotifications } from '@/hooks/useAutonomousNotifications'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
+import { useUiOverlays } from '@/stores'
 import { wsManager } from '@/services/websocket'
 import { api } from '@/services/api'
 
@@ -28,7 +32,13 @@ export function AppShell() {
   }, [auth?.authenticated])
 
   useWebSocketQueryBridge()
+  useAutonomousNotifications()
   useKeyboardShortcuts()
+
+  const notificationsOpen = useUiOverlays((s) => s.notificationsOpen)
+  const setNotificationsOpen = useUiOverlays((s) => s.setNotificationsOpen)
+  const shortcutHelpOpen = useUiOverlays((s) => s.shortcutHelpOpen)
+  const setShortcutHelpOpen = useUiOverlays((s) => s.setShortcutHelpOpen)
 
   // Single shared /live/summary query — keyed so Command page + TopNavBar share cache.
   const { data: liveSummary } = useQuery<LiveSummaryShape>({
@@ -46,6 +56,14 @@ export function AppShell() {
         <Outlet />
       </main>
       <CommandPalette />
+      <NotificationDrawer
+        open={notificationsOpen}
+        onOpenChange={setNotificationsOpen}
+      />
+      <KeyboardShortcutHelp
+        open={shortcutHelpOpen}
+        onOpenChange={setShortcutHelpOpen}
+      />
     </div>
   )
 }

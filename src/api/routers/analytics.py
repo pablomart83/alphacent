@@ -3494,12 +3494,25 @@ async def get_tear_sheet(
 
         dates = [s.date for s in snapshots]
         equities = np.array([s.equity for s in snapshots], dtype=float)
-        daily_returns = np.diff(equities) / equities[:-1]
-        return_dates = dates[1:]
+        # Guard against zero-equity snapshots that produce inf/nan in returns.
+        # Replace zeros with NaN so np.diff produces NaN rather than inf,
+        # then strip NaN rows from the returns array before any stats.
+        equities_safe = np.where(equities <= 0, np.nan, equities)
+        raw_returns = np.diff(equities_safe) / equities_safe[:-1]
+        # Build a mask of finite returns; keep the corresponding dates aligned.
+        finite_mask = np.isfinite(raw_returns)
+        daily_returns = raw_returns[finite_mask]
+        return_dates = [dates[i + 1] for i in range(len(raw_returns)) if finite_mask[i]]
 
         # --- Underwater plot (drawdown from running peak) ---
-        running_max = np.maximum.accumulate(equities)
-        drawdowns = (equities - running_max) / running_max
+        # Use equities_safe so zero-equity rows don't produce -100% spikes.
+        equities_for_dd = np.where(equities <= 0, np.nan, equities)
+        running_max = np.fmax.accumulate(np.where(np.isnan(equities_for_dd), 0, equities_for_dd))
+        drawdowns = np.where(
+            (running_max > 0) & np.isfinite(equities_for_dd),
+            (equities_for_dd - running_max) / running_max,
+            0.0,
+        )
         underwater_plot = [
             UnderwaterPoint(date=dates[i], drawdown_pct=round(float(drawdowns[i]) * 100, 4))
             for i in range(len(dates))
