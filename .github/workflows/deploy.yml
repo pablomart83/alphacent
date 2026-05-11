@@ -44,6 +44,7 @@ jobs:
             --exclude 'config/demo_credentials.json' \
             --exclude 'config/live_credentials.json' \
             --exclude 'config/api_keys.yaml' \
+            --exclude 'config/autonomous_trading.yaml' \
             --exclude '.env' \
             --exclude '.env.production' \
             --exclude 'frontend/dist/' \
