@@ -164,11 +164,16 @@ export function LiveStream() {
 
         if (status === 'running') {
           // Suppress per-strategy iteration messages (e.g. "Walk-forward X (79/192)")
-          // — they flood the log. Only log stage starts (no phase) or meaningful phases.
-          const isIterationMsg = phase && /\(\d+\/\d+\)/.test(phase)
-          if (!isIterationMsg) {
-            pushLog(`▶ ${label}${phase ? ` — ${phase}` : ''}`, 'info')
+          // except every 20th one — gives progress without flooding.
+          const iterMatch = phase && phase.match(/\((\d+)\/(\d+)\)/)
+          if (iterMatch) {
+            const current = parseInt(iterMatch[1], 10)
+            const total = parseInt(iterMatch[2], 10)
+            const isLast = current === total
+            const isEvery20 = current % 20 === 0
+            if (!isEvery20 && !isLast) return // suppress
           }
+          pushLog(`▶ ${label}${phase ? ` — ${phase}` : ''}`, 'info')
         } else if (status === 'complete') {
           const detail = metricsLine(metrics)
           pushLog(`✓ ${label}${detail ? ` — ${detail}` : ''}`, 'success')
