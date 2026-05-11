@@ -104,10 +104,15 @@ export function CyclePipelineVisual({ lastCycle, isRunning, className }: CyclePi
   }, [])
 
   // Reset live state when a new cycle starts (cycle_id change).
+  // Keep the completed state visible for 30 seconds after the cycle ends
+  // so the user can see the final pipeline state before it clears.
   useEffect(() => {
-    if (!isRunning) {
-      setLiveStates({} as Record<SpecStageId, StageState>)
-      setLiveCycleId(null)
+    if (!isRunning && Object.keys(liveStates).length > 0) {
+      const timer = window.setTimeout(() => {
+        setLiveStates({} as Record<SpecStageId, StageState>)
+        setLiveCycleId(null)
+      }, 30_000)
+      return () => window.clearTimeout(timer)
     }
   }, [isRunning])
 

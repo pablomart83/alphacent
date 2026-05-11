@@ -88,15 +88,16 @@ export function LiveStream() {
           typeof data?.confidence === 'number'
             ? ` · ${(data.confidence * 100).toFixed(0)}`
             : ''
+        const strategyName = data?.strategy_name || ''
+        const reasoning = data?.reasoning || ''
+        // Show strategy name if available, otherwise truncate reasoning
+        const detail = strategyName || (reasoning.length > 60 ? reasoning.slice(0, 60) + '…' : reasoning)
         push({
           timestamp: new Date().toISOString(),
           type: 'signal',
           title: `${data?.symbol || '?'} ${isExit ? 'EXIT' : isSell ? 'SELL' : 'BUY'}${conviction}`,
-          detail:
-            data?.strategy_name ||
-            data?.reasoning ||
-            (data?.strategy_id ? `Strategy ${String(data.strategy_id).slice(0, 8)}` : ''),
-          accent: isSell ? 'var(--pnl-down)' : 'var(--pnl-up)',
+          detail,
+          accent: isExit ? 'var(--text-2)' : isSell ? 'var(--pnl-down)' : 'var(--pnl-up)',
           Icon: isSell ? ArrowDownRight : ArrowUpRight,
         })
       }),
@@ -111,12 +112,19 @@ export function LiveStream() {
           data?.strategy_name ||
           data?.name ||
           'Strategy'
+        const symbol = data?.strategy?.symbols?.[0] || data?.symbol || ''
+        const sharpe = data?.strategy?.backtest_results?.sharpe_ratio ?? data?.sharpe ?? null
         const label = friendlyStrategyEvent(event)
+        const detail = [
+          label,
+          symbol ? symbol : null,
+          sharpe != null ? `Sharpe ${Number(sharpe).toFixed(2)}` : null,
+        ].filter(Boolean).join(' · ')
         push({
           timestamp: data?.timestamp || new Date().toISOString(),
           type: 'strategy',
-          title: `${strategyName}`,
-          detail: label,
+          title: strategyName,
+          detail,
           accent: accentForStrategyEvent(event),
           Icon: iconForStrategyEvent(event),
         })
@@ -159,23 +167,39 @@ export function LiveStream() {
 
     off.push(
       wsManager.on('cycle_progress', (data: any) => {
-        const stage = String(data?.stage || '').replace(/_/g, ' ')
+        const stage = String(data?.stage_label || data?.stage || '').replace(/_/g, ' ')
         const status = String(data?.status || '').toLowerCase()
         if (!stage) return
-        // Only log stage starts + errors to avoid flooding — completes fire
-        // frequently and aren't interesting per-step in the feed (the pipeline
-        // visual shows the status).
-        if (status !== 'running' && status !== 'error' && status !== 'failed') return
+        // Show starts, completions, and errors — completions are useful to confirm progress
+        if (status !== 'running' && status !== 'complete' && status !== 'error' && status !== 'failed') return
+        const isError = status === 'error' || status === 'failed'
+        const isComplete = status === 'complete'
+        // Build a detail line from metrics
+        const metrics = data?.metrics || {}
+        const metricParts: string[] = []
+        if (metrics.proposed != null) metricParts.push(`${metrics.proposed} proposed`)
+        if (metrics.backtested != null) metricParts.push(`${metrics.backtested} backtested`)
+        if (metrics.passed != null) metricParts.push(`${metrics.passed} passed`)
+        if (metrics.activated != null) metricParts.push(`${metrics.activated} activated`)
+        if (metrics.signals != null || metrics.signals_generated != null) metricParts.push(`${metrics.signals ?? metrics.signals_generated} signals`)
+        if (metrics.retired != null) metricParts.push(`${metrics.retired} retired`)
+        if (metrics.cleaned != null) metricParts.push(`${metrics.cleaned} cleaned`)
+        const detail = isError
+          ? (data?.error || 'stage error')
+          : metricParts.length > 0
+            ? metricParts.join(' · ')
+            : isComplete ? 'done' : 'running'
         push({
           timestamp: data?.timestamp || new Date().toISOString(),
           type: 'stage',
-          title: stage,
-          detail: status === 'error' || status === 'failed' ? (data?.error || 'stage error') : 'running',
-          accent:
-            status === 'error' || status === 'failed'
-              ? 'var(--pnl-down)'
+          title: `${isComplete ? '✓' : isError ? '✗' : '▶'} ${stage}`,
+          detail,
+          accent: isError
+            ? 'var(--pnl-down)'
+            : isComplete
+              ? 'var(--pnl-up)'
               : 'var(--accent-primary)',
-          Icon: status === 'error' || status === 'failed' ? AlertTriangle : Activity,
+          Icon: isError ? AlertTriangle : isComplete ? CheckCircle2 : Activity,
         })
       }),
     )
@@ -187,16 +211,18 @@ export function LiveStream() {
         const side = String(data?.side || '').toUpperCase()
         const isFilled = status === 'FILLED'
         const isFailed = status === 'FAILED' || status === 'REJECTED' || status === 'CANCELLED'
-        if (!isFilled && !isFailed) return // noisy — only surface terminal transitions
+        const isSubmitted = status === 'SUBMITTED' || status === 'PENDING'
+        if (!isFilled && !isFailed && !isSubmitted) return
+        const price = data?.filled_price ?? data?.price
         push({
           timestamp: data?.timestamp || new Date().toISOString(),
           type: 'order',
           title: `${symbol} ${side} ${status}`,
           detail:
             data?.strategy_name ||
-            (data?.filled_price != null ? `@ ${data.filled_price}` : ''),
-          accent: isFailed ? 'var(--pnl-down)' : 'var(--pnl-up)',
-          Icon: isFailed ? XCircle : CheckCircle2,
+            (price != null ? `@ ${Number(price).toFixed(2)}` : ''),
+          accent: isFailed ? 'var(--pnl-down)' : isFilled ? 'var(--pnl-up)' : 'var(--text-2)',
+          Icon: isFailed ? XCircle : isFilled ? CheckCircle2 : Activity,
         })
       }),
     )
