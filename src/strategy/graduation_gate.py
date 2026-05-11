@@ -169,51 +169,78 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
     # Aggregate trade_journal by (template_name, symbol) across ALL strategy IDs.
     # COALESCE: prefer strategy_metadata->>'template_name', fall back to name
     # with version suffix stripped.
+    #
+    # The representative_strategy_id (most recent strategy for this pair) is
+    # resolved in a separate CTE rather than a correlated subquery — PostgreSQL
+    # cannot reference outer-query columns (s.strategy_metadata) inside a
+    # correlated subquery when the outer query uses GROUP BY.
     candidates_raw = session.execute(
         text("""
+            WITH pair_stats AS (
+                SELECT
+                    COALESCE(
+                        s.strategy_metadata->>'template_name',
+                        REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                    )                                                   AS template_name,
+                    tj.symbol,
+                    COUNT(*)                                            AS trades,
+                    ROUND(
+                        CASE WHEN STDDEV(tj.pnl) > 0
+                             THEN (AVG(tj.pnl) / STDDEV(tj.pnl)) * SQRT(252)
+                             ELSE 0
+                        END::numeric, 4
+                    )                                                   AS paper_sharpe,
+                    ROUND(
+                        100.0 * SUM(CASE WHEN tj.pnl > 0 THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(*), 0)::numeric, 2
+                    )                                                   AS win_rate_pct,
+                    ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2)        AS total_pnl,
+                    COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions
+                FROM trade_journal tj
+                JOIN strategies s ON s.id = tj.strategy_id
+                WHERE tj.pnl IS NOT NULL
+                  AND tj.account_type = 'demo'
+                GROUP BY template_name, tj.symbol
+                HAVING COUNT(*) >= :min_trades
+            ),
+            latest_strategy AS (
+                -- For each (template_name, symbol) pair, find the most recently
+                -- created strategy_id. Used as the representative ID for the
+                -- approval flow (needs a valid strategy_id to reference).
+                SELECT DISTINCT ON (
+                    COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
+                    tj.symbol
+                )
+                    COALESCE(
+                        s.strategy_metadata->>'template_name',
+                        REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                    )                                                   AS template_name,
+                    tj.symbol,
+                    s.id                                                AS strategy_id,
+                    s.name                                              AS strategy_name
+                FROM trade_journal tj
+                JOIN strategies s ON s.id = tj.strategy_id
+                WHERE tj.pnl IS NOT NULL
+                  AND tj.account_type = 'demo'
+                ORDER BY
+                    COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
+                    tj.symbol,
+                    s.created_at DESC
+            )
             SELECT
-                COALESCE(
-                    s.strategy_metadata->>'template_name',
-                    REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
-                )                                                   AS template_name,
-                tj.symbol,
-                -- Use the most recent PAPER strategy_id for this pair so the
-                -- approval flow has a valid strategy_id to reference.
-                (
-                    SELECT s2.id FROM strategies s2
-                    JOIN trade_journal tj2 ON tj2.strategy_id = s2.id
-                    WHERE tj2.symbol = tj.symbol
-                      AND COALESCE(
-                            s2.strategy_metadata->>'template_name',
-                            REGEXP_REPLACE(s2.name, ' V[0-9]+$', '')
-                          ) = COALESCE(
-                            s.strategy_metadata->>'template_name',
-                            REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
-                          )
-                      AND tj2.pnl IS NOT NULL
-                      AND tj2.account_type = 'demo'
-                    ORDER BY s2.created_at DESC
-                    LIMIT 1
-                )                                                   AS representative_strategy_id,
-                COUNT(*)                                            AS trades,
-                ROUND(
-                    CASE WHEN STDDEV(tj.pnl) > 0
-                         THEN (AVG(tj.pnl) / STDDEV(tj.pnl)) * SQRT(252)
-                         ELSE 0
-                    END::numeric, 4
-                )                                                   AS paper_sharpe,
-                ROUND(
-                    100.0 * SUM(CASE WHEN tj.pnl > 0 THEN 1 ELSE 0 END)
-                    / NULLIF(COUNT(*), 0)::numeric, 2
-                )                                                   AS win_rate_pct,
-                ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2)        AS total_pnl,
-                COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions
-            FROM trade_journal tj
-            JOIN strategies s ON s.id = tj.strategy_id
-            WHERE tj.pnl IS NOT NULL
-              AND tj.account_type = 'demo'
-            GROUP BY template_name, tj.symbol
-            HAVING COUNT(*) >= :min_trades
+                ps.template_name,
+                ps.symbol,
+                ls.strategy_id  AS representative_strategy_id,
+                ls.strategy_name,
+                ps.trades,
+                ps.paper_sharpe,
+                ps.win_rate_pct,
+                ps.total_pnl,
+                ps.strategy_versions
+            FROM pair_stats ps
+            JOIN latest_strategy ls
+              ON ls.template_name = ps.template_name
+             AND ls.symbol        = ps.symbol
         """),
         {"min_trades": MIN_PAPER_TRADES},
     ).fetchall()

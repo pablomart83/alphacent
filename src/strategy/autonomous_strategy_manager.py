@@ -664,23 +664,28 @@ class AutonomousStrategyManager:
                 "template_count": template_count,
             })
 
-            # Persist detected market regime to YAML for the status endpoint
+            # Persist detected market regime to YAML for the status endpoint.
+            # NOTE: This is a read-modify-write on the YAML. To minimise the
+            # race window with the Settings page's PUT /config/autonomous, we
+            # detect the regime BEFORE reading the file so the read→write gap
+            # is as short as possible.
             try:
                 import yaml
                 from pathlib import Path
                 config_path = Path("config/autonomous_trading.yaml")
                 if config_path.exists():
-                    with open(config_path, 'r') as f:
-                        yaml_config = yaml.safe_load(f) or {}
-                    
-                    # Detect current regime
                     try:
                         sub_regime, confidence, _, _ = self.strategy_proposer.market_analyzer.detect_sub_regime()
                         stats['regime'] = sub_regime.value
                         stats['regime_confidence'] = confidence
+                        # Read the LATEST YAML (after regime detection, not before)
+                        # so any Settings save that happened during detection is
+                        # preserved rather than overwritten.
+                        with open(config_path, 'r') as f:
+                            yaml_config = yaml.safe_load(f) or {}
                         yaml_config['market_regime'] = {
                             'current': sub_regime.value,
-                            'confidence': float(confidence),  # Convert numpy scalar to plain float
+                            'confidence': float(confidence),
                             'updated_at': datetime.now().isoformat(),
                         }
                         with open(config_path, 'w') as f:
