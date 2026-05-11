@@ -51,19 +51,116 @@ class Session:
 
 class AuthenticationManager:
     """
-    DB-backed user authentication with bcrypt hashing and in-memory sessions.
+    DB-backed user authentication with bcrypt hashing and DB-persisted sessions.
+
+    Sessions are written to the `user_sessions` table on creation and deleted
+    on logout/expiry. On startup, all non-expired rows are loaded back into the
+    in-memory dict so the fast-path validation (dict lookup) still works.
+    This means sessions survive backend restarts, deploys, and systemd bounces.
     """
 
     def __init__(self, session_timeout_minutes: int = 480):  # 8 hours default
         self.sessions: Dict[str, Session] = {}
         self.session_timeout = timedelta(minutes=session_timeout_minutes)
         self._db = None
+        # Throttle DB writes for last_activity — update DB at most every 60s
+        # per session to avoid a write on every single API request.
+        self._last_db_activity_write: Dict[str, datetime] = {}
+        self._DB_WRITE_INTERVAL = timedelta(seconds=60)
         logger.info(f"AuthenticationManager initialized with {session_timeout_minutes}min timeout")
 
     def set_database(self, db):
         """Set database reference for DB-backed user management."""
         self._db = db
         logger.info("AuthenticationManager connected to database")
+        # Restore sessions that survived the restart
+        self.load_sessions_from_db()
+
+    def load_sessions_from_db(self):
+        """Load all non-expired sessions from DB into the in-memory dict.
+
+        Called once at startup after set_database(). Any session that was
+        valid before the restart is immediately usable again — the user's
+        browser cookie still works.
+        """
+        from src.models.orm import UserSessionORM
+        db_session = self._get_db_session()
+        if not db_session:
+            return
+        try:
+            now = datetime.now()
+            rows = db_session.query(UserSessionORM).filter(
+                UserSessionORM.expires_at > now
+            ).all()
+            loaded = 0
+            for row in rows:
+                session = Session(
+                    session_id=row.session_id,
+                    username=row.username,
+                    role=row.role,
+                    permissions=row.permissions or {},
+                    created_at=row.created_at,
+                    last_activity=row.last_activity,
+                    expires_at=row.expires_at,
+                )
+                self.sessions[row.session_id] = session
+                loaded += 1
+            logger.info(f"Loaded {loaded} active sessions from DB (restart recovery)")
+        except Exception as e:
+            logger.warning(f"Could not load sessions from DB: {e}")
+        finally:
+            db_session.close()
+
+    def _persist_session(self, session: Session):
+        """Write or update a session row in the DB. Best-effort — never raises."""
+        from src.models.orm import UserSessionORM
+        db_session = self._get_db_session()
+        if not db_session:
+            return
+        try:
+            existing = db_session.query(UserSessionORM).filter_by(
+                session_id=session.session_id
+            ).first()
+            if existing:
+                existing.last_activity = session.last_activity
+                existing.expires_at = session.expires_at
+            else:
+                db_session.add(UserSessionORM(
+                    session_id=session.session_id,
+                    username=session.username,
+                    role=session.role,
+                    permissions=session.permissions,
+                    created_at=session.created_at,
+                    last_activity=session.last_activity,
+                    expires_at=session.expires_at,
+                ))
+            db_session.commit()
+        except Exception as e:
+            try:
+                db_session.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not persist session {session.session_id[:8]}: {e}")
+        finally:
+            db_session.close()
+
+    def _delete_session_from_db(self, session_id: str):
+        """Remove a session row from the DB. Best-effort — never raises."""
+        from src.models.orm import UserSessionORM
+        db_session = self._get_db_session()
+        if not db_session:
+            return
+        try:
+            db_session.query(UserSessionORM).filter_by(session_id=session_id).delete()
+            db_session.commit()
+        except Exception as e:
+            try:
+                db_session.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not delete session {session_id[:8]} from DB: {e}")
+        finally:
+            db_session.close()
 
     def _get_db_session(self):
         """Get a DB session. Returns None if DB not available."""
@@ -194,6 +291,9 @@ class AuthenticationManager:
             )
             self.sessions[session_id] = session
 
+            # Persist to DB so the session survives a backend restart
+            self._persist_session(session)
+
             logger.info(f"User authenticated: {username} (role={user.role}), session: {session_id[:8]}...")
             return session_id
         except Exception as e:
@@ -203,7 +303,11 @@ class AuthenticationManager:
             db_session.close()
 
     def validate_session(self, session_id: str) -> bool:
-        """Validate session and update last activity."""
+        """Validate session and update last activity.
+
+        The in-memory dict is the fast path. DB writes are throttled to once
+        per 60s per session so we don't hammer the DB on every API request.
+        """
         session = self.sessions.get(session_id)
         if not session:
             return False
@@ -216,6 +320,13 @@ class AuthenticationManager:
 
         session.last_activity = now
         session.expires_at = now + self.session_timeout
+
+        # Throttled DB write — persist the rolling expiry at most every 60s
+        last_write = self._last_db_activity_write.get(session_id)
+        if last_write is None or (now - last_write) >= self._DB_WRITE_INTERVAL:
+            self._persist_session(session)
+            self._last_db_activity_write[session_id] = now
+
         return True
 
     def get_session_user(self, session_id: str) -> Optional[str]:
@@ -236,22 +347,46 @@ class AuthenticationManager:
         return session.permissions if session else {}
 
     def logout(self, session_id: str) -> bool:
-        """Logout user by removing session."""
+        """Logout user by removing session from memory and DB."""
         session = self.sessions.pop(session_id, None)
+        self._last_db_activity_write.pop(session_id, None)
+        self._delete_session_from_db(session_id)
         if session:
             logger.info(f"User logged out: {session.username}, session: {session_id[:8]}...")
             return True
         return False
 
     def clear_expired_sessions(self) -> int:
-        """Remove all expired sessions."""
+        """Remove all expired sessions from memory and DB."""
+        from src.models.orm import UserSessionORM
         now = datetime.now()
         expired = [sid for sid, s in self.sessions.items() if now > s.expires_at]
         for sid in expired:
             s = self.sessions.pop(sid)
+            self._last_db_activity_write.pop(sid, None)
             logger.info(f"Cleared expired session for user: {s.username}")
         if expired:
-            logger.info(f"Cleared {len(expired)} expired sessions")
+            logger.info(f"Cleared {len(expired)} expired sessions from memory")
+
+        # Also purge expired rows from DB (belt-and-braces cleanup)
+        db_session = self._get_db_session()
+        if db_session:
+            try:
+                deleted = db_session.query(UserSessionORM).filter(
+                    UserSessionORM.expires_at <= now
+                ).delete()
+                db_session.commit()
+                if deleted:
+                    logger.info(f"Purged {deleted} expired session rows from DB")
+            except Exception as e:
+                try:
+                    db_session.rollback()
+                except Exception:
+                    pass
+                logger.warning(f"Could not purge expired sessions from DB: {e}")
+            finally:
+                db_session.close()
+
         return len(expired)
 
     def change_password(self, username: str, old_password: str, new_password: str) -> bool:

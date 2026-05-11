@@ -1110,6 +1110,39 @@ class UserORM(Base):
         }
 
 
+class UserSessionORM(Base):
+    """Persistent user sessions — survive backend restarts.
+
+    Sessions are written to DB on creation and deleted on logout/expiry.
+    On startup, AuthenticationManager loads all non-expired rows back into
+    its in-memory dict so the fast-path validation (dict lookup) still works.
+
+    This table is the source of truth for 'is this session_id still valid?'
+    across restarts, deploys, and systemd service bounces.
+    """
+    __tablename__ = "user_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(64), nullable=False, unique=True, index=True)
+    username = Column(String, nullable=False, index=True)
+    role = Column(String, nullable=False)
+    permissions = Column(NumpySafeJSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    last_activity = Column(DateTime, nullable=False, default=datetime.now)
+    expires_at = Column(DateTime, nullable=False, index=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "username": self.username,
+            "role": self.role,
+            "permissions": self.permissions or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_activity": self.last_activity.isoformat() if self.last_activity else None,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+        }
+
+
 class SignalDecisionORM(Base):
     """Audit log of every template × symbol × direction decision per cycle.
 
