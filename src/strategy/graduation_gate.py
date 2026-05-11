@@ -395,50 +395,102 @@ def approve_graduation(
     """
     Approve a (strategy, symbol) pair for live trading.
 
-    Creates a graduation_approvals row (approved) and a live_strategies row.
+    Creates:
+      1. A new StrategyORM row with status=LIVE, symbols=[symbol] — the live
+         strategy is a separate entity from the source PAPER/BACKTESTED strategy.
+         The source strategy is NOT mutated and continues generating DEMO trades.
+      2. A graduation_approvals row recording the approval snapshot.
+      3. A live_strategies row pointing at the new LIVE strategy_id.
+
+    The new LIVE strategy carries over the template rules, risk params, and WF
+    metadata from the source strategy, plus a `parent_strategy_id` reference so
+    the full lineage is traceable.
+
     Returns the created live_strategies record as a dict.
     """
+    import uuid
+    import json
     from src.models.orm import StrategyORM, GraduationApprovalORM, LiveStrategyORM
+    from src.models.enums import StrategyStatus
 
-    strategy = session.query(StrategyORM).filter_by(id=strategy_id).first()
-    if not strategy:
+    source = session.query(StrategyORM).filter_by(id=strategy_id).first()
+    if not source:
         raise ValueError(f"Strategy {strategy_id} not found")
 
-    meta = strategy.strategy_metadata or {}
-    template_name = meta.get("template_name") or strategy.name
+    meta = source.strategy_metadata or {}
+    template_name = meta.get("template_name") or source.name
     wf_sharpe = (
-        meta.get("wf_test_sharpe")        # primary key — set by strategy_proposer
-        or meta.get("wf_sharpe")           # legacy alias
-        or meta.get("walk_forward_sharpe") # older alias
-        or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
+        meta.get("wf_test_sharpe")
+        or meta.get("wf_sharpe")
+        or meta.get("walk_forward_sharpe")
+        or (source.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
     )
 
-    # Use cross-version aggregated stats (same query as the graduation queue) so
-    # the approval record reflects the full (template_name, symbol) history, not
-    # just the single strategy_id that happens to be the representative version.
+    # Aggregated cross-version paper stats for the approval snapshot.
     paper_stats = get_aggregated_paper_stats(session, template_name, symbol)
     if not paper_stats.get("paper_trades"):
-        # Fallback: single-strategy stats if aggregation returns nothing.
         paper_stats = get_paper_stats_for_strategy(session, strategy_id, symbol)
     ratio = None
     if wf_sharpe and wf_sharpe > 0 and paper_stats["paper_sharpe"] is not None:
         ratio = round(paper_stats["paper_sharpe"] / wf_sharpe, 3)
 
-    # Check not already active
+    # Check not already active — scope to template+symbol, not strategy_id,
+    # so re-graduation after retirement is caught correctly.
     existing = (
         session.query(LiveStrategyORM)
-        .filter_by(strategy_id=strategy_id, symbol=symbol)
+        .filter_by(template_name=template_name, symbol=symbol)
         .filter(LiveStrategyORM.retired_at.is_(None))
         .first()
     )
     if existing:
-        raise ValueError(f"({strategy_id}, {symbol}) is already active in live_strategies")
+        raise ValueError(f"({template_name}, {symbol}) is already active in live_strategies")
 
     now = datetime.now()
 
-    # Record approval
+    # ── 1. Create the LIVE strategy row ──────────────────────────────────────
+    # Inherits rules and risk params from the source strategy.
+    # symbols is scoped to the single approved symbol — a live strategy trades
+    # exactly one symbol, not the full paper watchlist.
+    live_meta = dict(meta)  # copy source metadata
+    live_meta["parent_strategy_id"] = strategy_id   # lineage reference
+    live_meta["graduated_from"] = source.name
+    live_meta["graduated_at"] = now.isoformat()
+    live_meta["activation_approved"] = True
+    # Override risk params with CIO-approved values
+    live_meta["live_position_size"] = position_size
+    live_meta["live_sl_pct"] = sl_pct
+    live_meta["live_tp_pct"] = tp_pct
+    live_meta["live_conviction_min"] = conviction_min
+
+    # Build risk_params for the live strategy using CIO-approved SL/TP
+    live_risk_params = dict(source.risk_params or {})
+    live_risk_params["stop_loss_pct"] = sl_pct
+    live_risk_params["take_profit_pct"] = tp_pct
+
+    live_strategy_id = str(uuid.uuid4())
+    live_strategy = StrategyORM(
+        id=live_strategy_id,
+        name=f"{template_name} {symbol} LIVE",
+        description=f"Live strategy — graduated from {source.name} on {now.date()}",
+        status=StrategyStatus.LIVE,
+        rules=source.rules,
+        symbols=json.dumps([symbol]) if isinstance(source.symbols, str) else [symbol],
+        allocation_percent=source.allocation_percent or 0.0,
+        risk_params=live_risk_params,
+        created_at=now,
+        activated_at=now,
+        performance={"total_return": 0.0, "sharpe_ratio": 0.0, "sortino_ratio": 0.0,
+                     "max_drawdown": 0.0, "win_rate": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
+                     "total_trades": 0},
+        reasoning=source.reasoning,
+        backtest_results=source.backtest_results,
+        strategy_metadata=live_meta,
+    )
+    session.add(live_strategy)
+
+    # ── 2. Record approval snapshot ──────────────────────────────────────────
     approval = GraduationApprovalORM(
-        strategy_id=strategy_id,
+        strategy_id=live_strategy_id,   # points at the new LIVE strategy
         symbol=symbol,
         template_name=template_name,
         approved_at=now,
@@ -458,10 +510,10 @@ def approve_graduation(
     session.add(approval)
     session.flush()  # get approval.id
 
-    # Create live authorization
+    # ── 3. Create live authorization row ─────────────────────────────────────
     live_row = LiveStrategyORM(
         graduation_id=approval.id,
-        strategy_id=strategy_id,
+        strategy_id=live_strategy_id,   # the new LIVE strategy, not the source
         template_name=template_name,
         symbol=symbol,
         activated_at=now,
@@ -474,7 +526,10 @@ def approve_graduation(
     session.commit()
 
     logger.info(
-        f"GRADUATION APPROVED: ({template_name}, {symbol}) → live_strategies id={live_row.id} "
+        f"GRADUATION APPROVED: ({template_name}, {symbol}) → "
+        f"new LIVE strategy {live_strategy_id[:8]} | "
+        f"source={strategy_id[:8]} (continues as PAPER/BACKTESTED) | "
+        f"live_strategies id={live_row.id} "
         f"size=${position_size} sl={sl_pct*100:.1f}% tp={tp_pct*100:.1f}% "
         f"conviction_min={conviction_min}"
     )
