@@ -5022,7 +5022,7 @@ class StrategyEngine:
         
         return entries, exits
     
-    def generate_signals(self, strategy: Strategy, include_dynamic: bool = True) -> List[TradingSignal]:
+    def generate_signals(self, strategy: Strategy, include_dynamic: bool = True, account_type: str = 'demo') -> List[TradingSignal]:
         """
         Generate trading signals based on strategy rules and current market data.
         
@@ -5037,6 +5037,9 @@ class StrategyEngine:
         
         Args:
             strategy: Strategy to generate signals from
+            include_dynamic: Whether to include dynamic symbol additions
+            account_type: 'demo' or 'live' — scopes the pre-filter position/order check
+                          so DEMO positions never block LIVE signal generation and vice versa.
         
         Returns:
             List of trading signals
@@ -5265,7 +5268,8 @@ class StrategyEngine:
         )
         
         # Strategy-scoped pre-filter: only block if THIS strategy already has a position/order
-        # Different strategies CAN trade the same symbol — coordination layer handles dedup
+        # in the same account. DEMO positions must never block LIVE signal generation and
+        # vice versa — the two accounts are independent research/trading pipelines.
         this_strategy_positions = set()  # normalized symbols where THIS strategy has open positions
         this_strategy_pending = set()    # normalized symbols where THIS strategy has pending orders
         
@@ -5278,19 +5282,21 @@ class StrategyEngine:
             db = get_database()
             session = db.get_session()
             try:
-                # Only check positions for THIS strategy
+                # Only check positions for THIS strategy in THIS account
                 my_positions = session.query(PositionORM).filter(
                     PositionORM.strategy_id == strategy.id,
-                    PositionORM.closed_at.is_(None)
+                    PositionORM.closed_at.is_(None),
+                    PositionORM.account_type == account_type,
                 ).all()
                 
                 for pos in my_positions:
                     this_strategy_positions.add(normalize_symbol(pos.symbol))
                 
-                # Only check pending orders for THIS strategy
+                # Only check pending orders for THIS strategy in THIS account
                 my_pending = session.query(OrderORM).filter(
                     OrderORM.strategy_id == strategy.id,
-                    OrderORM.status == OrderStatus.PENDING
+                    OrderORM.status == OrderStatus.PENDING,
+                    OrderORM.account_type == account_type,
                 ).all()
                 
                 for order in my_pending:
@@ -5298,7 +5304,7 @@ class StrategyEngine:
                 
                 if this_strategy_positions or this_strategy_pending:
                     logger.info(
-                        f"Pre-filter for {strategy.name}: "
+                        f"Pre-filter for {strategy.name} [{account_type}]: "
                         f"{len(this_strategy_positions)} symbols with own positions, "
                         f"{len(this_strategy_pending)} symbols with own pending orders"
                     )
@@ -6091,7 +6097,7 @@ class StrategyEngine:
             """Worker function for parallel signal generation."""
             t0 = _time.time()
             try:
-                signals = self.generate_signals(strategy, include_dynamic=include_dynamic)
+                signals = self.generate_signals(strategy, include_dynamic=include_dynamic, account_type='demo')
                 elapsed = _time.time() - t0
                 if signals:
                     logger.info(f"Strategy {strategy.name}: {len(signals)} signals in {elapsed:.2f}s")

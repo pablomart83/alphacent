@@ -1901,6 +1901,151 @@ class TradingScheduler:
 
                 result["backtested_expired"] = expired_count
 
+            # ── Phase 2B: Live-independent signal pass ────────────────────────────────────
+            # DEMO positions must not block live entries — the two accounts are independent.
+            # For each live-authorized (strategy, symbol) pair, re-run signal generation
+            # scoped to account_type='live' so the pre-filter checks live positions only.
+            # This fires even when the DEMO signal was suppressed by a DEMO position.
+            if self._live_order_executor is not None:
+                try:
+                    from src.core.config_loader import load_config as _load_cfg_live2
+                    _live_cfg2 = _load_cfg_live2().get("live_trading", {})
+                    _live_enabled2 = _live_cfg2.get("enabled", False)
+
+                    if _live_enabled2:
+                        from src.strategy.graduation_gate import get_all_live_approvals
+                        from src.models.database import get_database as _gdb_live2
+                        _ls2 = _gdb_live2().get_session()
+                        try:
+                            _all_approvals = get_all_live_approvals(_ls2)
+                        finally:
+                            _ls2.close()
+
+                        for _appr in _all_approvals:
+                            _live_strat_id = _appr.strategy_id
+                            _live_sym = _appr.symbol
+
+                            # Find the strategy object from the active set
+                            _strat_obj = None
+                            for _s_orm in active_strategies:
+                                if _s_orm.id == _live_strat_id:
+                                    _strat_obj = strategy_map.get(_live_strat_id, (None, None))[0]
+                                    break
+                            if _strat_obj is None:
+                                continue
+
+                            # Skip if this (strategy, symbol) already got a live fill
+                            # this cycle from the DEMO-path live routing above.
+                            if (_live_strat_id, _live_sym, 'LONG') in orders_submitted_this_run or \
+                               (_live_strat_id, _live_sym, 'SHORT') in orders_submitted_this_run:
+                                logger.debug(
+                                    f"Live pass: ({_live_strat_id[:8]}, {_live_sym}) already "
+                                    f"filled this cycle via DEMO path — skipping"
+                                )
+                                continue
+
+                            try:
+                                # Generate signals scoped to live account — pre-filter checks
+                                # live positions only, not DEMO positions.
+                                _live_signals = self._strategy_engine.generate_signals(
+                                    _strat_obj,
+                                    include_dynamic=False,
+                                    account_type='live',
+                                )
+                                for _lsig in _live_signals:
+                                    if _lsig.symbol != _live_sym:
+                                        continue
+                                    if _lsig.action not in [SignalAction.ENTER_LONG, SignalAction.ENTER_SHORT]:
+                                        continue
+
+                                    # Conviction gate
+                                    _meta_conv2 = (
+                                        (_lsig.metadata or {}).get("conviction_score")
+                                        if isinstance(getattr(_lsig, 'metadata', None), dict)
+                                        else None
+                                    )
+                                    _sig_conv2 = float(_meta_conv2 or getattr(_lsig, 'confidence', 0) or 0)
+                                    _is_crypto2 = _live_sym.upper() in {
+                                        'BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOT', 'LINK',
+                                        'AVAX', 'NEAR', 'LTC', 'BCH', 'DOGE', 'SUI', 'APT',
+                                        'ARB', 'OP', 'RENDER', 'INJ',
+                                    }
+                                    _live_conv_min2 = int(
+                                        _live_cfg2.get("conviction_threshold_crypto", 68)
+                                        if _is_crypto2
+                                        else _live_cfg2.get("conviction_threshold", 74)
+                                    )
+                                    if _sig_conv2 < _live_conv_min2:
+                                        logger.info(
+                                            f"Live pass conviction gate blocked: {_live_sym} "
+                                            f"score={_sig_conv2:.1f} < {_live_conv_min2} "
+                                            f"({'crypto' if _is_crypto2 else 'equity'})"
+                                        )
+                                        continue
+
+                                    # Size and execute
+                                    _live_min2 = float(_live_cfg2.get("min_order_size", 200))
+                                    _live_max2 = float(_live_cfg2.get("max_order_size", 1500))
+                                    _live_size2 = max(_live_min2, min(_live_max2, float(_appr.position_size)))
+
+                                    try:
+                                        _live_order2 = self._live_order_executor.execute_signal(
+                                            signal=_lsig,
+                                            position_size=_live_size2,
+                                            stop_loss_pct=_appr.sl_pct,
+                                            take_profit_pct=_appr.tp_pct,
+                                        )
+                                        _live_order_orm2 = OrderORM(
+                                            id=_live_order2.id,
+                                            strategy_id=_live_order2.strategy_id,
+                                            symbol=_live_order2.symbol,
+                                            side=_live_order2.side,
+                                            order_type=_live_order2.order_type,
+                                            quantity=_live_order2.quantity,
+                                            status=_live_order2.status,
+                                            price=_live_order2.price,
+                                            stop_price=_live_order2.stop_price,
+                                            take_profit_price=_live_order2.take_profit_price,
+                                            submitted_at=_live_order2.submitted_at or datetime.now(),
+                                            filled_at=_live_order2.filled_at,
+                                            filled_price=_live_order2.filled_price,
+                                            filled_quantity=_live_order2.filled_quantity,
+                                            etoro_order_id=_live_order2.etoro_order_id,
+                                            expected_price=_live_order2.expected_price,
+                                            slippage=_live_order2.slippage,
+                                            fill_time_seconds=_live_order2.fill_time_seconds,
+                                            order_action='entry',
+                                            account_type='live',
+                                            order_metadata=(
+                                                _lsig.metadata
+                                                if isinstance(getattr(_lsig, 'metadata', None), dict)
+                                                else None
+                                            ),
+                                        )
+                                        session.add(_live_order_orm2)
+                                        session.commit()
+                                        logger.info(
+                                            f"LIVE FILL (independent pass): {_live_sym} "
+                                            f"{_lsig.action.value} ${_live_size2:.0f} virtual "
+                                            f"(${_live_size2 * _live_cfg2.get('mirror_ratio', 0.10):.0f} real) "
+                                            f"conviction={_sig_conv2:.1f}>={_live_conv_min2}"
+                                        )
+                                    except Exception as _live_exec_err:
+                                        logger.error(
+                                            f"Live pass execution failed for {_live_sym}: "
+                                            f"{_live_exec_err}",
+                                            exc_info=True,
+                                        )
+                            except Exception as _live_sig_err:
+                                logger.error(
+                                    f"Live pass signal gen failed for strategy "
+                                    f"{_live_strat_id[:8]} / {_live_sym}: {_live_sig_err}",
+                                    exc_info=True,
+                                )
+                except Exception as _live_pass_err:
+                    # Never let the live pass crash the DEMO cycle
+                    logger.error(f"Live-independent pass failed (non-fatal): {_live_pass_err}", exc_info=True)
+
             # Log to structured cycle log
             try:
                 from src.core.cycle_logger import get_cycle_logger

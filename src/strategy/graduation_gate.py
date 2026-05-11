@@ -564,3 +564,20 @@ def get_live_approval(
         .filter(LiveStrategyORM.retired_at.is_(None))
         .first()
     )
+
+
+def get_all_live_approvals(session: Session) -> list:
+    """
+    Return all active LiveStrategyORM rows (retired_at IS NULL).
+
+    Used by TradingScheduler's live-independent signal pass to iterate over
+    every authorized (strategy, symbol) pair and fire live entries independently
+    of the DEMO signal path.
+    """
+    from src.models.orm import LiveStrategyORM
+
+    return (
+        session.query(LiveStrategyORM)
+        .filter(LiveStrategyORM.retired_at.is_(None))
+        .all()
+    )
