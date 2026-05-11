@@ -1615,7 +1615,10 @@ async def update_autonomous_config(
         pf['weight_decay_per_day'] = request.feedback_weight_decay_per_day
 
     # ─── Directional balance + quotas ───────────────────────────────────
-    if request.directional_balance_enabled is not None: db['enabled'] = request.directional_balance_enabled
+    if request.directional_balance_enabled is not None:
+        db['enabled'] = request.directional_balance_enabled
+        # Also sync to directional_quotas.enabled — the key strategy_proposer reads.
+        dq['enabled'] = request.directional_balance_enabled
     if request.directional_min_long_pct is not None: db['min_long_pct'] = request.directional_min_long_pct
     if request.directional_max_long_pct is not None: db['max_long_pct'] = request.directional_max_long_pct
     if request.directional_min_short_pct is not None: db['min_short_pct'] = request.directional_min_short_pct
