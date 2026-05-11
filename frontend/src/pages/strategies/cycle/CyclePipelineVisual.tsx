@@ -211,12 +211,12 @@ export function CyclePipelineVisual({ lastCycle, isRunning, className }: CyclePi
       ) : (
         <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] p-2">
           <div
-            className="grid items-stretch w-full"
+            className="grid items-stretch w-full overflow-x-auto"
             style={{
               gridTemplateColumns: PIPELINE_STAGES
                 .flatMap((_, i) => i < PIPELINE_STAGES.length - 1
-                  ? ['minmax(0,1fr)', '28px']
-                  : ['minmax(0,1fr)'])
+                  ? ['minmax(64px,1fr)', '24px']
+                  : ['minmax(64px,1fr)'])
                 .join(' '),
             }}
           >
