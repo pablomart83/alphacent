@@ -975,6 +975,48 @@ export function useGraduationQueue() {
   })
 }
 
+/* ── Approaching graduation ── */
+
+export interface ApproachingGraduationRow {
+  template_name: string
+  symbol: string
+  trades: number
+  sharpe: number
+  win_rate: number
+  total_pnl: number
+  wf_sharpe: number | null
+  qualification_ratio: number | null
+  strategy_versions: number
+  first_trade: string | null
+  last_trade: string | null
+  graduation_score: number
+  missing_criteria: string[]
+  progress: {
+    trades: number
+    sharpe: number
+    win_rate: number
+    pnl: number
+  }
+}
+
+export interface ApproachingGraduationPayload {
+  approaching: ApproachingGraduationRow[]
+  count: number
+}
+
+export function useApproachingGraduation(minTrades = 5, limit = 20) {
+  return useQuery<ApproachingGraduationPayload>({
+    queryKey: ['approaching-graduation', minTrades, limit],
+    queryFn: () =>
+      api.get<ApproachingGraduationPayload>('/strategies/approaching-graduation', {
+        min_trades: minTrades,
+        limit,
+      }),
+    refetchInterval: 120_000,
+    staleTime: 60_000,
+  })
+}
+
 export function useLiveStrategies() {
   return useQuery<LiveStrategiesPayload>({
     queryKey: ['live-strategies'],

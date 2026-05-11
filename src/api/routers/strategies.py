@@ -1638,6 +1638,230 @@ async def get_graduation_queue(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/approaching-graduation")
+async def get_approaching_graduation(
+    min_trades: int = Query(5, ge=1, le=50, description="Minimum trades to appear in the list"),
+    limit: int = Query(20, ge=1, le=100),
+    username: str = Depends(get_current_user),
+    session: Session = Depends(get_db_session),
+):
+    """
+    Return (template_name, symbol) pairs that are building toward graduation
+    but have not yet crossed all thresholds.
+
+    Key design decisions:
+    - Groups by (template_name, symbol) across ALL strategy IDs — not just
+      currently-PAPER strategies. When a strategy retires and is re-proposed,
+      the new strategy_id gets a fresh UUID but the same template+symbol pair
+      continues accumulating evidence. Grouping by strategy_id would reset
+      the counter on every re-activation.
+    - Reads from trade_journal (closed trades with P&L), not from
+      performance_metrics on the strategies table. This matches exactly what
+      the graduation gate evaluates.
+    - Excludes pairs already in the graduation queue (fully qualified) and
+      pairs already active in live_strategies.
+    - Graduation thresholds mirror graduation_gate.py constants:
+        MIN_PAPER_TRADES = 20
+        MIN_PAPER_WIN_RATE = 0.45
+        MIN_PAPER_PNL = 0.0
+        MIN_QUALIFICATION_RATIO = 0.60 (paper_sharpe / wf_sharpe)
+
+    Returns up to `limit` pairs sorted by a composite graduation score
+    (weighted progress toward each criterion).
+    """
+    from sqlalchemy import text
+    from src.models.orm import LiveStrategyORM, GraduationApprovalORM
+    from src.strategy.graduation_gate import (
+        MIN_PAPER_TRADES,
+        MIN_PAPER_WIN_RATE,
+        MIN_PAPER_PNL,
+        MIN_QUALIFICATION_RATIO,
+        REJECTION_COOLDOWN_DAYS,
+    )
+    from datetime import timedelta
+
+    try:
+        # --- Pairs to exclude ---
+        # 1. Already active in live_strategies
+        active_live = set(
+            (row.template_name, row.symbol)
+            for row in session.query(LiveStrategyORM)
+            .filter(LiveStrategyORM.retired_at.is_(None))
+            .all()
+        )
+
+        # 2. Already in the graduation queue (fully qualified) — we get these
+        #    by running the same query as the graduation gate but just collecting
+        #    the (template, symbol) keys.
+        from src.strategy.graduation_gate import get_graduation_queue as _get_queue
+        try:
+            already_qualified = set(
+                (row.get("template_name") or row.get("strategy_name"), row["symbol"])
+                for row in _get_queue(session)
+            )
+        except Exception:
+            already_qualified = set()
+
+        # 3. Recently rejected (within cooldown)
+        cooldown_cutoff = datetime.now() - timedelta(days=REJECTION_COOLDOWN_DAYS)
+        recently_rejected = set(
+            (row.template_name, row.symbol)
+            for row in session.query(GraduationApprovalORM)
+            .filter(
+                GraduationApprovalORM.rejected_at.isnot(None),
+                GraduationApprovalORM.rejected_at >= cooldown_cutoff,
+            )
+            .all()
+        )
+
+        # --- Aggregate trade_journal by (template_name, symbol) ---
+        # We join strategies to get template_name from strategy_metadata.
+        # COALESCE: prefer strategy_metadata->>'template_name', fall back to
+        # strategy name (strips the version suffix " V1", " V2" etc.).
+        rows = session.execute(
+            text("""
+                SELECT
+                    COALESCE(
+                        s.strategy_metadata->>'template_name',
+                        REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                    )                                                   AS template_name,
+                    tj.symbol,
+                    COUNT(*)                                            AS trades,
+                    ROUND(
+                        CASE WHEN STDDEV(tj.pnl) > 0
+                             THEN (AVG(tj.pnl) / STDDEV(tj.pnl)) * SQRT(252)
+                             ELSE 0
+                        END::numeric, 4
+                    )                                                   AS sharpe,
+                    ROUND(
+                        100.0 * SUM(CASE WHEN tj.pnl > 0 THEN 1 ELSE 0 END)
+                        / NULLIF(COUNT(*), 0)::numeric, 2
+                    )                                                   AS win_rate_pct,
+                    ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2)        AS total_pnl,
+                    MIN(tj.entry_time)                                  AS first_trade,
+                    MAX(tj.entry_time)                                  AS last_trade,
+                    COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions
+                FROM trade_journal tj
+                JOIN strategies s ON s.id = tj.strategy_id
+                WHERE tj.pnl IS NOT NULL
+                  AND tj.account_type = 'demo'
+                GROUP BY template_name, tj.symbol
+                HAVING COUNT(*) >= :min_trades
+                ORDER BY trades DESC
+            """),
+            {"min_trades": min_trades},
+        ).fetchall()
+
+        # --- Get best WF sharpe per template from strategies table ---
+        # Use the highest WF sharpe seen across all strategy versions for this
+        # template — the most recent activation is the most relevant signal.
+        wf_rows = session.execute(
+            text("""
+                SELECT
+                    COALESCE(
+                        strategy_metadata->>'template_name',
+                        REGEXP_REPLACE(name, ' V[0-9]+$', '')
+                    )                                                   AS template_name,
+                    MAX(
+                        COALESCE(
+                            (strategy_metadata->>'wf_sharpe')::float,
+                            (strategy_metadata->>'walk_forward_sharpe')::float,
+                            0
+                        )
+                    )                                                   AS best_wf_sharpe
+                FROM strategies
+                WHERE strategy_metadata IS NOT NULL
+                GROUP BY template_name
+            """),
+        ).fetchall()
+        wf_by_template = {r.template_name: float(r.best_wf_sharpe or 0) for r in wf_rows}
+
+        # --- Build approaching list ---
+        approaching = []
+        for row in rows:
+            tname = row.template_name or ""
+            sym = row.symbol or ""
+            pair = (tname, sym)
+
+            # Skip already qualified / active / rejected
+            if pair in active_live or pair in already_qualified or pair in recently_rejected:
+                continue
+
+            trades = int(row.trades)
+            sharpe = float(row.sharpe) if row.sharpe is not None else 0.0
+            win_rate = float(row.win_rate_pct) / 100.0 if row.win_rate_pct is not None else 0.0
+            total_pnl = float(row.total_pnl) if row.total_pnl is not None else 0.0
+            wf_sharpe = wf_by_template.get(tname, 0.0)
+
+            # Skip pairs that have already crossed ALL thresholds — they should
+            # be in the graduation queue (we excluded them above, but belt+braces).
+            trades_ok = trades >= MIN_PAPER_TRADES
+            pnl_ok = total_pnl > MIN_PAPER_PNL
+            wr_ok = win_rate >= MIN_PAPER_WIN_RATE
+            ratio = (sharpe / wf_sharpe) if wf_sharpe > 0 and sharpe > 0 else None
+            ratio_ok = ratio is not None and ratio >= MIN_QUALIFICATION_RATIO
+
+            if trades_ok and pnl_ok and wr_ok and ratio_ok:
+                continue  # fully qualified — graduation gate should have it
+
+            # Composite graduation score (0-100): weighted progress toward each gate.
+            # Weights: trades 30%, sharpe/ratio 35%, win_rate 20%, pnl 15%.
+            trades_pct = min(1.0, trades / MIN_PAPER_TRADES)
+            sharpe_pct = min(1.0, max(0.0, sharpe) / 1.0)  # target Sharpe 1.0
+            wr_pct = min(1.0, win_rate / MIN_PAPER_WIN_RATE)
+            pnl_pct = 1.0 if total_pnl > 0 else max(0.0, 1.0 + total_pnl / max(abs(total_pnl), 1))
+            score = (trades_pct * 30 + sharpe_pct * 35 + wr_pct * 20 + pnl_pct * 15)
+
+            # Missing criteria — what's blocking graduation
+            missing = []
+            if not trades_ok:
+                missing.append(f"trades {trades}/{MIN_PAPER_TRADES}")
+            if not pnl_ok:
+                missing.append(f"P&L {total_pnl:.0f} ≤ 0")
+            if not wr_ok:
+                missing.append(f"win rate {win_rate*100:.1f}% < {MIN_PAPER_WIN_RATE*100:.0f}%")
+            if not ratio_ok:
+                if ratio is not None:
+                    missing.append(f"qual ratio {ratio:.2f} < {MIN_QUALIFICATION_RATIO}")
+                elif wf_sharpe <= 0:
+                    missing.append("no WF sharpe on record")
+                else:
+                    missing.append("Sharpe not computable")
+
+            approaching.append({
+                "template_name": tname,
+                "symbol": sym,
+                "trades": trades,
+                "sharpe": round(sharpe, 3),
+                "win_rate": round(win_rate, 4),
+                "total_pnl": round(total_pnl, 2),
+                "wf_sharpe": round(wf_sharpe, 3) if wf_sharpe else None,
+                "qualification_ratio": round(ratio, 3) if ratio is not None else None,
+                "strategy_versions": int(row.strategy_versions),
+                "first_trade": row.first_trade.isoformat() if row.first_trade else None,
+                "last_trade": row.last_trade.isoformat() if row.last_trade else None,
+                "graduation_score": round(score, 1),
+                "missing_criteria": missing,
+                # Progress toward each threshold (0-1)
+                "progress": {
+                    "trades": round(trades_pct, 3),
+                    "sharpe": round(sharpe_pct, 3),
+                    "win_rate": round(wr_pct, 3),
+                    "pnl": round(pnl_pct, 3),
+                },
+            })
+
+        # Sort by graduation_score desc
+        approaching.sort(key=lambda x: x["graduation_score"], reverse=True)
+        approaching = approaching[:limit]
+
+        return {"approaching": approaching, "count": len(approaching)}
+
+    except Exception as e:
+        logger.error(f"Error fetching approaching graduation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/live")
 async def get_live_strategies(
     username: str = Depends(get_current_user),

@@ -1,97 +1,60 @@
-import { useMemo } from 'react'
 import { TrendingUp } from 'lucide-react'
 import { SectionLabel } from '@/components/layout'
-import { Badge, EmptyState, Skeleton } from '@/components/primitives'
-import { cn, formatNumber } from '@/lib/utils'
-import { useStrategies, type StrategyRow } from '../useStrategiesData'
+import { EmptyState, Skeleton } from '@/components/primitives'
+import { cn, formatAge, formatNumber } from '@/lib/utils'
+import {
+  useApproachingGraduation,
+  type ApproachingGraduationRow,
+} from '../useStrategiesData'
 
 /**
- * ApproachingGraduationPanel — top 10 PAPER strategies that are on track
- * toward graduation but haven't crossed the threshold yet.
+ * ApproachingGraduationPanel — top candidates building toward graduation.
  *
- * Graduation criteria (from useStrategiesData.isGraduationEligible):
- *   - status === PAPER
- *   - trades >= 20
- *   - Sharpe >= 1.0
+ * Data source: GET /strategies/approaching-graduation
  *
- * "Approaching" = PAPER + trades >= 10 + Sharpe >= 0.5 (below threshold).
- * Sorted by a composite graduation score so the closest candidates surface
- * at the top.
+ * Why this endpoint exists (and why the old client-side approach was wrong):
+ *
+ *   1. Graduation is evaluated against trade_journal (closed trades with P&L),
+ *      not performance_metrics.total_trades (which counts open positions too).
+ *
+ *   2. Every time the proposer creates a strategy it gets a new UUID. When a
+ *      strategy retires and the same (template, symbol) pair is re-proposed,
+ *      the new strategy_id starts from zero in the graduation gate's view.
+ *      The backend endpoint groups by (template_name, symbol) across ALL
+ *      strategy IDs so historical evidence accumulates correctly.
+ *
+ *   3. The graduation thresholds are: trades ≥ 20, win rate ≥ 45%, P&L > 0,
+ *      and paper_sharpe ≥ 60% of WF sharpe. The composite score weights
+ *      progress toward each gate so the closest candidates surface first.
  */
 
-interface ApproachingRow {
-  id: string
-  name: string
-  symbol: string
-  trades: number
-  sharpe: number
-  winRate: number
-  totalPnl: number
-  score: number // 0-100 composite progress toward graduation
-}
-
-function graduationScore(s: StrategyRow): number {
-  const trades = s.performance_metrics?.total_trades ?? 0
-  const sharpe = s.performance_metrics?.sharpe_ratio ?? 0
-  const winRate = s.performance_metrics?.win_rate ?? 0
-  // Weighted progress toward each threshold:
-  //   trades: 20 needed → 40% weight
-  //   sharpe: 1.0 needed → 40% weight
-  //   win_rate: 45% needed → 20% weight
-  const tradesPct = Math.min(1, trades / 20)
-  const sharpePct = Math.min(1, Math.max(0, sharpe) / 1.0)
-  const wrPct = Math.min(1, winRate / 45)
-  return (tradesPct * 40 + sharpePct * 40 + wrPct * 20)
-}
+// Graduation thresholds — mirror graduation_gate.py constants
+const MIN_TRADES = 20
+const MIN_WIN_RATE = 0.45
+const MIN_QUAL_RATIO = 0.60
 
 export function ApproachingGraduationPanel() {
-  const strategies = useStrategies({ slim: true, include_retired: false })
+  const query = useApproachingGraduation(5, 10)
 
-  const rows = useMemo<ApproachingRow[]>(() => {
-    const all = strategies.data?.strategies ?? []
-    return all
-      .filter((s) => {
-        if (s.status !== 'PAPER') return false
-        const trades = s.performance_metrics?.total_trades ?? 0
-        const sharpe = s.performance_metrics?.sharpe_ratio ?? 0
-        // Approaching but not yet graduated: trades 10-19 OR sharpe 0.5-0.99
-        const approaching =
-          (trades >= 10 && trades < 20) ||
-          (sharpe >= 0.5 && sharpe < 1.0) ||
-          (trades >= 20 && sharpe < 1.0)
-        return approaching
-      })
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        symbol: (s.symbols ?? [])[0] ?? '—',
-        trades: s.performance_metrics?.total_trades ?? 0,
-        sharpe: s.performance_metrics?.sharpe_ratio ?? 0,
-        winRate: s.performance_metrics?.win_rate ?? 0,
-        totalPnl: s.performance_metrics?.total_pnl ?? 0,
-        score: graduationScore(s),
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10)
-  }, [strategies.data?.strategies])
-
-  if (strategies.isLoading && !strategies.data) {
+  if (query.isLoading && !query.data) {
     return (
-      <section className="space-y-1.5">
+      <section className="space-y-1.5 px-2 pb-2">
         <SectionLabel>Approaching graduation</SectionLabel>
         <Skeleton className="h-[280px] w-full" />
       </section>
     )
   }
 
+  const rows = query.data?.approaching ?? []
+
   if (!rows.length) {
     return (
-      <section className="space-y-1.5">
+      <section className="space-y-1.5 px-2 pb-2">
         <SectionLabel>Approaching graduation</SectionLabel>
         <EmptyState
           icon={TrendingUp}
-          title="No strategies approaching graduation"
-          description="Strategies appear here once they have ≥ 10 trades or Sharpe ≥ 0.5 but haven't yet crossed the graduation threshold."
+          title="No candidates approaching graduation"
+          description="Pairs appear here once they have ≥ 5 closed trades in the journal but haven't yet crossed all graduation thresholds."
           className="py-6"
         />
       </section>
@@ -99,11 +62,11 @@ export function ApproachingGraduationPanel() {
   }
 
   return (
-    <section className="space-y-1.5">
+    <section className="space-y-1.5 px-2 pb-2">
       <SectionLabel
         actions={
           <span className="text-[10px] normal-case tracking-normal text-[var(--text-3)]">
-            {rows.length} candidates · threshold: 20 trades + Sharpe ≥ 1.0
+            {rows.length} candidates · thresholds: 20 trades · Sharpe ≥ 60% WF · WR ≥ 45% · P&L {'>'} 0
           </span>
         }
       >
@@ -111,34 +74,52 @@ export function ApproachingGraduationPanel() {
       </SectionLabel>
       <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] divide-y divide-[var(--border-subtle)]">
         {rows.map((r) => (
-          <ApproachingRow key={r.id} row={r} />
+          <ApproachingRow key={`${r.template_name}::${r.symbol}`} row={r} />
         ))}
       </div>
     </section>
   )
 }
 
-function ApproachingRow({ row }: { row: ApproachingRow }) {
-  const tradesPct = Math.min(100, (row.trades / 20) * 100)
-  const sharpePct = Math.min(100, (Math.max(0, row.sharpe) / 1.0) * 100)
+function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
+  const tradesPct = Math.min(100, (row.trades / MIN_TRADES) * 100)
+  const wrPct = Math.min(100, (row.win_rate / MIN_WIN_RATE) * 100)
+  const qualPct =
+    row.qualification_ratio != null
+      ? Math.min(100, (row.qualification_ratio / MIN_QUAL_RATIO) * 100)
+      : row.sharpe > 0
+        ? Math.min(100, (row.sharpe / 1.0) * 100) // fallback: progress toward Sharpe 1.0
+        : 0
+  const pnlOk = row.total_pnl > 0
 
   return (
-    <div className="px-3 py-2 space-y-1.5">
-      <div className="flex items-center justify-between gap-2">
+    <div className="px-3 py-2 space-y-2">
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[11px] font-medium text-[var(--text-0)] truncate" title={row.name}>
-            {row.name}
+          <div
+            className="text-[11px] font-medium text-[var(--text-0)] truncate"
+            title={row.template_name}
+          >
+            {row.template_name}
           </div>
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <Badge variant="paper" size="sm">PAPER</Badge>
-            <span className="mono text-[10px] text-[var(--text-2)]">{row.symbol}</span>
+          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-[var(--text-3)]">
+            <span className="mono font-medium text-[var(--text-2)]">{row.symbol}</span>
+            {row.strategy_versions > 1 && (
+              <span title={`${row.strategy_versions} strategy versions contributed trades`}>
+                {row.strategy_versions} versions
+              </span>
+            )}
+            {row.last_trade && (
+              <span>last trade {formatAge(row.last_trade)}</span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0 text-[10px]">
           <Stat
             label="Trades"
-            value={`${row.trades}/20`}
-            tone={row.trades >= 20 ? 'up' : 'neutral'}
+            value={`${row.trades}/${MIN_TRADES}`}
+            tone={row.trades >= MIN_TRADES ? 'up' : 'neutral'}
           />
           <Stat
             label="Sharpe"
@@ -147,21 +128,47 @@ function ApproachingRow({ row }: { row: ApproachingRow }) {
           />
           <Stat
             label="Win %"
-            value={`${formatNumber(row.winRate, 1)}%`}
-            tone={row.winRate >= 45 ? 'up' : 'neutral'}
+            value={`${formatNumber(row.win_rate * 100, 1)}%`}
+            tone={row.win_rate >= MIN_WIN_RATE ? 'up' : 'neutral'}
           />
           <Stat
             label="P&L"
-            value={`${row.totalPnl >= 0 ? '+' : ''}${formatNumber(row.totalPnl, 0)}`}
-            tone={row.totalPnl > 0 ? 'up' : row.totalPnl < 0 ? 'down' : 'neutral'}
+            value={`${row.total_pnl >= 0 ? '+' : ''}${formatNumber(row.total_pnl, 0)}`}
+            tone={pnlOk ? 'up' : 'down'}
           />
+          {row.qualification_ratio != null && (
+            <Stat
+              label="Qual ratio"
+              value={formatNumber(row.qualification_ratio, 2)}
+              tone={row.qualification_ratio >= MIN_QUAL_RATIO ? 'up' : 'neutral'}
+            />
+          )}
         </div>
       </div>
-      {/* Dual progress bars: trades + sharpe */}
-      <div className="grid grid-cols-2 gap-2">
-        <ProgressBar label="Trades" pct={tradesPct} met={row.trades >= 20} />
-        <ProgressBar label="Sharpe" pct={sharpePct} met={row.sharpe >= 1.0} />
+
+      {/* Progress bars */}
+      <div className="grid grid-cols-3 gap-2">
+        <ProgressBar label="Trades" pct={tradesPct} met={row.trades >= MIN_TRADES} />
+        <ProgressBar label="Win rate" pct={wrPct} met={row.win_rate >= MIN_WIN_RATE} />
+        <ProgressBar
+          label={row.qualification_ratio != null ? 'Qual ratio' : 'Sharpe'}
+          pct={qualPct}
+          met={row.qualification_ratio != null ? row.qualification_ratio >= MIN_QUAL_RATIO : row.sharpe >= 1.0}
+        />
       </div>
+
+      {/* Missing criteria */}
+      {row.missing_criteria.length > 0 && (
+        <div className="text-[10px] text-[var(--text-3)]">
+          Missing:{' '}
+          {row.missing_criteria.map((m, i) => (
+            <span key={i}>
+              {i > 0 && ' · '}
+              <span className="text-[var(--status-warning)]">{m}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -214,7 +221,11 @@ function ProgressBar({
           className="h-full rounded-[1px] transition-all"
           style={{
             width: `${pct}%`,
-            backgroundColor: met ? 'var(--pnl-up)' : pct >= 75 ? 'var(--status-warning)' : 'var(--accent-primary)',
+            backgroundColor: met
+              ? 'var(--pnl-up)'
+              : pct >= 75
+                ? 'var(--status-warning)'
+                : 'var(--accent-primary)',
           }}
         />
       </div>
