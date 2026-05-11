@@ -5204,19 +5204,16 @@ class MonitoringService:
                     pass
 
                 if not has_positions and not has_pending and not has_recent_fill:
-                    # Handle pending_retirement strategies: demote to BACKTESTED with
-                    # activation_approved=False so they must pass WF again before trading.
-                    # Previously these were skipped here and left to _check_strategy_decay,
-                    # but that path was not reliably firing — strategies sat in PAPER for weeks.
+                    # Handle pending_retirement strategies: retire them immediately.
+                    # pending_retirement means the system already decided these strategies
+                    # have expired edge. Once all positions close, retire them.
                     if isinstance(s.strategy_metadata, dict) and s.strategy_metadata.get('pending_retirement'):
                         meta = s.strategy_metadata
                         reason = meta.get('pending_retirement_reason', 'Pending retirement — all positions closed')
-                        s.status = StrategyStatus.BACKTESTED
-                        s.retired_at = None
-                        meta['activation_approved'] = False  # Must pass WF again
-                        meta['demoted_from_active'] = True
-                        meta['demoted_at'] = datetime.now().isoformat()
-                        meta['demotion_reason'] = reason
+                        s.status = StrategyStatus.RETIRED
+                        s.retired_at = datetime.now()
+                        meta['retirement_reason'] = reason
+                        meta['retired_at'] = datetime.now().isoformat()
                         meta.pop('pending_retirement', None)
                         meta.pop('pending_retirement_reason', None)
                         meta.pop('pending_retirement_at', None)
@@ -5225,8 +5222,8 @@ class MonitoringService:
                         _flag_mod(s, 'strategy_metadata')
                         demoted += 1
                         logger.info(
-                            f"Demoted pending-retirement PAPER strategy to BACKTESTED: "
-                            f"{s.name} (all positions closed, activation_approved=False)"
+                            f"Retired pending-retirement strategy: {s.name} "
+                            f"(all positions closed): {reason}"
                         )
                         continue
 
