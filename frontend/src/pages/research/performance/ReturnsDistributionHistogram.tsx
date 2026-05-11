@@ -105,16 +105,16 @@ export function ReturnsDistributionHistogram({
       </SectionLabel>
       <div className="h-[260px] rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] px-2 pt-2 pb-1">
         <ResponsiveContainer>
-          <BarChart data={buckets} barCategoryGap={1} margin={{ top: 6, right: 12, bottom: 2, left: -8 }}>
+          {/* Use category XAxis (dataKey="label") so Recharts auto-sizes bar widths.
+              A numeric XAxis with Bar produces zero-width bars unless barSize is set. */}
+          <BarChart data={buckets} barCategoryGap="2%" margin={{ top: 6, right: 12, bottom: 2, left: -8 }}>
             <CartesianGrid stroke="var(--border-subtle)" strokeDasharray="2 4" vertical={false} />
             <XAxis
-              dataKey="mid"
-              type="number"
-              tickFormatter={(v: number) => `${v.toFixed(1)}%`}
-              domain={['dataMin', 'dataMax']}
+              dataKey="label"
               tick={{ fill: 'var(--text-3)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={{ stroke: 'var(--border-subtle)' }}
               tickLine={false}
+              interval="preserveStartEnd"
             />
             <YAxis
               tick={{ fill: 'var(--text-3)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
@@ -131,13 +131,22 @@ export function ReturnsDistributionHistogram({
                 fontSize: 11,
                 borderRadius: 3,
               }}
-              labelFormatter={(v) => (typeof v === 'number' ? `Bucket ${v.toFixed(2)}%` : '—')}
-              formatter={(v) => (typeof v === 'number' ? `${v} days` : '—')}
+              labelFormatter={(v) => `Bucket ${v}`}
+              formatter={(v) => (typeof v === 'number' ? [`${v} days`, 'Count'] : ['—', 'Count'])}
             />
-            <ReferenceLine x={0} stroke="var(--text-3)" strokeDasharray="2 3" />
-            <ReferenceLine x={mean} stroke="var(--accent-primary)" strokeDasharray="4 3" />
-            <ReferenceLine x={mean - std} stroke="var(--status-warning)" strokeDasharray="1 3" />
-            <ReferenceLine x={mean + std} stroke="var(--status-warning)" strokeDasharray="1 3" />
+            {/* Reference lines use x= with the label string for category axis */}
+            <ReferenceLine
+              x={buckets.reduce((closest, b) => Math.abs(b.mid) < Math.abs(closest.mid) ? b : closest, buckets[0])?.label}
+              stroke="var(--text-3)"
+              strokeDasharray="2 3"
+              label={{ value: '0', fill: 'var(--text-3)', fontSize: 9, position: 'top' }}
+            />
+            <ReferenceLine
+              x={buckets.reduce((closest, b) => Math.abs(b.mid - mean) < Math.abs(closest.mid - mean) ? b : closest, buckets[0])?.label}
+              stroke="var(--accent-primary)"
+              strokeDasharray="4 3"
+              label={{ value: 'μ', fill: 'var(--accent-primary)', fontSize: 9, position: 'top' }}
+            />
             <Bar dataKey="count" radius={[2, 2, 0, 0]}>
               {buckets.map((b, i) => (
                 <Cell key={i} fill={b.negative ? 'var(--pnl-down)' : 'var(--pnl-up)'} />

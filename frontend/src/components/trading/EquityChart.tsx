@@ -52,6 +52,13 @@ interface EquityChartProps {
   onShowRealizedChange?: (v: boolean) => void
   showDrawdown?: boolean
   onShowDrawdownChange?: (v: boolean) => void
+  /**
+   * When true the equity (and realised) series are rebased to % return from
+   * the first point so LIVE (flat) vs DEMO (growing) are directly comparable
+   * on the same axis. SPY is also rebased to % so the overlay is meaningful.
+   */
+  percentMode?: boolean
+  onPercentModeChange?: (v: boolean) => void
   fullscreen?: boolean
   onFullscreenToggle?: () => void
   /** Loading state — render empty chart shell. */
@@ -90,6 +97,8 @@ export function EquityChart({
   onShowRealizedChange,
   showDrawdown = true,
   onShowDrawdownChange,
+  percentMode = false,
+  onPercentModeChange,
   fullscreen = false,
   onFullscreenToggle,
   loading = false,
@@ -231,7 +240,19 @@ export function EquityChart({
           : String(a.time).localeCompare(String(b.time)),
       )
 
-    equitySeries.setData(ordered.map((d) => ({ time: d.time, value: d.value })))
+    // In percent mode rebase equity to % return from first point.
+    const eqBase = percentMode && ordered.length > 0 ? ordered[0].value : null
+    const toDisplayValue = (v: number) =>
+      eqBase != null && eqBase > 0 ? ((v - eqBase) / eqBase) * 100 : v
+
+    // Update price format to match mode.
+    equitySeries.applyOptions(
+      percentMode
+        ? { priceFormat: { type: 'percent', precision: 2, minMove: 0.01 } }
+        : { priceFormat: { type: 'price', precision: 0, minMove: 1 } },
+    )
+
+    equitySeries.setData(ordered.map((d) => ({ time: d.time, value: toDisplayValue(d.value) })))
 
     // Realized cumulative as a dashed overlay.
     if (showRealized) {
@@ -250,10 +271,24 @@ export function EquityChart({
             0,
           )
         }
+        // Rebase realized the same way as equity.
+        const realBase = percentMode && ordered.length > 0 ? (ordered[0].realized ?? null) : null
+        realizedSeriesRef.current!.applyOptions(
+          percentMode
+            ? { priceFormat: { type: 'percent', precision: 2, minMove: 0.01 } }
+            : { priceFormat: { type: 'price', precision: 0, minMove: 1 } },
+        )
         realizedSeriesRef.current!.setData(
           ordered
             .filter((d) => d.realized != null && Number.isFinite(d.realized as number))
-            .map((d) => ({ time: d.time, value: d.realized as number })),
+            .map((d) => {
+              const rv = d.realized as number
+              const displayRv =
+                percentMode && realBase != null && realBase > 0
+                  ? ((rv - realBase) / realBase) * 100
+                  : rv
+              return { time: d.time, value: displayRv }
+            }),
         )
       } else if (realizedSeriesRef.current) {
         chartRef.current?.removeSeries(realizedSeriesRef.current)
@@ -265,7 +300,7 @@ export function EquityChart({
     }
 
     chartRef.current?.timeScale().fitContent()
-  }, [equityData, showRealized])
+  }, [equityData, showRealized, percentMode])
 
   // SPY benchmark overlay — rebased to equity start so the line is comparable.
   useEffect(() => {
@@ -280,10 +315,13 @@ export function EquityChart({
       return
     }
 
-    const eqBase = Number(equityData[0].equity)
     const spyBase = Number(spyData[0].close)
     if (!Number.isFinite(spyBase) || spyBase <= 0) return
-    if (!Number.isFinite(eqBase) || eqBase <= 0) return
+
+    // In percent mode: show SPY as % return from its own first point (same axis as equity %).
+    // In dollar mode: rebase SPY to equity start value so the lines are visually comparable.
+    const eqBase = Number(equityData[0].equity)
+    if (!percentMode && (!Number.isFinite(eqBase) || eqBase <= 0)) return
 
     // Dedup by time and enforce monotonically increasing order — LWC throws
     // inside requestAnimationFrame if any point has a null/NaN value or if
@@ -293,7 +331,9 @@ export function EquityChart({
       const close = Number(p.close)
       if (!Number.isFinite(close) || close <= 0) continue
       const t = toChartTime(p.date)
-      const v = eqBase * (close / spyBase)
+      const v = percentMode
+        ? ((close - spyBase) / spyBase) * 100
+        : eqBase * (close / spyBase)
       if (!Number.isFinite(v)) continue
       seen.set(t as any, v)
     }
@@ -325,8 +365,13 @@ export function EquityChart({
         0,
       )
     }
+    spySeriesRef.current!.applyOptions(
+      percentMode
+        ? { priceFormat: { type: 'percent', precision: 2, minMove: 0.01 } }
+        : { priceFormat: { type: 'price', precision: 0, minMove: 1 } },
+    )
     spySeriesRef.current!.setData(rebased)
-  }, [spyData, showBenchmark, equityData])
+  }, [spyData, showBenchmark, equityData, percentMode])
 
   // Drawdown pane (separate pane 1 — 30% stretch).
   useEffect(() => {
@@ -386,9 +431,13 @@ export function EquityChart({
         <div className="flex flex-col gap-0.5 text-[10px]">
           <div className="text-[var(--text-3)] uppercase tracking-wide">{tsLabel}</div>
           <div className="flex items-center gap-2 mono">
-            <span className="text-[var(--text-2)]">Equity</span>
+            <span className="text-[var(--text-2)]">
+              {percentMode ? 'Return' : 'Equity'}
+            </span>
             <span className="text-[var(--text-0)] font-semibold">
-              {formatCurrency(hover.equity, { precision: 0 })}
+              {percentMode
+                ? formatPercentage(hover.equity, { precision: 2, signed: true })
+                : formatCurrency(hover.equity, { precision: 0 })}
             </span>
           </div>
           {hover.drawdown != null && (
@@ -415,7 +464,7 @@ export function EquityChart({
         </div>
       </div>
     )
-  }, [hover])
+  }, [hover, percentMode])
 
   return (
     <div className={cn('flex flex-col h-full min-h-0', className)}>
@@ -456,6 +505,14 @@ export function EquityChart({
               label="Drawdown"
               active={showDrawdown}
               onClick={() => onShowDrawdownChange(!showDrawdown)}
+            />
+          )}
+          {onPercentModeChange && (
+            <ToggleChip
+              label="%"
+              active={percentMode}
+              onClick={() => onPercentModeChange(!percentMode)}
+              title="Switch y-axis to % return (rebased from first point)"
             />
           )}
           {onFullscreenToggle && (
@@ -536,15 +593,18 @@ function ToggleChip({
   label,
   active,
   onClick,
+  title,
 }: {
   label: string
   active: boolean
   onClick: () => void
+  title?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={cn(
         'h-6 px-2 rounded-[2px] text-[10px] font-medium uppercase tracking-wide transition-colors',
         active

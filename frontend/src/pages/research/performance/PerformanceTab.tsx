@@ -30,6 +30,7 @@ export function PerformanceTab() {
   const [showBenchmark, setShowBenchmark] = useState(true)
   const [showRealized, setShowRealized] = useState(true)
   const [showDrawdown, setShowDrawdown] = useState(true)
+  const [percentMode, setPercentMode] = useState(true)
 
   const monthlyEntries = useMemo(() => {
     if (!performance.data?.monthly_returns) return []
@@ -82,6 +83,8 @@ export function PerformanceTab() {
         onShowRealizedChange={setShowRealized}
         showDrawdown={showDrawdown}
         onShowDrawdownChange={setShowDrawdown}
+        percentMode={percentMode}
+        onPercentModeChange={setPercentMode}
       />
       <PipelineFunnelPanel />
       <ReturnsDistributionHistogram

@@ -58,7 +58,7 @@ export function StrategyContributionBar({ rows, loading }: StrategyContributionB
       <SectionLabel>Top 15 contributors</SectionLabel>
       <div
         className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] px-2 pt-2 pb-1"
-        style={{ height }}
+        style={{ height: `${height}px` }}
       >
         <ResponsiveContainer>
           <BarChart data={top} layout="vertical" margin={{ top: 4, right: 48, bottom: 2, left: 8 }}>

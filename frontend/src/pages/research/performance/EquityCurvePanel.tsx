@@ -18,6 +18,8 @@ interface EquityCurvePanelProps {
   onShowRealizedChange: (v: boolean) => void
   showDrawdown: boolean
   onShowDrawdownChange: (v: boolean) => void
+  percentMode: boolean
+  onPercentModeChange: (v: boolean) => void
 }
 
 export function EquityCurvePanel({
@@ -30,6 +32,8 @@ export function EquityCurvePanel({
   onShowRealizedChange,
   showDrawdown,
   onShowDrawdownChange,
+  percentMode,
+  onPercentModeChange,
 }: EquityCurvePanelProps) {
   const period = useResearchStore((s) => s.period)
   const interval = useResearchStore((s) => s.interval)
@@ -68,6 +72,8 @@ export function EquityCurvePanel({
             onShowRealizedChange={onShowRealizedChange}
             showDrawdown={showDrawdown}
             onShowDrawdownChange={onShowDrawdownChange}
+            percentMode={percentMode}
+            onPercentModeChange={onPercentModeChange}
           />
         </div>
       )}

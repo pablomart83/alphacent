@@ -36,6 +36,8 @@ interface EquityPanelProps {
   onShowRealizedChange: (v: boolean) => void
   showDrawdown: boolean
   onShowDrawdownChange: (v: boolean) => void
+  percentMode: boolean
+  onPercentModeChange: (v: boolean) => void
 
   fullscreen: boolean
   onFullscreenToggle: () => void
@@ -141,6 +143,8 @@ export function EquityPanel(props: EquityPanelProps) {
           onShowRealizedChange={props.onShowRealizedChange}
           showDrawdown={props.showDrawdown}
           onShowDrawdownChange={props.onShowDrawdownChange}
+          percentMode={props.percentMode}
+          onPercentModeChange={props.onPercentModeChange}
           fullscreen={props.fullscreen}
           onFullscreenToggle={props.onFullscreenToggle}
           loading={props.isLoadingDashboard || props.isLoadingAnalytics}

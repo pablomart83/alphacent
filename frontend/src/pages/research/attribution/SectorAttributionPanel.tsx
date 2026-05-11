@@ -172,7 +172,7 @@ export function SectorAttributionPanel({
 
       <div className="space-y-1.5">
         <SectionLabel>Sector attribution · detail</SectionLabel>
-        <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] max-h-[300px]">
+        <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] max-h-[300px] overflow-hidden">
           <DataTable
             data={sectors}
             columns={columns}

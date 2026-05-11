@@ -219,8 +219,10 @@ async def get_strategy_attribution(
     # BATCH: Load all strategies + their positions in TWO queries instead of N+1.
     # With 185 strategies, this saves ~184 round-trips to PostgreSQL.
     strategies = session.query(StrategyORM).all()
+    account_type_str = mode.value.lower()  # 'demo' or 'live'
     all_positions = session.query(PositionORM).filter(
-        PositionORM.opened_at >= start_date
+        PositionORM.opened_at >= start_date,
+        PositionORM.account_type == account_type_str,
     ).all()
     
     # Group positions by strategy_id in memory
@@ -731,10 +733,13 @@ async def get_performance_analytics(
     # or each hour (hourly). Use hourly snapshots for 1h/4h interval requests.
     from src.models.orm import EquitySnapshotORM
 
+    account_type_str = mode.value.lower()  # 'demo' or 'live'
+
     if interval in ('1h', '4h'):
         # Use hourly snapshots — format "YYYY-MM-DD HH:00"
         snapshot_rows = session.query(EquitySnapshotORM).filter(
             EquitySnapshotORM.snapshot_type == 'hourly',
+            EquitySnapshotORM.account_type == account_type_str,
             EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d %H:00'),
         ).order_by(EquitySnapshotORM.date.asc()).all()
 
@@ -757,18 +762,21 @@ async def get_performance_analytics(
         if not snapshot_rows:
             snapshot_rows = session.query(EquitySnapshotORM).filter(
                 EquitySnapshotORM.snapshot_type == 'daily',
+                EquitySnapshotORM.account_type == account_type_str,
                 EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d'),
             ).order_by(EquitySnapshotORM.date.asc()).all()
     else:
         # Daily snapshots
         snapshot_rows = session.query(EquitySnapshotORM).filter(
             EquitySnapshotORM.snapshot_type == 'daily',
+            EquitySnapshotORM.account_type == account_type_str,
             EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d'),
         ).order_by(EquitySnapshotORM.date.asc()).all()
 
         # Fall back to any snapshot type if no daily data
         if not snapshot_rows:
             snapshot_rows = session.query(EquitySnapshotORM).filter(
+                EquitySnapshotORM.account_type == account_type_str,
                 EquitySnapshotORM.date >= start_date.strftime('%Y-%m-%d'),
             ).order_by(EquitySnapshotORM.date.asc()).all()
 
@@ -821,12 +829,14 @@ async def get_performance_analytics(
         positions = session.query(PositionORM).filter(
             PositionORM.opened_at >= start_date,
             PositionORM.closed_at.isnot(None),
+            PositionORM.account_type == account_type_str,
         ).all()
         wins = [_position_pnl(p) for p in positions if _position_pnl(p) > 0]
         losses = [abs(_position_pnl(p)) for p in positions if _position_pnl(p) < 0]
         # Also count open positions for total_trades
         all_positions = session.query(PositionORM).filter(
-            PositionORM.opened_at >= start_date
+            PositionORM.opened_at >= start_date,
+            PositionORM.account_type == account_type_str,
         ).all()
         total_trades = len(all_positions)
         winning_trades = len(wins)
@@ -837,7 +847,8 @@ async def get_performance_analytics(
         # ── FALLBACK: Build from position-level P&L when no snapshots ────────
         # Less accurate but works when equity_snapshots is empty.
         positions = session.query(PositionORM).filter(
-            PositionORM.opened_at >= start_date
+            PositionORM.opened_at >= start_date,
+            PositionORM.account_type == account_type_str,
         ).order_by(PositionORM.opened_at).all()
 
         daily_pnl: Dict[str, float] = {}

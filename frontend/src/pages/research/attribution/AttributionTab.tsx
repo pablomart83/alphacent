@@ -36,7 +36,7 @@ export function AttributionTab() {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-auto bg-[var(--bg-0)] px-3 py-3 space-y-4">
+    <div className="flex flex-col h-full min-h-0 overflow-auto bg-[var(--bg-0)] px-3 py-3 gap-4">
       <PerStrategyAttributionTable
         rows={strategyAttr.data}
         loading={strategyAttr.isLoading}

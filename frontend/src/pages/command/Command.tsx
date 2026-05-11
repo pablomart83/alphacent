@@ -50,6 +50,7 @@ export function Command() {
   const [showBenchmark, setShowBenchmark] = useState(true)
   const [showRealized, setShowRealized] = useState(true)
   const [showDrawdown, setShowDrawdown] = useState(true)
+  const [percentMode, setPercentMode] = useState(true)
   const [fullscreen, setFullscreen] = useState(false)
 
   // Persist period/interval in URL so deep-linking + refresh preserve view.
@@ -191,6 +192,8 @@ export function Command() {
       onShowRealizedChange={setShowRealized}
       showDrawdown={showDrawdown}
       onShowDrawdownChange={setShowDrawdown}
+      percentMode={percentMode}
+      onPercentModeChange={setPercentMode}
       fullscreen={fullscreen}
       onFullscreenToggle={() => setFullscreen((v) => !v)}
     />
