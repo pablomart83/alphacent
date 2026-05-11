@@ -32,6 +32,9 @@ config/credentials.json
 config/live_credentials.json
 config/demo_credentials.json
 config/api_keys.yaml
+# EC2 is authoritative for autonomous_trading.yaml — Settings page writes it live.
+# Never commit it; git push must not overwrite EC2's live version.
+config/autonomous_trading.yaml
 .env
 .env.*
 !.env.example
