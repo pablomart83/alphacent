@@ -32,16 +32,39 @@ const STRATEGY_TYPES: Array<{ value: string; label: string }> = [
   { value: 'alpha_edge', label: 'Alpha Edge' },
 ]
 
+const STORAGE_KEY = 'alphacent_cycle_trigger_prefs'
+
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return { assetClasses: [], intervals: [], strategyTypes: [], force: false }
+    return JSON.parse(raw)
+  } catch {
+    return { assetClasses: [], intervals: [], strategyTypes: [], force: false }
+  }
+}
+
+function savePrefs(prefs: { assetClasses: string[]; intervals: string[]; strategyTypes: string[]; force: boolean }) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs)) } catch {}
+}
+
 export function ManualCycleTrigger() {
   const mutation = useTriggerCycle()
-  const [assetClasses, setAssetClasses] = useState<string[]>([])
-  const [intervals, setIntervals] = useState<string[]>([])
-  const [strategyTypes, setStrategyTypes] = useState<string[]>([])
-  const [force, setForce] = useState(false)
+  const [assetClasses, setAssetClasses] = useState<string[]>(() => loadPrefs().assetClasses)
+  const [intervals, setIntervals] = useState<string[]>(() => loadPrefs().intervals)
+  const [strategyTypes, setStrategyTypes] = useState<string[]>(() => loadPrefs().strategyTypes)
+  const [force, setForce] = useState<boolean>(() => loadPrefs().force)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
-  const toggle = (list: string[], setter: (l: string[]) => void, value: string) => {
-    setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value])
+  const toggle = (list: string[], setter: (l: string[]) => void, value: string, key: 'assetClasses' | 'intervals' | 'strategyTypes') => {
+    const next = list.includes(value) ? list.filter((v) => v !== value) : [...list, value]
+    setter(next)
+    savePrefs({
+      assetClasses: key === 'assetClasses' ? next : assetClasses,
+      intervals: key === 'intervals' ? next : intervals,
+      strategyTypes: key === 'strategyTypes' ? next : strategyTypes,
+      force,
+    })
   }
 
   const handleConfirm = async () => {
@@ -72,25 +95,28 @@ export function ManualCycleTrigger() {
           label="Asset classes"
           options={ASSET_CLASSES}
           selected={assetClasses}
-          onToggle={(v) => toggle(assetClasses, setAssetClasses, v)}
+          onToggle={(v) => toggle(assetClasses, setAssetClasses, v, 'assetClasses')}
         />
         <ChipGroup
           label="Intervals"
           options={INTERVALS}
           selected={intervals}
-          onToggle={(v) => toggle(intervals, setIntervals, v)}
+          onToggle={(v) => toggle(intervals, setIntervals, v, 'intervals')}
         />
         <ChipGroup
           label="Strategy types"
           options={STRATEGY_TYPES}
           selected={strategyTypes}
-          onToggle={(v) => toggle(strategyTypes, setStrategyTypes, v)}
+          onToggle={(v) => toggle(strategyTypes, setStrategyTypes, v, 'strategyTypes')}
         />
         <label className="inline-flex items-center gap-1.5 text-[10px] text-[var(--text-2)] cursor-pointer">
           <input
             type="checkbox"
             checked={force}
-            onChange={(e) => setForce(e.target.checked)}
+            onChange={(e) => {
+              setForce(e.target.checked)
+              savePrefs({ assetClasses, intervals, strategyTypes, force: e.target.checked })
+            }}
             className="h-3 w-3 accent-[var(--accent-primary)]"
           />
           Force — override disabled autonomous flag
