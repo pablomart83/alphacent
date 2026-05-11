@@ -11208,7 +11208,8 @@ class StrategyEngine:
 
         # Resolve signal with position-aware priority
         # When both entry and exit fire simultaneously:
-        #   - No open position → entry takes priority (can't exit what you don't have)
+        #   - No open position + exit strength < 50% → entry takes priority
+        #   - No open position + exit strength >= 50% → skip entry (would exit immediately)
         #   - Has open position → exit takes priority (protect capital)
         emit_entry = False
         emit_exit = False
@@ -11222,11 +11223,22 @@ class StrategyEngine:
                     f"exit takes priority"
                 )
             else:
-                emit_entry = True
-                logger.info(
-                    f"Both entry and exit active for {symbol} — no open position, "
-                    f"entry takes priority"
-                )
+                # No open position. Check exit strength — if the exit condition is
+                # already strongly met (>= 50% of recent bars), entering now would
+                # result in an immediate exit on the next cycle. Skip the entry.
+                if exit_strength >= 0.5:
+                    logger.info(
+                        f"Both entry and exit active for {symbol} — no open position, "
+                        f"exit strength={exit_strength:.0%} >= 50% — skipping entry "
+                        f"(would exit immediately)"
+                    )
+                    # Neither entry nor exit — don't trade into an immediately-exiting setup
+                else:
+                    emit_entry = True
+                    logger.info(
+                        f"Both entry and exit active for {symbol} — no open position, "
+                        f"exit strength={exit_strength:.0%} < 50% — entry takes priority"
+                    )
         elif latest_entry and not latest_exit:
             emit_entry = True
         elif latest_exit and not latest_entry:
