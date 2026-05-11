@@ -1072,6 +1072,10 @@ class AutonomousConfigResponse(BaseModel):
     rejection_blacklist_threshold: int = 3
     rejection_blacklist_cooldown_days: int = 30
 
+    # ─── Portfolio VaR ──────────────────────────────────────────────────
+    portfolio_var_enabled: bool = True
+    portfolio_var_max_pct: float = 0.02  # 2% default
+
     # ─── Category (3) — read-only audit view ───────────────────────────
     advanced_readonly: AdvancedReadonly = AdvancedReadonly()
 
@@ -1199,6 +1203,10 @@ class AutonomousConfigRequest(BaseModel):
     rejection_blacklist_threshold: Optional[int] = None
     rejection_blacklist_cooldown_days: Optional[int] = None
 
+    # Portfolio VaR
+    portfolio_var_enabled: Optional[bool] = None
+    portfolio_var_max_pct: Optional[float] = Field(None, ge=0.001, le=1.0)  # 0.1% – 100%
+
 
 @router.get("/autonomous", response_model=AutonomousConfigResponse)
 async def get_autonomous_config(
@@ -1250,6 +1258,7 @@ async def get_autonomous_config(
     alpha_edge = full_config.get('alpha_edge', {}) or {}
     rejection_bl = alpha_edge.get('rejection_blacklist', {}) or {}
     regime_detection = full_config.get('regime_detection', {}) or {}
+    portfolio_var = pm.get('portfolio_var', {}) or {}
     market_regime = full_config.get('market_regime', {}) or {}
 
     # Helper: yaml decimal fraction (0-1) → API percentage (0-100)
@@ -1416,6 +1425,10 @@ async def get_autonomous_config(
         # Rejection blacklist
         rejection_blacklist_threshold=int(rejection_bl.get('threshold', 3)),
         rejection_blacklist_cooldown_days=int(rejection_bl.get('cooldown_days', 30)),
+
+        # Portfolio VaR
+        portfolio_var_enabled=bool(portfolio_var.get('enabled', True)),
+        portfolio_var_max_pct=float(portfolio_var.get('max_var_pct', 0.02)),
 
         # Read-only audit view
         advanced_readonly=AdvancedReadonly(
@@ -1684,6 +1697,13 @@ async def update_autonomous_config(
         rbl['threshold'] = request.rejection_blacklist_threshold
     if request.rejection_blacklist_cooldown_days is not None:
         rbl['cooldown_days'] = request.rejection_blacklist_cooldown_days
+
+    # ─── Portfolio VaR ──────────────────────────────────────────────────
+    pv = full_config['position_management'].setdefault('portfolio_var', {})
+    if request.portfolio_var_enabled is not None:
+        pv['enabled'] = request.portfolio_var_enabled
+    if request.portfolio_var_max_pct is not None:
+        pv['max_var_pct'] = request.portfolio_var_max_pct
 
     # ─── Persist ────────────────────────────────────────────────────────
     with open(config_file, 'w') as f:

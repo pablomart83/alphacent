@@ -4,7 +4,7 @@ import { Card, Input, Label } from '@/components/primitives'
 import { SaveBar, SectionLabel } from '@/components/layout'
 import { classifyError } from '@/lib/errors'
 import { useTradingMode } from '@/stores'
-import { useRiskConfig, useUpdateRiskConfig } from '../useSettingsData'
+import { useRiskConfig, useUpdateRiskConfig, useAutonomousConfig, useUpdateAutonomousConfig } from '../useSettingsData'
 
 /**
  * Risk limits — per-mode dollar / % caps. Numbers are stored as decimal
@@ -115,6 +115,79 @@ export function RiskLimitsTab() {
         onSave={onSave}
         onReset={onReset}
         loading={update.isPending}
+      />
+      <VaRSection />
+    </div>
+  )
+}
+
+function VaRSection() {
+  const autonomousConfig = useAutonomousConfig()
+  const updateAutonomous = useUpdateAutonomousConfig()
+
+  const initialVar = useMemo(() => {
+    const d = autonomousConfig.data as Record<string, unknown> | undefined
+    return {
+      enabled: d?.portfolio_var_enabled !== false,
+      max_pct: pct((d?.portfolio_var_max_pct as number | undefined) ?? 0.02),
+    }
+  }, [autonomousConfig.data])
+
+  const [varForm, setVarForm] = useState(initialVar)
+  useEffect(() => { setVarForm(initialVar) }, [initialVar])
+
+  const varDirty = JSON.stringify(varForm) !== JSON.stringify(initialVar)
+
+  const onSaveVar = async () => {
+    try {
+      await updateAutonomous.mutateAsync({
+        portfolio_var_enabled: varForm.enabled,
+        portfolio_var_max_pct: varForm.max_pct / 100,
+      })
+      toast.success('Portfolio VaR limit saved')
+    } catch (err) {
+      toast.error(classifyError(err, 'save VaR limit').message)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1">
+        <SectionLabel className="mb-0">Portfolio VaR limit</SectionLabel>
+        <p className="text-[12px] text-[var(--text-2)]">
+          Pre-trade 1-day 95% historical simulation VaR gate. Blocks new entries when the
+          portfolio's estimated daily loss exceeds this % of equity. Writes to{' '}
+          <code className="mono text-[10px]">autonomous_trading.yaml</code>.
+        </p>
+      </div>
+      <Card padding="md" className="space-y-3">
+        <div className="flex items-center gap-3">
+          <Label className="text-[11px] text-[var(--text-1)] w-[200px] shrink-0">VaR check enabled</Label>
+          <input
+            type="checkbox"
+            checked={varForm.enabled}
+            onChange={(e) => setVarForm((p) => ({ ...p, enabled: e.target.checked }))}
+            className="h-4 w-4 accent-[var(--accent-primary)]"
+          />
+          <span className="text-[11px] text-[var(--text-2)]">
+            {varForm.enabled ? 'Enabled — blocks entries when VaR exceeds limit' : 'Disabled — no VaR gate'}
+          </span>
+        </div>
+        <FieldRow
+          label="Max portfolio VaR"
+          hint="1-day 95% VaR as % of equity — entries blocked above this level (current book: ~98%)"
+          value={varForm.max_pct}
+          onChange={(v) => setVarForm((p) => ({ ...p, max_pct: v }))}
+          max={20}
+          loading={autonomousConfig.isLoading}
+        />
+      </Card>
+      <SaveBar
+        dirty={varDirty}
+        changeCount={varDirty ? 1 : 0}
+        onSave={onSaveVar}
+        onReset={() => setVarForm(initialVar)}
+        loading={updateAutonomous.isPending}
       />
     </div>
   )
