@@ -6,7 +6,7 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Frontend rebuild v2 is complete. Sprints 0-12 shipped. All 5 surfaces + Settings are live at https://alphacent.co.uk.**
+**Frontend rebuild v2 is complete (Sprints 0-12 + polish). All 5 surfaces + Settings are live at https://alphacent.co.uk. The platform is now in active iteration — fixing bugs, improving analytics, and tuning the graduation/live trading pipeline.**
 
 ### Frontend rebuild progress
 
@@ -25,6 +25,111 @@
 | 10 | Research / Performance + Attribution + Trades | ✅ SHIPPED | `aebff39` |
 | 11 | Research / Regime + Alpha Edge + Tear Sheet + Stress + Journal | ✅ SHIPPED | `020933c` |
 | 12 | Settings (10 tabs) + Command Palette + Shortcuts | ✅ SHIPPED | `e3a8300` |
+| 12+ | Polish: notification drawer, ? help, ⌘K strategy/symbol search, tear-sheet backend fix | ✅ SHIPPED | `b89106d` |
+| Post-12 | Hedge fund dashboard: 10 analytics improvements across all surfaces | ✅ SHIPPED | `42fdb48` |
+
+### Post-Sprint-12 fixes and improvements (all shipped)
+
+| Commit | What |
+|---|---|
+| `ebe860b` | Cycle pipeline stuck on Proposals (stage mapping + auto-completion) · Equity chart Realised toggle fix · mode-switch loading state · Execution sub-tabs (Slippage/TCA/Analytics) · Approaching graduation card |
+| `f634e06` | Approaching graduation: proper backend endpoint grouping by (template_name, symbol) across all strategy versions |
+| `e42958d` | Session timeout: 30min → 480min to match cookie max_age |
+| `1f79e6c` | Sessions persisted to DB (user_sessions table) — survive backend restarts |
+| `69e4723` | Graduation gate: 3 structural bugs (wrong WF sharpe key, strategy_id grouping, rejection cooldown) |
+| `978c6fd` | Graduation queue SQL GroupingError fix (CTE rewrite) + YAML race condition (detect regime before read) |
+| `5dfd601` | Win rate threshold 45% → 55% + graduation params surfaced in Settings / Live Trading |
+| `42fdb48` | 10 hedge fund analytics improvements (see below) |
+
+### Hedge fund dashboard improvements (commit `42fdb48`)
+
+1. **Command / DEMO vs LIVE split tile** — side-by-side account cards in Pulse panel
+2. **Command / Alpha generation tile** — 7d and 30d total return
+3. **Strategies / Library status bar** — BACKTESTED · PAPER · LIVE · RETIRED filter badges
+4. **Book / Execution summary strip** — 6 execution metrics above sub-tabs
+5. **Command / Fund Scorecard** — replaces HealthScoreCard with 6 real metrics (Sharpe, Sortino, max DD, win rate, profit factor, total return)
+6. **Research / Performance pipeline funnel** — Proposed → Backtested → Paper → Live with conversion rates
+7. **Book / Execution Analytics DEMO vs LIVE split** — side-by-side account summaries
+8. **Command / Daily Briefing** — collapsible auto-generated text summary
+9. **Research / Attribution strategy deep-dive** — click any row to open trade journal + metrics drawer
+10. **Guard / Live trading health card** — virtual equity, real equity, live positions, today's real P&L
+
+### Current system state (2026-05-11)
+
+- **DEMO equity:** ~$9,995 (account_info) | **Open positions:** 61 | **Regime:** trending_up_strong
+- **DEMO strategies:** 48 PAPER + 56 BACKTESTED
+- **LIVE account:** Agent Portfolio | Virtual: $10K | Real: $1K | Mirror: 10%
+- **LIVE positions:** 0 | **live_trading.enabled:** TRUE | **Live authorisations:** 0
+- **Trade journal:** 1,003 closed trades (DEMO) across 380 strategy IDs
+- **Graduation queue:** empty (best pair: 4H EMA Ribbon Trend Long / GOOGL at 15/20 trades)
+- **errors.log baseline:** last entry 2026-05-11 09:16:52 (pre-existing graduation SQL errors, now fixed)
+- **Latest commit:** `42fdb48`
+
+### Graduation gate state
+
+- **Thresholds (as of this session):** min_trades=20, min_win_rate=55%, min_qualification_ratio=0.60, rejection_cooldown=14d
+- **Configurable from:** Settings → Live Trading → Graduation gate thresholds (takes effect immediately, no restart)
+- **Best approaching pair:** 4H EMA Ribbon Trend Long / GOOGL — 15 trades, 80% WR, Sharpe 6.6, P&L +$804
+- **Gate logic:** groups by (template_name, symbol) across ALL strategy versions — historical trades from retired strategies count
+- **WF sharpe key:** `wf_test_sharpe` in strategy_metadata (was broken, now fixed)
+
+### Key backend additions since last session doc
+
+- `user_sessions` table — DB-persisted sessions survive restarts
+- `GET /strategies/approaching-graduation` — top candidates building toward graduation, grouped by (template_name, symbol)
+- `GET /strategies/graduation-queue` — fixed to group by (template_name, symbol) with CTE rewrite
+- `GET /config/live-trading` — now returns graduation gate thresholds
+- `PUT /config/live-trading` — now writes graduation gate thresholds + patches in-memory constants immediately
+- `graduation_gate.py` — reads thresholds from YAML `graduation_gate` section on startup
+
+### Open items for next session
+
+**P1 — Graduation threshold discussion**
+- Current: 20 trades, 55% WR, 0.60 qual ratio
+- Best pair (GOOGL) is at 15/20 trades — could reach threshold in ~2 weeks
+- Consider: minimum time span (e.g. trades must span ≥14 days) to prevent a single momentum burst graduating a pair
+- Consider: minimum avg P&L per trade (e.g. >$10) to filter pairs profitable only by tiny margins
+
+**P2 — YAML race condition (partial fix)**
+- The autonomous_strategy_manager writes market_regime to autonomous_trading.yaml after every cycle
+- Fix applied: detect regime BEFORE reading the file (shrinks race window from seconds to milliseconds)
+- Proper fix: store market_regime in the database instead of YAML — it's already in equity_snapshots and autonomous_cycle_runs
+- Worth doing when convenient
+
+**P3 — Live conviction gate wiring (pre-existing)**
+- In trading_scheduler.py live fill routing block, the conviction gate reads the threshold but the comparison may not be fully wired
+- Check: `_sig_conv < _live_conv_min` block in the live fill routing section
+
+**P4 — Raise DEMO conviction threshold to 74 (pre-existing)**
+- Calibration shows 74-76 is first clearly positive-EV bucket
+- Change in Settings → Autonomous → Conviction Score Threshold
+
+**P5 — Strategy deep-dive in Research/Attribution**
+- The drawer opens but the trade journal query uses `strategyId` (single strategy_id)
+- Should ideally aggregate across all strategy versions for the same (template, symbol) pair
+- Low priority — the current implementation is honest about what it shows
+
+**P6 — AutonomousStrategyManager config reload**
+- The manager loads config once at startup from YAML
+- Settings page changes (proposal_count, etc.) take effect on next restart
+- Consider: add a `reload_config()` method called by the PUT /config/autonomous endpoint
+
+### Session start checklist
+
+```bash
+# Health + errors
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'tail -20 /home/ubuntu/alphacent/logs/errors.log'
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'tail -30 /home/ubuntu/alphacent/logs/cycles/cycle_history.log'
+
+# Strategy counts
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT status, COUNT(*) FROM strategies GROUP BY status ORDER BY status;"'
+
+# Graduation pipeline
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT COALESCE(s.strategy_metadata->>'"'"'template_name'"'"', REGEXP_REPLACE(s.name, '"'"' V[0-9]+\$'"'"', '"'"''"'"')) AS tname, tj.symbol, COUNT(*) AS trades, ROUND(100.0*SUM(CASE WHEN tj.pnl>0 THEN 1 ELSE 0 END)/COUNT(*),1) AS wr, ROUND(SUM(tj.pnl)::numeric,2) AS pnl FROM trade_journal tj JOIN strategies s ON s.id=tj.strategy_id WHERE tj.pnl IS NOT NULL AND tj.account_type='"'"'demo'"'"' GROUP BY tname, tj.symbol HAVING COUNT(*) >= 5 ORDER BY trades DESC LIMIT 15;"'
+
+# Active sessions (should survive restarts now)
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT username, expires_at FROM user_sessions WHERE expires_at > NOW() ORDER BY expires_at DESC;"'
+```
 
 ### Foundation already in place — do not rebuild
 
@@ -397,9 +502,202 @@ ALTER TABLE orders ADD COLUMN order_action VARCHAR, slippage FLOAT, fill_time_se
 
 ---
 
-## Frontend Rebuild — Spec Session Prompt
+## New session kickoff prompt
 
-Use this prompt to kick off the frontend rebuild as a new spec in the next session.
+Use this prompt to start the next session:
+
+```
+Start this session by reading, in this exact order:
+(1) .kiro/steering/trading-system-context.md — permanent rules
+(2) Session_Continuation.md — current system state (read the NEXT SESSION KICKOFF block carefully)
+
+Confirm you've read both, then begin.
+
+==========================================================================
+CONTEXT
+==========================================================================
+
+AlphaCent is a live autonomous trading platform. The frontend v2 rebuild
+is complete (Sprints 0-12 + post-sprint polish). We are now in active
+iteration — fixing bugs, improving analytics, and tuning the graduation
+and live trading pipeline.
+
+Production: https://alphacent.co.uk
+Latest commit: 42fdb48
+
+System state:
+- DEMO equity: ~$9,995 | Open positions: 61 | Regime: trending_up_strong
+- DEMO strategies: 48 PAPER + 56 BACKTESTED
+- LIVE account: Agent Portfolio | Virtual $10K / Real $1K / Mirror 10%
+- LIVE positions: 0 | live_trading.enabled: TRUE | Live authorisations: 0
+- Trade journal: 1,003 closed DEMO trades across 380 strategy IDs
+- Graduation queue: empty (best pair: 4H EMA Ribbon Trend Long / GOOGL at 15/20 trades)
+- errors.log baseline: last entry 2026-05-11 09:16:52
+
+==========================================================================
+OPERATING RULES (non-negotiable)
+==========================================================================
+
+1. Proper solutions only — no stopgaps, ever.
+2. Local is source of truth. EC2 is a deploy target.
+3. Deploy after every meaningful change. Verify before moving on:
+   - npm run typecheck passes
+   - npm run build succeeds clean
+   - curl https://alphacent.co.uk/ returns 200
+   - errors.log has no NEW entries post-deploy
+4. Push with -c core.hooksPath=/dev/null (git-defender pre-push hook).
+5. Think like a trader. Every feature evaluated through "would a CIO trust this?"
+6. Don't create markdown files unless asked.
+7. Backend route order: static paths BEFORE dynamic {id} catch-alls.
+
+==========================================================================
+DEPLOY COMMAND (copy-paste)
+==========================================================================
+
+cd frontend
+VITE_API_BASE_URL=https://alphacent.co.uk \
+VITE_WS_BASE_URL=wss://alphacent.co.uk \
+npm run build
+
+scp -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no -r \
+dist ubuntu@34.252.61.149:/home/ubuntu/alphacent/frontend/dist_next
+
+# Verify assets landed BEFORE swapping
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no \
+ubuntu@34.252.61.149 \
+'ls /home/ubuntu/alphacent/frontend/dist_next/assets/ | grep -E "index|Command|Guard" | head -3'
+
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no \
+ubuntu@34.252.61.149 \
+'cd /home/ubuntu/alphacent/frontend && rm -rf dist_prev && mv dist dist_prev && mv dist_next dist && echo "swapped"'
+
+curl -sf -o /dev/null -w "prod %{http_code}\n" https://alphacent.co.uk/
+curl -sf -o /dev/null -w "health %{http_code}\n" https://alphacent.co.uk/health
+
+==========================================================================
+WHAT'S BUILT — FULL SURFACE INVENTORY
+==========================================================================
+
+Frontend directory: frontend/
+Backend: src/ (FastAPI/Python)
+
+SURFACES (all live):
+- / (Command) — Pulse panel (DEMO/LIVE split, alpha gen, fund scorecard,
+  daily briefing, pipeline counts, regime, cycle status) + Equity chart
+  (LWC v5, SPY overlay, drawdown, realised) + Stream panel
+- /book — Positions (4 sub-tabs) · Orders · Execution (Slippage/TCA/Analytics
+  with DEMO vs LIVE split) · Live
+- /strategies — Cycle (pipeline visual, funnel, scheduler) · Library
+  (status bar, detail panel, compare) · Templates · Symbols · Blacklist ·
+  Graduation (queue + approaching-graduation card + GraduationCard) · Lab
+- /guard — Risk · Gates · System · Circuit Breakers · Alerts · Audit +
+  Live trading health card in left panel
+- /research — Performance (fund scorecard tiles, equity curve, pipeline
+  funnel, monthly heatmap) · Attribution (deep-dive drawer) · Trades ·
+  Regime · Alpha Edge · Tear Sheet · Stress · Journal
+- /settings — Trading Mode · API Config · Risk Limits · Position Management ·
+  Autonomous (65-field schema-driven form) · Alpha Edge · Alerts · Live
+  Trading (incl. graduation gate thresholds) · Users · Shortcuts
+- /login
+
+GLOBAL:
+- ⌘K command palette (navigation + strategy/symbol search)
+- Notification drawer (WS autonomous_notifications + cycle events)
+- ? keyboard shortcut help
+- Bell badge in TopNavBar with unread count
+
+KEY PRIMITIVES (frontend/src/components/):
+- primitives/: Button, Input, Select, Tabs, Dialog, ConfirmDialog, Popover,
+  DropdownMenu, Tooltip, Switch, Checkbox, Badge, Card, Skeleton, Spinner,
+  EmptyState, ErrorState, Label, Separator, DataTable (TanStack + Virtual)
+- layout/: PageTemplate, PanelHeader, ResizablePanelLayout, SectionLabel,
+  MetricGrid, FilterBar, SaveBar
+- trading/: AccountToggle, WebSocketIndicator, TopNavBar, PnLNumber,
+  RegimePill, LivePill, ConvictionBar, EquityChart (LWC v5), PriceChart,
+  ModifyRiskDialog, SignalFeed, OrderFillsTicker, LifecycleFeed, AlertsBadge
+
+KEY BACKEND ENDPOINTS (all registered, all working):
+- /account/dashboard/summary, /account/metrics-bar, /account/positions/*
+- /analytics/performance, /analytics/strategy-attribution, /analytics/tca,
+  /analytics/tear-sheet, /analytics/regime-comprehensive,
+  /analytics/alpha-edge/*, /analytics/trade-journal, /analytics/stress-tests,
+  /analytics/conviction-calibration, /analytics/rolling-statistics
+- /strategies/graduation-queue, /strategies/approaching-graduation,
+  /strategies/live, /strategies/{id}/graduate, /strategies/{id}/reject-graduation
+- /config/autonomous, /config/live-trading (incl. graduation gate thresholds),
+  /config/risk, /config/alpha-edge, /config/credentials
+- /control/system/status, /control/autonomous/cycles, /control/autonomous/schedules
+- /auth/login, /auth/logout, /auth/users (CRUD)
+- /alerts/history, /alerts/config, /audit/log, /audit/trade-lifecycle/{id}
+
+KEY DATABASE TABLES (PostgreSQL):
+- strategies, positions, orders, trade_journal, equity_snapshots
+- graduation_approvals, live_strategies, user_sessions (new — persists sessions)
+- autonomous_cycle_runs, signal_decisions, strategy_proposals
+- users, alerts, audit_log
+
+==========================================================================
+OPEN ITEMS (prioritised)
+==========================================================================
+
+P1 — Graduation threshold calibration (discuss before implementing)
+  Current: 20 trades, 55% WR, 0.60 qual ratio
+  Best pair (GOOGL) at 15/20 trades — could reach threshold in ~2 weeks
+  Consider: minimum time span (trades must span ≥14 days)
+  Consider: minimum avg P&L per trade (>$10) to filter tiny-margin pairs
+  Configurable from Settings → Live Trading → Graduation gate thresholds
+
+P2 — YAML race condition (partial fix applied)
+  autonomous_strategy_manager writes market_regime to autonomous_trading.yaml
+  after every cycle. Partial fix: detect regime BEFORE reading the file.
+  Proper fix: store market_regime in DB (already in equity_snapshots +
+  autonomous_cycle_runs) instead of YAML.
+
+P3 — AutonomousStrategyManager config reload
+  Manager loads config once at startup. Settings page changes (proposal_count
+  etc.) take effect on next restart only.
+  Fix: add reload_config() called by PUT /config/autonomous.
+
+P4 — Live conviction gate wiring (pre-existing)
+  In trading_scheduler.py live fill routing, verify _sig_conv < _live_conv_min
+  comparison is fully wired and blocking correctly.
+
+P5 — Raise DEMO conviction threshold to 74
+  Calibration shows 74-76 is first clearly positive-EV bucket.
+  Change in Settings → Autonomous → Conviction Score Threshold.
+
+P6 — Strategy deep-dive drawer (Research/Attribution)
+  Currently shows single strategy_id trades. Should aggregate across all
+  strategy versions for the same (template, symbol) pair.
+
+==========================================================================
+TECHNICAL DECISIONS LOCKED IN
+==========================================================================
+
+- React 19 + TypeScript 5.9 + Vite 6 + Tailwind 4
+- TanStack Query 5 + Zustand 5
+- TradingView Lightweight Charts v5 (LWC) for equity/price charts
+- Recharts 3.x for analytics charts
+- Visx 4.0.0-alpha.11 for bespoke layouts (heatmaps, underwater plots, scatter)
+- TanStack Table 8 + TanStack Virtual 3 for all tables
+- Fuse.js 7 for fuzzy search (command palette, autonomous form)
+- No --legacy-peer-deps. Every dep resolves cleanly.
+- Native fetch, not axios.
+- Sessions: DB-persisted (user_sessions table), 8h rolling timeout
+- YAML: autonomous_trading.yaml is the authoritative config for the running
+  system. Settings page writes it via PUT /config/autonomous. The autonomous
+  manager reads it at startup only (P3 above).
+- Nginx SPA routing: browser nav (Accept: text/html) falls through to
+  index.html. API client sets Accept: application/json. No conflict.
+- Push with: git -c core.hooksPath=/dev/null push origin main
+
+==========================================================================
+PROCEED
+==========================================================================
+
+Read the session continuation file, check errors.log and strategy counts,
+then ask what to work on or proceed with the highest-priority open item.
+```
 
 **Before starting the spec session, run this on EC2 to backup the deployed frontend:**
 ```bash
