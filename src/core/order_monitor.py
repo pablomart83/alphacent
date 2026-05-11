@@ -303,9 +303,13 @@ class OrderMonitor:
             for pos in etoro_positions:
                 etoro_pos_by_id[pos.etoro_position_id] = pos
 
-            # Get all open positions from DB
+            # Get all open positions from DB — DEMO only.
+            # reconcile_on_startup uses self.etoro_client which is the DEMO client.
+            # Including LIVE positions here would close them spuriously because
+            # the DEMO client never returns live positions.
             db_open_positions = session.query(PositionORM).filter(
-                PositionORM.closed_at.is_(None)
+                PositionORM.closed_at.is_(None),
+                PositionORM.account_type == 'demo',
             ).all()
             db_pos_by_etoro_id = {p.etoro_position_id: p for p in db_open_positions}
 
