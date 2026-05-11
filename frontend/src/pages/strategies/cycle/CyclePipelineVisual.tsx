@@ -223,11 +223,13 @@ export function CyclePipelineVisual({ lastCycle, isRunning, className }: CyclePi
             {displayStages.map((stage, idx) => {
               const next = displayStages[idx + 1]
               const dropPct = computeDropPct(stage.count, next?.count ?? null)
+              const isLast = idx === displayStages.length - 1
               return (
                 <StagePairFragment
                   key={stage.key}
                   stage={stage}
-                  dropPct={idx < displayStages.length - 1 ? dropPct : null}
+                  dropPct={isLast ? null : dropPct}
+                  isLast={isLast}
                 />
               )
             })}
@@ -241,9 +243,11 @@ export function CyclePipelineVisual({ lastCycle, isRunning, className }: CyclePi
 function StagePairFragment({
   stage,
   dropPct,
+  isLast,
 }: {
   stage: { key: string; label: string; status: StageStatus; count: number | null; error?: string | null }
   dropPct: number | null
+  isLast: boolean
 }) {
   const { bg, border, text, Icon } = stageStyle(stage.status)
   return (
@@ -274,11 +278,13 @@ function StagePairFragment({
         )}
       </div>
 
-      {/* Drop connector */}
-      {dropPct !== null && (
-        <div className="self-center inline-flex flex-col items-center justify-center">
+      {/* Drop connector — always rendered for non-last stages to hold the grid column.
+          When counts are null (cycle running, no data yet) we still need the column
+          occupied so subsequent stage pills land in the correct 1fr column. */}
+      {!isLast && (
+        <div className="self-center flex flex-col items-center justify-center w-full">
           <div className="h-px w-full bg-[var(--border-subtle)]" />
-          {dropPct > 0 && (
+          {dropPct != null && dropPct > 0 && (
             <span
               className="mono text-[8px] mt-0.5 whitespace-nowrap"
               style={{
