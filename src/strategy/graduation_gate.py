@@ -130,27 +130,34 @@ def is_qualified(
 
 def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
     """
-    Return all (strategy, symbol) pairs that qualify for live trading.
+    Return all (template_name, symbol) pairs that qualify for live trading.
+
+    Groups by (template_name, symbol) across ALL strategy IDs — not just the
+    currently-PAPER strategy. When a strategy retires and the same
+    (template, symbol) pair is re-proposed, the new strategy_id gets a fresh
+    UUID but the historical trade_journal rows from previous activations still
+    count toward the graduation threshold. Grouping by strategy_id would reset
+    the counter on every re-activation.
 
     Excludes:
-    - Pairs already active in live_strategies
-    - Pairs rejected in the last 14 days
+    - Pairs already active in live_strategies (matched by template_name + symbol)
+    - Pairs rejected in the last 14 days (matched by template_name + symbol)
     """
     from src.models.orm import StrategyORM, GraduationApprovalORM, LiveStrategyORM
     from sqlalchemy import text
 
-    # Active live pairs — exclude these
+    # Active live pairs — exclude by (template_name, symbol)
     active_live = set(
-        (row.strategy_id, row.symbol)
+        (row.template_name, row.symbol)
         for row in session.query(LiveStrategyORM)
         .filter(LiveStrategyORM.retired_at.is_(None))
         .all()
     )
 
-    # Recently rejected pairs — exclude these
+    # Recently rejected pairs — exclude by (template_name, symbol)
     cooldown_cutoff = datetime.now() - timedelta(days=REJECTION_COOLDOWN_DAYS)
     recently_rejected = set(
-        (row.strategy_id, row.symbol)
+        (row.template_name, row.symbol)
         for row in session.query(GraduationApprovalORM)
         .filter(
             GraduationApprovalORM.rejected_at.isnot(None),
@@ -159,31 +166,53 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
         .all()
     )
 
-    # PAPER strategies with at least MIN_PAPER_TRADES in trade_journal
+    # Aggregate trade_journal by (template_name, symbol) across ALL strategy IDs.
+    # COALESCE: prefer strategy_metadata->>'template_name', fall back to name
+    # with version suffix stripped.
     candidates_raw = session.execute(
         text("""
             SELECT
-                s.id            AS strategy_id,
-                s.name          AS strategy_name,
+                COALESCE(
+                    s.strategy_metadata->>'template_name',
+                    REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                )                                                   AS template_name,
                 tj.symbol,
-                COUNT(*)        AS trades,
+                -- Use the most recent PAPER strategy_id for this pair so the
+                -- approval flow has a valid strategy_id to reference.
+                (
+                    SELECT s2.id FROM strategies s2
+                    JOIN trade_journal tj2 ON tj2.strategy_id = s2.id
+                    WHERE tj2.symbol = tj.symbol
+                      AND COALESCE(
+                            s2.strategy_metadata->>'template_name',
+                            REGEXP_REPLACE(s2.name, ' V[0-9]+$', '')
+                          ) = COALESCE(
+                            s.strategy_metadata->>'template_name',
+                            REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                          )
+                      AND tj2.pnl IS NOT NULL
+                      AND tj2.account_type = 'demo'
+                    ORDER BY s2.created_at DESC
+                    LIMIT 1
+                )                                                   AS representative_strategy_id,
+                COUNT(*)                                            AS trades,
                 ROUND(
                     CASE WHEN STDDEV(tj.pnl) > 0
                          THEN (AVG(tj.pnl) / STDDEV(tj.pnl)) * SQRT(252)
                          ELSE 0
                     END::numeric, 4
-                )               AS paper_sharpe,
+                )                                                   AS paper_sharpe,
                 ROUND(
                     100.0 * SUM(CASE WHEN tj.pnl > 0 THEN 1 ELSE 0 END)
                     / NULLIF(COUNT(*), 0)::numeric, 2
-                )               AS win_rate_pct,
-                ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2) AS total_pnl
+                )                                                   AS win_rate_pct,
+                ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2)        AS total_pnl,
+                COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions
             FROM trade_journal tj
             JOIN strategies s ON s.id = tj.strategy_id
-            WHERE s.status = 'PAPER'
-              AND tj.pnl IS NOT NULL
+            WHERE tj.pnl IS NOT NULL
               AND tj.account_type = 'demo'
-            GROUP BY s.id, s.name, tj.symbol
+            GROUP BY template_name, tj.symbol
             HAVING COUNT(*) >= :min_trades
         """),
         {"min_trades": MIN_PAPER_TRADES},
@@ -191,7 +220,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
 
     queue = []
     for row in candidates_raw:
-        pair = (row.strategy_id, row.symbol)
+        pair = (row.template_name, row.symbol)
         if pair in active_live or pair in recently_rejected:
             continue
 
@@ -202,18 +231,22 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             "paper_total_pnl": float(row.total_pnl) if row.total_pnl is not None else None,
         }
 
-        # Get WF sharpe from strategy metadata
-        strategy = session.query(StrategyORM).filter_by(id=row.strategy_id).first()
+        # Get WF sharpe from the most recent strategy version for this template.
+        # Use the representative_strategy_id from the subquery.
+        representative_id = row.representative_strategy_id
         wf_sharpe = None
-        template_name = None
-        if strategy:
-            meta = strategy.strategy_metadata or {}
-            wf_sharpe = (
-                meta.get("wf_sharpe")
-                or meta.get("walk_forward_sharpe")
-                or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
-            )
-            template_name = meta.get("template_name") or strategy.name
+        strategy_name = row.template_name
+        if representative_id:
+            strategy = session.query(StrategyORM).filter_by(id=representative_id).first()
+            if strategy:
+                meta = strategy.strategy_metadata or {}
+                wf_sharpe = (
+                    meta.get("wf_test_sharpe")
+                    or meta.get("wf_sharpe")
+                    or meta.get("walk_forward_sharpe")
+                    or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
+                )
+                strategy_name = strategy.name
 
         qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe)
         if not qualified:
@@ -224,9 +257,9 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             ratio = round(paper_stats["paper_sharpe"] / wf_sharpe, 3)
 
         queue.append({
-            "strategy_id": row.strategy_id,
-            "strategy_name": row.strategy_name,
-            "template_name": template_name,
+            "strategy_id": representative_id,  # most recent strategy_id for this pair
+            "strategy_name": strategy_name,
+            "template_name": row.template_name,
             "symbol": row.symbol,
             "paper_trades": paper_stats["paper_trades"],
             "paper_sharpe": paper_stats["paper_sharpe"],
@@ -234,6 +267,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             "paper_total_pnl": paper_stats["paper_total_pnl"],
             "wf_sharpe": wf_sharpe,
             "qualification_ratio": ratio,
+            "strategy_versions": int(row.strategy_versions),
         })
 
     # Sort by qualification_ratio desc (best candidates first)
@@ -266,8 +300,9 @@ def approve_graduation(
     meta = strategy.strategy_metadata or {}
     template_name = meta.get("template_name") or strategy.name
     wf_sharpe = (
-        meta.get("wf_sharpe")
-        or meta.get("walk_forward_sharpe")
+        meta.get("wf_test_sharpe")        # primary key — set by strategy_proposer
+        or meta.get("wf_sharpe")           # legacy alias
+        or meta.get("walk_forward_sharpe") # older alias
         or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
     )
 
