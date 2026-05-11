@@ -269,23 +269,23 @@ class TradingScheduler:
         session = db.get_session()
 
         try:
-            # Scan both PAPER/LIVE (actively trading) and BACKTESTED (validated, waiting for signal).
-            # BACKTESTED strategies with activation_approved=True are ready to trade —
-            # they'll be promoted to PAPER when they generate their first signal.
+            # Scan PAPER and BACKTESTED strategies for DEMO signal generation.
+            # LIVE strategies are handled exclusively by the live-independent pass
+            # (Phase 2B) — they run against account_type='live' and must not
+            # appear in the DEMO cycle.
             active_strategies = session.query(StrategyORM).filter(
-                StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.LIVE, StrategyStatus.BACKTESTED])
+                StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.BACKTESTED])
             ).all()
             
             # Filter:
-            # - PAPER/LIVE are actively trading (produce exit signals + new entries)
-            # - BACKTESTED with activation_approved=True are ready to trade (promoted on first fill)
-            # - Exclude pending_retirement or superseded strategies regardless of status —
-            #   they must not generate new entry signals. Existing positions close via SL/TP.
+            # - PAPER: actively trading on DEMO, produce exit + entry signals
+            # - BACKTESTED with activation_approved=True: ready to trade (promoted on first fill)
+            # - Exclude pending_retirement or superseded strategies
             def _is_eligible(s):
                 meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
                 if meta.get('pending_retirement') or meta.get('superseded'):
                     return False
-                if s.status in (StrategyStatus.PAPER, StrategyStatus.LIVE):
+                if s.status == StrategyStatus.PAPER:
                     return True
                 if s.status == StrategyStatus.BACKTESTED and meta.get('activation_approved'):
                     return True
@@ -1902,10 +1902,10 @@ class TradingScheduler:
                 result["backtested_expired"] = expired_count
 
             # ── Phase 2B: Live-independent signal pass ────────────────────────────────────
-            # DEMO positions must not block live entries — the two accounts are independent.
-            # For each live-authorized (strategy, symbol) pair, re-run signal generation
-            # scoped to account_type='live' so the pre-filter checks live positions only.
-            # This fires even when the DEMO signal was suppressed by a DEMO position.
+            # LIVE strategies (status=LIVE, single symbol) run exclusively here.
+            # They are NOT in the DEMO active_strategies set — they have their own
+            # account context, their own position pre-filter (account_type='live'),
+            # and fire directly to the live order executor.
             if self._live_order_executor is not None:
                 try:
                     from src.core.config_loader import load_config as _load_cfg_live2
@@ -1913,11 +1913,21 @@ class TradingScheduler:
                     _live_enabled2 = _live_cfg2.get("enabled", False)
 
                     if _live_enabled2:
+                        # Load all active live_strategies rows and their corresponding
+                        # LIVE strategy objects directly from the DB.
                         from src.strategy.graduation_gate import get_all_live_approvals
                         from src.models.database import get_database as _gdb_live2
                         _ls2 = _gdb_live2().get_session()
                         try:
                             _all_approvals = get_all_live_approvals(_ls2)
+                            # Bulk-load the LIVE strategy ORM rows in one query
+                            _live_strat_ids = [a.strategy_id for a in _all_approvals]
+                            _live_orm_rows = (
+                                _ls2.query(StrategyORM)
+                                .filter(StrategyORM.id.in_(_live_strat_ids))
+                                .all()
+                            ) if _live_strat_ids else []
+                            _live_orm_by_id = {s.id: s for s in _live_orm_rows}
                         finally:
                             _ls2.close()
 
@@ -1925,28 +1935,35 @@ class TradingScheduler:
                             _live_strat_id = _appr.strategy_id
                             _live_sym = _appr.symbol
 
-                            # Find the strategy object from the active set
-                            _strat_obj = None
-                            for _s_orm in active_strategies:
-                                if _s_orm.id == _live_strat_id:
-                                    _strat_obj = strategy_map.get(_live_strat_id, (None, None))[0]
-                                    break
-                            if _strat_obj is None:
+                            # Load the LIVE strategy object
+                            _live_orm = _live_orm_by_id.get(_live_strat_id)
+                            if _live_orm is None:
+                                logger.warning(
+                                    f"Live pass: strategy {_live_strat_id[:8]} not found in DB — skipping"
+                                )
                                 continue
 
-                            # Skip if this (strategy, symbol) already got a live fill
-                            # this cycle from the DEMO-path live routing above.
+                            # Convert ORM → Strategy dataclass (same path as DEMO cycle)
+                            try:
+                                _strat_obj = self._strategy_engine._orm_to_strategy(_live_orm)
+                            except Exception as _conv_err:
+                                logger.error(f"Live pass: ORM→Strategy conversion failed for {_live_strat_id[:8]}: {_conv_err}")
+                                continue
+
+                            # Skip if already filled this cycle (shouldn't happen since LIVE
+                            # strategies don't run in the DEMO cycle, but guard anyway)
                             if (_live_strat_id, _live_sym, 'LONG') in orders_submitted_this_run or \
                                (_live_strat_id, _live_sym, 'SHORT') in orders_submitted_this_run:
                                 logger.debug(
                                     f"Live pass: ({_live_strat_id[:8]}, {_live_sym}) already "
-                                    f"filled this cycle via DEMO path — skipping"
+                                    f"filled this cycle — skipping"
                                 )
                                 continue
 
                             try:
-                                # Generate signals scoped to live account — pre-filter checks
-                                # live positions only, not DEMO positions.
+                                # Generate signals scoped to live account.
+                                # The LIVE strategy already has symbols=[_live_sym] so the
+                                # pre-filter and signal gen only touch the approved symbol.
                                 _live_signals = self._strategy_engine.generate_signals(
                                     _strat_obj,
                                     include_dynamic=False,
