@@ -40,6 +40,9 @@ export interface WalkForwardResults {
   train_trades?: number | null
   test_trades?: number | null
   consistency_score?: number | null
+  /** Set when synthesized from strategy_metadata (autonomous strategies). */
+  walk_forward_validated?: boolean | null
+  performance_degradation?: number | null
   /** Monte Carlo / bootstrap percentiles on final equity or Sharpe. */
   bootstrap?: {
     p5?: number | null

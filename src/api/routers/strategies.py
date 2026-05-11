@@ -665,9 +665,28 @@ async def get_strategies(
         entry_rules = rules_dict.get("entry", []) if isinstance(rules_dict.get("entry"), list) else None
         exit_rules = rules_dict.get("exit", []) if isinstance(rules_dict.get("exit"), list) else None
         
-        # Extract walk-forward results from backtest_results
+        # Extract walk-forward results from backtest_results.
+        # Autonomous strategies store WF metrics in strategy_metadata (wf_test_sharpe,
+        # wf_train_sharpe, etc.) rather than in a nested backtest_results.walk_forward_results
+        # key. Synthesize the WalkForwardResults shape from metadata when the nested key is
+        # absent so the frontend Evidence tab always has data to display.
         backtest_results = strategy_dict.get("backtest_results", {})
         walk_forward_results = backtest_results.get("walk_forward_results") if backtest_results else None
+        if not walk_forward_results:
+            meta_wf = strategy_dict.get("metadata", {}) or {}
+            wf_test = meta_wf.get("wf_test_sharpe") or meta_wf.get("wf_sharpe")
+            wf_train = meta_wf.get("wf_train_sharpe")
+            if wf_test is not None or wf_train is not None:
+                walk_forward_results = {
+                    "test_sharpe": wf_test,
+                    "train_sharpe": wf_train,
+                    "test_return": meta_wf.get("expost_730d_return"),
+                    "test_win_rate": meta_wf.get("expost_730d_win_rate"),
+                    "test_trades": meta_wf.get("expost_730d_trades"),
+                    "test_max_drawdown": meta_wf.get("expost_730d_drawdown"),
+                    "performance_degradation": meta_wf.get("wf_performance_degradation"),
+                    "walk_forward_validated": meta_wf.get("walk_forward_validated", False),
+                }
         
         # Task 9.7: Extract strategy metadata fields with proper resolution
         ALPHA_EDGE_TEMPLATES = {
@@ -1942,9 +1961,26 @@ async def get_strategy(
     entry_rules = rules_dict.get("entry", []) if isinstance(rules_dict.get("entry"), list) else None
     exit_rules = rules_dict.get("exit", []) if isinstance(rules_dict.get("exit"), list) else None
     
-    # Extract walk-forward results from backtest_results
+    # Extract walk-forward results from backtest_results.
+    # Autonomous strategies store WF metrics in strategy_metadata — synthesize
+    # the WalkForwardResults shape from metadata when the nested key is absent.
     backtest_results = strategy_dict.get("backtest_results", {})
     walk_forward_results = backtest_results.get("walk_forward_results") if backtest_results else None
+    if not walk_forward_results:
+        meta_wf = metadata or {}
+        wf_test = meta_wf.get("wf_test_sharpe") or meta_wf.get("wf_sharpe")
+        wf_train = meta_wf.get("wf_train_sharpe")
+        if wf_test is not None or wf_train is not None:
+            walk_forward_results = {
+                "test_sharpe": wf_test,
+                "train_sharpe": wf_train,
+                "test_return": meta_wf.get("expost_730d_return"),
+                "test_win_rate": meta_wf.get("expost_730d_win_rate"),
+                "test_trades": meta_wf.get("expost_730d_trades"),
+                "test_max_drawdown": meta_wf.get("expost_730d_drawdown"),
+                "performance_degradation": meta_wf.get("wf_performance_degradation"),
+                "walk_forward_validated": meta_wf.get("walk_forward_validated", False),
+            }
     
     # Task 9.7: Extract strategy metadata fields
     strategy_category = metadata.get("strategy_category", "template_based")
