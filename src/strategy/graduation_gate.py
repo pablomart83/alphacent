@@ -32,9 +32,32 @@ logger = logging.getLogger(__name__)
 
 MIN_PAPER_TRADES = 20
 MIN_QUALIFICATION_RATIO = 0.60   # paper_sharpe / wf_sharpe
-MIN_PAPER_WIN_RATE = 0.45
+MIN_PAPER_WIN_RATE = 0.55        # raised from 0.45 — 45% is too permissive for real money
 MIN_PAPER_PNL = 0.0              # must be profitable
 REJECTION_COOLDOWN_DAYS = 14
+
+# Override constants from YAML if graduation_gate section exists.
+# This means Settings page changes take effect immediately (the PUT endpoint
+# also patches the in-memory constants directly, but this covers the startup
+# case where the YAML was already updated before the process started).
+try:
+    import yaml as _yaml
+    from pathlib import Path as _Path
+    _cfg_path = _Path("config/autonomous_trading.yaml")
+    if _cfg_path.exists():
+        with open(_cfg_path, "r") as _f:
+            _cfg = _yaml.safe_load(_f) or {}
+        _gg = _cfg.get("graduation_gate", {}) or {}
+        if "min_trades" in _gg:
+            MIN_PAPER_TRADES = int(_gg["min_trades"])
+        if "min_win_rate_pct" in _gg:
+            MIN_PAPER_WIN_RATE = float(_gg["min_win_rate_pct"]) / 100.0
+        if "min_qualification_ratio" in _gg:
+            MIN_QUALIFICATION_RATIO = float(_gg["min_qualification_ratio"])
+        if "rejection_cooldown_days" in _gg:
+            REJECTION_COOLDOWN_DAYS = int(_gg["rejection_cooldown_days"])
+except Exception:
+    pass  # Fall back to hardcoded defaults — never crash at import time
 
 
 def get_paper_stats_for_strategy(

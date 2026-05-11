@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle } from 'lucide-react'
+import { AlertTriangle, Info } from 'lucide-react'
 import { Card, Input, Label, Switch } from '@/components/primitives'
 import { SaveBar, SectionLabel } from '@/components/layout'
 import { classifyError } from '@/lib/errors'
@@ -54,6 +54,10 @@ export function LiveTradingSettingsTab() {
         mirror_ratio: form.mirror_ratio / 100,
         conviction_threshold: form.conviction_threshold,
         conviction_threshold_crypto: form.conviction_threshold_crypto,
+        graduation_min_trades: form.graduation_min_trades,
+        graduation_min_win_rate: form.graduation_min_win_rate,
+        graduation_min_qualification_ratio: form.graduation_min_qualification_ratio,
+        graduation_rejection_cooldown_days: form.graduation_rejection_cooldown_days,
       })
       toast.success('Live trading config saved')
     } catch (err) {
@@ -173,6 +177,55 @@ export function LiveTradingSettingsTab() {
         />
       </Card>
 
+      <Card padding="md" className="space-y-3">
+        <div className="flex items-center gap-2">
+          <h3 className="text-[12px] font-medium text-[var(--text-0)]">Graduation gate thresholds</h3>
+          <Info className="h-3.5 w-3.5 text-[var(--accent-primary)]" />
+        </div>
+        <p className="text-[10px] text-[var(--text-3)] leading-[14px]">
+          A (template, symbol) pair must clear all four gates before appearing in the graduation
+          queue. Changes take effect immediately — no restart needed.
+        </p>
+        <NumberRow
+          label="Min paper trades"
+          hint="Closed trades with P&L in trade_journal across all strategy versions for this pair"
+          value={form?.graduation_min_trades ?? 20}
+          onChange={(v) => set('graduation_min_trades', Math.round(v))}
+          min={5}
+          max={100}
+          step={1}
+        />
+        <NumberRow
+          label="Min win rate"
+          hint="% of trades that must be profitable — 55% is the live-money floor"
+          suffix="%"
+          value={form?.graduation_min_win_rate ?? 55}
+          onChange={(v) => set('graduation_min_win_rate', v)}
+          min={30}
+          max={90}
+          step={1}
+        />
+        <NumberRow
+          label="Min qualification ratio"
+          hint="paper_sharpe / wf_sharpe — live performance must track walk-forward (0.60 = 60%)"
+          value={form?.graduation_min_qualification_ratio ?? 0.60}
+          onChange={(v) => set('graduation_min_qualification_ratio', v)}
+          min={0.1}
+          max={1.0}
+          step={0.05}
+        />
+        <NumberRow
+          label="Rejection cooldown"
+          hint="Days before a rejected pair can re-appear in the queue"
+          suffix="d"
+          value={form?.graduation_rejection_cooldown_days ?? 14}
+          onChange={(v) => set('graduation_rejection_cooldown_days', Math.round(v))}
+          min={1}
+          max={90}
+          step={1}
+        />
+      </Card>
+
       <SaveBar
         dirty={dirty}
         changeCount={changeCount}
@@ -194,6 +247,10 @@ function extract(c: LiveTradingConfigShape) {
     mirror_ratio: Number(((c.mirror_ratio ?? 0) * 100).toFixed(2)),
     conviction_threshold: Number(c.conviction_threshold ?? 0),
     conviction_threshold_crypto: Number(c.conviction_threshold_crypto ?? 0),
+    graduation_min_trades: Number(c.graduation_min_trades ?? 20),
+    graduation_min_win_rate: Number(c.graduation_min_win_rate ?? 55),
+    graduation_min_qualification_ratio: Number(c.graduation_min_qualification_ratio ?? 0.60),
+    graduation_rejection_cooldown_days: Number(c.graduation_rejection_cooldown_days ?? 14),
   }
 }
 

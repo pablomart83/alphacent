@@ -170,6 +170,11 @@ export interface LiveTradingConfigShape {
   mirror_ratio: number
   conviction_threshold: number
   conviction_threshold_crypto: number
+  // Graduation gate thresholds
+  graduation_min_trades?: number
+  graduation_min_win_rate?: number
+  graduation_min_qualification_ratio?: number
+  graduation_rejection_cooldown_days?: number
   [k: string]: unknown
 }
 

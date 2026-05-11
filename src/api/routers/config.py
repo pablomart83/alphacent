@@ -1704,6 +1704,12 @@ class LiveTradingConfigResponse(BaseModel):
     portfolio_heat_cap: float = 90.0    # percentage (yaml: 0.90)
     conviction_threshold: int = 74
     conviction_threshold_crypto: int = 68
+    # Graduation gate thresholds — stored in graduation_gate.py constants
+    # but surfaced here so the CIO can tune them from the Settings page.
+    graduation_min_trades: int = 20
+    graduation_min_win_rate: float = 55.0   # percentage
+    graduation_min_qualification_ratio: float = 0.60
+    graduation_rejection_cooldown_days: int = 14
     # Computed read-only fields
     real_per_virtual_order: float = 0.0  # min_order_size * mirror_ratio
     max_real_per_order: float = 0.0      # max_order_size * mirror_ratio
@@ -1723,6 +1729,11 @@ class LiveTradingConfigRequest(BaseModel):
     portfolio_heat_cap: Optional[float] = None  # percentage (0-100)
     conviction_threshold: Optional[int] = None
     conviction_threshold_crypto: Optional[int] = None
+    # Graduation gate thresholds
+    graduation_min_trades: Optional[int] = Field(None, ge=5, le=100)
+    graduation_min_win_rate: Optional[float] = Field(None, ge=30.0, le=90.0)   # percentage
+    graduation_min_qualification_ratio: Optional[float] = Field(None, ge=0.1, le=1.0)
+    graduation_rejection_cooldown_days: Optional[int] = Field(None, ge=1, le=90)
 
 
 @router.get("/live-trading", response_model=LiveTradingConfigResponse)
@@ -1754,6 +1765,16 @@ async def get_live_trading_config(
     max_order = float(lt.get("max_order_size", 1500))
     mirror = float(lt.get("mirror_ratio", 0.10))
 
+    # Graduation gate thresholds — read from yaml graduation_gate section,
+    # fall back to the constants in graduation_gate.py.
+    from src.strategy.graduation_gate import (
+        MIN_PAPER_TRADES,
+        MIN_PAPER_WIN_RATE,
+        MIN_QUALIFICATION_RATIO,
+        REJECTION_COOLDOWN_DAYS,
+    )
+    gg = full_config.get("graduation_gate", {}) or {}
+
     return LiveTradingConfigResponse(
         enabled=bool(lt.get("enabled", False)),
         virtual_balance=float(lt.get("virtual_balance", 10000)),
@@ -1766,6 +1787,10 @@ async def get_live_trading_config(
         portfolio_heat_cap=float(lt.get("portfolio_heat_cap", 0.90)) * 100,
         conviction_threshold=int(lt.get("conviction_threshold", 74)),
         conviction_threshold_crypto=int(lt.get("conviction_threshold_crypto", 68)),
+        graduation_min_trades=int(gg.get("min_trades", MIN_PAPER_TRADES)),
+        graduation_min_win_rate=float(gg.get("min_win_rate_pct", MIN_PAPER_WIN_RATE * 100)),
+        graduation_min_qualification_ratio=float(gg.get("min_qualification_ratio", MIN_QUALIFICATION_RATIO)),
+        graduation_rejection_cooldown_days=int(gg.get("rejection_cooldown_days", REJECTION_COOLDOWN_DAYS)),
         real_per_virtual_order=round(min_order * mirror, 2),
         max_real_per_order=round(max_order * mirror, 2),
         live_client_configured=live_client_configured,
@@ -1813,6 +1838,34 @@ async def update_live_trading_config(
         lt["conviction_threshold"] = int(request.conviction_threshold)
     if request.conviction_threshold_crypto is not None:
         lt["conviction_threshold_crypto"] = int(request.conviction_threshold_crypto)
+
+    # Graduation gate thresholds — stored under graduation_gate section in YAML
+    # and also applied to the in-memory graduation_gate module constants so
+    # changes take effect immediately without a restart.
+    full_config.setdefault("graduation_gate", {})
+    gg = full_config["graduation_gate"]
+    if request.graduation_min_trades is not None:
+        gg["min_trades"] = int(request.graduation_min_trades)
+    if request.graduation_min_win_rate is not None:
+        gg["min_win_rate_pct"] = float(request.graduation_min_win_rate)
+    if request.graduation_min_qualification_ratio is not None:
+        gg["min_qualification_ratio"] = float(request.graduation_min_qualification_ratio)
+    if request.graduation_rejection_cooldown_days is not None:
+        gg["rejection_cooldown_days"] = int(request.graduation_rejection_cooldown_days)
+
+    # Apply to in-memory constants immediately — no restart needed.
+    try:
+        import src.strategy.graduation_gate as _gg
+        if request.graduation_min_trades is not None:
+            _gg.MIN_PAPER_TRADES = int(request.graduation_min_trades)
+        if request.graduation_min_win_rate is not None:
+            _gg.MIN_PAPER_WIN_RATE = float(request.graduation_min_win_rate) / 100.0
+        if request.graduation_min_qualification_ratio is not None:
+            _gg.MIN_QUALIFICATION_RATIO = float(request.graduation_min_qualification_ratio)
+        if request.graduation_rejection_cooldown_days is not None:
+            _gg.REJECTION_COOLDOWN_DAYS = int(request.graduation_rejection_cooldown_days)
+    except Exception as _e:
+        logger.warning(f"Could not apply graduation gate constants in-memory: {_e}")
 
     with open(config_file, "w") as f:
         yaml.dump(full_config, f, default_flow_style=False, sort_keys=False)
