@@ -29,9 +29,10 @@ import {
  */
 
 // Graduation thresholds — mirror graduation_gate.py constants
-const MIN_TRADES = 20
-const MIN_WIN_RATE = 0.45
+const MIN_TRADES = 15
+const MIN_WIN_RATE = 0.55
 const MIN_QUAL_RATIO = 0.60
+const MAX_QUAL_RATIO = 2.0  // paper Sharpe must not exceed 2× WF Sharpe (regime-luck guard)
 
 export function ApproachingGraduationPanel() {
   const query = useApproachingGraduation(5, 10)
@@ -66,7 +67,7 @@ export function ApproachingGraduationPanel() {
       <SectionLabel
         actions={
           <span className="text-[10px] normal-case tracking-normal text-[var(--text-3)]">
-            {rows.length} candidates · thresholds: 20 trades · Sharpe ≥ 60% WF · WR ≥ 45% · P&L {'>'} 0
+            {rows.length} candidates · thresholds: {MIN_TRADES} trades · Sharpe {MIN_QUAL_RATIO}–{MAX_QUAL_RATIO}× WF · WR ≥ {MIN_WIN_RATE * 100}% · P&L {'>'} 0
           </span>
         }
       >
@@ -83,14 +84,21 @@ export function ApproachingGraduationPanel() {
 
 function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
   const tradesPct = Math.min(100, (row.trades / MIN_TRADES) * 100)
-  const wrPct = Math.min(100, (row.win_rate / MIN_WIN_RATE) * 100)
+  // Win rate bar: show actual win rate as % of 100% (not % of threshold).
+  // Threshold line is shown via the `met` flag (turns green when crossed).
+  const wrPct = Math.min(100, row.win_rate * 100)
   const qualPct =
     row.qualification_ratio != null
-      ? Math.min(100, (row.qualification_ratio / MIN_QUAL_RATIO) * 100)
+      ? // Ratio bar: 0–100% maps to 0–MAX_QUAL_RATIO. Green zone = MIN to MAX.
+        Math.min(100, (row.qualification_ratio / MAX_QUAL_RATIO) * 100)
       : row.sharpe > 0
-        ? Math.min(100, (row.sharpe / 1.0) * 100) // fallback: progress toward Sharpe 1.0
+        ? Math.min(100, (row.sharpe / 1.0) * 100)
         : 0
   const pnlOk = row.total_pnl > 0
+  const ratioMet =
+    row.qualification_ratio != null
+      ? row.qualification_ratio >= MIN_QUAL_RATIO && row.qualification_ratio <= MAX_QUAL_RATIO
+      : row.sharpe >= 1.0
 
   return (
     <div className="px-3 py-2 space-y-2">
@@ -153,7 +161,7 @@ function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
         <ProgressBar
           label={row.qualification_ratio != null ? 'Qual ratio' : 'Sharpe'}
           pct={qualPct}
-          met={row.qualification_ratio != null ? row.qualification_ratio >= MIN_QUAL_RATIO : row.sharpe >= 1.0}
+          met={ratioMet}
         />
       </div>
 

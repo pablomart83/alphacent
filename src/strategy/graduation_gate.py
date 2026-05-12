@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 
 MIN_PAPER_TRADES = 20
 MIN_QUALIFICATION_RATIO = 0.60   # paper_sharpe / wf_sharpe
+MAX_QUALIFICATION_RATIO = 2.0    # paper_sharpe must not exceed 2× wf_sharpe
+                                  # A ratio > 2 means the paper period was regime-lucky,
+                                  # not a genuine edge confirmation. Graduating a strategy
+                                  # with paper_sharpe 3× its WF sharpe is graduating the
+                                  # regime, not the strategy.
 MIN_PAPER_WIN_RATE = 0.55        # raised from 0.45 — 45% is too permissive for real money
 MIN_PAPER_PNL = 0.0              # must be profitable
 REJECTION_COOLDOWN_DAYS = 14
@@ -54,6 +59,8 @@ try:
             MIN_PAPER_WIN_RATE = float(_gg["min_win_rate_pct"]) / 100.0
         if "min_qualification_ratio" in _gg:
             MIN_QUALIFICATION_RATIO = float(_gg["min_qualification_ratio"])
+        if "max_qualification_ratio_cap" in _gg:
+            MAX_QUALIFICATION_RATIO = float(_gg["max_qualification_ratio_cap"])
         if "rejection_cooldown_days" in _gg:
             REJECTION_COOLDOWN_DAYS = int(_gg["rejection_cooldown_days"])
 except Exception:
@@ -201,6 +208,12 @@ def is_qualified(
             reasons.append(
                 f"qualification_ratio={ratio:.2f} < {MIN_QUALIFICATION_RATIO} "
                 f"(paper_sharpe={sharpe:.2f}, wf_sharpe={wf_sharpe:.2f})"
+            )
+        elif ratio > MAX_QUALIFICATION_RATIO:
+            reasons.append(
+                f"qualification_ratio={ratio:.2f} > {MAX_QUALIFICATION_RATIO} "
+                f"(paper_sharpe={sharpe:.2f} is {ratio:.1f}× wf_sharpe={wf_sharpe:.2f} "
+                f"— paper period was regime-lucky, not a genuine edge confirmation)"
             )
     elif sharpe is None:
         reasons.append("paper_sharpe not computable (no trades with variance)")
@@ -353,7 +366,6 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     or meta.get("walk_forward_sharpe")
                     or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
                 )
-                strategy_name = strategy.name
 
         qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe)
         if not qualified:

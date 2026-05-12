@@ -185,7 +185,7 @@ export function GraduationQueueTable({
       <EmptyState
         icon={GraduationCap}
         title="Graduation queue is empty"
-        description="Pairs qualify with ≥20 paper trades, paper Sharpe ≥ 60% of WF Sharpe, win rate ≥ 45%, and positive P&L. Open the Library and filter to graduation-eligible to see the paper pool."
+        description="Pairs qualify with ≥15 paper trades, paper Sharpe between 60%–200% of WF Sharpe, win rate ≥ 55%, and positive P&L. Open the Library and filter to graduation-eligible to see the paper pool."
         action={
           <a
             className="text-[var(--accent-primary)] text-[11px] hover:underline"

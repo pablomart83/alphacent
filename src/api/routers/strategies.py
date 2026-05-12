@@ -1708,6 +1708,7 @@ async def get_approaching_graduation(
         MIN_PAPER_WIN_RATE,
         MIN_PAPER_PNL,
         MIN_QUALIFICATION_RATIO,
+        MAX_QUALIFICATION_RATIO,
         REJECTION_COOLDOWN_DAYS,
     )
     from datetime import timedelta
@@ -1834,7 +1835,7 @@ async def get_approaching_graduation(
             pnl_ok = total_pnl > MIN_PAPER_PNL
             wr_ok = win_rate >= MIN_PAPER_WIN_RATE
             ratio = (sharpe / wf_sharpe) if wf_sharpe > 0 and sharpe > 0 else None
-            ratio_ok = ratio is not None and ratio >= MIN_QUALIFICATION_RATIO
+            ratio_ok = ratio is not None and ratio >= MIN_QUALIFICATION_RATIO and ratio <= MAX_QUALIFICATION_RATIO
 
             if trades_ok and pnl_ok and wr_ok and ratio_ok:
                 continue  # fully qualified — graduation gate should have it
@@ -1857,7 +1858,10 @@ async def get_approaching_graduation(
                 missing.append(f"win rate {win_rate*100:.1f}% < {MIN_PAPER_WIN_RATE*100:.0f}%")
             if not ratio_ok:
                 if ratio is not None:
-                    missing.append(f"qual ratio {ratio:.2f} < {MIN_QUALIFICATION_RATIO}")
+                    if ratio > MAX_QUALIFICATION_RATIO:
+                        missing.append(f"qual ratio {ratio:.2f} > {MAX_QUALIFICATION_RATIO} (regime-lucky)")
+                    else:
+                        missing.append(f"qual ratio {ratio:.2f} < {MIN_QUALIFICATION_RATIO}")
                 elif wf_sharpe <= 0:
                     missing.append("no WF sharpe on record")
                 else:
