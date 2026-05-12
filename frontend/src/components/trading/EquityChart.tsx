@@ -124,6 +124,7 @@ export function EquityChart({
     time: string | null
     equity: number | null
     realized: number | null
+    realizedAlphaSpy: number | null
     drawdown: number | null
     spyAlpha: number | null
   } | null>(null)
@@ -219,6 +220,27 @@ export function EquityChart({
         time: timeStr,
         equity: eqData ? (eqData.value as number) : null,
         realized: realizedData ? (realizedData.value as number) : null,
+        realizedAlphaSpy: (() => {
+          // Alpha Realised vs SPY: realized return % minus SPY return % at this point.
+          // In percent mode: realized value is already % of starting equity; SPY is % return.
+          // In dollar mode: realized is raw $; SPY is rebased to equity start.
+          // We compute realized as % of starting equity, then subtract SPY %.
+          if (!realizedData || !spyPoint) return null
+          const realVal = realizedData.value as number
+          const spyVal = spyPoint.value as number
+          if (!Number.isFinite(realVal) || !Number.isFinite(spyVal)) return null
+          if (percentModeRef.current) {
+            // Both already in % — realized is realized/eqBase*100, SPY is spyReturn%
+            return realVal - spyVal
+          }
+          // Dollar mode: convert realized $ to % of starting equity, SPY is rebased to eqBase
+          const eqBase = equityDataRef.current[0]?.equity
+          const spyBase = spyDataRef.current?.[0]?.close
+          if (!eqBase || !spyBase || eqBase <= 0 || spyBase <= 0) return null
+          const realPct = (realVal / eqBase) * 100
+          const spyPct = ((spyVal - eqBase) / eqBase) * 100  // SPY rebased to eqBase
+          return realPct - spyPct
+        })(),
         drawdown: ddData ? (ddData.value as number) : null,
         spyAlpha,
       })
@@ -499,6 +521,14 @@ export function EquityChart({
                 {percentMode
                   ? formatPercentage(hover.realized, { precision: 2, signed: true })
                   : formatCurrency(hover.realized, { precision: 0 })}
+              </span>
+            </div>
+          )}
+          {hover.realizedAlphaSpy != null && showRealized && showBenchmark && (
+            <div className="flex items-center gap-2 mono">
+              <span className="text-[var(--text-2)]">Realised α SPY</span>
+              <span style={{ color: hover.realizedAlphaSpy >= 0 ? 'var(--pnl-up)' : 'var(--pnl-down)' }}>
+                {formatPercentage(hover.realizedAlphaSpy, { precision: 2, signed: true })}
               </span>
             </div>
           )}

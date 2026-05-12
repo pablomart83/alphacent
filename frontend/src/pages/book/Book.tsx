@@ -4,20 +4,19 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/primitives'
 import { useTradingMode } from '@/stores'
 import { PositionsTab } from './positions/PositionsTab'
 import { OrdersTab } from './orders/OrdersTab'
-import { ExecutionTab } from './execution/ExecutionTab'
 import { LiveTab } from './live/LiveTab'
 import { PositionDetailPage } from './PositionDetailPage'
 
 /**
  * Book surface — /book.
  *
- * Tabs: Positions · Orders · Execution · Live. All live as of Sprint 4.
+ * Tabs: Positions · Orders · Live.
+ * Execution tab moved to Research (2nd tab after Performance).
  */
 
 const TABS = [
   { value: 'positions', label: 'Positions' },
   { value: 'orders', label: 'Orders' },
-  { value: 'execution', label: 'Execution' },
   { value: 'live', label: 'Live' },
 ] as const
 
@@ -28,6 +27,8 @@ export function Book() {
     <Routes>
       <Route path="position/:symbol" element={<PositionDetailPage />} />
       <Route index element={<Navigate to="/book/positions" replace />} />
+      {/* Redirect old /book/execution links to Research */}
+      <Route path="execution/*" element={<Navigate to="/research/execution" replace />} />
       <Route path=":tab/*" element={<BookShell />} />
     </Routes>
   )
@@ -48,9 +49,7 @@ function BookShell() {
       ? `Positions · ${mode}`
       : current === 'orders'
         ? `Orders · ${mode}`
-        : current === 'execution'
-          ? `Execution · ${mode}`
-          : 'Live trading'
+        : 'Live trading'
 
   return (
     <PageTemplate title="Book" description={tabDescription}>
@@ -72,8 +71,6 @@ function BookShell() {
               <PositionsTab />
             ) : current === 'orders' ? (
               <OrdersTab />
-            ) : current === 'execution' ? (
-              <ExecutionTab />
             ) : (
               <LiveTab />
             )}

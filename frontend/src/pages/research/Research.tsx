@@ -13,19 +13,21 @@ import { AlphaEdgeTab } from './alpha-edge/AlphaEdgeTab'
 import { TearSheetTab } from './tear-sheet/TearSheetTab'
 import { StressTab } from './stress/StressTab'
 import { JournalTab } from './journal/JournalTab'
+import { ExecutionTab } from '../book/execution/ExecutionTab'
 
 /**
  * Research surface — /research.
  *
- * Tabs: Performance · Attribution · Trades · Regime · Alpha Edge ·
+ * Tabs: Performance · Execution · Attribution · Trades · Regime · Alpha Edge ·
  *       Tear Sheet · Stress · Journal.
  *
- * The full-width content area uses a period + interval segmented control
- * persisted in Zustand so a CIO's selection survives tab switches.
+ * Execution moved here from Book (Sprint 12) — it's an analytics surface,
+ * not a trade-management surface.
  */
 
 type TabValue =
   | 'performance'
+  | 'execution'
   | 'attribution'
   | 'trades'
   | 'regime'
@@ -36,6 +38,7 @@ type TabValue =
 
 const TABS: Array<{ value: TabValue; label: string }> = [
   { value: 'performance', label: 'Performance' },
+  { value: 'execution', label: 'Execution' },
   { value: 'attribution', label: 'Attribution' },
   { value: 'trades', label: 'Trades' },
   { value: 'regime', label: 'Regime' },
@@ -141,6 +144,8 @@ function ResearchShell() {
           <div className="flex-1 min-h-0">
             {current === 'performance' ? (
               <PerformanceTab />
+            ) : current === 'execution' ? (
+              <ExecutionTab />
             ) : current === 'attribution' ? (
               <AttributionTab />
             ) : current === 'trades' ? (
