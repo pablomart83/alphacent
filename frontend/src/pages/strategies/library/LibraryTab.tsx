@@ -19,6 +19,9 @@ import {
   hasSignalToday,
   isGraduationEligible,
   isIdle7d,
+  isPromotedToday,
+  isActivatedToday,
+  isLiveToday,
   useActivateStrategy,
   useDeactivateStrategy,
   useDeleteStrategyPermanent,
@@ -62,6 +65,9 @@ function parsePills(raw: string | null): QuickPillId[] {
     'negative-live-pnl',
     'graduation-eligible',
     'paper-20-plus',
+    'promoted-today',
+    'activated-today',
+    'live-today',
   ]
   return raw
     .split(',')
@@ -579,6 +585,9 @@ function applyFilters(rows: StrategyRow[], filters: LibraryFilters): StrategyRow
       if (pill === 'negative-live-pnl' && !hasNegativeLivePnl(r)) return false
       if (pill === 'graduation-eligible' && !isGraduationEligible(r)) return false
       if (pill === 'paper-20-plus' && !hasPaper20Plus(r)) return false
+      if (pill === 'promoted-today' && !isPromotedToday(r)) return false
+      if (pill === 'activated-today' && !isActivatedToday(r)) return false
+      if (pill === 'live-today' && !isLiveToday(r)) return false
     }
     return true
   })

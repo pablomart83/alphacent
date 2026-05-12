@@ -652,7 +652,25 @@ async def get_strategies(
         for row in last_signal_rows
     }
 
-    # Sprint 7.3: Fetch current equity for allocation_pct → dollar conversion
+    # Bulk query: activated_at per strategy for "Promoted Today" and "Activated Today" pills.
+    # Promoted Today  = PAPER status, activated_at today, created_at NOT today
+    #                   (existed before as BACKTESTED, promoted to PAPER today).
+    # Activated Today = created_at today (brand-new strategy proposed and activated today).
+    # Both are derived client-side from activated_at + created_at already on the row —
+    # no extra query needed; just ensure both timestamps are in the slim response.
+    # (activated_at is already a top-level field on StrategyResponse.)
+
+    # Bulk query: live_strategies.activated_at per strategy for "Live Today" pill.
+    # A strategy goes LIVE when a live_strategies row is created (graduation approval).
+    live_activated_today_ids: set = set(
+        row.strategy_id
+        for row in session.query(LiveStrategyORM.strategy_id, LiveStrategyORM.activated_at)
+        .filter(
+            LiveStrategyORM.retired_at.is_(None),
+            sa_func.date(LiveStrategyORM.activated_at) == sa_func.current_date(),
+        )
+        .all()
+    )    # Sprint 7.3: Fetch current equity for allocation_pct → dollar conversion
     # and SPY price series for alpha computation.
     # Skipped in slim mode — these are the most expensive queries (SPY fetches
     # thousands of rows from historical_price_cache).
@@ -850,8 +868,10 @@ async def get_strategies(
                 # Operational fields not in strategy_metadata but needed by pill filters.
                 # last_signal_at: most recent signal_emitted timestamp (signals-today / idle-7d pills).
                 # live_pnl: from live_strategies row (negative-live-pnl pill).
+                # live_today: True when this strategy's live_strategies row was created today.
                 "last_signal_at": last_signal_map.get(strategy_id),
                 "live_pnl": live_pnl_map.get(strategy_id),
+                "live_today": strategy_id in live_activated_today_ids,
             },
             # Task 9.7: Include strategy metadata fields
             strategy_category=strategy_category,

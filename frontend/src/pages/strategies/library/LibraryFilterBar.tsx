@@ -1,4 +1,4 @@
-import { Search, X, Zap, MoonStar, TrendingDown, GraduationCap, Beaker } from 'lucide-react'
+import { Search, X, Zap, MoonStar, TrendingDown, TrendingUp, GraduationCap, Beaker, Sparkles, Star } from 'lucide-react'
 import {
   Input,
   Select,
@@ -16,6 +16,9 @@ export type QuickPillId =
   | 'negative-live-pnl'
   | 'graduation-eligible'
   | 'paper-20-plus'
+  | 'promoted-today'
+  | 'activated-today'
+  | 'live-today'
 
 export interface LibraryFilters {
   search: string
@@ -83,6 +86,24 @@ const QUICK_PILLS: Array<{
     label: 'Paper ≥ 20 trades',
     icon: Beaker,
     description: 'PAPER strategies with at least 20 trades',
+  },
+  {
+    id: 'promoted-today',
+    label: 'Promoted today',
+    icon: TrendingUp,
+    description: 'Strategies promoted from BACKTESTED → PAPER today',
+  },
+  {
+    id: 'activated-today',
+    label: 'Activated today',
+    icon: Sparkles,
+    description: 'Brand-new strategies proposed and activated today',
+  },
+  {
+    id: 'live-today',
+    label: 'Live today',
+    icon: Star,
+    description: 'Strategies that graduated to live trading today',
   },
 ]
 

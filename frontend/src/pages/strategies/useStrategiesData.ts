@@ -100,6 +100,7 @@ export interface StrategyMetadata {
   asset_class?: string | null
   last_signal_at?: string | null
   last_fill_at?: string | null
+  live_today?: boolean | null
   [key: string]: unknown
 }
 
@@ -421,6 +422,27 @@ export function hasNegativeLivePnl(s: StrategyRow): boolean {
 export function hasPaper20Plus(s: StrategyRow): boolean {
   if (s.status !== 'PAPER') return false
   return (s.performance_metrics?.total_trades ?? 0) >= 20
+}
+
+/** Promoted Today — pre-existing strategy promoted to PAPER today (activated_at today, created_at not today). */
+export function isPromotedToday(s: StrategyRow): boolean {
+  if (!s.activated_at) return false
+  const today = new Date().toISOString().slice(0, 10)
+  const activatedDay = s.activated_at.slice(0, 10)
+  const createdDay = s.created_at?.slice(0, 10)
+  return activatedDay === today && createdDay !== today
+}
+
+/** Activated Today — brand-new strategy created today. */
+export function isActivatedToday(s: StrategyRow): boolean {
+  if (!s.created_at) return false
+  const today = new Date().toISOString().slice(0, 10)
+  return s.created_at.slice(0, 10) === today
+}
+
+/** Live Today — strategy that graduated to live trading today. */
+export function isLiveToday(s: StrategyRow): boolean {
+  return s.metadata?.live_today === true
 }
 
 
