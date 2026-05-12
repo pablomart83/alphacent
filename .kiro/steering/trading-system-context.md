@@ -224,6 +224,7 @@ Never silent-no-op; every cycle produces this line so outages surface in one `ta
 
 ### Conviction Scoring
 - Threshold: **65/100** (was 70, dropped — was above DSL ceiling)
+- **Live pass threshold: 73** — higher bar for real money. Set in `live_strategies.conviction_min`.
 - Components: WF edge (40) + signal quality (25) + regime fit (20) + asset tradability (15) + fundamental quality (±15) + carry bias (±5) + crypto cycle (±5) + news sentiment (±1) + factor exposure (±6)
 - Theoretical max: 132 (normalized to 100)
 - Asset tradability: Tier 1 stocks & major instruments 15pts | Tier 2 liquid 13pts | **ETFs 13pts, Indices 14pts** (bumped May 1 — 64.6% ETF WR, 85.7% index WR live)
@@ -294,7 +295,35 @@ Three runtime gates sit between signal generation and execution:
 
 All three gates are armed by default, use live data via `market_data_manager`, scope: equity/ETF/index/commodity entries. Never block exits, stops, or gate-exempt instruments.
 
-### Signal-Decision Audit Log (post-2026-05-02)
+### Graduation Gate (post-2026-05-12)
+
+Qualification criteria for promoting a (template, symbol) paper pair to live trading. All must pass:
+
+- `paper_trades ≥ min_trades` (currently 15 in YAML — was lowered from 20 to enable GOOGL test graduation; raise back to 20 once stable)
+- `paper_win_rate ≥ min_win_rate_pct / 100` (currently 55%)
+- `paper_pnl > 0`
+- `paper_sharpe / wf_sharpe ≥ min_qualification_ratio` (currently 0.60)
+- `paper_sharpe / wf_sharpe ≤ max_qualification_ratio_cap` (currently 2.0) — **regime-luck guard**: if paper Sharpe is more than 2× the WF Sharpe, the paper period was unusually favorable, not a genuine edge confirmation. Graduating a strategy with ratio 3× is graduating the regime, not the strategy.
+
+WF Sharpe key priority in SQL: `wf_test_sharpe → wf_sharpe → walk_forward_sharpe`. All active strategies store WF Sharpe under `wf_test_sharpe`.
+
+Approval flow: CIO reviews queue → approves via POST /strategies/{id}/graduate → `live_strategies` row created → `TradingScheduler` checks `live_strategies` before every live fill.
+
+### Live Trading Account Scoping — Critical Invariant (post-2026-05-12)
+
+Every component that touches DB positions or orders **must** scope to `account_type`. eToro reuses numeric position IDs across demo and live accounts. Without scoping:
+- DEMO sync finds live positions by etoro_position_id and updates them as DEMO rows
+- Live positions never get their own DB rows → no TSL, no P&L tracking, no zombie exit
+- Order matching picks the most-recently-filled order regardless of account → wrong strategy attribution
+
+**Enforced in:**
+- `OrderMonitor.__init__` — takes `account_type` param, scopes all queries
+- `_sync_positions` — `all_db_positions` query filtered by `account_type`; Pass 1 + Pass 2 order matching filtered by `account_type`
+- `reconcile_on_startup` — uses `self.account_type` throughout; live monitor runs its own startup reconcile
+- `/risk/metrics` and `/risk/advanced` — positions query filtered by `account_type`
+- `/account/positions`, `/account/positions/pending-open`, `/account/positions/pending-closures` — all filtered by mode → account_type
+
+**DB constraint:** `positions.etoro_position_id` unique constraint is composite `(etoro_position_id, account_type)` — not global. Migration: `migrations/migrate_etoro_id_constraint.sql`.
 
 Every template × symbol × stage decision per cycle is persisted in `signal_decisions`. One row per (stage, decision) per strategy per cycle. Stages written:
 
@@ -357,18 +386,18 @@ The price data pipeline has three layers. Each has distinct responsibilities. Vi
 
 ---
 
-## Known Open Issues (as of May 2, 2026)
+## Known Open Issues (as of May 12, 2026)
 
 - **Walk-forward bypass paths admit regime-luck** — test-dominant path in `strategy_proposer.py` allows strategies with ts ≥ -0.1 to pass if test Sharpe clears. SHORT side has been tightened; LONG still loose. Consider a consistency gate `(test_sharpe - train_sharpe) ≤ 1.5` post-Batch-4.
 - **Entry order 82% FAILED rate** — cosmetic: market-closed deferrals written as FAILED then re-fired each cycle. Batch 2 fix pending.
 - **NVDA and AMZN at 7.43% of equity each** — symbol concentration cap not enforced cumulatively across strategies. Batch 3 fix pending.
 - **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false, generates 0 trades. Regex-based param substitution collapses positional literals. Batch 4 fix pending.
-- **MQS persistence** — recent `equity_snapshots` have NULL `market_quality_score` despite code path being present. `_save_hourly_equity_snapshot` wraps MQS computation in `except: pass` hiding the real error. Investigation open.
+- **MQS persistence** — resolved May 12. MQS=84 now showing in equity_snapshots.
 - **Sector Rotation + Pairs Trading templates structurally broken** — Sector Rotation `fixed_symbols` covers only 5 of 11 SPDR sectors. Pairs Trading Market Neutral's DSL conditions are momentum-long signals, not pairs. Need design session, don't fix piecemeal.
 - **Regime classification two-tier inconsistency** — `market_analyzer.detect_sub_regime` and proposer regime gate can disagree. Worth tracing; affects which template pool gets used.
 - **Overview chart panel** — 3 separate chart components with misaligned axes; needs multi-pane rewrite.
 - **FMP insider endpoint** — 403/404 on current plan; insider_buying uses momentum proxy fallback.
 - **1h strategies** — ~1 active. Emergent from `min_trades_dsl_1h=15` + MC annualization inflation, not an explicit block. Revisit post-Batch-4.
-- **Cycle-error observability gap** — when a cycle stage throws (e.g. the `SignalAction` NameError on 2026-05-02 08:08 UTC), it only logs `Error proposing strategies:` and continues silently. No `signal_decisions` row written, no alert. Add a `cycle_error` stage write so stage failures are visible in the funnel.
+- **Cycle-error observability gap** — when a cycle stage throws, it only logs `Error proposing strategies:` and continues silently. No `signal_decisions` row written, no alert. Add a `cycle_error` stage write so stage failures are visible in the funnel.
 - **Entry-timing score (#5 from observability ranking)** — deferred; needs per-minute post-entry price snapshots we don't capture yet.
 - **Deploy-validation auto-tracker (#10)** — subsumed by signal_decisions once it's fully populated across a few cycles.
