@@ -523,9 +523,11 @@ async def get_pending_open_positions(
     from src.models.orm import OrderORM
     from src.models.enums import OrderStatus, OrderSide
     
-    # Get PENDING orders (orders submitted but not yet filled)
+    # Get PENDING orders (orders submitted but not yet filled) — scoped to account_type
+    _account_type = 'live' if mode == TradingMode.LIVE else 'demo'
     pending_orders = db.query(OrderORM).filter(
-        OrderORM.status == OrderStatus.PENDING
+        OrderORM.status == OrderStatus.PENDING,
+        OrderORM.account_type == _account_type,
     ).all()
     
     # Convert pending orders to position-like responses
@@ -580,10 +582,12 @@ async def get_pending_closures(
     """
     logger.info(f"Getting pending closures for {mode.value} mode, user {username}")
     
-    # Get positions marked for closure
+    # Get positions marked for closure — scoped to account_type
+    _account_type = 'live' if mode == TradingMode.LIVE else 'demo'
     positions = db.query(PositionORM).filter(
         PositionORM.pending_closure == True,
-        PositionORM.closed_at.is_(None)
+        PositionORM.closed_at.is_(None),
+        PositionORM.account_type == _account_type,
     ).all()
     
     position_responses = []
