@@ -1787,6 +1787,8 @@ async def get_approaching_graduation(
         # --- Get best WF sharpe per template from strategies table ---
         # Use the highest WF sharpe seen across all strategy versions for this
         # template — the most recent activation is the most relevant signal.
+        # Key priority: wf_test_sharpe (primary — set by walk-forward validation),
+        # then wf_sharpe (legacy alias), then walk_forward_sharpe (older alias).
         wf_rows = session.execute(
             text("""
                 SELECT
@@ -1796,6 +1798,7 @@ async def get_approaching_graduation(
                     )                                                   AS template_name,
                     MAX(
                         COALESCE(
+                            (strategy_metadata->>'wf_test_sharpe')::float,
                             (strategy_metadata->>'wf_sharpe')::float,
                             (strategy_metadata->>'walk_forward_sharpe')::float,
                             0
