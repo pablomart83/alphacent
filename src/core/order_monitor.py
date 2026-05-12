@@ -306,13 +306,14 @@ class OrderMonitor:
             for pos in etoro_positions:
                 etoro_pos_by_id[pos.etoro_position_id] = pos
 
-            # Get all open positions from DB — DEMO only.
-            # reconcile_on_startup uses self.etoro_client which is the DEMO client.
-            # Including LIVE positions here would close them spuriously because
-            # the DEMO client never returns live positions.
+            # Get all open positions from DB — scoped to this monitor's account_type.
+            # reconcile_on_startup uses self.etoro_client which is account-specific.
+            # A DEMO monitor must not touch live positions (DEMO client never returns
+            # live positions, so they'd be spuriously closed). A live monitor must not
+            # touch demo positions for the same reason.
             db_open_positions = session.query(PositionORM).filter(
                 PositionORM.closed_at.is_(None),
-                PositionORM.account_type == 'demo',
+                PositionORM.account_type == self.account_type,
             ).all()
             db_pos_by_etoro_id = {p.etoro_position_id: p for p in db_open_positions}
 
@@ -338,6 +339,7 @@ class OrderMonitor:
                         recent_cutoff = datetime.now() - timedelta(hours=24)
                         matching_orders = session.query(OrderORM).filter(
                             OrderORM.status == OrderStatus.FILLED,
+                            OrderORM.account_type == self.account_type,
                         ).order_by(OrderORM.filled_at.desc()).limit(50).all()
 
                         for order in matching_orders:
@@ -365,6 +367,7 @@ class OrderMonitor:
                         stop_loss=etoro_pos.stop_loss,
                         take_profit=etoro_pos.take_profit,
                         closed_at=None,
+                        account_type=self.account_type,
                     )
                     session.add(new_pos)
                     results["positions_created"] += 1
@@ -507,7 +510,8 @@ class OrderMonitor:
             logger.info("Step 2: Reconciling orders sent to eToro...")
             submitted_orders = session.query(OrderORM).filter(
                 OrderORM.status == OrderStatus.PENDING,
-                OrderORM.etoro_order_id.isnot(None)
+                OrderORM.etoro_order_id.isnot(None),
+                OrderORM.account_type == self.account_type,
             ).all()
 
             logger.info(f"  Found {len(submitted_orders)} orders sent to eToro in DB")
@@ -558,6 +562,52 @@ class OrderMonitor:
 
             # Update sync timestamp so regular sync doesn't immediately re-run
             self._last_full_sync = time.time()
+
+            # --- Step 2b: Verify recently-filled live orders have open positions ---
+            # If the service restarts after a live order fills but before the position
+            # sync runs, the startup reconciler (Step 2) misses it — it only checks
+            # PENDING orders. Without this check, the live pass could fire again after
+            # the 4h cooldown expires and submit a duplicate order.
+            # This step scans FILLED live entry orders from the last 2 hours and
+            # verifies each has a corresponding open live position. If not, it forces
+            # a position sync so the position is created before signal generation starts.
+            if self.account_type == 'live':
+                try:
+                    from datetime import timedelta as _td_2b
+                    from src.utils.symbol_normalizer import normalize_symbol as _norm_2b
+                    _recent_filled_cutoff = datetime.now() - _td_2b(hours=2)
+                    _recent_filled_live = session.query(OrderORM).filter(
+                        OrderORM.status == OrderStatus.FILLED,
+                        OrderORM.account_type == 'live',
+                        OrderORM.filled_at >= _recent_filled_cutoff,
+                        OrderORM.order_action == 'entry',
+                    ).all()
+                    _missing_positions = []
+                    for _fo in _recent_filled_live:
+                        _sym = _norm_2b(_fo.symbol)
+                        _existing = session.query(PositionORM).filter(
+                            PositionORM.strategy_id == _fo.strategy_id,
+                            PositionORM.symbol == _sym,
+                            PositionORM.account_type == 'live',
+                            PositionORM.closed_at.is_(None),
+                        ).first()
+                        if not _existing:
+                            _missing_positions.append(_fo)
+                            logger.warning(
+                                f"  LIVE order {_fo.id[:8]} ({_sym}) is FILLED "
+                                f"but has no open live position — will force sync"
+                            )
+                    if _missing_positions:
+                        logger.info(
+                            f"  Step 2b: {len(_missing_positions)} filled live order(s) "
+                            f"missing positions — forcing position sync"
+                        )
+                        # Force sync runs after reconcile completes (flag checked by caller)
+                        results["force_live_sync"] = True
+                    else:
+                        logger.debug("  Step 2b: all recent filled live orders have open positions")
+                except Exception as _2b_err:
+                    logger.warning(f"  Step 2b check failed (non-fatal): {_2b_err}")
 
             # Cache the fresh positions
             self._positions_cache = (etoro_positions, time.time())

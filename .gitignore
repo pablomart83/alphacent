@@ -56,3 +56,7 @@ frontend/dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Temporary diagnostic / scratch files — never commit these
+# (DB migrations live in migrations/ instead)
+.kiro_tmp/

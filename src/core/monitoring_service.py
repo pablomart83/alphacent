@@ -94,6 +94,10 @@ class MonitoringService:
         self._last_order_check: float = 0
         self._last_position_sync: float = 0
         self._last_trailing_check: float = 0
+        # One-time live reconcile: run once before the first position sync to
+        # verify recently-filled live orders have open positions (Step 2b).
+        # Mirrors the DEMO reconcile_on_startup in trading_scheduler.
+        self._live_reconcile_done: bool = False
         import time as _time_init
         self._last_fundamental_check: float = _time_init.time()  # Skip first fundamental check on startup
         self._last_pending_closure_check: float = _time_init.time()  # Skip first pending closure check on startup
@@ -419,6 +423,24 @@ class MonitoringService:
 
                 # Phase 2: sync live positions if live client is configured
                 if self.live_order_monitor is not None:
+                    # One-time startup reconcile for live account: verify recently-filled
+                    # live orders have open positions. Runs before the first sync so any
+                    # gap (service restarted after fill, before sync) is caught immediately.
+                    if not self._live_reconcile_done:
+                        try:
+                            live_recon = self.live_order_monitor.reconcile_on_startup()
+                            self._live_reconcile_done = True
+                            if live_recon.get("force_live_sync"):
+                                logger.info(
+                                    "Live reconcile: forcing position sync "
+                                    "(filled live order(s) missing positions)"
+                                )
+                                # Force the sync below to run immediately
+                                self.live_order_monitor._last_full_sync = 0
+                        except Exception as _lr_err:
+                            logger.warning(f"Live startup reconcile failed (non-fatal): {_lr_err}")
+                            self._live_reconcile_done = True  # don't retry on every cycle
+
                     try:
                         live_results = self.live_order_monitor.sync_positions(account_type="live")
                         logger.info(
@@ -4826,6 +4848,12 @@ class MonitoringService:
                                     _PosORM.closed_at.isnot(None),
                                     _PosORM.realized_pnl.isnot(None),
                                     _PosORM.account_type == 'demo',
+                                    # Exclude sync artifacts (orphan-relinked positions,
+                                    # overnight-bug duplicates, etc.) — these have a
+                                    # closure_reason set by the system and are not genuine
+                                    # strategy trades. Counting them skews the win rate and
+                                    # can trigger the circuit breaker on healthy templates.
+                                    _PosORM.closure_reason.is_(None),
                                 ).order_by(_PosORM.closed_at.desc()).limit(10).all()
                                 if len(_recent_closed) >= 5:  # Need at least 5 trades to judge
                                     _wins = sum(1 for p in _recent_closed if (p.realized_pnl or 0) > 0)
