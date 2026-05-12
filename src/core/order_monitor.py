@@ -1475,10 +1475,15 @@ class OrderMonitor:
                         
                         # Pass 1: Look for a recently FILLED order matching this symbol.
                         # This is the normal happy-path (order filled → position created).
+                        # CRITICAL: scope to account_type — a live position must only match
+                        # live orders, and a demo position must only match demo orders.
+                        # Without this, a recently-filled DEMO order for the same symbol
+                        # wins the sort over an older live order, misattributing the position.
                         recent_cutoff = datetime.now() - timedelta(hours=2)
                         matching_orders = session.query(OrderORM).filter(
                             OrderORM.status == OrderStatus.FILLED,
-                            OrderORM.filled_at >= recent_cutoff
+                            OrderORM.filled_at >= recent_cutoff,
+                            OrderORM.account_type == account_type,
                         ).order_by(OrderORM.filled_at.desc()).all()
                         
                         for order in matching_orders:
@@ -1577,6 +1582,7 @@ class OrderMonitor:
                                     OrderORM.submitted_at <= window_hi,
                                     OrderORM.status.in_([OrderStatus.CANCELLED, OrderStatus.FAILED]),
                                     OrderORM.order_metadata.isnot(None),
+                                    OrderORM.account_type == account_type,
                                 ).all()
                                 # Filter to entry orders only.
                                 cancelled_candidates = [
