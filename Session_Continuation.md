@@ -59,46 +59,47 @@ The DEMO `OrderMonitor.check_submitted_orders()` had no `account_type` filter. I
 
 ## CURRENT SYSTEM STATE (2026-05-12 end of session)
 
-- **DEMO equity:** ~$495K | **Open positions:** ~65 | **Regime:** trending_up_strong
+- **DEMO equity:** ~$484K | **Open positions:** ~69 | **Regime:** trending_up_strong
 - **DEMO strategies:** ~47 PAPER + ~63 BACKTESTED
 - **LIVE strategy:** `4H EMA Ribbon Trend Long GOOGL LIVE` (id: `918b0c99`) — status LIVE
-- **LIVE positions:** 0 open — all overnight duplicates closed
-- **live_trading.enabled:** TRUE (re-enabled)
-- **Latest commit:** `49d7c00`
+- **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53
+- **live_trading.enabled:** TRUE
+- **Latest commit:** `c603c6d`
 
 ---
 
-## 🔴 P0 — LIVE GOOGL POSITION NOT RE-OPENING
+## ✅ P0 — LIVE GOOGL POSITION RESOLVED (2026-05-12)
 
-### What happened
-1. Original GOOGL live position closed at 20:27 May 11 (miss counter bug)
-2. Live pass fired every 10 min overnight → 12 GOOGL positions at market open May 12
-3. All 12 closed at a loss (GOOGL down at open)
-4. Template circuit breaker: win rate 10% → -1.5 decay penalty → conviction 71.8 < 73
-5. Circuit breaker fix deployed (commit `49d7c00`) — excludes live positions
-6. Service restarted at ~12:56 UTC May 12
+### What happened (full chain)
+1. Original GOOGL live position closed at 20:27 May 11 (miss counter bug — fixed `a6918de`)
+2. DEMO OrderMonitor processed live orders overnight → 12 GOOGL positions at market open (fixed `a5ff668`)
+3. All 12 closed at a loss → template circuit breaker fired (win rate 10%) → conviction 71.8 < 73
+4. Circuit breaker fix deployed (`49d7c00`) — excludes live positions from template win rate
+5. Live pass fired at 13:14 UTC May 12 — conviction 73.1, order `8dbe13a8` FILLED
+6. **But position never appeared in DB** — three bugs in `_sync_positions` blocked it
 
-### Why GOOGL live hasn't re-entered yet (as of end of session)
-After the circuit breaker fix and restart, the live pass should fire on the next signal cycle if:
-- GOOGL 4H EMA Ribbon signal is active (conviction ≥ 73)
-- No open live position
-- No pending live order
-- No recent live order within 4h (last was ~10:43, so 4h window expired ~14:43)
+### Root cause of missing DB row (fixed `c603c6d`)
+Three bugs in `order_monitor._sync_positions`:
 
-**Check at session start:**
-```bash
-# Check if live pass is firing and what's blocking it
-grep "Live pass\|LIVE FILL\|conviction.*gate.*GOOGL\|circuit.*breaker.*GOOGL\|4H EMA Ribbon.*LIVE" /home/ubuntu/alphacent/logs/system.log | tail -20
+**Bug 1 — `db_by_etoro_id` not scoped to `account_type`**
+- `all_db_positions` loaded ALL accounts. Live sync found the DEMO row `bf17f4af` (which had `etoro_position_id='3515044608'`) and updated it instead of creating a live row.
+- Fix: scope `all_db_positions` query to `account_type`.
 
-# Check conviction score for LIVE strategy
-grep "conviction.*GOOGL.*LIVE\|GOOGL.*LIVE.*conviction\|4H EMA Ribbon.*GOOGL.*LIVE.*score" /home/ubuntu/alphacent/logs/alphacent.log | tail -10
+**Bug 2 — Global unique constraint on `etoro_position_id`**
+- eToro reuses numeric position IDs across demo/live accounts.
+- INSERT failed with `UniqueViolation` on `positions_etoro_position_id_key` when live ID matched a demo row.
+- Fix: DB migration replaced global constraint with composite `uq_positions_etoro_id_account (etoro_position_id, account_type)`.
 
-# Check live_strategies state
-sudo -u postgres psql alphacent -c "SELECT id, strategy_id, template_name, symbol, live_trades, live_pnl, conviction_min FROM live_strategies;"
+**Bug 3 — `existing_by_id` check didn't filter by `account_type` or `closed_at`**
+- A closed DEMO row with the same numeric PK blocked the live INSERT.
+- Fix: `existing_by_id` only matches when `account_type` matches AND `closed_at IS NULL`.
+- Added `all_pk_ids_in_db` set for PK collision detection; collision path creates position with synthetic UUID.
 
-# Check if circuit breaker is still firing
-grep "circuit breaker.*4H EMA Ribbon\|4H EMA Ribbon.*circuit" /home/ubuntu/alphacent/logs/alphacent.log | tail -5
-```
+### Current state (as of 15:07 UTC May 12)
+- Live GOOGL position: `id=3439749630`, `account_type=live`, `etoro_position_id=3439749630`, `entry=389.2`, `stop_loss=365.82`, `take_profit=447.53`
+- Live position sync: `1 updated` every cycle — clean, no errors
+- No UniqueViolation errors since fix deployed
+- **Note**: `strategy_id='ad637559'` on the live position (not `918b0c99`) — this is because the orphan reconciler matched it to a different order. Not blocking anything but worth fixing in a future session.
 
 ---
 
@@ -122,11 +123,12 @@ Three checks before firing a live entry:
 
 ## KNOWN ISSUES / TECHNICAL DEBT
 
+- **Live position strategy_id mismatch** — live GOOGL position `3439749630` has `strategy_id='ad637559'` (not `918b0c99`). The orphan reconciler matched it to a different order. Position is tracked and protected by TSL, but strategy attribution is wrong. Fix: manual DB update or improve orphan reconciler to prefer live strategy when `account_type='live'`.
 - **VaR check disabled** — portfolio VaR was 97.97% (model artefact from young equity curve). Disabled in Settings. Re-enable after 90+ days of equity history.
 - **Conviction threshold 73** — many DEMO signals scoring 65-72 are blocked. Intentional — only high-conviction signals trade.
 - **Directional quotas disabled** — you disabled in Settings.
 - **4h cooldown on live orders** — belt-and-suspenders guard. May delay re-entry after legitimate position close. Consider reducing to 1h once system is stable.
-- **MQS persistence** — NULL values in recent equity_snapshots (silent exception in _save_hourly_equity_snapshot)
+- **MQS persistence** — NULL values in recent equity_snapshots (silent exception in _save_hourly_equity_snapshot) — now fixed (MQS=84 showing in snapshots)
 - **Triple EMA Alignment DSL bug** — EMA(10) > EMA(10) always false
 - **Sector Rotation + Pairs Trading templates** — structurally broken
 
@@ -142,8 +144,8 @@ ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.6
 # Live position status
 ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT id, symbol, side, entry_price, current_price, unrealized_pnl, account_type, opened_at FROM positions WHERE account_type='"'"'live'"'"' AND closed_at IS NULL;"'
 
-# Live pass activity (most important)
-ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'grep "Live pass\|LIVE FILL\|circuit breaker.*GOOGL\|conviction.*gate.*GOOGL" /home/ubuntu/alphacent/logs/system.log | tail -20'
+# Live pass activity
+ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'grep "Live pass\|LIVE FILL\|UniqueViolation\|PK collision" /home/ubuntu/alphacent/logs/system.log | tail -10'
 
 # Strategy counts
 ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149 'sudo -u postgres psql alphacent -t -A -c "SELECT status, COUNT(*) FROM strategies GROUP BY status ORDER BY status;"'
@@ -160,24 +162,18 @@ scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent
 Read .kiro/steering/trading-system-context.md and Session_Continuation.md in full before doing anything.
 
 System state:
-- DEMO: ~$495K equity, ~65 open positions, trending_up_strong
-- LIVE: 0 open positions — all overnight duplicates closed (system bug fixed)
+- DEMO: ~$484K equity, ~69 open positions, trending_up_strong
+- LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53
 - live_trading.enabled: TRUE
-- Latest commit: 49d7c00
+- Latest commit: c603c6d
 
-P0 — LIVE GOOGL position not re-opening:
-The overnight bug (DEMO OrderMonitor processing live orders) caused 12 GOOGL positions to open and close at a loss. This triggered the template circuit breaker (win rate 10% → -1.5 decay penalty → conviction 71.8 < 73 → live pass blocked). Circuit breaker fix deployed (commit 49d7c00, excludes live positions from template win rate). Service restarted ~12:56 UTC May 12.
+P1 — Live position strategy_id mismatch:
+Live GOOGL position (id=3439749630) has strategy_id='ad637559' instead of '918b0c99' (the live strategy).
+The orphan reconciler matched it to a different order. Position is tracked and protected by TSL.
+Fix: update the strategy_id in DB, or improve orphan reconciler to prefer live strategy when account_type='live'.
 
-Investigate why GOOGL live position has not re-opened:
-1. Check if circuit breaker is still firing after the fix
-2. Check conviction score for 4H EMA Ribbon Trend Long GOOGL LIVE
-3. Check if 4h cooldown guard is still blocking (last order ~10:43, expires ~14:43)
-4. Check if GOOGL 4H EMA Ribbon signal is actually firing
-5. Check live pass logs for any other blockers
-
-Key commands:
-grep "Live pass\|LIVE FILL\|circuit breaker.*GOOGL\|conviction.*gate.*GOOGL\|4H EMA Ribbon.*LIVE" /home/ubuntu/alphacent/logs/system.log | tail -20
-grep "Live pass\|LIVE FILL\|circuit breaker\|conviction.*gate" /home/ubuntu/alphacent/logs/alphacent.log | tail -20
+P2 — Frontend: verify cycle pipeline shows stages correctly during next cycle run
+P2 — Frontend: verify Alpha vs SPY tile in Research/Performance shows data
 
 Root causes fixed this session (do not re-patch):
 - OrderMonitor scoped to account_type (commit a5ff668)
@@ -186,8 +182,6 @@ Root causes fixed this session (do not re-patch):
 - Circuit breaker excludes live positions (commit 49d7c00)
 - _submit_close_order refreshes etoro_position_id (commit 871bd53)
 - live.py close endpoint refreshes etoro_position_id (commit 1e67485)
-
-P1 — Update Session_Continuation.md with any new findings
-P2 — Frontend: verify cycle pipeline shows stages correctly during next cycle run
-P2 — Frontend: verify Alpha vs SPY tile in Research/Performance shows data
+- _sync_positions scoped to account_type, PK/etoro_id collision fixed (commit c603c6d)
+- DB migration: global etoro_position_id unique → composite (etoro_position_id, account_type)
 ```
