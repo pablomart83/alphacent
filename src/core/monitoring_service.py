@@ -4825,6 +4825,7 @@ class MonitoringService:
                                     _PosORM.strategy_id.in_(_template_strat_ids),
                                     _PosORM.closed_at.isnot(None),
                                     _PosORM.realized_pnl.isnot(None),
+                                    _PosORM.account_type == 'demo',
                                 ).order_by(_PosORM.closed_at.desc()).limit(10).all()
                                 if len(_recent_closed) >= 5:  # Need at least 5 trades to judge
                                     _wins = sum(1 for p in _recent_closed if (p.realized_pnl or 0) > 0)
