@@ -3336,8 +3336,40 @@ class MonitoringService:
                 if _pos_account_type == 'live' and self.live_etoro_client is not None
                 else self.etoro_client
             )
+
+            # For live positions, verify the etoro_position_id is current.
+            # eToro oscillates position IDs — the DB row may have a stale ID
+            # that eToro no longer recognises, causing silent close failures.
+            # Fetch fresh positions and find the matching one by symbol.
+            etoro_position_id_to_close = pos.etoro_position_id
+            if _pos_account_type == 'live' and self.live_etoro_client is not None:
+                try:
+                    live_positions = self.live_etoro_client.get_positions()
+                    from src.utils.symbol_normalizer import normalize_symbol as _norm_sym
+                    _sym = _norm_sym(pos.symbol)
+                    # Find the position on eToro matching this symbol
+                    # If DB ID is in the live list, use it; otherwise use the first match
+                    live_ids = {str(p.etoro_position_id) for p in live_positions
+                                if _norm_sym(p.symbol) == _sym}
+                    if live_ids:
+                        db_id = str(pos.etoro_position_id)
+                        if db_id not in live_ids:
+                            # DB ID is stale — use the first live ID for this symbol
+                            etoro_position_id_to_close = next(iter(live_ids))
+                            logger.info(
+                                f"Live close: DB etoro_position_id {db_id} not found on eToro "
+                                f"for {pos.symbol} — using fresh ID {etoro_position_id_to_close}"
+                            )
+                            # Update DB row with fresh ID
+                            pos.etoro_position_id = etoro_position_id_to_close
+                except Exception as _id_refresh_err:
+                    logger.warning(
+                        f"Could not refresh etoro_position_id for {pos.symbol}: "
+                        f"{_id_refresh_err} — using DB value {pos.etoro_position_id}"
+                    )
+
             _close_client.close_position(
-                pos.etoro_position_id,
+                etoro_position_id_to_close,
                 instrument_id=instrument_id,
                 amount=close_dollar_amount,
             )
