@@ -261,7 +261,28 @@ async def close_live_position(
             raise HTTPException(status_code=503, detail="Live eToro client not configured")
 
         instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(pos.symbol)
-        live_client.close_position(pos.etoro_position_id, instrument_id=instrument_id)
+
+        # Refresh etoro_position_id before closing — the DB value may be stale
+        # due to eToro's ID oscillation. Fetch current positions and find the
+        # correct ID for this symbol.
+        etoro_id_to_close = pos.etoro_position_id
+        try:
+            live_positions = live_client.get_positions()
+            from src.utils.symbol_normalizer import normalize_symbol as _norm
+            _sym = _norm(pos.symbol)
+            live_ids = {str(p.etoro_position_id) for p in live_positions
+                        if _norm(p.symbol) == _sym}
+            if live_ids and str(pos.etoro_position_id) not in live_ids:
+                etoro_id_to_close = next(iter(live_ids))
+                logger.info(
+                    f"Live close: DB etoro_position_id {pos.etoro_position_id} stale "
+                    f"for {pos.symbol} — using fresh ID {etoro_id_to_close}"
+                )
+                pos.etoro_position_id = etoro_id_to_close
+        except Exception as _refresh_err:
+            logger.warning(f"Could not refresh etoro_position_id for {pos.symbol}: {_refresh_err}")
+
+        live_client.close_position(etoro_id_to_close, instrument_id=instrument_id)
 
         pos.pending_closure = True
         pos.closure_reason = f"Manual close by {username}"
