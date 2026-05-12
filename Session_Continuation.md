@@ -123,7 +123,7 @@ Three checks before firing a live entry:
 
 ## KNOWN ISSUES / TECHNICAL DEBT
 
-- **Live position strategy_id mismatch** — live GOOGL position `3439749630` has `strategy_id='ad637559'` (not `918b0c99`). The orphan reconciler matched it to a different order. Position is tracked and protected by TSL, but strategy attribution is wrong. Fix: manual DB update or improve orphan reconciler to prefer live strategy when `account_type='live'`.
+- **Live position strategy_id mismatch** — ~~live GOOGL position `3439749630` has `strategy_id='ad637559'` (not `918b0c99`)~~ **FIXED** (`a65b986`). Root cause: Pass 1 and Pass 2 order matching in `_sync_positions` queried orders without `account_type` filter. A recently-filled DEMO order for GOOGL outranked the older live order in the sort. Fix: both passes now filter `OrderORM.account_type == account_type`. DB corrected manually.
 - **VaR check disabled** — portfolio VaR was 97.97% (model artefact from young equity curve). Disabled in Settings. Re-enable after 90+ days of equity history.
 - **Conviction threshold 73** — many DEMO signals scoring 65-72 are blocked. Intentional — only high-conviction signals trade.
 - **Directional quotas disabled** — you disabled in Settings.
@@ -163,14 +163,9 @@ Read .kiro/steering/trading-system-context.md and Session_Continuation.md in ful
 
 System state:
 - DEMO: ~$484K equity, ~69 open positions, trending_up_strong
-- LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53
+- LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53, strategy 918b0c99 ✅
 - live_trading.enabled: TRUE
-- Latest commit: c603c6d
-
-P1 — Live position strategy_id mismatch:
-Live GOOGL position (id=3439749630) has strategy_id='ad637559' instead of '918b0c99' (the live strategy).
-The orphan reconciler matched it to a different order. Position is tracked and protected by TSL.
-Fix: update the strategy_id in DB, or improve orphan reconciler to prefer live strategy when account_type='live'.
+- Latest commit: a65b986
 
 P2 — Frontend: verify cycle pipeline shows stages correctly during next cycle run
 P2 — Frontend: verify Alpha vs SPY tile in Research/Performance shows data
@@ -183,5 +178,7 @@ Root causes fixed this session (do not re-patch):
 - _submit_close_order refreshes etoro_position_id (commit 871bd53)
 - live.py close endpoint refreshes etoro_position_id (commit 1e67485)
 - _sync_positions scoped to account_type, PK/etoro_id collision fixed (commit c603c6d)
+- DB migration: global etoro_position_id unique → composite (etoro_position_id, account_type)
+- Order matching Pass 1 + Pass 2 scoped to account_type (commit a65b986)
 - DB migration: global etoro_position_id unique → composite (etoro_position_id, account_type)
 ```
