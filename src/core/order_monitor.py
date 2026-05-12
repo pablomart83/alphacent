@@ -57,15 +57,18 @@ logger = logging.getLogger(__name__)
 class OrderMonitor:
     """Monitors submitted orders and updates their status from eToro."""
 
-    def __init__(self, etoro_client: EToroAPIClient, db: Optional[Database] = None):
+    def __init__(self, etoro_client: EToroAPIClient, db: Optional[Database] = None, account_type: str = 'demo'):
         """Initialize order monitor.
         
         Args:
             etoro_client: eToro API client
             db: Database instance (creates new if not provided)
+            account_type: 'demo' or 'live' — scopes order/position queries so the
+                          DEMO monitor never touches live orders and vice versa.
         """
         self.etoro_client = etoro_client
         self.db = db or Database()
+        self.account_type = account_type  # scopes all DB queries
         
         # Cache for order statuses with TTL
         self._order_status_cache = {}  # order_id -> (status_data, timestamp)
@@ -598,10 +601,12 @@ class OrderMonitor:
         session = self.db.get_session()
 
         try:
-            # Get pending orders that have NOT been submitted to eToro yet
+            # Get pending orders that have NOT been submitted to eToro yet,
+            # scoped to this monitor's account_type.
             pending_orders = session.query(OrderORM).filter(
                 OrderORM.status == OrderStatus.PENDING,
-                OrderORM.etoro_order_id.is_(None)  # Only orders not yet submitted to eToro
+                OrderORM.etoro_order_id.is_(None),  # Only orders not yet submitted to eToro
+                OrderORM.account_type == self.account_type,
             ).all()
 
             if not pending_orders:
@@ -750,10 +755,14 @@ class OrderMonitor:
         session = self.db.get_session()
         
         try:
-            # Get all pending orders that have been sent to eToro (have etoro_order_id)
+            # Get all pending orders scoped to this monitor's account_type.
+            # CRITICAL: without this filter, the DEMO monitor picks up live orders,
+            # calls get_order_status with the DEMO client (404), and marks them
+            # CANCELLED — preventing the live position from ever being created in DB.
             submitted_orders = session.query(OrderORM).filter(
                 OrderORM.status == OrderStatus.PENDING,
-                OrderORM.etoro_order_id.isnot(None)
+                OrderORM.etoro_order_id.isnot(None),
+                OrderORM.account_type == self.account_type,
             ).all()
             
             if not submitted_orders:

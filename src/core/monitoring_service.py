@@ -74,11 +74,11 @@ class MonitoringService:
         self.live_etoro_client: Optional[EToroAPIClient] = live_etoro_client
 
         self.db = db or Database()
-        self.order_monitor = OrderMonitor(self.etoro_client, self.db)
+        self.order_monitor = OrderMonitor(self.etoro_client, self.db, account_type='demo')
 
         # Phase 2: separate OrderMonitor for live account (None = DEMO-only)
         self.live_order_monitor: Optional[OrderMonitor] = (
-            OrderMonitor(live_etoro_client, self.db) if live_etoro_client else None
+            OrderMonitor(live_etoro_client, self.db, account_type='live') if live_etoro_client else None
         )
         
         # Configurable intervals
