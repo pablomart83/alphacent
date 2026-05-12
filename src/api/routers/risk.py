@@ -329,9 +329,11 @@ async def get_risk_metrics(
     """
     logger.info(f"Getting risk metrics for {mode.value} mode, user {username}")
     
-    # Get all open positions
+    # Get all open positions — scoped to account_type
+    _account_type = 'live' if mode == TradingMode.LIVE else 'demo'
     positions = session.query(PositionORM).filter(
-        PositionORM.closed_at.is_(None)
+        PositionORM.closed_at.is_(None),
+        PositionORM.account_type == _account_type,
     ).all()
     
     # Get risk configuration
@@ -360,12 +362,24 @@ async def get_risk_metrics(
                       for p in positions] if account_balance > 0 else []
     max_position_size = max(position_sizes) if position_sizes else 0.0
     
-    # Calculate risk breakdown by strategy
-    risk_breakdown = {}
+    # Calculate risk breakdown by strategy — use strategy name, not UUID
+    # Batch-fetch strategy names to avoid N+1
+    strategy_ids_in_positions = list(set(p.strategy_id for p in positions if p.strategy_id))
+    from src.models.orm import StrategyORM as _StrategyORM_risk
+    strategy_name_map: Dict[str, str] = {}
+    if strategy_ids_in_positions:
+        strat_rows = session.query(_StrategyORM_risk.id, _StrategyORM_risk.name).filter(
+            _StrategyORM_risk.id.in_(strategy_ids_in_positions)
+        ).all()
+        strategy_name_map = {r.id: r.name for r in strat_rows}
+
+    risk_breakdown: Dict[str, float] = {}
     for position in positions:
         strategy_id = position.strategy_id or 'unknown'
+        # Use strategy name if available, fall back to truncated UUID
+        label = strategy_name_map.get(strategy_id) or f"{strategy_id[:8]}…"
         position_risk = _get_position_value(position)
-        risk_breakdown[strategy_id] = risk_breakdown.get(strategy_id, 0.0) + position_risk
+        risk_breakdown[label] = risk_breakdown.get(label, 0.0) + position_risk
     
     # Calculate risk score
     risk_score, risk_reasons = calculate_risk_score(
@@ -854,38 +868,43 @@ def _get_asset_class(symbol: str) -> str:
 def _calculate_correlated_pairs(
     positions: List[PositionORM], session: Session
 ) -> List[CorrelatedPair]:
-    """Calculate top correlated position pairs using historical price data from DB."""
+    """Calculate top correlated position pairs using historical price data from DB.
+    Uses a single batch query instead of N per-symbol queries."""
     from src.models.orm import HistoricalPriceCacheORM
 
     if len(positions) < 2:
         return []
 
-    symbols = list(set(p.symbol for p in positions))
+    symbols = list(set(p.symbol for p in positions))[:20]  # cap at 20
     if len(symbols) < 2:
         return []
 
-    # Fetch last 60 days of close prices per symbol from DB
     cutoff = datetime.now() - timedelta(days=90)
-    price_data: Dict[str, List[float]] = {}
 
-    for symbol in symbols[:20]:  # Limit to 20 symbols for performance
-        rows = (
-            session.query(HistoricalPriceCacheORM)
-            .filter(
-                HistoricalPriceCacheORM.symbol == symbol,
-                HistoricalPriceCacheORM.date >= cutoff,
-            )
-            .order_by(HistoricalPriceCacheORM.date.asc())
-            .all()
+    # BATCH: one query for all symbols instead of N separate queries
+    all_rows = (
+        session.query(HistoricalPriceCacheORM)
+        .filter(
+            HistoricalPriceCacheORM.symbol.in_(symbols),
+            HistoricalPriceCacheORM.date >= cutoff,
+            HistoricalPriceCacheORM.interval == '1d',
         )
-        if len(rows) >= 20:
-            closes = [r.close for r in rows if r.close and r.close > 0]
-            if len(closes) >= 20:
-                # Calculate daily returns
-                returns = []
-                for i in range(1, len(closes)):
-                    returns.append((closes[i] - closes[i - 1]) / closes[i - 1])
-                price_data[symbol] = returns
+        .order_by(HistoricalPriceCacheORM.symbol, HistoricalPriceCacheORM.date.asc())
+        .all()
+    )
+
+    # Group by symbol in memory
+    from collections import defaultdict
+    rows_by_symbol: dict = defaultdict(list)
+    for r in all_rows:
+        if r.close and r.close > 0:
+            rows_by_symbol[r.symbol].append(r.close)
+
+    price_data: Dict[str, List[float]] = {}
+    for symbol, closes in rows_by_symbol.items():
+        if len(closes) >= 20:
+            returns = [(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))]
+            price_data[symbol] = returns
 
     # Calculate pairwise correlations
     pairs: List[CorrelatedPair] = []
@@ -895,7 +914,6 @@ def _calculate_correlated_pairs(
         for j in range(i + 1, len(syms)):
             a_returns = price_data[syms[i]]
             b_returns = price_data[syms[j]]
-            # Align lengths
             min_len = min(len(a_returns), len(b_returns))
             if min_len < 15:
                 continue
@@ -920,7 +938,6 @@ def _calculate_correlated_pairs(
                 risk_level=risk_level,
             ))
 
-    # Sort by absolute correlation descending, return top 10
     pairs.sort(key=lambda p: abs(p.correlation), reverse=True)
     return pairs[:10]
 
@@ -928,22 +945,40 @@ def _calculate_correlated_pairs(
 def _calculate_var_historical(
     positions: List[PositionORM], session: Session
 ) -> VaRResult:
-    """Calculate VaR using historical simulation (last 252 trading days)."""
+    """Calculate VaR using historical simulation (last 252 trading days).
+    Uses a single batch query instead of N per-position queries."""
     from src.models.orm import HistoricalPriceCacheORM
 
     if not positions:
-        return VaRResult(
-            var_95=0, var_99=0, var_95_pct=0, var_99_pct=0, trading_days_used=0
-        )
+        return VaRResult(var_95=0, var_99=0, var_95_pct=0, var_99_pct=0, trading_days_used=0)
 
     cutoff = datetime.now() - timedelta(days=400)  # ~252 trading days
     portfolio_value = sum(_get_position_value(p) for p in positions)
     if portfolio_value == 0:
-        return VaRResult(
-            var_95=0, var_99=0, var_95_pct=0, var_99_pct=0, trading_days_used=0
-        )
+        return VaRResult(var_95=0, var_99=0, var_95_pct=0, var_99_pct=0, trading_days_used=0)
 
-    # Collect daily returns per position, weighted by position value
+    symbols = list(set(p.symbol for p in positions))
+
+    # BATCH: one query for all symbols instead of one per position
+    all_rows = (
+        session.query(HistoricalPriceCacheORM)
+        .filter(
+            HistoricalPriceCacheORM.symbol.in_(symbols),
+            HistoricalPriceCacheORM.date >= cutoff,
+            HistoricalPriceCacheORM.interval == '1d',
+        )
+        .order_by(HistoricalPriceCacheORM.symbol, HistoricalPriceCacheORM.date.asc())
+        .all()
+    )
+
+    # Group closes by symbol in memory
+    from collections import defaultdict
+    closes_by_symbol: dict = defaultdict(list)
+    for r in all_rows:
+        if r.close and r.close > 0:
+            closes_by_symbol[r.symbol].append(r.close)
+
+    # Build weighted return series per position
     all_portfolio_returns: List[np.ndarray] = []
     weights: List[float] = []
 
@@ -951,45 +986,25 @@ def _calculate_var_historical(
         pos_value = _get_position_value(pos)
         if pos_value == 0:
             continue
-
-        rows = (
-            session.query(HistoricalPriceCacheORM)
-            .filter(
-                HistoricalPriceCacheORM.symbol == pos.symbol,
-                HistoricalPriceCacheORM.date >= cutoff,
-            )
-            .order_by(HistoricalPriceCacheORM.date.asc())
-            .all()
-        )
-        closes = [r.close for r in rows if r.close and r.close > 0]
+        closes = closes_by_symbol.get(pos.symbol, [])
         if len(closes) < 30:
             continue
-
-        returns = []
-        for i in range(1, len(closes)):
-            returns.append((closes[i] - closes[i - 1]) / closes[i - 1])
-
-        all_portfolio_returns.append(np.array(returns))
+        returns = np.array([(closes[i] - closes[i - 1]) / closes[i - 1] for i in range(1, len(closes))])
+        all_portfolio_returns.append(returns)
         weights.append(pos_value / portfolio_value)
 
     if not all_portfolio_returns:
-        return VaRResult(
-            var_95=0, var_99=0, var_95_pct=0, var_99_pct=0, trading_days_used=0
-        )
+        return VaRResult(var_95=0, var_99=0, var_95_pct=0, var_99_pct=0, trading_days_used=0)
 
-    # Align all return series to same length
     min_len = min(len(r) for r in all_portfolio_returns)
     trading_days = min(min_len, 252)
 
-    # Calculate weighted portfolio returns
     portfolio_daily_returns = np.zeros(trading_days)
     for ret_arr, w in zip(all_portfolio_returns, weights):
         portfolio_daily_returns += ret_arr[-trading_days:] * w
 
-    # Historical VaR: percentile of losses
     var_95_pct = float(-np.percentile(portfolio_daily_returns, 5))
     var_99_pct = float(-np.percentile(portfolio_daily_returns, 1))
-
     var_95 = var_95_pct * portfolio_value
     var_99 = var_99_pct * portfolio_value
 
@@ -1092,9 +1107,13 @@ async def get_advanced_risk(
 
     logger.info(f"Getting advanced risk data for {mode.value} mode, user {username}")
 
+    _account_type_adv = 'live' if mode == TradingMode.LIVE else 'demo'
     positions = (
         session.query(PositionORM)
-        .filter(PositionORM.closed_at.is_(None))
+        .filter(
+            PositionORM.closed_at.is_(None),
+            PositionORM.account_type == _account_type_adv,
+        )
         .all()
     )
 

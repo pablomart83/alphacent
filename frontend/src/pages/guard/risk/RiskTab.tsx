@@ -38,20 +38,30 @@ export function RiskTab() {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto px-3 py-3 space-y-5">
-      <PerStrategyRiskTable metrics={metrics.data} loading={metrics.isLoading} />
-      <RiskScoreTrendChart data={history.data} loading={history.isLoading} />
-      <PositionRiskTable rows={positions.data} loading={positions.isLoading} />
-      <ExposurePanel
-        sector={advanced.data?.sector_exposure}
-        assetClass={advanced.data?.asset_class_exposure}
-        directional={advanced.data?.directional_exposure}
-        loading={advanced.isLoading}
-      />
-      <CorrelationHeatmap
-        pairs={advanced.data?.correlated_pairs}
-        loading={advanced.isLoading}
-      />
+    <div className="h-full overflow-y-auto bg-[var(--bg-0)] px-3 py-3 space-y-5">
+      <div className="shrink-0">
+        <PerStrategyRiskTable metrics={metrics.data} loading={metrics.isLoading} />
+      </div>
+      <div className="shrink-0">
+        <RiskScoreTrendChart data={history.data} loading={history.isLoading} />
+      </div>
+      <div className="shrink-0">
+        <PositionRiskTable rows={positions.data} loading={positions.isLoading} />
+      </div>
+      <div className="shrink-0">
+        <ExposurePanel
+          sector={advanced.data?.sector_exposure}
+          assetClass={advanced.data?.asset_class_exposure}
+          directional={advanced.data?.directional_exposure}
+          loading={advanced.isLoading}
+        />
+      </div>
+      <div className="shrink-0">
+        <CorrelationHeatmap
+          pairs={advanced.data?.correlated_pairs}
+          loading={advanced.isLoading}
+        />
+      </div>
     </div>
   )
 }

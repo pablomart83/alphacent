@@ -27,12 +27,12 @@ import { useRiskLimits, useRiskMetrics } from './useGuardData'
  * is permanent across all tabs.
  */
 
-type TabValue = 'risk' | 'gates' | 'system' | 'circuit-breakers' | 'alerts' | 'audit'
+type TabValue = 'system' | 'risk' | 'gates' | 'circuit-breakers' | 'alerts' | 'audit'
 
 const TABS: Array<{ value: TabValue; label: string }> = [
+  { value: 'system', label: 'System' },
   { value: 'risk', label: 'Risk' },
   { value: 'gates', label: 'Gates' },
-  { value: 'system', label: 'System' },
   { value: 'circuit-breakers', label: 'Circuit breakers' },
   { value: 'alerts', label: 'Alerts' },
   { value: 'audit', label: 'Audit' },
@@ -41,7 +41,7 @@ const TABS: Array<{ value: TabValue; label: string }> = [
 export function Guard() {
   return (
     <Routes>
-      <Route index element={<Navigate to="/guard/risk" replace />} />
+      <Route index element={<Navigate to="/guard/system" replace />} />
       <Route path=":tab/*" element={<GuardShell />} />
     </Routes>
   )
@@ -60,12 +60,12 @@ function GuardShell() {
     (TABS.find((t) => t.value === rawTab)?.value as TabValue) ?? 'risk'
 
   const description =
-    current === 'risk'
-      ? `Risk · ${mode}`
-      : current === 'gates'
-        ? 'Trading gates'
-        : current === 'system'
-          ? 'System health · data sync'
+    current === 'system'
+      ? 'System health · data sync'
+      : current === 'risk'
+        ? `Risk · ${mode}`
+        : current === 'gates'
+          ? 'Trading gates'
           : current === 'circuit-breakers'
             ? 'Circuit breakers'
             : current === 'alerts'
