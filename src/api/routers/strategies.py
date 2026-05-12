@@ -627,6 +627,31 @@ async def get_strategies(
         .all()
     )
 
+    # Bulk query: live_pnl per strategy from live_strategies table.
+    # Used by the "Negative live P&L" pill filter in the Library.
+    live_pnl_map: dict = {
+        row.strategy_id: float(row.live_pnl or 0.0)
+        for row in session.query(LiveStrategyORM.strategy_id, LiveStrategyORM.live_pnl)
+        .filter(LiveStrategyORM.retired_at.is_(None))
+        .all()
+    }
+
+    # Bulk query: most recent signal_emitted timestamp per strategy.
+    # Used by the "Signals today" and "Idle 7d+" pill filters in the Library.
+    # Single MAX(timestamp) GROUP BY strategy_id — one round-trip for all strategies.
+    from src.models.orm import SignalDecisionORM
+    last_signal_rows = session.query(
+        SignalDecisionORM.strategy_id,
+        sa_func.max(SignalDecisionORM.timestamp).label("last_signal_at"),
+    ).filter(
+        SignalDecisionORM.stage == "signal_emitted",
+        SignalDecisionORM.strategy_id.isnot(None),
+    ).group_by(SignalDecisionORM.strategy_id).all()
+    last_signal_map: dict = {
+        row.strategy_id: row.last_signal_at.isoformat() if row.last_signal_at else None
+        for row in last_signal_rows
+    }
+
     # Sprint 7.3: Fetch current equity for allocation_pct → dollar conversion
     # and SPY price series for alpha computation.
     # Skipped in slim mode — these are the most expensive queries (SPY fetches
@@ -821,6 +846,12 @@ async def get_strategies(
                     "health_score", "decay_score", "wf_test_sharpe",
                     "conviction_score", "source",
                 ) if k in metadata
+            } | {
+                # Operational fields not in strategy_metadata but needed by pill filters.
+                # last_signal_at: most recent signal_emitted timestamp (signals-today / idle-7d pills).
+                # live_pnl: from live_strategies row (negative-live-pnl pill).
+                "last_signal_at": last_signal_map.get(strategy_id),
+                "live_pnl": live_pnl_map.get(strategy_id),
             },
             # Task 9.7: Include strategy metadata fields
             strategy_category=strategy_category,
