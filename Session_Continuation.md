@@ -14,6 +14,8 @@
 
 ## SESSION 2026-05-12 — WHAT WAS DONE
 
+## SESSION 2026-05-12 — WHAT WAS DONE
+
 ### P0 Critical fixes (all shipped)
 
 | Commit | What |
@@ -44,6 +46,13 @@
 | `1e67485` | Fix live.py close endpoint: refresh etoro_position_id before closing |
 | `49d7c00` | Fix circuit breaker: exclude live positions from template win rate check |
 | `7d4170a` | Add Portfolio VaR limit to Settings / Risk Limits |
+| `c603c6d` | Fix live position tracking: scope sync to account_type, fix PK/etoro_id collision |
+| `a65b986` | Fix order matching: scope Pass 1 and Pass 2 to account_type |
+| `880d49c` | Session continuation update |
+| `c48ef27` | Fix all 6 post-investigation items (circuit breaker, orphan position, startup reconcile, gitignore, migrations/) |
+| `0b9f993` | Fix approaching-graduation: add wf_test_sharpe to WF sharpe SQL lookup |
+| `c2bd491` | Fix pending-open and pending-closures endpoints: add account_type filter |
+| `abde7ff` | Graduation: fix WR bar, add max_qualification_ratio cap, update labels |
 
 ### Root cause of overnight GOOGL disaster
 
@@ -64,7 +73,7 @@ The DEMO `OrderMonitor.check_submitted_orders()` had no `account_type` filter. I
 - **LIVE strategy:** `4H EMA Ribbon Trend Long GOOGL LIVE` (id: `918b0c99`) — status LIVE
 - **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53
 - **live_trading.enabled:** TRUE
-- **Latest commit:** `c603c6d`
+- **Latest commit:** `abde7ff`
 
 ---
 
@@ -165,7 +174,7 @@ System state:
 - DEMO: ~$484K equity, ~69 open positions, trending_up_strong
 - LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53, strategy 918b0c99 ✅
 - live_trading.enabled: TRUE
-- Latest commit: a65b986
+- Latest commit: abde7ff
 
 P2 — Frontend: verify cycle pipeline shows stages correctly during next cycle run
 P2 — Frontend: verify Alpha vs SPY tile in Research/Performance shows data
