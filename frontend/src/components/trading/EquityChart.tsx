@@ -123,6 +123,7 @@ export function EquityChart({
   const [hover, setHover] = useState<{
     time: string | null
     equity: number | null
+    realized: number | null
     drawdown: number | null
     spyAlpha: number | null
   } | null>(null)
@@ -180,6 +181,9 @@ export function EquityChart({
         return
       }
       const eqData = param.seriesData.get(equitySeries) as LineData | undefined
+      const realizedData = realizedSeriesRef.current
+        ? (param.seriesData.get(realizedSeriesRef.current) as LineData | undefined)
+        : undefined
       const ddData = drawdownSeriesRef.current
         ? (param.seriesData.get(drawdownSeriesRef.current) as AreaData | undefined)
         : undefined
@@ -192,15 +196,11 @@ export function EquityChart({
         : String(param.time)
 
       // Alpha vs SPY.
-      // In percent mode both series are already rebased to % return — alpha is
-      // simply the difference. In dollar mode we compute returns from raw values.
       let spyAlpha: number | null = null
       if (spyPoint && eqData) {
         const eqVal = eqData.value as number
         const spyVal = spyPoint.value as number
         if (Number.isFinite(eqVal) && Number.isFinite(spyVal)) {
-          // percentMode: both values are already % returns → alpha = difference
-          // dollarMode: rebase on the fly using first data points
           if (percentModeRef.current) {
             spyAlpha = eqVal - spyVal
           } else if (equityDataRef.current.length && spyDataRef.current && spyDataRef.current.length) {
@@ -218,6 +218,7 @@ export function EquityChart({
       setHover({
         time: timeStr,
         equity: eqData ? (eqData.value as number) : null,
+        realized: realizedData ? (realizedData.value as number) : null,
         drawdown: ddData ? (ddData.value as number) : null,
         spyAlpha,
       })
@@ -491,6 +492,16 @@ export function EquityChart({
                 : formatCurrency(hover.equity, { precision: 0 })}
             </span>
           </div>
+          {hover.realized != null && showRealized && (
+            <div className="flex items-center gap-2 mono">
+              <span className="text-[var(--text-2)]">Realised</span>
+              <span className="text-[var(--text-1)]">
+                {percentMode
+                  ? formatPercentage(hover.realized, { precision: 2, signed: true })
+                  : formatCurrency(hover.realized, { precision: 0 })}
+              </span>
+            </div>
+          )}
           {hover.drawdown != null && (
             <div className="flex items-center gap-2 mono">
               <span className="text-[var(--text-2)]">Drawdown</span>
@@ -515,7 +526,7 @@ export function EquityChart({
         </div>
       </div>
     )
-  }, [hover, percentMode])
+  }, [hover, percentMode, showRealized])
 
   return (
     <div className={cn('flex flex-col h-full min-h-0', className)}>

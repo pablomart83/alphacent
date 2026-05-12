@@ -45,6 +45,8 @@ export function PerformanceTiles({ data, loading, spyData }: PerformanceTilesPro
 
   const totalReturn = data?.total_return ?? 0
   const totalReturnDollars = data?.total_return_dollars ?? null
+  const realizedReturn = data?.realized_return ?? null
+  const realizedDollars = data?.realized_return_dollars ?? null
   const sharpe = data?.sharpe_ratio ?? 0
   const sortino = data?.sortino_ratio ?? 0
   const maxDD = data?.max_drawdown ?? 0
@@ -53,10 +55,10 @@ export function PerformanceTiles({ data, loading, spyData }: PerformanceTilesPro
   const drc = data?.daily_returns_count ?? 0
   const totalTrades = data?.total_trades ?? 0
 
-  // Compute alpha vs SPY from benchmark data
-  let spyReturn: number | null = null
-  let alpha: number | null = null
-  if (spyData && spyData.length >= 2) {
+  // Alpha vs SPY: prefer server-computed value, fall back to client-side from spyData
+  let spyReturn: number | null = data?.spy_return ?? null
+  let alpha: number | null = data?.alpha_vs_spy ?? null
+  if ((spyReturn == null || alpha == null) && spyData && spyData.length >= 2) {
     const first = spyData[0].close
     const last = spyData[spyData.length - 1].close
     if (first > 0) {
@@ -65,14 +67,21 @@ export function PerformanceTiles({ data, loading, spyData }: PerformanceTilesPro
     }
   }
 
+  const fmtDollar = (v: number | null) =>
+    v != null ? `${v >= 0 ? '+' : ''}${formatCurrency(v, { precision: 0 })}` : undefined
+
   const tiles: Tile[] = [
     {
       label: 'Total return',
       value: formatPercentage(totalReturn),
       tone: totalReturn > 0 ? 'up' : totalReturn < 0 ? 'down' : 'neutral',
-      hint: totalReturnDollars != null
-        ? `${totalReturnDollars >= 0 ? '+' : ''}${formatCurrency(totalReturnDollars)} absolute`
-        : undefined,
+      hint: fmtDollar(totalReturnDollars),
+    },
+    {
+      label: 'Realised P&L',
+      value: realizedReturn != null ? formatPercentage(realizedReturn) : '—',
+      tone: realizedReturn == null ? 'neutral' : realizedReturn > 0 ? 'up' : realizedReturn < 0 ? 'down' : 'neutral',
+      hint: fmtDollar(realizedDollars) ?? 'Closed-trade P&L only',
     },
     {
       label: 'Alpha vs SPY',

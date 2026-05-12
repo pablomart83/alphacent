@@ -49,8 +49,17 @@ export function FundScorecardCard({ performance, loading, className }: FundScore
   const pf = performance?.profit_factor
   const totalReturn = performance?.total_return
   const totalReturnDollars = performance?.total_return_dollars
+  const realizedReturn = performance?.realized_return
+  const realizedDollars = performance?.realized_return_dollars
+  const spyReturn = performance?.spy_return
+  const alpha = performance?.alpha_vs_spy
+
+  // Format a $ value with sign
+  const fmtDollar = (v: number | null | undefined) =>
+    v != null ? `${v >= 0 ? '+' : ''}${formatCurrency(v, { precision: 0 })}` : null
 
   const metrics: Metric[] = [
+    // Row 1 — risk-adjusted metrics
     {
       label: 'Sharpe (ann.)',
       value: sharpe != null ? formatNumber(sharpe, 2) : '—',
@@ -69,6 +78,7 @@ export function FundScorecardCard({ performance, loading, className }: FundScore
       tone: maxDD != null && maxDD > 15 ? 'down' : maxDD != null && maxDD > 8 ? 'warn' : 'neutral',
       hint: 'Peak-to-trough drawdown in selected period',
     },
+    // Row 2 — trade quality
     {
       label: 'Win rate',
       value: winRate != null ? `${formatNumber(winRate, 1)}%` : '—',
@@ -82,12 +92,33 @@ export function FundScorecardCard({ performance, loading, className }: FundScore
       hint: 'Gross profit / gross loss',
     },
     {
+      label: 'Alpha vs SPY',
+      value: alpha != null ? `${alpha >= 0 ? '+' : ''}${formatNumber(alpha, 2)}%` : '—',
+      tone: alpha == null ? 'neutral' : alpha > 0 ? 'up' : alpha < 0 ? 'down' : 'neutral',
+      hint: spyReturn != null ? `SPY ${spyReturn >= 0 ? '+' : ''}${formatNumber(spyReturn, 2)}% same period` : 'Total return minus SPY return',
+    },
+    // Row 3 — returns in $ and %
+    {
       label: 'Total return',
       value: totalReturn != null ? formatPercentage(totalReturn) : '—',
       tone: totalReturn != null && totalReturn > 0 ? 'up' : totalReturn != null && totalReturn < 0 ? 'down' : 'neutral',
-      hint: totalReturnDollars != null
-        ? `${totalReturnDollars >= 0 ? '+' : ''}${formatCurrency(totalReturnDollars)} absolute`
-        : 'Cumulative return in selected period',
+      hint: fmtDollar(totalReturnDollars) ?? 'Cumulative return in selected period',
+    },
+    {
+      label: 'Realised P&L',
+      value: realizedReturn != null ? formatPercentage(realizedReturn) : '—',
+      tone: realizedReturn != null && realizedReturn > 0 ? 'up' : realizedReturn != null && realizedReturn < 0 ? 'down' : 'neutral',
+      hint: fmtDollar(realizedDollars) ?? 'Closed-trade P&L only',
+    },
+    {
+      label: 'Unrealised P&L',
+      value: (totalReturnDollars != null && realizedDollars != null)
+        ? `${(totalReturnDollars - realizedDollars) >= 0 ? '+' : ''}${formatCurrency(totalReturnDollars - realizedDollars, { precision: 0 })}`
+        : '—',
+      tone: (totalReturnDollars != null && realizedDollars != null)
+        ? (totalReturnDollars - realizedDollars) > 0 ? 'up' : (totalReturnDollars - realizedDollars) < 0 ? 'down' : 'neutral'
+        : 'neutral',
+      hint: 'Open position mark-to-market P&L',
     },
   ]
 

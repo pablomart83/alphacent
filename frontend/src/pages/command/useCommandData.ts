@@ -68,6 +68,10 @@ export interface DashboardSummaryPayload {
 export interface PerformanceAnalyticsPayload {
   total_return: number
   total_return_dollars?: number | null
+  realized_return?: number | null
+  realized_return_dollars?: number | null
+  spy_return?: number | null
+  alpha_vs_spy?: number | null
   sharpe_ratio: number
   sortino_ratio: number
   max_drawdown: number

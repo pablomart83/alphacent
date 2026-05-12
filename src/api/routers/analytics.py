@@ -109,7 +109,11 @@ class EquityCurvePoint(BaseModel):
 class PerformanceAnalyticsResponse(BaseModel):
     """Comprehensive performance analytics."""
     total_return: float
-    total_return_dollars: Optional[float] = None  # absolute $ gain/loss for the period
+    total_return_dollars: Optional[float] = None       # absolute $ gain/loss for the period
+    realized_return: Optional[float] = None            # % return from closed trades only
+    realized_return_dollars: Optional[float] = None    # $ from closed trades only
+    spy_return: Optional[float] = None                 # SPY % return over same period
+    alpha_vs_spy: Optional[float] = None               # total_return − spy_return
     sharpe_ratio: float
     sortino_ratio: float
     max_drawdown: float
@@ -903,6 +907,41 @@ async def get_performance_analytics(
     sortino = calculate_sortino_ratio(daily_returns)
     monthly_returns = {k: round(v, 2) for k, v in monthly_returns.items()}
 
+    # ── Realized return from equity_snapshots.realized_pnl_cumulative ────────
+    # The realized series is already in equity_curve; extract start/end values.
+    realized_return: Optional[float] = None
+    realized_return_dollars: Optional[float] = None
+    if snapshot_rows and len(snapshot_rows) >= 2:
+        first_realized = snapshot_rows[0].realized_pnl_cumulative
+        last_realized = snapshot_rows[-1].realized_pnl_cumulative
+        if first_realized is not None and last_realized is not None and first_eq > 0:
+            realized_return_dollars = round(float(last_realized) - float(first_realized), 2)
+            realized_return = round(realized_return_dollars / first_eq * 100, 4)
+
+    # ── SPY return over the same period ──────────────────────────────────────
+    spy_return: Optional[float] = None
+    alpha_vs_spy: Optional[float] = None
+    try:
+        from src.models.orm import HistoricalPriceCacheORM
+        spy_rows = (
+            session.query(HistoricalPriceCacheORM.date, HistoricalPriceCacheORM.close)
+            .filter(
+                HistoricalPriceCacheORM.symbol == "SPY",
+                HistoricalPriceCacheORM.interval == "1d",
+                HistoricalPriceCacheORM.date >= start_date,
+            )
+            .order_by(HistoricalPriceCacheORM.date.asc())
+            .all()
+        )
+        if spy_rows and len(spy_rows) >= 2:
+            spy_first = float(spy_rows[0].close)
+            spy_last = float(spy_rows[-1].close)
+            if spy_first > 0:
+                spy_return = round((spy_last - spy_first) / spy_first * 100, 4)
+                alpha_vs_spy = round(total_return - spy_return, 4)
+    except Exception as _spy_err:
+        logger.debug(f"Could not compute SPY return for performance endpoint: {_spy_err}")
+
     returns_distribution = {
         'large_positive': len([r for r in daily_returns if r > 0.02]),
         'positive': len([r for r in daily_returns if 0 < r <= 0.02]),
@@ -914,6 +953,10 @@ async def get_performance_analytics(
     return PerformanceAnalyticsResponse(
         total_return=total_return,
         total_return_dollars=total_return_dollars,
+        realized_return=realized_return,
+        realized_return_dollars=realized_return_dollars,
+        spy_return=spy_return,
+        alpha_vs_spy=alpha_vs_spy,
         sharpe_ratio=sharpe,
         sortino_ratio=sortino,
         max_drawdown=max_drawdown,
