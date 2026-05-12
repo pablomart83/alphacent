@@ -1354,10 +1354,14 @@ class OrderMonitor:
             # Track price updates for WebSocket broadcasting after commit
             _price_updates: Dict[str, float] = {}
             
-            # BATCH: Load ALL existing positions in ONE query instead of per-position lookups.
-            # With 125 positions, this saves 124 round-trips to PostgreSQL.
+            # BATCH: Load existing positions for THIS account_type only.
+            # Scoping to account_type is critical: eToro reuses numeric position IDs
+            # across demo and live accounts.  If we load all accounts into db_by_etoro_id,
+            # the live sync finds the DEMO row by etoro_position_id and updates it instead
+            # of creating a new live row — the live position never gets its own DB row.
             all_db_positions = session.query(PositionORM).filter(
-                PositionORM.closed_at.is_(None)
+                PositionORM.closed_at.is_(None),
+                PositionORM.account_type == account_type,
             ).all()
             db_by_etoro_id = {str(p.etoro_position_id): p for p in all_db_positions}
             db_by_id = {p.id: p for p in all_db_positions}
@@ -1368,11 +1372,25 @@ class OrderMonitor:
                 key = (p.strategy_id, p.symbol, side_str)
                 db_by_strategy_symbol[key] = p
 
-            # Build a set of ALL etoro_position_ids (open AND closed) to prevent
-            # UniqueViolation when trying to assign an ID already held by a closed row.
+            # Build a set of etoro_position_ids for THIS account_type (open AND closed)
+            # to prevent UniqueViolation when trying to assign an ID already held by a
+            # closed row of the same account.
             all_etoro_ids_in_db: set = set(
                 str(row[0]) for row in session.query(PositionORM.etoro_position_id)
-                .filter(PositionORM.etoro_position_id.isnot(None)).all()
+                .filter(
+                    PositionORM.etoro_position_id.isnot(None),
+                    PositionORM.account_type == account_type,
+                ).all()
+            )
+
+            # Build a set of ALL primary-key IDs (open AND closed, ALL account types).
+            # eToro reuses numeric position IDs across accounts — a live position can
+            # have the same numeric ID as a closed DEMO position.  db_by_id only covers
+            # open positions, so it misses closed rows.  This set is the guard that
+            # prevents a PK UniqueViolation when the INSERT would collide with a closed
+            # row from a different account_type.
+            all_pk_ids_in_db: set = set(
+                row[0] for row in session.query(PositionORM.id).all()
             )
             
             # Update/create positions that exist on eToro
@@ -1667,10 +1685,12 @@ class OrderMonitor:
                         continue  # Don't create a new position
 
                     # Create new position with matched strategy_id
-                    # Safety check: verify no position with this ID already exists
-                    # (can happen if etoro_position_id changed format between syncs)
+                    # Safety check: verify no OPEN position with this ID already exists
+                    # (can happen if etoro_position_id changed format between syncs).
+                    # Only applies to open positions of the same account_type — a closed
+                    # row or a row from a different account_type is NOT a match here.
                     existing_by_id = db_by_id.get(pos.id)
-                    if existing_by_id:
+                    if existing_by_id and existing_by_id.account_type == account_type and existing_by_id.closed_at is None:
                         logger.info(
                             f"Position {pos.id} ({normalized_symbol}) already exists in DB "
                             f"(etoro_id mismatch: DB={existing_by_id.etoro_position_id}, "
@@ -1695,11 +1715,36 @@ class OrderMonitor:
                         updated_count += 1
                         continue
 
+                    # PK collision guard: eToro reuses numeric position IDs across accounts.
+                    # A live position can have the same numeric ID as a closed DEMO position
+                    # (or vice versa).  db_by_id only covers open positions, so it misses
+                    # closed rows.  If the PK is already taken by ANY row (open or closed,
+                    # any account_type), we cannot INSERT — we must create the new position
+                    # with a synthetic UUID instead so it gets its own row.
+                    if pos.id in all_pk_ids_in_db:
+                        # The numeric eToro ID is already a PK in our DB (from a different
+                        # account or a closed row).  Use a UUID so the new live position
+                        # gets its own row and is tracked independently.
+                        import uuid as _uuid
+                        synthetic_id = str(_uuid.uuid4())
+                        logger.warning(
+                            f"PK collision: eToro position ID {pos.id} ({normalized_symbol}, "
+                            f"account={account_type}) already exists in DB as a different row. "
+                            f"Creating new position with synthetic ID {synthetic_id} to avoid "
+                            f"UniqueViolation. This is expected when eToro reuses numeric IDs "
+                            f"across demo/live accounts."
+                        )
+                        # Override pos.id for the INSERT below — all other fields are correct.
+                        pos_id_to_use = synthetic_id
+                    else:
+                        pos_id_to_use = pos.id
+
                     # Final safety: check if a CLOSED position with this etoro_position_id exists
                     # (the main lookup only checks open positions — a closed one causes UniqueViolation)
                     closed_dup = session.query(PositionORM).filter(
                         PositionORM.etoro_position_id == pos.etoro_position_id,
                         PositionORM.closed_at.isnot(None),
+                        PositionORM.account_type == account_type,  # only same account — cross-account reuse is handled above
                     ).first()
                     if closed_dup:
                         # Reopen the closed position instead of creating a duplicate —
@@ -1762,7 +1807,7 @@ class OrderMonitor:
                             logger.debug(f"Could not validate strategy direction for {matched_strategy_id}: {e}")
 
                     new_pos = PositionORM(
-                        id=pos.id,
+                        id=pos_id_to_use,
                         strategy_id=matched_strategy_id,
                         symbol=normalized_symbol,
                         side=pos.side,
@@ -1797,6 +1842,7 @@ class OrderMonitor:
                     db_by_etoro_id[str(pos.etoro_position_id)] = new_pos
                     db_by_strategy_symbol[(matched_strategy_id, normalized_symbol, pos_side_str)] = new_pos
                     all_etoro_ids_in_db.add(str(pos.etoro_position_id))
+                    all_pk_ids_in_db.add(pos_id_to_use)
             
             # Close positions that are open in DB but no longer exist on eToro
             # Only check positions belonging to this account_type

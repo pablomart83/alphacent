@@ -227,6 +227,15 @@ class PositionORM(Base):
     """Position ORM model."""
     __tablename__ = "positions"
 
+    # etoro_position_id is unique per account_type, not globally.
+    # eToro reuses numeric position IDs across demo and live accounts.
+    # The composite unique constraint (etoro_position_id, account_type) enforces
+    # that the same eToro ID cannot appear twice within the same account, while
+    # allowing the same numeric ID to exist in both demo and live rows.
+    __table_args__ = (
+        UniqueConstraint('etoro_position_id', 'account_type', name='uq_positions_etoro_id_account'),
+    )
+
     id = Column(String, primary_key=True)
     strategy_id = Column(String, nullable=False)
     symbol = Column(String, nullable=False)
@@ -237,7 +246,7 @@ class PositionORM(Base):
     unrealized_pnl = Column(Float, nullable=False)
     realized_pnl = Column(Float, nullable=False)
     opened_at = Column(DateTime, nullable=False)
-    etoro_position_id = Column(String, nullable=False, unique=True)
+    etoro_position_id = Column(String, nullable=False)
     stop_loss = Column(Float, nullable=True)
     take_profit = Column(Float, nullable=True)
     closed_at = Column(DateTime, nullable=True)
