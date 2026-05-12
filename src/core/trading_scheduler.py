@@ -1359,8 +1359,9 @@ class TradingScheduler:
                             # If a live_strategies row exists for this (strategy, symbol) AND
                             # live_trading.enabled is True in config, fire a real fill.
                             # HARD GATE: both conditions must be true. Fail-open on any error.
+                            from src.models.enums import SignalAction as _SignalActionLive
                             if (
-                                signal.action in [SignalAction.ENTER_LONG, SignalAction.ENTER_SHORT]
+                                signal.action in [_SignalActionLive.ENTER_LONG, _SignalActionLive.ENTER_SHORT]
                                 and self._live_order_executor is not None
                             ):
                                 try:
@@ -1963,14 +1964,18 @@ class TradingScheduler:
                             # ── P0 DUPLICATE GUARD ────────────────────────────────────────
                             # Before generating any entry signals, check whether a live
                             # position or pending order already exists for this symbol.
-                            # This prevents the 3-order problem: pre-market placement queues
-                            # an order on eToro, the DEMO monitor mis-classifies it as
-                            # CANCELLED, and the next live pass fires again.
+                            # Also check for recently submitted orders (within 4 hours) —
+                            # the DEMO monitor marks live orders as CANCELLED (404) before
+                            # eToro fills them pre-market. Without this check, the guard
+                            # passes every cycle and fires a new order every 10 minutes
+                            # overnight, resulting in dozens of positions at market open.
                             #
-                            # (a) Open live position — skip entry signals entirely.
-                            # (b) Pending live order — skip entry signals entirely.
-                            # Exit signals are NOT blocked — they must still fire to close
-                            # the position when the DSL exit conditions trigger.
+                            # (a) Open live position — skip entry signals.
+                            # (b) Pending live order — skip entry signals.
+                            # (c) Any live order submitted in the last 4 hours — skip.
+                            #     4H covers the longest pre-market window (US market opens
+                            #     at 14:30 UTC; orders placed from 10:30 UTC are covered).
+                            # Exit signals are NOT blocked.
                             _skip_live_entries = False
                             try:
                                 _live_open_pos = session.query(PositionORM).filter(
@@ -1997,6 +2002,30 @@ class TradingScheduler:
                                             f"(order={_live_pending_order.id[:8]}, "
                                             f"etoro_order_id={_live_pending_order.etoro_order_id}) "
                                             f"— skipping entry signals"
+                                        )
+                                        _skip_live_entries = True
+
+                                if not _skip_live_entries:
+                                    # Check for any live order submitted in the last 4 hours.
+                                    # This catches the pre-market window where eToro queues
+                                    # orders and the DEMO monitor marks them CANCELLED (404)
+                                    # before they fill — without this, the guard passes every
+                                    # cycle and fires a new order every 10 minutes overnight.
+                                    from datetime import timedelta as _td_guard
+                                    _recent_cutoff = datetime.now() - _td_guard(hours=4)
+                                    _recent_live_order = session.query(OrderORM).filter(
+                                        OrderORM.account_type == 'live',
+                                        OrderORM.symbol == _live_sym,
+                                        OrderORM.order_action == 'entry',
+                                        OrderORM.submitted_at >= _recent_cutoff,
+                                    ).first()
+                                    if _recent_live_order:
+                                        logger.info(
+                                            f"Live pass: recent live order exists for {_live_sym} "
+                                            f"(order={_recent_live_order.id[:8]}, "
+                                            f"status={_recent_live_order.status}, "
+                                            f"submitted={_recent_live_order.submitted_at}) "
+                                            f"— skipping entry signals (4h cooldown)"
                                         )
                                         _skip_live_entries = True
                             except Exception as _dup_check_err:
