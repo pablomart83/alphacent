@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { SectionLabel } from '@/components/layout'
-import { cn, formatNumber, formatPercentage } from '@/lib/utils'
+import { cn, formatNumber, formatPercentage, formatCurrency } from '@/lib/utils'
 import type { PerformanceAnalyticsPayload } from './useCommandData'
 
 /**
@@ -48,6 +48,7 @@ export function FundScorecardCard({ performance, loading, className }: FundScore
   const winRate = performance?.win_rate
   const pf = performance?.profit_factor
   const totalReturn = performance?.total_return
+  const totalReturnDollars = performance?.total_return_dollars
 
   const metrics: Metric[] = [
     {
@@ -84,7 +85,9 @@ export function FundScorecardCard({ performance, loading, className }: FundScore
       label: 'Total return',
       value: totalReturn != null ? formatPercentage(totalReturn) : '—',
       tone: totalReturn != null && totalReturn > 0 ? 'up' : totalReturn != null && totalReturn < 0 ? 'down' : 'neutral',
-      hint: 'Cumulative return in selected period',
+      hint: totalReturnDollars != null
+        ? `${totalReturnDollars >= 0 ? '+' : ''}${formatCurrency(totalReturnDollars)} absolute`
+        : 'Cumulative return in selected period',
     },
   ]
 

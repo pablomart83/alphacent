@@ -1,6 +1,6 @@
 import { MetricGrid, SectionLabel } from '@/components/layout'
 import { Skeleton } from '@/components/primitives'
-import { formatNumber, formatPercentage, cn } from '@/lib/utils'
+import { formatNumber, formatPercentage, formatCurrency, cn } from '@/lib/utils'
 import type { PerformanceAnalyticsPayload, SpyBenchmarkPoint } from '../useResearchData'
 
 interface PerformanceTilesProps {
@@ -44,6 +44,7 @@ export function PerformanceTiles({ data, loading, spyData }: PerformanceTilesPro
   }
 
   const totalReturn = data?.total_return ?? 0
+  const totalReturnDollars = data?.total_return_dollars ?? null
   const sharpe = data?.sharpe_ratio ?? 0
   const sortino = data?.sortino_ratio ?? 0
   const maxDD = data?.max_drawdown ?? 0
@@ -69,6 +70,9 @@ export function PerformanceTiles({ data, loading, spyData }: PerformanceTilesPro
       label: 'Total return',
       value: formatPercentage(totalReturn),
       tone: totalReturn > 0 ? 'up' : totalReturn < 0 ? 'down' : 'neutral',
+      hint: totalReturnDollars != null
+        ? `${totalReturnDollars >= 0 ? '+' : ''}${formatCurrency(totalReturnDollars)} absolute`
+        : undefined,
     },
     {
       label: 'Alpha vs SPY',

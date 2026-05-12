@@ -109,6 +109,7 @@ class EquityCurvePoint(BaseModel):
 class PerformanceAnalyticsResponse(BaseModel):
     """Comprehensive performance analytics."""
     total_return: float
+    total_return_dollars: Optional[float] = None  # absolute $ gain/loss for the period
     sharpe_ratio: float
     sortino_ratio: float
     max_drawdown: float
@@ -823,6 +824,7 @@ async def get_performance_analytics(
         first_eq = snapshot_rows[0].equity
         last_eq = snapshot_rows[-1].equity
         total_return = ((last_eq - first_eq) / first_eq * 100) if first_eq > 0 else 0.0
+        total_return_dollars = round(last_eq - first_eq, 2)
         max_drawdown = max([p.drawdown for p in equity_curve]) if equity_curve else 0.0
 
         # Win/loss from closed positions (for win rate + profit factor)
@@ -889,6 +891,7 @@ async def get_performance_analytics(
         total_pnl = sum(daily_pnl.values())
         starting_equity = current_equity - total_pnl
         total_return = (total_pnl / starting_equity * 100) if starting_equity > 0 else 0.0
+        total_return_dollars = round(total_pnl, 2)
         max_drawdown = max([p.drawdown for p in equity_curve]) if equity_curve else 0.0
         total_trades = len(positions)
         winning_trades = len(wins)
@@ -910,6 +913,7 @@ async def get_performance_analytics(
     
     return PerformanceAnalyticsResponse(
         total_return=total_return,
+        total_return_dollars=total_return_dollars,
         sharpe_ratio=sharpe,
         sortino_ratio=sortino,
         max_drawdown=max_drawdown,
