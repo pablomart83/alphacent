@@ -82,7 +82,7 @@ async def get_data_sync_status():
 
     db_stats = _get_db_stats()
 
-    # Get quick price update status
+    # Get quick price update status — fall back to DB timestamp when in-memory is None
     quick_update = None
     try:
         from src.core.monitoring_service import get_monitoring_service
@@ -91,6 +91,30 @@ async def get_data_sync_status():
             quick_update = mon_qu._last_quick_update_result
     except Exception:
         pass
+
+    # If still None (fresh restart), derive last_run from the most recent
+    # historical_price_cache row — that's what the quick update writes to.
+    if not quick_update:
+        try:
+            from src.models.database import get_database
+            from sqlalchemy import text
+            db = get_database()
+            session = db.get_session()
+            try:
+                row = session.execute(text(
+                    "SELECT MAX(updated_at) FROM historical_price_cache WHERE interval = '1h'"
+                )).fetchone()
+                if row and row[0]:
+                    quick_update = {
+                        "last_run": row[0].isoformat() + "Z",
+                        "duration_s": None,
+                        "symbols_updated": None,
+                        "errors": 0,
+                    }
+            finally:
+                session.close()
+        except Exception:
+            pass
 
     return SyncStatusResponse(
         last_sync_at=last_sync_at,
@@ -258,10 +282,31 @@ async def get_fmp_cache_status():
     # (handles the race between trigger response and thread startup)
     thread_alive = _fmp_cache_thread is not None and _fmp_cache_thread.is_alive()
     is_running = thread_alive or _fmp_cache_progress.get("running", False)
+
+    # Derive last_warm_at from DB when in-memory has no completed_at (fresh restart)
+    last_warm_at = _fmp_cache_progress.get("completed_at")
+    if not last_warm_at:
+        try:
+            from src.models.database import get_database
+            from sqlalchemy import text
+            db = get_database()
+            session = db.get_session()
+            try:
+                row = session.execute(text(
+                    "SELECT MAX(fetched_at) FROM fmp_fundamentals"
+                )).fetchone()
+                if row and row[0]:
+                    last_warm_at = row[0].isoformat() + "Z"
+            finally:
+                session.close()
+        except Exception:
+            pass
+
     return {
         **_fmp_cache_progress,
         **coverage,
         "running": is_running,
+        "last_warm_at": last_warm_at,
     }
 
 
@@ -1671,7 +1716,27 @@ async def get_news_sentiment_status():
     coverage = _compute_sentiment_coverage()
     thread_alive = _news_sentiment_thread is not None and _news_sentiment_thread.is_alive()
     is_running = thread_alive or _news_sentiment_progress.get("running", False)
-    return {**_news_sentiment_progress, **coverage, "running": is_running}
+
+    # Derive last_run from DB when in-memory progress has no completed_at (fresh restart)
+    last_run = _news_sentiment_progress.get("completed_at")
+    if not last_run:
+        try:
+            from src.models.database import get_database
+            from sqlalchemy import text
+            db = get_database()
+            session = db.get_session()
+            try:
+                row = session.execute(text(
+                    "SELECT MAX(fetched_at) FROM symbol_news_sentiment"
+                )).fetchone()
+                if row and row[0]:
+                    last_run = row[0].isoformat() + "Z"
+            finally:
+                session.close()
+        except Exception:
+            pass
+
+    return {**_news_sentiment_progress, **coverage, "running": is_running, "last_run": last_run}
 
 
 @router.post("/news-sentiment/trigger", response_model=SyncTriggerResponse)

@@ -5903,15 +5903,44 @@ def set_monitoring_service(service: MonitoringService):
 # ─────────────────────────────────────────────────────────────────────────────
 # Service Log Buffer — captures structured start/complete events from all
 # backend services so the Guard → Sync Log tab can surface them in real time.
-# Thread-safe, capped ring buffer (500 entries). Never raises.
+# Thread-safe, capped ring buffer (500 entries). Persisted to disk so the log
+# survives service restarts. Never raises.
 # ─────────────────────────────────────────────────────────────────────────────
 
 import collections
+import json as _json
 import threading as _threading
+from pathlib import Path as _Path
 
 _SERVICE_LOG_LOCK = _threading.Lock()
-_SERVICE_LOG_BUFFER: collections.deque = collections.deque(maxlen=500)
+_SERVICE_LOG_BUFFER: collections.deque = collections.deque(maxlen=2000)
 _SERVICE_LOG_SEQ: int = 0  # monotonic sequence number for ordering
+_SERVICE_LOG_FILE = _Path("logs/service_log.jsonl")
+
+
+def _load_service_log_from_disk() -> None:
+    """Load persisted log entries from disk into the in-memory buffer on startup."""
+    global _SERVICE_LOG_SEQ
+    try:
+        if not _SERVICE_LOG_FILE.exists():
+            return
+        lines = _SERVICE_LOG_FILE.read_text(encoding="utf-8").splitlines()
+        # Keep last 2000 lines to match buffer maxlen
+        for line in lines[-2000:]:
+            try:
+                entry = _json.loads(line)
+                _SERVICE_LOG_BUFFER.append(entry)
+                seq = entry.get("seq", 0)
+                if seq > _SERVICE_LOG_SEQ:
+                    _SERVICE_LOG_SEQ = seq
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+# Load on module import (happens once at startup)
+_load_service_log_from_disk()
 
 
 def emit_service_event(
@@ -5921,7 +5950,8 @@ def emit_service_event(
     detail: Optional[str] = None,
 ) -> None:
     """
-    Append a structured event to the in-memory service log ring buffer.
+    Append a structured event to the in-memory service log ring buffer
+    and persist it to logs/service_log.jsonl.
 
     Args:
         service: Short service name, e.g. "price_sync", "signal_gen", "tsl", "order_monitor"
@@ -5943,6 +5973,13 @@ def emit_service_event(
                 "detail": detail,
             }
             _SERVICE_LOG_BUFFER.append(entry)
+            # Persist to disk — append-only JSONL, one entry per line
+            try:
+                _SERVICE_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+                with _SERVICE_LOG_FILE.open("a", encoding="utf-8") as _f:
+                    _f.write(_json.dumps(entry) + "\n")
+            except Exception:
+                pass  # Disk write failure must never break trading
     except Exception:
         pass  # Never let logging break trading
 
