@@ -306,7 +306,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
                 pending_orders_interval=5,
                 order_status_interval=30,
                 position_sync_interval=60,
-                trailing_stops_interval=30,
+                trailing_stops_interval=60,
             )
             set_monitoring_service(monitoring_service)
 
