@@ -1746,3 +1746,41 @@ async def trigger_news_sentiment_sync():
     _news_sentiment_thread = threading.Thread(target=_run, daemon=True, name="news-sentiment-sync")
     _news_sentiment_thread.start()
     return SyncTriggerResponse(success=True, message="News sentiment sync started")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Service Log endpoint — returns the in-memory ring buffer populated by
+# emit_service_event() calls across monitoring_service, trading_scheduler,
+# and the autonomous cycle. Used by the Guard → Sync Log tab.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ServiceLogEntry(BaseModel):
+    seq: int
+    ts: str
+    ts_iso: str
+    service: str
+    event: str
+    level: str
+    detail: Optional[str] = None
+
+
+class ServiceLogResponse(BaseModel):
+    entries: List[ServiceLogEntry]
+    total: int
+
+
+@router.get("/service-log", response_model=ServiceLogResponse)
+async def get_service_log(limit: int = 200):
+    """
+    Return the most recent service log entries from the in-memory ring buffer.
+
+    Captures start/complete events from: price_sync, quick_update, signal_gen,
+    autonomous_cycle, tsl, order_monitor, daily_sync, news_sentiment.
+    """
+    try:
+        from src.core.monitoring_service import get_service_log
+        entries = get_service_log(limit=min(limit, 500))
+        return ServiceLogResponse(entries=entries, total=len(entries))
+    except Exception as e:
+        logger.error(f"Service log fetch failed: {e}")
+        return ServiceLogResponse(entries=[], total=0)

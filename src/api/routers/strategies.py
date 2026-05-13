@@ -98,6 +98,11 @@ def launch_autonomous_cycle_thread(cycle_id: str, filters: Optional[Dict] = None
             logger.info(f"Cycle {cycle_id}: DB lock acquired")
             try:
                 logger.info(f"Background thread started for cycle {cycle_id}")
+                try:
+                    from src.core.monitoring_service import emit_service_event
+                    emit_service_event("autonomous_cycle", f"Cycle {cycle_id} started", "info")
+                except Exception:
+                    pass
 
                 # Wait for any running signal generation batch to finish
                 try:
@@ -135,6 +140,18 @@ def launch_autonomous_cycle_thread(cycle_id: str, filters: Optional[Dict] = None
                     loop.close()
 
                 logger.info(f"Autonomous cycle {cycle_id} completed successfully")
+                try:
+                    from src.core.monitoring_service import emit_service_event
+                    _proposed = cycle_result.get("strategies_proposed", 0) if isinstance(cycle_result, dict) else 0
+                    _activated = cycle_result.get("strategies_activated", 0) if isinstance(cycle_result, dict) else 0
+                    emit_service_event(
+                        "autonomous_cycle",
+                        f"Cycle {cycle_id} complete",
+                        "success",
+                        f"proposed:{_proposed} activated:{_activated}",
+                    )
+                except Exception:
+                    pass
                 with open('cycle_error.log', 'w') as f:
                     f.write(f"Cycle {cycle_id} completed successfully at {datetime.now().isoformat()}\n")
             finally:
@@ -145,6 +162,11 @@ def launch_autonomous_cycle_thread(cycle_id: str, filters: Optional[Dict] = None
             with open('cycle_error.log', 'w') as f:
                 f.write(f"CYCLE ERROR for {cycle_id}:\n{str(e)}\n\n{traceback.format_exc()}")
             logger.error(f"Background cycle {cycle_id} failed: {e}", exc_info=True)
+            try:
+                from src.core.monitoring_service import emit_service_event
+                emit_service_event("autonomous_cycle", f"Cycle {cycle_id} failed", "error", str(e)[:120])
+            except Exception:
+                pass
             try:
                 import asyncio
                 loop = asyncio.new_event_loop()

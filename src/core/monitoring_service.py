@@ -367,6 +367,7 @@ class MonitoringService:
                 pending_results = self.order_monitor.process_pending_orders()
                 if pending_results["submitted"] > 0:
                     logger.info(f"Pending orders: {pending_results['submitted']} submitted")
+                    emit_service_event("order_monitor", f"Pending orders: {pending_results['submitted']} submitted", "info")
                 # Also process live pending orders via the live order monitor
                 if self.live_order_monitor is not None:
                     try:
@@ -387,6 +388,11 @@ class MonitoringService:
                     logger.info(
                         f"Order status: {order_results['filled']} filled, "
                         f"{order_results['cancelled']} cancelled"
+                    )
+                    emit_service_event(
+                        "order_monitor",
+                        f"Order status: {order_results['filled']} filled, {order_results['cancelled']} cancelled",
+                        "success" if order_results["filled"] > 0 else "info",
                     )
                 # Also check live submitted orders — the live_order_monitor uses the
                 # live eToro client so it can resolve live order IDs correctly.
@@ -617,6 +623,11 @@ class MonitoringService:
                         f"Pending closures: {submitted} close orders submitted, "
                         f"{failed} failed, {skipped} skipped (already attempted or max retries)"
                     )
+                    emit_service_event(
+                        "order_monitor",
+                        f"Pending closures: {submitted} submitted, {failed} failed",
+                        "warning" if failed > 0 else "success",
+                    )
                 self._last_pending_closure_check = now
             except Exception as e:
                 logger.error(f"Error processing pending closures: {e}")
@@ -757,9 +768,11 @@ class MonitoringService:
         """
         try:
             logger.info("[bg-price-update] Starting quick price update in background thread")
+            emit_service_event("quick_update", "Starting quick price update", "info")
             self._quick_price_update()
         except Exception as e:
             logger.error(f"[bg-price-update] Background quick price update failed: {e}")
+            emit_service_event("quick_update", "Quick price update failed", "error", str(e))
 
     def _bg_full_price_sync(self) -> None:
         """Background thread wrapper for full price data sync.
@@ -770,10 +783,13 @@ class MonitoringService:
         """
         try:
             logger.info("[bg-full-sync] Starting full price sync in background thread")
+            emit_service_event("price_sync", "Starting full price sync", "info")
             self._sync_price_data()
             logger.info("[bg-full-sync] Full price sync completed")
+            emit_service_event("price_sync", "Full price sync completed", "success")
         except Exception as e:
             logger.error(f"[bg-full-sync] Background full price sync failed: {e}")
+            emit_service_event("price_sync", "Full price sync failed", "error", str(e))
 
     def _quick_price_update(self) -> None:
         """
@@ -2088,6 +2104,14 @@ class MonitoringService:
                 "elapsed_s": round(elapsed, 1),
                 "timestamp": datetime.now().isoformat(),
             }
+            emit_service_event(
+                "price_sync",
+                "Price sync complete",
+                "success" if stats.get("errors", 0) == 0 else "warning",
+                f"1d:{stats.get('1d',0)} 1h:{stats.get('1h',0)} 4h:{stats.get('4h',0)} "
+                f"cached:{stats.get('db_cached',0)} yahoo:{stats.get('yahoo_batch',0)} "
+                f"err:{stats.get('errors',0)} in {elapsed:.1f}s",
+            )
 
             # Signal to trading scheduler that fresh data is ready
             # Only the background automatic sync sets this flag — manual syncs don't
@@ -2124,6 +2148,7 @@ class MonitoringService:
         logger.info("=" * 60)
         logger.info("DAILY SYNC: Running daily maintenance tasks")
         logger.info("=" * 60)
+        emit_service_event("daily_sync", "Starting daily maintenance tasks", "info")
         
         # 1. Data cleanup (retention policy)
         try:
@@ -2193,6 +2218,7 @@ class MonitoringService:
             logger.warning(f"  Daily summary failed: {e}")
         
         logger.info("DAILY SYNC: Complete")
+        emit_service_event("daily_sync", "Daily maintenance complete", "success")
         logger.info("=" * 60)
         
         # 4. Save daily equity snapshot for accurate P&L period calculations
@@ -2686,6 +2712,14 @@ class MonitoringService:
                 f"db_updated={updated_count} "
                 f"breach={breach_count} "
                 f"errors={tsl_summary.get('errors', 0)}"
+            )
+            emit_service_event(
+                "tsl",
+                "TSL cycle complete",
+                "warning" if breach_count > 0 else "info",
+                f"total:{len(open_positions_orm)} trail:{tsl_summary.get('trail',0)} "
+                f"breakeven:{tsl_summary.get('breakeven',0)} breach:{breach_count} "
+                f"updated:{updated_count}",
             )
 
             return {
@@ -5444,6 +5478,7 @@ class MonitoringService:
             to_fetch = to_fetch[:80]
             logger.info(f"[NewsSentiment] Syncing {len(to_fetch)} symbols "
                         f"({len(open_syms)} with positions, {len(active_syms)} active strategies)")
+            emit_service_event("news_sentiment", f"Syncing {len(to_fetch)} symbols", "info")
 
             fetched = 0
             for sym in to_fetch:
@@ -5454,6 +5489,7 @@ class MonitoringService:
                     break  # Rate limit hit — stop for today
 
             logger.info(f"[NewsSentiment] Sync complete: {fetched}/{len(to_fetch)} symbols updated")
+            emit_service_event("news_sentiment", f"Sync complete: {fetched}/{len(to_fetch)} symbols", "success")
 
         except Exception as e:
             logger.warning(f"[NewsSentiment] Sync error: {e}")
@@ -5855,3 +5891,60 @@ def set_monitoring_service(service: MonitoringService):
     """Set the global monitoring service instance."""
     global _monitoring_service
     _monitoring_service = service
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Service Log Buffer — captures structured start/complete events from all
+# backend services so the Guard → Sync Log tab can surface them in real time.
+# Thread-safe, capped ring buffer (500 entries). Never raises.
+# ─────────────────────────────────────────────────────────────────────────────
+
+import collections
+import threading as _threading
+
+_SERVICE_LOG_LOCK = _threading.Lock()
+_SERVICE_LOG_BUFFER: collections.deque = collections.deque(maxlen=500)
+_SERVICE_LOG_SEQ: int = 0  # monotonic sequence number for ordering
+
+
+def emit_service_event(
+    service: str,
+    event: str,
+    level: str = "info",
+    detail: Optional[str] = None,
+) -> None:
+    """
+    Append a structured event to the in-memory service log ring buffer.
+
+    Args:
+        service: Short service name, e.g. "price_sync", "signal_gen", "tsl", "order_monitor"
+        event:   Human-readable event description, e.g. "Starting full price sync"
+        level:   "info" | "success" | "warning" | "error"
+        detail:  Optional extra context (counts, durations, etc.)
+    """
+    global _SERVICE_LOG_SEQ
+    try:
+        with _SERVICE_LOG_LOCK:
+            _SERVICE_LOG_SEQ += 1
+            entry = {
+                "seq": _SERVICE_LOG_SEQ,
+                "ts": datetime.now().strftime("%H:%M:%S"),
+                "ts_iso": datetime.now().isoformat() + "Z",
+                "service": service,
+                "event": event,
+                "level": level,
+                "detail": detail,
+            }
+            _SERVICE_LOG_BUFFER.append(entry)
+    except Exception:
+        pass  # Never let logging break trading
+
+
+def get_service_log(limit: int = 200) -> list:
+    """Return the most recent `limit` service log entries (newest last)."""
+    try:
+        with _SERVICE_LOG_LOCK:
+            entries = list(_SERVICE_LOG_BUFFER)
+        return entries[-limit:]
+    except Exception:
+        return []

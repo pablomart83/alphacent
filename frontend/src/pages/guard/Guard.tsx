@@ -17,6 +17,7 @@ import { SystemTab } from './system/SystemTab'
 import { CircuitBreakersTab } from './breakers/CircuitBreakersTab'
 import { AlertsTab } from './alerts/AlertsTab'
 import { AuditTab } from './audit/AuditTab'
+import { SyncLogTab } from './synclog/SyncLogTab'
 import { useRiskLimits, useRiskMetrics } from './useGuardData'
 
 /**
@@ -27,7 +28,7 @@ import { useRiskLimits, useRiskMetrics } from './useGuardData'
  * is permanent across all tabs.
  */
 
-type TabValue = 'system' | 'risk' | 'gates' | 'circuit-breakers' | 'alerts' | 'audit'
+type TabValue = 'system' | 'risk' | 'gates' | 'circuit-breakers' | 'alerts' | 'audit' | 'sync-log'
 
 const TABS: Array<{ value: TabValue; label: string }> = [
   { value: 'system', label: 'System' },
@@ -36,6 +37,7 @@ const TABS: Array<{ value: TabValue; label: string }> = [
   { value: 'circuit-breakers', label: 'Circuit breakers' },
   { value: 'alerts', label: 'Alerts' },
   { value: 'audit', label: 'Audit' },
+  { value: 'sync-log', label: 'Sync log' },
 ]
 
 export function Guard() {
@@ -70,7 +72,9 @@ function GuardShell() {
             ? 'Circuit breakers'
             : current === 'alerts'
               ? 'Alerts'
-              : 'Audit log'
+              : current === 'sync-log'
+                ? 'Live service log'
+                : 'Audit log'
 
   const leftPanel = (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto px-2 py-3 space-y-3">
@@ -115,6 +119,8 @@ function GuardShell() {
             <CircuitBreakersTab />
           ) : current === 'alerts' ? (
             <AlertsTab />
+          ) : current === 'sync-log' ? (
+            <SyncLogTab />
           ) : (
             <AuditTab />
           )}

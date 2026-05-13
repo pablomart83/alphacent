@@ -20,6 +20,15 @@ from src.models.enums import SystemStateEnum, StrategyStatus
 
 logger = logging.getLogger(__name__)
 
+# Import emit_service_event lazily to avoid circular imports at module load time
+def _emit(service: str, event: str, level: str = "info", detail: str = None):
+    """Fire-and-forget wrapper around emit_service_event — never raises."""
+    try:
+        from src.core.monitoring_service import emit_service_event
+        emit_service_event(service, event, level, detail)
+    except Exception:
+        pass
+
 
 class TradingScheduler:
     """
@@ -157,6 +166,7 @@ class TradingScheduler:
                             mon._background_sync_completed = False
                             sync_detected = True
                             logger.info("Background price sync completed — running signal generation")
+                            _emit("signal_gen", "Price sync ready — queuing signal generation", "info")
                             break
                     except Exception:
                         pass
@@ -184,9 +194,11 @@ class TradingScheduler:
                 current_state = state_manager.get_current_state()
                 
                 if current_state.state == SystemStateEnum.ACTIVE:
+                    _emit("signal_gen", "Starting signal generation cycle", "info")
                     await self._run_trading_cycle()
                     last_signal_run = _time.time()
                     logger.info(f"Signal generation complete — next run in ~{MIN_GAP_SECONDS // 60} min")
+                    _emit("signal_gen", f"Signal generation complete — next run in ~{MIN_GAP_SECONDS // 60}m", "success")
                 else:
                     logger.debug(
                         f"Skipping trading cycle: system state is {current_state.state.value}"
@@ -259,6 +271,7 @@ class TradingScheduler:
             return result
 
         logger.info("Running signal generation cycle")
+        _emit("signal_gen", "Running signal generation cycle", "info")
 
         from src.models.database import get_database
         from src.models.orm import StrategyORM, PositionORM, OrderORM
@@ -629,6 +642,12 @@ class TradingScheduler:
                 f"Batch signal generation: {total_signals} signals from "
                 f"{len(strategy_list)} strategies in {batch_time:.1f}s"
                 + (f" ({raw_signals - total_signals} rejected by conviction/frequency filters)" if raw_signals > total_signals else "")
+            )
+            _emit(
+                "signal_gen",
+                f"Batch signal generation: {total_signals} signals from {len(strategy_list)} strategies",
+                "info",
+                f"in {batch_time:.1f}s" + (f" ({raw_signals - total_signals} filtered)" if raw_signals > total_signals else ""),
             )
 
             # Coordinate signals to avoid redundancy and check existing positions
@@ -1763,6 +1782,12 @@ class TradingScheduler:
                 logger.debug(f"Exec cycle summary failed (non-fatal): {_exec_err}")
 
             logger.info("Signal generation cycle complete")
+            _emit(
+                "signal_gen",
+                "Signal generation cycle complete",
+                "success" if orders_executed > 0 else "info",
+                f"signals:{result.get('signals_coordinated',0)} orders:{orders_executed} rejected:{signals_rejected}",
+            )
 
             # === BACKTESTED TTL: expire strategies that haven't traded ===
             # Only run TTL checks during full scans (30-min scheduler), not targeted runs

@@ -734,3 +734,34 @@ export function buildAuditExportUrl(filters: AuditLogFilters): string {
   const qs = params.toString()
   return `${base}/audit/export${qs ? `?${qs}` : ''}`
 }
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  Service Log — Guard → Sync Log tab
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export type ServiceLogLevel = 'info' | 'success' | 'warning' | 'error'
+
+export interface ServiceLogEntry {
+  seq: number
+  ts: string
+  ts_iso: string
+  service: string
+  event: string
+  level: ServiceLogLevel
+  detail?: string | null
+}
+
+export interface ServiceLogPayload {
+  entries: ServiceLogEntry[]
+  total: number
+}
+
+export function useServiceLog(enabled = true) {
+  return useQuery<ServiceLogPayload>({
+    queryKey: ['service-log'],
+    queryFn: () => api.get<ServiceLogPayload>('/data/service-log?limit=300'),
+    enabled,
+    refetchInterval: 5_000,
+    staleTime: 4_000,
+  })
+}
