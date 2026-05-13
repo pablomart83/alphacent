@@ -770,6 +770,7 @@ class MonitoringService:
             logger.info("[bg-price-update] Starting quick price update in background thread")
             emit_service_event("quick_update", "Starting quick price update", "info")
             self._quick_price_update()
+            # Detailed complete emit is fired inside _quick_price_update with stats
         except Exception as e:
             logger.error(f"[bg-price-update] Background quick price update failed: {e}")
             emit_service_event("quick_update", "Quick price update failed", "error", str(e))
@@ -993,6 +994,12 @@ class MonitoringService:
                 "elapsed_s": round(elapsed, 1),
                 "timestamp": datetime.now().isoformat(),
             }
+            emit_service_event(
+                "quick_update",
+                f"Quick update: {updated}/{len(active_symbols)} symbols updated",
+                "success" if errors == 0 else "warning",
+                f"in {elapsed:.1f}s" + (f" ({errors} errors)" if errors else ""),
+            )
             
             if updated > 0:
                 logger.info(
