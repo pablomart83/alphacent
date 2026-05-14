@@ -2612,11 +2612,9 @@ class TradingScheduler:
         # 1d BTC LONG, 4h BTC LONG, and 1h BTC LONG are different trades —
         # they capture different market dynamics and shouldn't compete for slots.
         # Buckets: "1d" (daily), "4h" (4-hour), "1h" (hourly/intraday)
-        # Reduced from 5 to 2 — with larger positions ($5-10K each), having 5 strategies
-        # on the same symbol in the same timeframe means $25-50K in one name.
-        # 2 per timeframe (max 6 total across 1d/4h/1h) is the right limit for a
-        # concentrated 40-60 position book.
-        MAX_PER_SYMBOL_PER_TIMEFRAME = 2
+        # Set to 4 — dollar exposure is bounded by the 5% symbol cap regardless,
+        # so 4 per timeframe (max 12 total across 1d/4h/1h) is safe.
+        MAX_PER_SYMBOL_PER_TIMEFRAME = 4
         
         # Correlation analyzer disabled — same-symbol dedup handles concentration risk.
         # The pairwise correlation calculations were running hundreds of times per cycle
