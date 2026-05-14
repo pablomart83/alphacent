@@ -10,7 +10,42 @@
 
 ---
 
-## SESSION 2026-05-12 — WHAT WAS DONE
+## SESSION 2026-05-14 — WHAT WAS DONE
+
+### Sync Log tab (Guard page)
+| Commit | What |
+|---|---|
+| `f0976eb` | Add Sync Log tab to Guard — live terminal with color-coded service badges, polls /data/service-log every 5s |
+| `dca2858` | Fix quick_update: always emit complete with stats |
+| `2f38526` | Persist service log to disk (logs/service_log.jsonl, 2000-entry ring buffer, survives restarts) + fix last_run from DB for quick_update/news_sentiment/FMP |
+| `260da64` | Fix trailing_stops_interval: 30s → 60s (aligned with position sync, halves TSL log noise) |
+
+### Trading fixes
+| Commit | What |
+|---|---|
+| `a43fc2f` | Fix race condition: position sync creates row before fill sets strategy_id (UNH position was showing "—" strategy) |
+| `689daab` | Increase MAX_PER_SYMBOL_PER_TIMEFRAME: 2 → 4 (PAPER dynamism) |
+
+### PAPER trading dynamism analysis
+- Signal gen runs via two paths: main scheduler (~55 min gap) AND quick update (every 10 min, 5 min gap)
+- **Primary blocker identified: conviction threshold 73 applied to PAPER** — blocks the entire 70–72 band which is profitable (+$70 avg P&L, +$4,577 total, 65 trades last 60d)
+- **65–69 band is genuinely bad** (negative avg P&L) — correct to block
+- **Decision: lower PAPER conviction to 70** (set manually in Settings UI)
+- Rationale: graduation gate is the real quality filter; paper needs trade data to graduate strategies; 50% balance idle is opportunity cost
+- Live conviction stays at 73
+
+### Trading limits audit (full list in session notes)
+Key hardcoded limits found:
+- `MAX_PER_SYMBOL_PER_TIMEFRAME = 4` (was 2) — in trading_scheduler.py
+- `MAX_ORDERS_PER_RUN = 15` — hardcoded
+- `MIN_GAP_SECONDS = 3300` (55 min) — main scheduler only; quick update path uses 300s gap
+- `MINIMUM_ORDER_SIZE = $2,000` — hardcoded
+- `MAX_PORTFOLIO_HEAT_PCT = 30%` — hardcoded
+- Symbol cap: 5% of equity — hardcoded
+- `alpha_edge.max_trades_per_strategy_per_month = 4` — YAML, Alpha Edge only
+- YAML `position_management.max_positions_per_symbol: 5` is NOT read by code (dead config)
+
+---
 
 ### Live trading infrastructure (all shipped)
 
@@ -55,14 +90,14 @@
 
 ---
 
-## CURRENT SYSTEM STATE (2026-05-12 end of session)
+## CURRENT SYSTEM STATE (2026-05-14 end of session)
 
-- **DEMO equity:** ~$484K | **Open positions:** ~66 | **Regime:** trending_up_strong
-- **DEMO strategies:** ~47 PAPER + ~63 BACKTESTED
+- **DEMO equity:** ~$484K | **Open positions:** ~67 | **Regime:** trending_up_strong
+- **DEMO strategies:** ~47 PAPER + ~63 BACKTESTED (post-cycle)
 - **LIVE strategy:** `4H EMA Ribbon Trend Long GOOGL LIVE` (id: `918b0c99`) — status LIVE
 - **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53 ✅
 - **live_trading.enabled:** TRUE
-- **Latest commit:** `e4ab95b`
+- **Latest commit:** `689daab`
 
 ---
 
@@ -131,6 +166,7 @@ Performance · **Execution** · Attribution · Trades · Regime · Alpha Edge ·
 
 ## KNOWN ISSUES / TECHNICAL DEBT
 
+- **PAPER conviction threshold** — lowered to 70 (was 73) on 2026-05-14. Monitor 70–72 band performance. If win rate holds up over 15+ trades per strategy, graduation gate will filter correctly. Revisit graduation gate ratio cap (2.0×) once more data accumulates in 70–72 band.
 - **min_trades=15 in graduation_gate** — intentionally lowered to enable GOOGL test graduation. Raise back to 20 once live system is stable and you want stricter graduation criteria.
 - **VaR check disabled** — portfolio VaR was 97.97% (model artefact from young equity curve). Disabled in Settings. Re-enable after 90+ days of equity history.
 - **Conviction threshold 73** — many DEMO signals scoring 65-72 are blocked. Intentional — only high-conviction signals trade live.
@@ -172,21 +208,21 @@ scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent
 Read .kiro/steering/trading-system-context.md and Session_Continuation.md in full before doing anything.
 
 System state:
-- DEMO: ~$484K equity, ~66 open positions, trending_up_strong
+- DEMO: ~$484K equity, ~67 open positions, trending_up_strong
+- PAPER conviction threshold: 70 (lowered from 73 on 2026-05-14 to increase trade volume)
 - LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53, strategy 918b0c99 ✅
 - live_trading.enabled: TRUE
-- Latest commit: e4ab95b
+- Latest commit: 689daab
 
-Root causes fixed this session (do not re-patch):
-- OrderMonitor scoped to account_type (a5ff668)
-- reconcile_on_startup account_type-aware, live startup reconcile wired (c48ef27)
-- Miss counter keyed by DB UUID (a6918de)
-- Circuit breaker excludes live positions (49d7c00)
-- _submit_close_order + live.py close endpoint refresh etoro_position_id (871bd53, 1e67485)
-- _sync_positions scoped to account_type, PK/etoro_id collision fixed (c603c6d)
-- DB migration: global etoro_position_id unique → composite (etoro_position_id, account_type)
-- Order matching Pass 1 + Pass 2 scoped to account_type (a65b986)
-- pending-open and pending-closures endpoints scoped to account_type (c2bd491)
-- /risk/metrics and /risk/advanced scoped to account_type (e4ab95b)
-- /risk/advanced N+1 queries replaced with batch queries (e4ab95b)
+Key changes this session (do not re-patch):
+- Sync Log tab added to Guard page (service_log.jsonl persists across restarts)
+- trailing_stops_interval: 30s → 60s (app.py)
+- MAX_PER_SYMBOL_PER_TIMEFRAME: 2 → 4 (trading_scheduler.py)
+- Race condition fixed: position sync creating row before fill sets strategy_id
+- PAPER conviction lowered to 70 via Settings UI (not a code change)
+
+Next priorities:
+- Monitor 70–72 conviction band performance over next few days
+- Review graduation gate thresholds once more paper trades accumulate
+- Consider wiring key hardcoded limits (MAX_ORDERS_PER_RUN, MINIMUM_ORDER_SIZE, symbol cap) into Settings UI
 ```
