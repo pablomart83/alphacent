@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { SectionLabel } from '@/components/layout'
 import { Button, EmptyState } from '@/components/primitives'
+import { api } from '@/services/api'
 import { wsManager } from '@/services/websocket'
 import { cn, formatAge } from '@/lib/utils'
 
@@ -119,6 +120,8 @@ export function LiveStream() {
   const [log, setLog] = useState<LogLine[]>([])
   const logEndRef = useRef<HTMLDivElement>(null)
   const seqLog = useRef(0)
+  // Track whether we've loaded the persisted log — avoid double-loading
+  const persistedLoaded = useRef(false)
 
   const pushLog = (message: string, type: LogLine['type'] = 'info') => {
     setLog((prev) => {
@@ -127,6 +130,32 @@ export function LiveStream() {
       return next.slice(-MAX_LOG)
     })
   }
+
+  // On mount: fetch the last cycle's persisted log from disk so the panel
+  // shows the previous run even after navigating away or refreshing.
+  useEffect(() => {
+    if (persistedLoaded.current) return
+    persistedLoaded.current = true
+    api
+      .get<{ lines: Array<{ id: string; message: string; type: LogLine['type'] }>; cycle_id: string | null }>(
+        '/strategies/autonomous/cycle-log?lines=500',
+      )
+      .then((data) => {
+        if (data.lines && data.lines.length > 0) {
+          setLog(
+            data.lines.map((l, i) => ({
+              id: `hist-${i}`,
+              time: '',   // historical lines don't have a separate time field — message contains it
+              message: l.message,
+              type: l.type,
+            })),
+          )
+        }
+      })
+      .catch(() => {
+        // Non-critical — panel just starts empty
+      })
+  }, [])
 
   // Event feed state
   const [buffer, setBuffer] = useState<StreamEvent[]>([])
@@ -342,7 +371,9 @@ export function LiveStream() {
               <div className="p-1.5 flex flex-col gap-0.5">
                 {log.map((line) => (
                   <div key={line.id} className="flex items-start gap-1.5 leading-[1.4]">
-                    <span className="text-[var(--text-3)] shrink-0 tabular-nums">{line.time}</span>
+                    {line.time && (
+                      <span className="text-[var(--text-3)] shrink-0 tabular-nums">{line.time}</span>
+                    )}
                     <span
                       className={cn(
                         'flex-1 min-w-0 break-words',

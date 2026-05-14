@@ -4321,3 +4321,73 @@ async def reject_graduation(
     except Exception as e:
         logger.error(f"Error rejecting graduation: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/autonomous/cycle-log")
+async def get_cycle_log(
+    lines: int = 500,
+    _user: str = Depends(get_current_user),
+):
+    """
+    Return the last cycle's log lines from logs/cycles/cycle_history.log.
+
+    Used by the Cycle page LiveStream panel to pre-populate the log on mount
+    so the user sees the previous cycle's output even after navigating away.
+
+    Returns the last `lines` lines of the file, split into structured entries
+    with a `type` field inferred from the line prefix.
+    """
+    from pathlib import Path as _Path
+    import re as _re
+
+    log_path = _Path("logs/cycles/cycle_history.log")
+    if not log_path.exists():
+        return {"lines": [], "cycle_id": None, "total": 0}
+
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+        all_lines = text.splitlines()
+
+        # Find the start of the last cycle (last "CYCLE cycle_xxx | date" line)
+        last_cycle_start = 0
+        last_cycle_id = None
+        for i, line in enumerate(all_lines):
+            stripped = line.strip()
+            if stripped.startswith("CYCLE ") and "|" in stripped:
+                # The separator "===" is the line before
+                last_cycle_start = max(0, i - 1)
+                # Extract cycle_id
+                m = _re.match(r"CYCLE\s+(\S+)\s+\|", stripped)
+                if m:
+                    last_cycle_id = m.group(1)
+
+        # Take from last cycle start, capped at `lines`
+        cycle_lines = all_lines[last_cycle_start:][-lines:]
+
+        def _classify(line: str) -> str:
+            s = line.strip()
+            if s.startswith("+ ") or "✓" in s or "[ACTIVATION]" in s or "CYCLE COMPLETE" in s:
+                return "success"
+            if s.startswith("x ") or "✗" in s or "[ERROR]" in s or "CYCLE FAILED" in s or "[WARN]" in s:
+                return "error"
+            if "-> ENTER" in s or "-> EXIT" in s or "[SIGNALS]" in s or "↑" in s or "↓" in s or "↩" in s:
+                return "signal"
+            if "[ORDERS]" in s or "✓ Order" in s or "✗ Order" in s:
+                return "order"
+            return "info"
+
+        result = []
+        for i, line in enumerate(cycle_lines):
+            if not line.strip():
+                continue
+            result.append({
+                "id": f"hist-{i}",
+                "message": line.rstrip(),
+                "type": _classify(line),
+            })
+
+        return {"lines": result, "cycle_id": last_cycle_id, "total": len(result)}
+
+    except Exception as e:
+        logger.error(f"Error reading cycle log: {e}")
+        return {"lines": [], "cycle_id": None, "total": 0, "error": str(e)}
