@@ -12,6 +12,7 @@ OPTIMIZATION: Implements tiered scheduling to reduce eToro API calls:
 
 import asyncio
 import logging
+import threading
 from datetime import datetime
 from typing import Optional, Dict, List
 
@@ -19,6 +20,13 @@ from src.core.system_state_manager import get_system_state_manager
 from src.models.enums import SystemStateEnum, StrategyStatus
 
 logger = logging.getLogger(__name__)
+
+# Signal generation lock — prevents the main scheduler loop and the quick-update
+# path from running run_signal_generation_sync concurrently. Without this, both
+# paths can start within milliseconds of each other (price sync completes, both
+# detect it simultaneously), see the same empty position state, and submit
+# duplicate orders for the same strategy+symbol.
+_signal_gen_lock = threading.Lock()
 
 # Import emit_service_event lazily to avoid circular imports at module load time
 def _emit(service: str, event: str, level: str = "info", detail: str = None):
@@ -195,7 +203,14 @@ class TradingScheduler:
                 
                 if current_state.state == SystemStateEnum.ACTIVE:
                     _emit("signal_gen", "Starting signal generation cycle", "info")
-                    await self._run_trading_cycle()
+                    # Acquire signal gen lock to prevent concurrent runs with quick-update path
+                    if not _signal_gen_lock.acquire(blocking=False):
+                        logger.info("Signal gen lock held by quick-update path — skipping this scheduler tick")
+                        continue
+                    try:
+                        await self._run_trading_cycle()
+                    finally:
+                        _signal_gen_lock.release()
                     last_signal_run = _time.time()
                     logger.info(f"Signal generation complete — next run in ~{MIN_GAP_SECONDS // 60} min")
                     _emit("signal_gen", f"Signal generation complete — next run in ~{MIN_GAP_SECONDS // 60}m", "success")

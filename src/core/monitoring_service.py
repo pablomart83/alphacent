@@ -1040,7 +1040,19 @@ class MonitoringService:
                                     _db_cycle_lock.release()  # Release immediately — just checking
                             except ImportError:
                                 pass
-                            
+
+                            # Also skip if the main scheduler is currently running signal gen
+                            if not _skip_signal:
+                                try:
+                                    from src.core.trading_scheduler import _signal_gen_lock
+                                    if not _signal_gen_lock.acquire(blocking=False):
+                                        logger.info("Skipping quick signal gen — main scheduler signal gen in progress")
+                                        _skip_signal = True
+                                    else:
+                                        _signal_gen_lock.release()  # Release immediately — just checking
+                                except ImportError:
+                                    pass
+
                             if not _skip_signal:
                                 result = scheduler.run_signal_generation_sync()
                                 signals = result.get('signals_coordinated', 0)
