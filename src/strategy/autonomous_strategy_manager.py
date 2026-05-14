@@ -2259,6 +2259,11 @@ class AutonomousStrategyManager:
                 # Retirement triggers at avg_loss > 3x stop_loss with 20+ trades.
                 # Catch this at activation to avoid activate-then-immediately-retire.
                 # avg_loss from vectorbt is in DOLLARS — convert to % of position size.
+                #
+                # Multiplier is interval-aware: 1h bars have gap risk that daily bars
+                # don't — a news event can gap through a stop in a single bar, producing
+                # avg losses of 3-4× the stop even on a well-designed strategy.
+                # 1h: 5× | 4h: 4× | 1d: 3× (daily bars have the least gap risk)
                 if (strategy.backtest_results and strategy.risk_params
                         and strategy.risk_params.stop_loss_pct > 0
                         and strategy.backtest_results.avg_loss != 0
@@ -2288,11 +2293,20 @@ class AutonomousStrategyManager:
                         )
                         avg_loss_pct = 0.0
 
-                    sl_limit = strategy.risk_params.stop_loss_pct * 3.0
+                    # Interval-aware multiplier
+                    _strat_interval = (strategy.metadata or {}).get('interval', '1d') if strategy.metadata else '1d'
+                    if _strat_interval == '1h':
+                        _sl_multiplier = 5.0  # 1h: gap risk is highest
+                    elif _strat_interval == '4h':
+                        _sl_multiplier = 4.0  # 4h: moderate gap risk
+                    else:
+                        _sl_multiplier = 3.0  # 1d: least gap risk
+
+                    sl_limit = strategy.risk_params.stop_loss_pct * _sl_multiplier
                     if avg_loss_pct > sl_limit:
                         logger.warning(
                             f"      ⚠️ Skipping activation — avg loss {avg_loss_pct:.1%} > "
-                            f"{sl_limit:.1%} (3x stop-loss) — would retire immediately"
+                            f"{sl_limit:.1%} ({_sl_multiplier:.0f}x stop-loss, {_strat_interval}) — would retire immediately"
                         )
                         bt = strategy.backtest_results
                         stats["rejected_details"].append({
@@ -2300,7 +2314,7 @@ class AutonomousStrategyManager:
                             "sharpe": bt.sharpe_ratio if bt else 0,
                             "win_rate": bt.win_rate if bt else 0,
                             "trades": bt.total_trades if bt else 0,
-                            "reason": f"Avg loss {avg_loss_pct:.1%} > {sl_limit:.1%} (3x stop-loss, would retire immediately)",
+                            "reason": f"Avg loss {avg_loss_pct:.1%} > {sl_limit:.1%} ({_sl_multiplier:.0f}x stop-loss, would retire immediately)",
                         })
                         continue
 
