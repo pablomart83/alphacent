@@ -102,6 +102,7 @@ After syncing, diff against any local uncommitted changes before proceeding so a
 | SSH | `ssh -i ~/Downloads/alphacent-key.pem -o StrictHostKeyChecking=no ubuntu@34.252.61.149` |
 | SCP | `scp -i ~/Downloads/alphacent-key.pem <local> ubuntu@34.252.61.149:/home/ubuntu/alphacent/<remote>` |
 | DB | `ssh ... 'sudo -u postgres psql alphacent -t -A -c "SQL"'` |
+| eToro API | `ssh ... 'cd /home/ubuntu/alphacent && /home/ubuntu/alphacent/venv/bin/python3 -c "import sys; sys.path.insert(0,\".\"); from src.core.config import Configuration; from src.api.etoro_client import EToroAPIClient; from src.models.enums import TradingMode; c=Configuration(); cr=c.load_credentials(TradingMode.DEMO); client=EToroAPIClient(public_key=cr[\"public_key\"],user_key=cr[\"user_key\"],mode=TradingMode.DEMO); ..."'` |
 | Restart | `ssh ... 'sudo systemctl restart alphacent && sleep 12 && curl -sf http://localhost:8000/health'` |
 | Frontend build | `ssh ... 'cd /home/ubuntu/alphacent/frontend && VITE_API_BASE_URL=https://alphacent.co.uk VITE_WS_BASE_URL=wss://alphacent.co.uk npm run build 2>&1 | tail -5'` |
 

@@ -1367,6 +1367,44 @@ class TradingScheduler:
                             session.add(order_orm)
                             session.commit()
                             orders_executed += 1
+
+                            # ── Optimistic position write ─────────────────────────────────
+                            # Write a position row immediately at submit time so the next
+                            # signal generation cycle (quick update fires every 10 min) finds
+                            # it and doesn't fire a duplicate order while the fill is pending.
+                            # etoro_position_id uses a "pending_<order_id>" placeholder that
+                            # the fill handlers (immediate check + order_monitor) replace with
+                            # the real eToro position ID when the fill comes back.
+                            try:
+                                from src.models.enums import OrderSide as _OrdSideOpt, PositionSide as _PosSideOpt
+                                import uuid as _uuid_opt
+                                _opt_side = _PosSideOpt.LONG if order.side == _OrdSideOpt.BUY else _PosSideOpt.SHORT
+                                _opt_pos = PositionORM(
+                                    id=str(_uuid_opt.uuid4()),
+                                    strategy_id=order.strategy_id,
+                                    symbol=order.symbol,
+                                    side=_opt_side,
+                                    quantity=order.quantity,
+                                    entry_price=order.expected_price or 0,
+                                    current_price=order.expected_price or 0,
+                                    unrealized_pnl=0.0,
+                                    realized_pnl=0.0,
+                                    opened_at=datetime.now(),
+                                    etoro_position_id=f"pending_{order.id}",
+                                    stop_loss=order.stop_price,
+                                    take_profit=order.take_profit_price,
+                                    invested_amount=order.quantity,
+                                    account_type=order_orm.account_type,
+                                )
+                                session.add(_opt_pos)
+                                session.commit()
+                                logger.info(
+                                    f"Optimistic position created: {order.symbol} {_opt_side.value} "
+                                    f"(pending fill, order {order.id[:8]})"
+                                )
+                            except Exception as _opt_err:
+                                logger.debug(f"Optimistic position write failed (non-critical): {_opt_err}")
+                                # Non-critical — fill handler will create the position normally
                             
                             # Track this strategy+symbol+direction to prevent in-run duplicates
                             orders_submitted_this_run.add((strategy_id, _sig_sym, _sig_dir))
@@ -1665,13 +1703,18 @@ class TradingScheduler:
                                             ).first()
                                             
                                             if not existing:
-                                                # Second: match by strategy + symbol + side (same strategy only)
+                                                # Second: match by strategy + symbol + side —
+                                                # also catches optimistic rows with pending_ placeholder
+                                                from sqlalchemy import or_ as _or_fill
                                                 existing = session.query(PositionORM).filter(
                                                     PositionORM.strategy_id == order.strategy_id,
                                                     PositionORM.symbol == order.symbol,
                                                     PositionORM.side == pos_side,
                                                     PositionORM.closed_at.is_(None),
-                                                    PositionORM.etoro_position_id.is_(None),
+                                                    _or_fill(
+                                                        PositionORM.etoro_position_id.is_(None),
+                                                        PositionORM.etoro_position_id.like("pending_%"),
+                                                    ),
                                                 ).first()
 
                                             if existing:
