@@ -4110,16 +4110,22 @@ class MonitoringService:
            Threshold is looser (±2%) because we want to catch genuinely stuck positions,
            not normal intraday noise.
 
-        2. LONG-TERM FLAT: positions open 14+ days (above p90 for 1D strategies) that
-           are flat (±1%). These are genuinely stagnant regardless of strategy type.
-           4H strategies get a tighter threshold: 7+ days flat (above p90 for 4H).
+        2. LONG-TERM FLAT: positions open past their type-specific threshold that are
+           flat within the threshold. Differentiated by asset class and strategy type:
+           - Forex: ±2% flat for 14+ days (wider threshold for spread noise, but not
+             permanently exempt — a 30-day flat forex position is dead capital)
+           - Trend-following 1D: ±1% flat for 5+ days
+           - Trend-following 4H: ±1% flat for 3+ days
+           - Mean reversion 1D: ±1% flat for 7+ days
+           - Mean reversion 4H: ±1% flat for 4+ days
+           - Alpha Edge 1D: ±1% flat for 14+ days
+           - Alpha Edge 4H: ±1% flat for 7+ days
 
         Does NOT auto-close — sets pending_closure=True with a descriptive reason so
         the operator can review and approve via the UI.
 
         Skips:
         - Positions already pending closure
-        - Forex positions (spread noise makes ±1% meaningless for short holds)
         - Alpha Edge strategies (they have their own hold logic, longer time horizons)
         """
         session = self.db.get_session()
@@ -4142,11 +4148,10 @@ class MonitoringService:
             for pos in open_positions:
                 if not pos.opened_at or not pos.invested_amount:
                     continue
-                if pos.symbol and pos.symbol.upper() in forex_symbols:
-                    continue
 
                 age_days = (now - pos.opened_at).total_seconds() / 86400
                 pnl_pct = pos.unrealized_pnl / pos.invested_amount * 100 if pos.invested_amount else 0
+                is_forex = pos.symbol and pos.symbol.upper() in forex_symbols
 
                 strategy = session.query(StrategyORM).filter(
                     StrategyORM.id == pos.strategy_id
@@ -4173,11 +4178,7 @@ class MonitoringService:
                         f"({pnl_pct:+.1f}%) for {age_days:.0f} days — blocking strategy demotion"
                     )
 
-                # Category 2: stale position — differentiated by strategy type
-                # Trend-following: 3 days. If the trend didn't materialize in 3 days, it's not coming.
-                # Mean reversion: 7 days. They need time to revert.
-                # Alpha Edge: 14 days. Fundamental thesis takes longer to play out.
-                # 4H strategies get half the daily threshold (faster timeframe).
+                # Category 2: stale position — differentiated by asset class and strategy type
                 elif not reason:
                     strategy_type_str = ''
                     if strategy:
@@ -4189,23 +4190,29 @@ class MonitoringService:
                         is_mean_reversion = False
                         is_alpha_edge = False
 
-                    if is_alpha_edge:
+                    if is_forex:
+                        # Forex: wider flat threshold (spread noise) but NOT permanently exempt.
+                        # A forex position flat ±2% for 14+ days is dead capital regardless.
                         flat_days_threshold = 7 if is_4h else 14
+                        flat_pct_threshold = 2.0
+                        asset_label = 'Forex'
+                    elif is_alpha_edge:
+                        flat_days_threshold = 7 if is_4h else 14
+                        flat_pct_threshold = 1.0
+                        asset_label = 'Alpha Edge'
                     elif is_mean_reversion:
                         flat_days_threshold = 4 if is_4h else 7
+                        flat_pct_threshold = 1.0
+                        asset_label = 'Mean Reversion'
                     else:
                         # Trend-following and everything else.
-                        # Winners avg 5.4 days hold — 3 days was cutting profitable
-                        # positions before they had time to mature. A trend position
-                        # that's flat after 3 days may simply be consolidating before
-                        # the next leg. 5 days (1D) / 3 days (4H) gives it room.
                         flat_days_threshold = 3 if is_4h else 5
+                        flat_pct_threshold = 1.0
+                        asset_label = 'Trend'
 
-                    flat_pct_threshold = 1.0
                     if age_days >= flat_days_threshold and abs(pnl_pct) <= flat_pct_threshold:
-                        strategy_label = 'Alpha Edge' if is_alpha_edge else ('Mean Reversion' if is_mean_reversion else 'Trend')
                         reason = (
-                            f"Stale underwater: {'4H' if is_4h else '1D'} {strategy_label} position flat "
+                            f"Stale: {'4H' if is_4h else '1D'} {asset_label} position flat "
                             f"({pnl_pct:+.1f}%) for {age_days:.0f} days — capital redeployment candidate"
                         )
 
