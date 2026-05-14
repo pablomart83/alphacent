@@ -1676,6 +1676,10 @@ class TradingScheduler:
 
                                             if existing:
                                                 existing.etoro_position_id = etoro_position_id
+                                                # Correct strategy_id if position was created by sync
+                                                # before the fill was processed (race condition)
+                                                if existing.strategy_id == "etoro_position":
+                                                    existing.strategy_id = order.strategy_id
                                                 logger.info(f"Updated existing {order.symbol} position (strategy {order.strategy_id[:8]}) with eToro ID {etoro_position_id}")
                                             else:
                                                 import uuid as _uuid
