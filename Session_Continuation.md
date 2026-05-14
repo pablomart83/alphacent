@@ -12,6 +12,8 @@
 
 ## SESSION 2026-05-14 — WHAT WAS DONE
 
+## SESSION 2026-05-14 — WHAT WAS DONE
+
 ### Sync Log tab (Guard page)
 | Commit | What |
 |---|---|
@@ -25,6 +27,11 @@
 |---|---|
 | `a43fc2f` | Fix race condition: position sync creates row before fill sets strategy_id (UNH position was showing "—" strategy) |
 | `689daab` | Increase MAX_PER_SYMBOL_PER_TIMEFRAME: 2 → 4 (PAPER dynamism) |
+| `b5a8495` | Optimistic position write: create DB row at order submit time (prevents duplicate positions from quick-update race) |
+| `3cf814d` | Fix zombie exit: remove blanket forex exemption, add forex-specific thresholds (±2%, 14d min age) |
+| `a3dd268` | Add quick filter pills to Book Positions and Orders tabs |
+| `00b35f7` | Interval-aware avg-loss gate: 1h=5×, 4h=4×, 1d=3× stop-loss |
+| `bc10c5b` | 1h strategy improvements: WF cache TTL 2d→1h, MC bootstrap p5 floor -0.1 for 1h equity |
 
 ### PAPER trading dynamism analysis
 - Signal gen runs via two paths: main scheduler (~55 min gap) AND quick update (every 10 min, 5 min gap)
@@ -33,6 +40,29 @@
 - **Decision: lower PAPER conviction to 70** (set manually in Settings UI)
 - Rationale: graduation gate is the real quality filter; paper needs trade data to graduate strategies; 50% balance idle is opportunity cost
 - Live conviction stays at 73
+
+### 1h strategy pipeline fixes
+- `min_trades_dsl_1h: 12` (was 15) — set via Settings UI
+- Avg-loss gate now interval-aware: 1h uses 5× multiplier (was 3×), 4h uses 4×, 1d stays 3×
+- WF cache TTL: 2 days → 1 hour (config changes take effect within one cycle)
+- MC bootstrap: 1h equity now uses p5 ≥ -0.1 (was 0.0) — wider bootstrap distribution for intraday
+- Result: 4 new 1h strategies activated in first post-fix cycle (LUNR, MU, Opening Range Breakout MU/MS)
+
+### Transaction cost correction (eToro Diamond+)
+Real costs confirmed from eToro fee pages:
+- **Stocks/ETFs LONG (non-leveraged BUY):** zero commission, zero spread markup, zero overnight fee
+- **Crypto (Diamond, $100K-$250K):** 0.75% per position (was modelled at 0.1%)
+- **Forex:** ~10 bps spread (was 1.5 bps)
+
+YAML updated in `config/autonomous_trading.yaml`:
+- `stock/etf spread_percent: 0.0015 → 0.0` (phantom cost removed)
+- `stock/etf overnight_financing_pct_per_day: 0.0002 → 0.0` (non-leveraged BUY has no overnight)
+- `crypto commission_percent: 0.001 → 0.0075` (Diamond tier 0.75%)
+- `crypto spread_percent: 0.0038 → 0.0` (no eToro markup on non-leveraged crypto)
+- `forex spread_percent: 0.00015 → 0.0001` (1 pip ≈ 10 bps)
+- BTC/ETH per-symbol overrides corrected to match Diamond tier
+
+Impact: stock/ETF strategies show higher backtest Sharpe (phantom costs gone), crypto strategies show lower Sharpe (real 1.5% round-trip now modelled). Opening Range Breakout template now activating multiple symbols per cycle.
 
 ### Trading limits audit (full list in session notes)
 Key hardcoded limits found:
@@ -92,12 +122,13 @@ Key hardcoded limits found:
 
 ## CURRENT SYSTEM STATE (2026-05-14 end of session)
 
-- **DEMO equity:** ~$484K | **Open positions:** ~67 | **Regime:** trending_up_strong
-- **DEMO strategies:** ~47 PAPER + ~63 BACKTESTED (post-cycle)
+- **DEMO equity:** ~$493K | **Open positions:** ~62 | **Regime:** trending_up_strong
+- **DEMO strategies:** ~43 active (mix of PAPER + BACKTESTED), 1h strategies now activating
 - **LIVE strategy:** `4H EMA Ribbon Trend Long GOOGL LIVE` (id: `918b0c99`) — status LIVE
 - **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53 ✅
 - **live_trading.enabled:** TRUE
-- **Latest commit:** `689daab`
+- **PAPER conviction threshold:** 70 (lowered from 73 via Settings UI)
+- **Latest commit:** `bc10c5b`
 
 ---
 
@@ -168,15 +199,15 @@ Performance · **Execution** · Attribution · Trades · Regime · Alpha Edge ·
 
 - **PAPER conviction threshold** — lowered to 70 (was 73) on 2026-05-14. Monitor 70–72 band performance. If win rate holds up over 15+ trades per strategy, graduation gate will filter correctly. Revisit graduation gate ratio cap (2.0×) once more data accumulates in 70–72 band.
 - **min_trades=15 in graduation_gate** — intentionally lowered to enable GOOGL test graduation. Raise back to 20 once live system is stable and you want stricter graduation criteria.
+- **Transaction costs — crypto min_return_per_trade** — now that crypto round-trip is correctly modelled at 1.5% (Diamond tier), the `min_return_per_trade` thresholds for crypto (1d: 3%, 4h: 1.5%, 1h: 0.9%) should be reviewed upward. Monitor a few cycles first.
 - **VaR check disabled** — portfolio VaR was 97.97% (model artefact from young equity curve). Disabled in Settings. Re-enable after 90+ days of equity history.
-- **Conviction threshold 73** — many DEMO signals scoring 65-72 are blocked. Intentional — only high-conviction signals trade live.
-- **Directional quotas disabled** — disabled in Settings.
 - **4h cooldown on live orders** — belt-and-suspenders guard. May delay re-entry after legitimate position close. Consider reducing to 1h once system is stable.
 - **Triple EMA Alignment DSL bug** — `EMA(10) > EMA(10)` always false, generates 0 trades.
 - **Sector Rotation + Pairs Trading templates** — structurally broken, need design session.
 - **Walk-forward bypass paths admit regime-luck** — LONG test-dominant path still loose. Consider consistency gate `(test_sharpe - train_sharpe) ≤ 1.5`.
 - **Entry order 82% FAILED rate** — cosmetic: market-closed deferrals written as FAILED then re-fired each cycle.
 - **Cycle-error observability gap** — stage failures log silently, no `signal_decisions` row written.
+- **Optimistic position write** — `etoro_position_id` is now nullable (migration applied). Pending positions use `pending_<order_id>` placeholder. Fill handlers update to real ID. Monitor for any edge cases with position sync or TSL on pending rows.
 
 ---
 
@@ -208,21 +239,30 @@ scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent
 Read .kiro/steering/trading-system-context.md and Session_Continuation.md in full before doing anything.
 
 System state:
-- DEMO: ~$484K equity, ~67 open positions, trending_up_strong
-- PAPER conviction threshold: 70 (lowered from 73 on 2026-05-14 to increase trade volume)
+- DEMO: ~$493K equity, ~62 open positions, trending_up_strong
+- PAPER conviction threshold: 70 (lowered from 73 on 2026-05-14)
 - LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53, strategy 918b0c99 ✅
 - live_trading.enabled: TRUE
-- Latest commit: 689daab
+- Latest commit: bc10c5b
 
 Key changes this session (do not re-patch):
-- Sync Log tab added to Guard page (service_log.jsonl persists across restarts)
-- trailing_stops_interval: 30s → 60s (app.py)
-- MAX_PER_SYMBOL_PER_TIMEFRAME: 2 → 4 (trading_scheduler.py)
-- Race condition fixed: position sync creating row before fill sets strategy_id
-- PAPER conviction lowered to 70 via Settings UI (not a code change)
+- Optimistic position write: DB row created at order submit time with pending_ placeholder (b5a8495)
+  → etoro_position_id is now nullable (migration applied on EC2)
+- Zombie exit: forex no longer exempt — ±2% flat for 14d+ now flagged (3cf814d)
+- Book page: quick filter pills added to Positions and Orders tabs (a3dd268)
+- Avg-loss gate: interval-aware 1h=5×, 4h=4×, 1d=3× (00b35f7)
+- WF cache TTL: 2d → 1h; MC bootstrap p5 ≥ -0.1 for 1h equity (bc10c5b)
+- Transaction costs corrected for eToro Diamond+:
+  stock/etf: spread=0, overnight=0 (non-leveraged BUY has no fees)
+  crypto: commission=0.75% (Diamond tier), spread=0
+  forex: spread=0.01% (1 pip)
+  (autonomous_trading.yaml updated and pushed to EC2 — NOT committed to git)
+- min_trades_dsl_1h: 12 (was 15) — set via Settings UI
 
 Next priorities:
-- Monitor 70–72 conviction band performance over next few days
-- Review graduation gate thresholds once more paper trades accumulate
+- Monitor 70–72 conviction band performance (first trades placed 2026-05-14 ~16:49)
+- Monitor 1h strategy activation rate over next few cycles
+- Review crypto min_return_per_trade thresholds (now that 1.5% round-trip is modelled correctly)
 - Consider wiring key hardcoded limits (MAX_ORDERS_PER_RUN, MINIMUM_ORDER_SIZE, symbol cap) into Settings UI
+- Graduation gate review once 70–72 band accumulates 15+ trades per strategy
 ```
