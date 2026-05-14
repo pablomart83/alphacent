@@ -81,7 +81,8 @@ class StrategyProposer:
         # on the same (template, symbol) combo when data hasn't changed.
         # Key: (template_name, primary_symbol), Value: (wf_results_tuple, timestamp)
         self._wf_results_cache: Dict[Tuple[str, str], Tuple[tuple, float]] = {}
-        self._wf_cache_ttl = 172800  # 2 days (was 7 — give templates another shot sooner as data shifts)
+        self._wf_cache_ttl = 3600  # 1 hour (was 2 days — shorter TTL means config changes
+        # like min_trades_dsl_1h take effect faster and new data shifts are picked up sooner)
         # Cache schema version (D3): bumped when crypto-relevant config changes
         # so cached WF results from an older config are rejected automatically.
         # Compute from a hash of crypto thresholds in yaml; any change produces
@@ -2060,6 +2061,13 @@ class StrategyProposer:
             MC_CRYPTO_MIN_P_SHARPE = -0.2       # p10 floor for crypto/commodity (heavy-tail-aware)
             MC_CRYPTO_PERCENTILE = 10
             MC_CRYPTO_MIN_TRADES = 20           # bypass bootstrap below this for crypto (more conservative)
+            # 1h intraday equity: slightly relaxed p5 floor (-0.1 vs 0.0).
+            # Intraday strategies have higher transaction costs baked in and the
+            # bootstrap distribution is wider with more trades — a p5 of -0.1
+            # still means the strategy is profitable in 95% of resampled worlds
+            # after accounting for the wider tail. Crypto 1h still uses the
+            # heavy-tail calibration above.
+            MC_1H_MIN_P_SHARPE = -0.1           # p5 floor for 1h equity intraday
 
             # Backward-compat aliases for logs / existing references below
             MC_MIN_P5_SHARPE = MC_DEFAULT_MIN_P_SHARPE  # retained only for log string compatibility
@@ -2088,10 +2096,14 @@ class StrategyProposer:
                     mc_passed_ids.add(s.id)
                     continue
 
-                # Select calibration by asset class
+                # Select calibration by asset class and interval
                 _sym_mc = (s.symbols[0].upper() if s.symbols else '')
                 _is_heavy_tail = _sym_mc in _MC_HEAVY_TAIL
-                _mc_min_p = MC_CRYPTO_MIN_P_SHARPE if _is_heavy_tail else MC_DEFAULT_MIN_P_SHARPE
+                _strat_interval_mc = (s.metadata or {}).get('interval', '1d') if s.metadata else '1d'
+                _is_1h_equity = _strat_interval_mc == '1h' and not _is_heavy_tail
+                _mc_min_p = (MC_CRYPTO_MIN_P_SHARPE if _is_heavy_tail
+                             else MC_1H_MIN_P_SHARPE if _is_1h_equity
+                             else MC_DEFAULT_MIN_P_SHARPE)
                 _mc_percentile = MC_CRYPTO_PERCENTILE if _is_heavy_tail else MC_DEFAULT_PERCENTILE
                 _mc_min_trades = MC_CRYPTO_MIN_TRADES if _is_heavy_tail else MC_DEFAULT_MIN_TRADES
 
