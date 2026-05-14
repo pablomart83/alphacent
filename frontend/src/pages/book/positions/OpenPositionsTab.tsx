@@ -29,6 +29,7 @@ const DEFAULT_FILTERS: PositionFilters = {
   strategy: '',
   side: 'all',
   status: 'all',
+  quickPills: [],
 }
 
 export function OpenPositionsTab() {
@@ -62,6 +63,7 @@ export function OpenPositionsTab() {
 
   const rows = useMemo(() => {
     const q = filters.search.trim().toLowerCase()
+    const now = Date.now()
     return allRows.filter((r) => {
       if (filters.side === 'long') {
         const up = (r.side || '').toUpperCase()
@@ -79,6 +81,19 @@ export function OpenPositionsTab() {
           r.symbol.toLowerCase().includes(q) ||
           (r.strategy_name || '').toLowerCase().includes(q)
         if (!hit) return false
+      }
+      // Quick pills — all active pills must match (AND logic)
+      for (const pill of filters.quickPills) {
+        const openedMs = r.opened_at
+          ? new Date(r.opened_at.endsWith('Z') ? r.opened_at : `${r.opened_at}Z`).getTime()
+          : 0
+        const heldDays = (now - openedMs) / 86_400_000
+        if (pill === 'today'         && heldDays > 1) return false
+        if (pill === '48h'           && heldDays > 2) return false
+        if (pill === 'losing'        && (r.unrealized_pnl ?? 0) >= 0) return false
+        if (pill === 'big-loss'      && (r.unrealized_pnl_percent ?? 0) > -5) return false
+        if (pill === 'long-held'     && heldDays < 14) return false
+        if (pill === 'pending-close' && !r.pending_closure) return false
       }
       return true
     })

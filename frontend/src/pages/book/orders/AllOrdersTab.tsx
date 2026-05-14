@@ -36,6 +36,7 @@ const DEFAULT_FILTERS: OrderFilters = {
   status: 'all',
   action: 'all',
   range: '30d',
+  quickPills: [],
 }
 
 /** Kept in sync with the Closed-positions tab. */
@@ -123,6 +124,17 @@ export function AllOrdersTab({
           (r.strategy_name || '').toLowerCase().includes(q) ||
           r.id.toLowerCase().includes(q)
         if (!hit) return false
+      }
+      // Quick pills — all active pills must match (AND logic)
+      for (const pill of filters.quickPills) {
+        const createdMs = r.created_at ? parseUtcIso(r.created_at).getTime() : 0
+        const ageHours = (Date.now() - createdMs) / 3_600_000
+        if (pill === 'today'  && ageHours > 24) return false
+        if (pill === '48h'    && ageHours > 48) return false
+        if (pill === 'filled' && r.status !== 'FILLED') return false
+        if (pill === 'failed' && !['FAILED','REJECTED','CANCELLED'].includes(r.status)) return false
+        if (pill === 'entry'  && r.order_action !== 'entry') return false
+        if (pill === 'close'  && r.order_action !== 'close') return false
       }
       return true
     })
