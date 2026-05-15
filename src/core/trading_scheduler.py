@@ -967,78 +967,15 @@ class TradingScheduler:
                         signals_rejected += 1
                         continue
                     
-                    # ── REGIME GATE: Block equity shorts in non-bearish markets ──
-                    # Shorting individual stocks in a rising/ranging market is a losing
-                    # game — you're fighting the tide. Only allow new SHORT entries when:
-                    # (a) equity regime is clearly bearish (trending_down variants), OR
-                    # (b) the specific symbol has strongly bearish news sentiment (< -0.5)
-                    #     — bad news on a specific stock can justify a short even in a
-                    #     rising market (earnings miss, scandal, guidance cut, etc.)
-                    # Forex, commodity, and index shorts are allowed in all regimes.
-                    if _sig_dir == "SHORT":
-                        try:
-                            from src.core.tradeable_instruments import (
-                                DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX,
-                                DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_INDICES,
-                                DEMO_ALLOWED_ETFS,
-                            )
-                            _is_equity = (_sig_sym not in set(DEMO_ALLOWED_CRYPTO)
-                                         and _sig_sym not in set(DEMO_ALLOWED_FOREX)
-                                         and _sig_sym not in set(DEMO_ALLOWED_COMMODITIES)
-                                         and _sig_sym not in set(DEMO_ALLOWED_INDICES))
-                            if _is_equity:
-                                _bearish_regimes = {'trending_down', 'trending_down_weak', 'trending_down_strong', 'high_volatility'}
-                                _current_regime = 'unknown'
-                                try:
-                                    from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-                                    _analyzer = MarketStatisticsAnalyzer(self._market_data)
-                                    _sub_regime, _, _, _ = _analyzer.detect_sub_regime()
-                                    _current_regime = _sub_regime.value.lower() if _sub_regime else 'unknown'
-                                except Exception:
-                                    pass
-                                if _current_regime not in _bearish_regimes:
-                                    # Check if symbol has strongly bearish news — override the regime gate
-                                    _sentiment_override = False
-                                    try:
-                                        from src.data.news_sentiment_provider import get_news_sentiment_provider
-                                        _sent_provider = get_news_sentiment_provider()
-                                        if _sent_provider:
-                                            _sent_score = _sent_provider.get_sentiment(_sig_sym)
-                                            # Strongly bearish news (< -0.5) justifies shorting
-                                            # even in a non-bearish market regime
-                                            if _sent_score < -0.5:
-                                                _sentiment_override = True
-                                                logger.info(
-                                                    f"Regime gate override: allowing {_sig_sym} SHORT "
-                                                    f"despite {_current_regime} regime — "
-                                                    f"news sentiment={_sent_score:.3f} (strongly bearish)"
-                                                )
-                                    except Exception:
-                                        pass
-
-                                    if not _sentiment_override:
-                                        logger.info(
-                                            f"Regime gate: blocking {_sig_sym} SHORT — equity regime "
-                                            f"is '{_current_regime}' (not bearish). Only short equities "
-                                            f"in trending_down/high_volatility regimes or on strongly bearish news."
-                                        )
-                                        self._log_signal_decision(
-                                            session=session,
-                                            signal=signal,
-                                            strategy_name=strategy.name,
-                                            decision="REJECTED",
-                                            rejection_reason=f"Regime gate: equity SHORT blocked in {_current_regime} regime",
-                                        )
-                                        signals_rejected += 1
-                                        continue
-                        except Exception as _regime_err:
-                            logger.debug(f"Regime gate check failed: {_regime_err}")
-
                     # ── SHORT CONCENTRATION LIMIT ──────────────────────────────────
-                    # In non-bearish regimes, cap open equity shorts at 3 total.
-                    # Correlated shorts amplify losses when the market moves against them.
-                    # This prevents the April 13 scenario where 7 shorts were opened on
-                    # the same day and all moved against us simultaneously.
+                    # Cap open equity shorts at 3 total regardless of regime.
+                    # Conviction scoring already handles regime fit — a SHORT that
+                    # passed conviction in a trending_up regime scored 20/20 on regime
+                    # fit (uptrend exhaustion hedge). The concentration limit is a pure
+                    # execution-time risk control: correlated shorts amplify losses when
+                    # the market moves against them simultaneously (April 13 scenario).
+                    # Applies in all regimes — 3 concurrent exhaustion shorts is enough
+                    # even in a bear market.
                     if _sig_dir == "SHORT":
                         try:
                             from src.core.tradeable_instruments import (
@@ -1050,43 +987,33 @@ class TradingScheduler:
                                                and _sig_sym not in set(DEMO_ALLOWED_COMMODITIES)
                                                and _sig_sym not in set(DEMO_ALLOWED_INDICES))
                             if _is_equity_short:
-                                _bearish_regimes = {'trending_down', 'trending_down_weak', 'trending_down_strong', 'high_volatility'}
-                                _current_regime_for_conc = 'unknown'
-                                try:
-                                    from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-                                    _analyzer2 = MarketStatisticsAnalyzer(self._market_data)
-                                    _sub_regime2, _, _, _ = _analyzer2.detect_sub_regime()
-                                    _current_regime_for_conc = _sub_regime2.value.lower() if _sub_regime2 else 'unknown'
-                                except Exception:
-                                    pass
-                                if _current_regime_for_conc not in _bearish_regimes:
-                                    # Count open equity shorts
-                                    _open_equity_shorts = sum(
-                                        1 for p in position_dataclasses
-                                        if str(p.side).upper() in ('SHORT', 'SELL')
-                                        and p.symbol.upper() not in set(DEMO_ALLOWED_CRYPTO)
-                                        and p.symbol.upper() not in set(DEMO_ALLOWED_FOREX)
-                                        and p.symbol.upper() not in set(DEMO_ALLOWED_COMMODITIES)
-                                        and p.symbol.upper() not in set(DEMO_ALLOWED_INDICES)
-                                        and p.closed_at is None
-                                        and not getattr(p, 'pending_closure', False)
+                                # Count open equity shorts
+                                _open_equity_shorts = sum(
+                                    1 for p in position_dataclasses
+                                    if str(p.side).upper() in ('SHORT', 'SELL')
+                                    and p.symbol.upper() not in set(DEMO_ALLOWED_CRYPTO)
+                                    and p.symbol.upper() not in set(DEMO_ALLOWED_FOREX)
+                                    and p.symbol.upper() not in set(DEMO_ALLOWED_COMMODITIES)
+                                    and p.symbol.upper() not in set(DEMO_ALLOWED_INDICES)
+                                    and p.closed_at is None
+                                    and not getattr(p, 'pending_closure', False)
+                                )
+                                MAX_EQUITY_SHORTS = 3
+                                if _open_equity_shorts >= MAX_EQUITY_SHORTS:
+                                    logger.info(
+                                        f"Short concentration limit: blocking {_sig_sym} SHORT — "
+                                        f"{_open_equity_shorts} equity shorts already open "
+                                        f"(max {MAX_EQUITY_SHORTS})"
                                     )
-                                    MAX_EQUITY_SHORTS_NON_BEARISH = 3
-                                    if _open_equity_shorts >= MAX_EQUITY_SHORTS_NON_BEARISH:
-                                        logger.info(
-                                            f"Short concentration limit: blocking {_sig_sym} SHORT — "
-                                            f"{_open_equity_shorts} equity shorts already open "
-                                            f"(max {MAX_EQUITY_SHORTS_NON_BEARISH} in {_current_regime_for_conc} regime)"
-                                        )
-                                        self._log_signal_decision(
-                                            session=session,
-                                            signal=signal,
-                                            strategy_name=strategy.name,
-                                            decision="REJECTED",
-                                            rejection_reason=f"Short concentration limit: {_open_equity_shorts} equity shorts open (max {MAX_EQUITY_SHORTS_NON_BEARISH} in non-bearish regime)",
-                                        )
-                                        signals_rejected += 1
-                                        continue
+                                    self._log_signal_decision(
+                                        session=session,
+                                        signal=signal,
+                                        strategy_name=strategy.name,
+                                        decision="REJECTED",
+                                        rejection_reason=f"Short concentration limit: {_open_equity_shorts} equity shorts open (max {MAX_EQUITY_SHORTS})",
+                                    )
+                                    signals_rejected += 1
+                                    continue
                         except Exception as _conc_err:
                             logger.debug(f"Short concentration check failed: {_conc_err}")
 
