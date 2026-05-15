@@ -502,7 +502,8 @@ class IntelAnalyst:
         session = self.db.get_session()
         try:
             row = session.execute(text(f"""
-                SELECT COUNT(*) as rejections,
+                SELECT COUNT(DISTINCT strategy_id) as strategies,
+                       COUNT(*) as rejections,
                        (SELECT COUNT(*) FROM conviction_score_logs
                         WHERE passed_threshold = false
                         AND timestamp > NOW() - INTERVAL '{lookback_days} days') as total_rejections
@@ -514,22 +515,23 @@ class IntelAnalyst:
         finally:
             session.close()
 
-        if not row or (row[0] or 0) < 20:
+        # Only flag if ≥5 distinct strategies are stuck in this band
+        if not row or (row[0] or 0) < 5:
             return None
 
-        pct = round(row[0] / row[1] * 100, 1) if row[1] and row[1] > 0 else 0
-        evidence = f"Rejections in 65-69 band: {row[0]}\nTotal rejections: {row[1]}\nBand share: {pct}%"
+        pct = round(row[1] / row[2] * 100, 1) if row[2] and row[2] > 0 else 0
+        evidence = f"Distinct strategies scoring 65-69: {row[0]}\nTotal rejections in band: {row[1]}\nTotal rejections: {row[2]}\nBand share: {pct}%"
         return Finding(
             check_id="A7",
             key="conviction_threshold_calibration",
             category="A",
             severity="P1",
-            title=f"A7: {row[0]} strategies scoring 65-69 (just below threshold)",
-            detail="Many strategies are scoring just below the conviction threshold. This may indicate the threshold is miscalibrated or the scoring denominator is too high for certain asset classes.",
+            title=f"A7: {row[0]} distinct strategies scoring 65-69 (just below threshold)",
+            detail="Multiple strategies are consistently scoring just below the conviction threshold. This may indicate the threshold is miscalibrated or the scoring denominator is too high for certain asset classes.",
             evidence=evidence,
             recommended_action="Review conviction scorer calibration — particularly normalization denominator and asset-class effective maximums.",
             context_links=[{"label": "Research / Attribution", "url": "/research/attribution"}],
-            ask_kiro_prompt=f'Intel finding [A7]: "{row[0]} strategies scoring 65-69 (just below threshold)."\n\nEvidence: {evidence}\n\nRecommended action: Review conviction scorer calibration.',
+            ask_kiro_prompt=f'Intel finding [A7]: "{row[0]} distinct strategies scoring 65-69 (just below threshold)."\n\nEvidence: {evidence}\n\nRecommended action: Review conviction scorer calibration.',
         )
 
     def _check_a8_zero_short_exposure(self, lookback_days: int) -> Optional[Finding]:
@@ -598,16 +600,27 @@ class IntelAnalyst:
         return findings if findings else None
 
     def _check_a10_overtrading(self, lookback_days: int) -> Optional[List[Finding]]:
+        """Flag strategies generating more signals per symbol per day than their interval allows.
+
+        A 1D strategy should fire at most once per symbol per day.
+        A 4H strategy at most 6 times per symbol per day.
+        A 1H strategy at most 24 times per symbol per day.
+        We allow 3× headroom for quick-update cycles and multi-symbol strategies.
+        """
         from sqlalchemy import text
         session = self.db.get_session()
         try:
             rows = session.execute(text("""
-                SELECT sd.strategy_id, s.name, COUNT(*) as signal_count
+                SELECT sd.strategy_id, s.name,
+                       COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))) as symbol_days,
+                       COUNT(*) as total_signals,
+                       COUNT(*) / NULLIF(COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))), 0) as signals_per_symbol_day,
+                       COALESCE(s.strategy_metadata->>'interval', '1d') as interval
                 FROM signal_decisions sd
                 LEFT JOIN strategies s ON s.id = sd.strategy_id
                 WHERE sd.stage = 'signal_emitted' AND sd.decision = 'emitted'
                 AND sd.timestamp > NOW() - INTERVAL '24 hours'
-                GROUP BY sd.strategy_id, s.name HAVING COUNT(*) > 8
+                GROUP BY sd.strategy_id, s.name, s.strategy_metadata->>'interval'
             """)).fetchall()
         finally:
             session.close()
@@ -615,21 +628,34 @@ class IntelAnalyst:
         if not rows:
             return None
 
+        # Max signals per (symbol, day) — 3× headroom over bar count
+        # 1D: 1 bar/day × 3 = 3 max
+        # 4H: 6 bars/day × 3 = 18 max
+        # 1H: 24 bars/day × 3 = 72 max
+        MAX_PER_SYMBOL_DAY = {'1d': 3, '4h': 18, '1h': 72}
+
         findings = []
         for row in rows:
+            interval = row[5] or '1d'
+            threshold = MAX_PER_SYMBOL_DAY.get(interval, 3)
+            signals_per_sd = row[4] or 0
+            if signals_per_sd <= threshold:
+                continue
             name = row[1] or row[0]
-            evidence = f"Strategy: {name}\nSignals in last 24h: {row[2]}"
+            evidence = (f"Strategy: {name}\nInterval: {interval}\n"
+                       f"Total signals (24h): {row[2]}\nSymbol-days: {row[1]}\n"
+                       f"Signals per symbol-day: {signals_per_sd:.1f} (max: {threshold})")
             findings.append(Finding(
                 check_id="A10",
                 key=f"strategy:{row[0]}",
                 category="A",
                 severity="P2",
-                title=f"A10: {name} — {row[2]} signals in 24h (overtrading)",
-                detail="Strategy is generating an unusually high number of signals in 24 hours. Frequency filter may be too loose.",
+                title=f"A10: {name} — {signals_per_sd:.0f} signals/symbol/day (overtrading, {interval})",
+                detail=f"Strategy is generating {signals_per_sd:.0f} signals per symbol per day for a {interval} strategy (max {threshold}). Frequency filter may be too loose.",
                 evidence=evidence,
                 recommended_action="Check alpha_edge.max_trades_per_strategy_per_month or add signal cooldown.",
                 context_links=[{"label": "Guard / Audit", "url": "/guard/audit"}],
-                ask_kiro_prompt=f'Intel finding [A10]: "{name} — {row[2]} signals in 24h (overtrading)."\n\nEvidence: {evidence}\n\nRecommended action: Check frequency filter.',
+                ask_kiro_prompt=f'Intel finding [A10]: "{name} — {signals_per_sd:.0f} signals/symbol/day (overtrading, {interval})."\n\nEvidence: {evidence}\n\nRecommended action: Check frequency filter.',
             ))
         return findings if findings else None
 
@@ -871,22 +897,25 @@ class IntelAnalyst:
         session = self.db.get_session()
         try:
             rows = session.execute(text("""
+                WITH equity AS (
+                    SELECT COALESCE(
+                        (SELECT equity FROM equity_snapshots
+                         WHERE account_type = 'demo'
+                         ORDER BY created_at DESC LIMIT 1),
+                        (SELECT balance FROM account_info WHERE mode = 'DEMO'
+                         ORDER BY updated_at DESC LIMIT 1),
+                        1
+                    ) as val
+                )
                 SELECT p.symbol,
                        SUM(p.invested_amount) as total_invested,
-                       SUM(p.invested_amount) / NULLIF(
-                           (SELECT balance FROM account_info
-                            WHERE mode = 'DEMO'
-                            ORDER BY updated_at DESC LIMIT 1), 0
-                       ) as pct
+                       SUM(p.invested_amount) / (SELECT val FROM equity) as pct
                 FROM positions p
                 WHERE p.closed_at IS NULL AND p.account_type = 'demo'
-                AND p.invested_amount IS NOT NULL
+                AND p.invested_amount IS NOT NULL AND p.invested_amount > 0
                 GROUP BY p.symbol
-                HAVING SUM(p.invested_amount) / NULLIF(
-                    (SELECT balance FROM account_info
-                     WHERE mode = 'DEMO'
-                     ORDER BY updated_at DESC LIMIT 1), 0
-                ) > 0.05
+                HAVING SUM(p.invested_amount) / (SELECT val FROM equity) > 0.05
+                ORDER BY pct DESC
             """)).fetchall()
         finally:
             session.close()
@@ -917,17 +946,23 @@ class IntelAnalyst:
         session = self.db.get_session()
         try:
             row = session.execute(text("""
+                WITH equity AS (
+                    SELECT COALESCE(
+                        (SELECT equity FROM equity_snapshots
+                         WHERE account_type = 'demo'
+                         ORDER BY created_at DESC LIMIT 1),
+                        (SELECT balance FROM account_info WHERE mode = 'DEMO'
+                         ORDER BY updated_at DESC LIMIT 1),
+                        1
+                    ) as val
+                )
                 SELECT
                     SUM(p.invested_amount) as total_invested,
-                    (SELECT balance FROM account_info WHERE mode = 'DEMO'
-                     ORDER BY updated_at DESC LIMIT 1) as equity,
-                    SUM(p.invested_amount) / NULLIF(
-                        (SELECT balance FROM account_info WHERE mode = 'DEMO'
-                         ORDER BY updated_at DESC LIMIT 1), 0
-                    ) as heat
+                    (SELECT val FROM equity) as equity_val,
+                    SUM(p.invested_amount) / (SELECT val FROM equity) as heat
                 FROM positions p
                 WHERE p.closed_at IS NULL AND p.account_type = 'demo'
-                AND p.invested_amount IS NOT NULL
+                AND p.invested_amount IS NOT NULL AND p.invested_amount > 0
             """)).fetchone()
         finally:
             session.close()
@@ -1415,13 +1450,17 @@ class IntelAnalyst:
         session = self.db.get_session()
         try:
             rows = session.execute(text("""
-                SELECT sd.strategy_id, s.name, COUNT(*) as blocked_count,
-                       MAX(sd.reason) as last_reason
+                SELECT sd.strategy_id, s.name,
+                       COUNT(*) as blocked_count,
+                       COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))) as symbol_days,
+                       COUNT(*) / NULLIF(COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))), 0) as blocks_per_symbol_day,
+                       MAX(sd.reason) as last_reason,
+                       COALESCE(s.strategy_metadata->>'interval', '1d') as interval
                 FROM signal_decisions sd
                 LEFT JOIN strategies s ON s.id = sd.strategy_id
                 WHERE sd.stage = 'gate_blocked'
                 AND sd.timestamp > NOW() - INTERVAL '24 hours'
-                GROUP BY sd.strategy_id, s.name HAVING COUNT(*) > 10
+                GROUP BY sd.strategy_id, s.name, s.strategy_metadata->>'interval'
             """)).fetchall()
         finally:
             session.close()
@@ -1429,21 +1468,32 @@ class IntelAnalyst:
         if not rows:
             return None
 
+        # Max gate blocks per (symbol, day) — same as A10 thresholds
+        MAX_PER_SYMBOL_DAY = {'1d': 3, '4h': 18, '1h': 72}
+
         findings = []
         for row in rows:
+            interval = row[6] or '1d'
+            threshold = MAX_PER_SYMBOL_DAY.get(interval, 3)
+            blocks_per_sd = row[4] or 0
+            if blocks_per_sd <= threshold:
+                continue
             name = row[1] or row[0]
-            evidence = f"Strategy: {name}\nGate blocks in 24h: {row[2]}\nLast reason: {row[3]}"
+            evidence = (f"Strategy: {name}\nInterval: {interval}\n"
+                       f"Gate blocks (24h): {row[2]}\nSymbol-days: {row[3]}\n"
+                       f"Blocks per symbol-day: {blocks_per_sd:.1f} (max: {threshold})\n"
+                       f"Last reason: {row[5]}")
             findings.append(Finding(
                 check_id="E5",
                 key=f"gate_loop:{row[0]}",
                 category="E",
                 severity="P1",
-                title=f"E5: {name} — blocked by gate {row[2]}x in 24h",
-                detail="Strategy is permanently blocked by a runtime gate. Either the gate logic is wrong for this strategy type, or the strategy should be retired.",
+                title=f"E5: {name} — {blocks_per_sd:.0f} gate blocks/symbol/day ({interval})",
+                detail="Strategy is being blocked by a runtime gate at an anomalous rate per symbol per day. Either the gate logic is wrong for this strategy type, or the strategy should be retired.",
                 evidence=evidence,
                 recommended_action="Review gate logic vs conviction scorer — they should be consistent. If gate is correct, retire the strategy.",
                 context_links=[{"label": "Guard / Gates", "url": "/guard/gates"}, {"label": "Guard / Audit", "url": "/guard/audit"}],
-                ask_kiro_prompt=f'Intel finding [E5]: "{name} — blocked by gate {row[2]}x in 24h."\n\nEvidence: {evidence}\n\nRecommended action: Review gate logic for this strategy type.',
+                ask_kiro_prompt=f'Intel finding [E5]: "{name} — blocked by gate {row[2]}x in 24h ({interval})."\n\nEvidence: {evidence}\n\nRecommended action: Review gate logic for this strategy type.',
             ))
         return findings if findings else None
 
@@ -1853,10 +1903,12 @@ class IntelAnalyst:
                 SELECT id, name,
                        (strategy_metadata->>'wf_performance_degradation')::float as deg,
                        (strategy_metadata->>'wf_test_sharpe')::float as test_s,
-                       (strategy_metadata->>'wf_train_sharpe')::float as train_s
+                       (strategy_metadata->>'wf_train_sharpe')::float as train_s,
+                       COALESCE((backtest_results->>'total_trades')::int, 0) as trades
                 FROM strategies WHERE status IN ('BACKTESTED','PAPER')
                 AND (strategy_metadata->>'wf_performance_degradation') IS NOT NULL
                 AND (strategy_metadata->>'wf_performance_degradation')::float < -500
+                AND COALESCE((backtest_results->>'total_trades')::int, 0) >= 8
             """)).fetchall()
         finally:
             session.close()
@@ -1866,14 +1918,14 @@ class IntelAnalyst:
 
         findings = []
         for row in rows:
-            evidence = f"Strategy: {row[1]}\nDegradation: {row[2]:.0f}%\nWF test Sharpe: {row[3]:.2f}\nWF train Sharpe: {row[4]:.2f}"
+            evidence = f"Strategy: {row[1]}\nDegradation: {row[2]:.0f}%\nWF test Sharpe: {row[3]:.2f}\nWF train Sharpe: {row[4]:.2f}\nTrades: {row[5]}"
             findings.append(Finding(
                 check_id="G9",
                 key=f"strategy:{row[0]}",
                 category="G",
                 severity="P2",
                 title=f"G9: {row[1]} — extreme degradation {row[2]:.0f}% (regime luck)",
-                detail="Extreme WF performance degradation indicates the strategy captured a single regime event. Test Sharpe is 6x+ above train Sharpe.",
+                detail="Extreme WF performance degradation with sufficient trade count indicates the strategy captured a single regime event. Test Sharpe is 6x+ above train Sharpe.",
                 evidence=evidence,
                 recommended_action="Consider retiring or requiring re-validation with stricter consistency gate.",
                 context_links=[{"label": "Strategies", "url": "/strategies"}],
