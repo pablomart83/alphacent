@@ -6,11 +6,40 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Platform is in active iteration — live trading is running, graduation pipeline is working, analytics surfaces are being refined.**
+**Platform is in active iteration — live trading is running, graduation pipeline is working, Intel page is live.**
 
 ---
 
 ## SESSION 2026-05-15 — WHAT WAS DONE
+
+### Intel page built end-to-end + calibrated
+| Commit | What |
+|---|---|
+| `74e0d84` | Intel page: analyst, 50 checks A-H, findings DB, nav badge |
+| `ccca21d` | Fix 504: async background thread + polling (POST /run returns immediately) |
+| `f6e4bbb` | Fix C1/C2 equity (use equity_snapshots not balance), A7 distinct strategies, A10/E5 per-symbol-day |
+| `12457ea` | Fix A10/E5: use order_submitted not signal_emitted (quick-update signals are expected) |
+| `9ad34ad` | Fix A6 dedup (suppress when A1 exists), E5 UUID fallback, G9 threshold -1000% + train>0 |
+
+**Intel is live at https://alphacent.co.uk/intel**
+- Manual trigger, configurable lookback (1/7/14/30/90 days), runs in ~75s background thread
+- 101 findings after calibration: 3 P0, 67 P1, 22 P2, 9 opportunities
+- "Ask Kiro →" button copies pre-filled prompt to clipboard
+- Nav badge shows P0+P1 open count (red if P0, amber if P1), fetched every 60s
+- Findings persist across sessions, deduplicated by (check_id, key)
+
+**Key findings from first calibrated run (2026-05-15, 7d lookback):**
+- P0: B5 (eToro ID collision demo/live), F1 (5367 errors in errors.log), F2 (33 SQLAlchemy InFailedSqlTransaction)
+- P1: 15 strategies BACKTESTED with 0 signals (A1), 20 regime luck (A4), 18 permanent gate loops (E5 — signals fire, 0 orders), 73 strategies scoring 65-69 (A7), 0% short exposure (A8)
+- P2: GOOGL LIVE Sharpe -17.23 vs WF 2.73 (G5), WF cache hit rate 27% (E2), 10 extreme degradation (G9)
+- Opportunities: RKLB 47% missed alpha, LUNR 40%, indices underweighted at 4% of strategies (G2)
+
+**Calibration fixes applied (do not re-patch):**
+- C1/C2: use `equity_snapshots WHERE account_type='demo'` not bare `account_info.balance`
+- A7: COUNT(DISTINCT strategy_id) not raw row count
+- A10/E5: measure order_submitted not signal_emitted (signals fire every 10min by design)
+- A6: only fires when signals ARE generating but not converting (not when 0 signals — that's A1)
+- G9: threshold -1000% + train_sharpe > 0 + trades >= 8 (genuine regime luck, not thin train data)
 
 ### Intel page spec written
 | File | What |
@@ -173,13 +202,13 @@ Key hardcoded limits found:
 
 ## CURRENT SYSTEM STATE (2026-05-15 end of session)
 
-- **DEMO equity:** ~$493K | **Open positions:** ~62 | **Regime:** trending_up_strong
+- **DEMO equity:** ~$493K | **Open positions:** ~74 | **Regime:** trending_up_strong
 - **DEMO strategies:** ~43 active (mix of PAPER + BACKTESTED), 1h strategies now activating
 - **LIVE strategy:** `4H EMA Ribbon Trend Long GOOGL LIVE` (id: `918b0c99`) — status LIVE
 - **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53 ✅
 - **live_trading.enabled:** TRUE
 - **PAPER conviction threshold:** 70 (lowered from 73 via Settings UI)
-- **Latest commit:** `82d192e`
+- **Latest commit:** `74e0d84`
 
 ---
 
@@ -294,27 +323,29 @@ System state:
 - PAPER conviction threshold: 70 (lowered from 73 on 2026-05-14)
 - LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53, strategy 918b0c99 ✅
 - live_trading.enabled: TRUE
-- Latest commit: b625cdb
+- Latest commit: 9ad34ad
 
 Key changes this session (do not re-patch):
+- Intel page live at /intel — 101 calibrated findings (9ad34ad and prior)
+  Calibration fixes: C1/C2 use equity not balance, A7 distinct strategies,
+  A10/E5 use order_submitted not signal_emitted, A6 deduped vs A1,
+  G9 threshold -1000% + train>0, E5 UUID fallback name lookup
 - Regime gate REMOVED from trading_scheduler (b625cdb)
   → Conviction scorer is now the single source of truth for regime fit
   → SHORT concentration limit kept (max 3 open equity shorts, all regimes)
-  → ENPH SHORT now flows to order_executor, caught correctly by C3 trend-consistency gate
 - Conviction scorer: 5 fairness fixes for SHORT/low-freq strategies (82d192e)
-  1. Per-asset-class effective denominator: stock/etf=101, forex=104, crypto=106, commodity=98, index=100
-  2. Low-freq trade confidence: sqrt(trades/8) for SHORT mean_reversion/volatility strategies
-  3. Degradation penalty gated by trade count: trades>=8 gets softer penalty (-3/-1.5)
-  4. Parabolic/Exhaustion/Volume Climax SHORT → mean_reversion type in _detect_strategy_type
-  5. Stock base asset score: 10→12, commodity: 11→12
-- Guard System tab fixes: MonitoringServiceCard flattens nested payload, DataQualityTable filter fixed (3c83730)
+  → F SHORT, BB VEEV, Stoch Midrange FOREX, NATGAS Parabolic now pass 70
+- Guard System tab: MonitoringServiceCard flattens nested payload (3c83730)
 - Attribution tab: removed h-full/shrink-0 wrappers causing chart overlap (3c83730)
-- Intel page spec written: INTEL_SPEC.md — read this before building Intel
 
-Next priorities:
-1. **BUILD INTEL PAGE** — read INTEL_SPEC.md, implement end-to-end in one session
-2. Monitor SHORT strategies: first paper trades should appear within 1-2 cycles
-3. Monitor LONG score changes: Fix 1+5 also raise LONG stock/commodity/index scores ~5-9pts
-4. Review crypto min_return_per_trade thresholds (1.5% round-trip now correctly modelled)
-5. Graduation gate: raise min_trades back to 20 once live system stable
+Next priorities (use Intel page to triage):
+1. P0 B5: eToro position ID collision demo/live — investigate
+2. P0 F1: 5367 errors in errors.log — check what they are
+3. P0 F2: 33 SQLAlchemy InFailedSqlTransaction — fix transaction handling
+4. P1 E5: 18 strategies with gate blocks + 0 orders (Keltner TSM 302 blocks) — investigate gate
+5. P2 G5: GOOGL LIVE Sharpe -17.23 vs WF 2.73 — live strategy underperforming
+6. P2 E2: WF cache hit rate 27% — cycles slower than needed
+7. Monitor SHORT strategies: first paper trades should appear within 1-2 cycles
+8. Review crypto min_return_per_trade thresholds (1.5% round-trip now correctly modelled)
+9. Graduation gate: raise min_trades back to 20 once live system stable
 ```
