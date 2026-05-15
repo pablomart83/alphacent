@@ -81,8 +81,13 @@ class StrategyProposer:
         # on the same (template, symbol) combo when data hasn't changed.
         # Key: (template_name, primary_symbol), Value: (wf_results_tuple, timestamp)
         self._wf_results_cache: Dict[Tuple[str, str], Tuple[tuple, float]] = {}
-        self._wf_cache_ttl = 3600  # 1 hour (was 2 days — shorter TTL means config changes
-        # like min_trades_dsl_1h take effect faster and new data shifts are picked up sooner)
+        self._wf_cache_ttl = 86400  # 24 hours (was 1 hour)
+        # Config-change invalidation is handled by _wf_cache_schema_version — any change to
+        # min_trades, transaction costs, or WF windows bumps the schema version and clears
+        # the entire cache automatically. The TTL only needs to cover data staleness (daily
+        # bars update once per day). 1 hour was shorter than the cycle interval (~3h), so
+        # every cycle was a full cache miss. 24h gives ~100% hit rate on cycles 2 and 3
+        # of the same day, cutting WF compute from ~15 min/cycle to near-zero after cycle 1.
         # Cache schema version (D3): bumped when crypto-relevant config changes
         # so cached WF results from an older config are rejected automatically.
         # Compute from a hash of crypto thresholds in yaml; any change produces
