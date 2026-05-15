@@ -160,7 +160,7 @@ export function PerStrategyAttributionTable({
           className="py-8"
         />
       ) : (
-        <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] max-h-[340px]">
+        <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] max-h-[340px] overflow-y-auto">
           <DataTable
             data={data}
             columns={columns}

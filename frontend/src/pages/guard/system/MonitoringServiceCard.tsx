@@ -1,4 +1,5 @@
 import { CheckCircle2, XCircle, Clock as ClockIcon } from 'lucide-react'
+import { useMemo } from 'react'
 import { Skeleton } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
 import { cn, formatAge } from '@/lib/utils'
@@ -26,6 +27,13 @@ const KNOWN_TASKS = [
  * MonitoringServiceCard — running flag + sub-tasks grid. Reads
  * /data/monitoring/status for the per-task last_run, falls back to
  * /control/system-health.monitoring_service.sub_tasks where present.
+ *
+ * The API returns a nested structure:
+ *   { main_loop: { position_sync: {...}, trailing_stops: {...}, ... },
+ *     background: { quick_price_update: {...}, full_price_sync: {...} },
+ *     daily: { fundamental_exits: {...} } }
+ *
+ * We flatten it here so each KNOWN_TASKS key resolves correctly.
  */
 export function MonitoringServiceCard({
   health,
@@ -33,6 +41,32 @@ export function MonitoringServiceCard({
   loading,
 }: MonitoringServiceCardProps) {
   const running = !!(health?.monitoring_service as { running?: boolean } | undefined)?.running
+
+  // Flatten the nested monitoring payload into a single lookup map.
+  // The backend nests tasks under main_loop / background / daily.
+  // The frontend KNOWN_TASKS keys must match the leaf keys in those groups.
+  const flat = useMemo(() => {
+    if (!monitoring) return {} as Record<string, { last_run?: string | null; duration_s?: number | null; status?: string }>
+    const result: Record<string, { last_run?: string | null; duration_s?: number | null; status?: string }> = {}
+    // Direct flat keys (legacy / future)
+    for (const [k, v] of Object.entries(monitoring)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const nested = v as Record<string, unknown>
+        // If the value has a last_run or status field it's a leaf task entry
+        if ('last_run' in nested || 'status' in nested || 'age' in nested) {
+          result[k] = nested as { last_run?: string | null; duration_s?: number | null; status?: string }
+        } else {
+          // It's a group (main_loop, background, daily) — flatten its children
+          for (const [ck, cv] of Object.entries(nested)) {
+            if (cv && typeof cv === 'object' && !Array.isArray(cv)) {
+              result[ck] = cv as { last_run?: string | null; duration_s?: number | null; status?: string }
+            }
+          }
+        }
+      }
+    }
+    return result
+  }, [monitoring])
 
   return (
     <section className="space-y-1.5">
@@ -61,7 +95,7 @@ export function MonitoringServiceCard({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
           {KNOWN_TASKS.map((t) => {
-            const m = (monitoring?.[t.key] ?? {}) as {
+            const m = (flat[t.key] ?? {}) as {
               last_run?: string | null
               duration_s?: number | null
               status?: string

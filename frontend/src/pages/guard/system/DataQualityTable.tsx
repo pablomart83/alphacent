@@ -34,7 +34,7 @@ export function DataQualityTable({ entries, loading }: DataQualityTableProps) {
   const [search, setSearch] = useState('')
   const [assetClass, setAssetClass] = useState<string>('all')
   const [bucket, setBucket] = useState<Bucket>('all')
-  const [sorting, setSorting] = useState<SortingState>([{ id: 'score', desc: false }])
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'score', desc: true }])
 
   const classOptions = useMemo(() => {
     const set = new Set<string>()
@@ -50,8 +50,12 @@ export function DataQualityTable({ entries, loading }: DataQualityTableProps) {
     return (entries ?? []).filter((e) => {
       if (q && !e.symbol.toUpperCase().includes(q)) return false
       if (assetClass !== 'all' && e.asset_class !== assetClass) return false
-      const score = typeof e.score === 'number' ? e.score : -1
-      if (score < range[0] || score >= range[1]) return false
+      // When bucket is 'all', include entries with null/missing scores too.
+      // Only apply the score range filter when a specific bucket is selected.
+      if (bucket !== 'all') {
+        const score = typeof e.score === 'number' ? e.score : -1
+        if (score < range[0] || score >= range[1]) return false
+      }
       return true
     })
   }, [entries, search, assetClass, bucket])

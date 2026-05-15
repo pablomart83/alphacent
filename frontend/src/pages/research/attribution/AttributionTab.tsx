@@ -36,29 +36,23 @@ export function AttributionTab() {
   }
 
   return (
-    <div className="h-full overflow-y-auto bg-[var(--bg-0)] px-3 py-3 space-y-4">
-      <div className="shrink-0">
-        <PerStrategyAttributionTable
-          rows={strategyAttr.data}
-          loading={strategyAttr.isLoading}
-          onRowClick={(row) => setSelectedStrategyId(row.strategy_id)}
-          activeStrategyId={selectedStrategyId}
-        />
-      </div>
-      <div className="shrink-0">
-        <StrategyContributionBar
-          rows={strategyAttr.data}
-          loading={strategyAttr.isLoading}
-        />
-      </div>
-      <div className="shrink-0">
-        <SectorAttributionPanel
-          data={perfAttr.data}
-          loading={perfAttr.isLoading}
-          error={perfAttr.isError ? perfAttr.error : null}
-          onRetry={() => perfAttr.refetch()}
-        />
-      </div>
+    <div className="overflow-y-auto bg-[var(--bg-0)] px-3 py-3 space-y-4">
+      <PerStrategyAttributionTable
+        rows={strategyAttr.data}
+        loading={strategyAttr.isLoading}
+        onRowClick={(row) => setSelectedStrategyId(row.strategy_id)}
+        activeStrategyId={selectedStrategyId}
+      />
+      <StrategyContributionBar
+        rows={strategyAttr.data}
+        loading={strategyAttr.isLoading}
+      />
+      <SectorAttributionPanel
+        data={perfAttr.data}
+        loading={perfAttr.isLoading}
+        error={perfAttr.isError ? perfAttr.error : null}
+        onRetry={() => perfAttr.refetch()}
+      />
       <StrategyDeepDiveDrawer
         strategyId={selectedStrategyId}
         onClose={() => setSelectedStrategyId(null)}
