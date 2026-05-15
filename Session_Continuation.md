@@ -10,6 +10,47 @@
 
 ---
 
+## SESSION 2026-05-15 — WHAT WAS DONE
+
+### Conviction scorer: 5 fairness fixes for SHORT/low-frequency strategies
+
+**Root cause investigation:** All 16 SHORT strategies were generating signals but blocked at `signal_emitted` stage with conviction 57–61 against a 70 threshold. Zero paper trades across all SHORT strategies. Four compounding structural issues identified — none intentional SHORT discrimination, but all hitting SHORTs harder than LONGs.
+
+| Commit | What |
+|---|---|
+| `82d192e` | Fix conviction scorer: 5 fairness fixes for SHORT/low-freq strategies |
+
+**Fix 1 — Per-asset-class effective denominator** (replaces flat 111):
+- stock/etf: 101, forex: 104, crypto: 106, commodity: 98, index: 100
+- The 111 denominator included carry(5)+crypto(5) that stocks can never earn, structurally depressing stock scores by ~9pts vs their actual ceiling.
+
+**Fix 2 — Low-freq trade confidence denominator** for SHORT mean_reversion/volatility:
+- `sqrt(trades/8)` instead of `sqrt(trades/15)` for parabolic/exhaustion/BB squeeze shorts
+- These setups fire 3–6× per year by design; calibrating against 15 (LONG trend norm) halved their Sharpe component. 8 trades = full confidence for low-freq setups.
+
+**Fix 3 — Degradation penalty gated by trade count:**
+- `trades >= 8`: softer penalty (−3 at deg<−200, −1.5 at deg<−100)
+- `trades < 8`: full penalty unchanged (−7/−4/−2)
+- With <8 trades the train period may have 1–2 trades → low train Sharpe → large deg% even when edge is real (e.g. PFE SHORT 100% WR, deg=−470).
+
+**Fix 4 — Parabolic/Exhaustion/Volume Climax SHORT → mean_reversion type:**
+- `_detect_strategy_type` now checks name before metadata `template_type`
+- These counter-trend setups were typed as `volatility`, routing them to trend-following persistence scoring (persistence=1 → 5pts instead of 12pts)
+
+**Fix 5 — Asset tradability base scores:**
+- Stock base: 10 → 12 (PFE/NKE/VEEV/ENPH/F are large/mid-cap, more liquid than many ETFs that score 13)
+- Commodity: 11 → 12 (NATGAS/GOLD are highly liquid CFDs on eToro)
+
+**Net effect on SHORT strategies (simulated):**
+- Strong (Sharpe 2.5+, 8+ trades): 54–69 → 72–77 ✓ PASS (F SHORT, BB VEEV, Stoch Midrange FOREX, NATGAS Parabolic, SMA Env FOREX)
+- Medium (Sharpe 2.0–2.5, 4–6 trades): 54–63 → 63–70 near threshold (ENPH, SHOP, Exhaustion VEEV)
+- Weak (Sharpe 1.1–1.6, 50% WR): 54–63 → 62–64 ✗ correctly blocked (Stoch OB AUDUSD, NATGAS BB, BB USDCHF)
+- No threshold change needed.
+
+**Side effects on LONG strategies:** Fix 1 (denominator) and Fix 5 (asset scores) also improve LONG stock/commodity/index scores by ~5–9pts. This is correct — they were also being under-scored by the same structural issues. Monitor for any unexpected activation surge in the next 1–2 cycles.
+
+---
+
 ## SESSION 2026-05-14 — WHAT WAS DONE
 
 ## SESSION 2026-05-14 — WHAT WAS DONE
@@ -120,7 +161,7 @@ Key hardcoded limits found:
 
 ---
 
-## CURRENT SYSTEM STATE (2026-05-14 end of session)
+## CURRENT SYSTEM STATE (2026-05-15 end of session)
 
 - **DEMO equity:** ~$493K | **Open positions:** ~62 | **Regime:** trending_up_strong
 - **DEMO strategies:** ~43 active (mix of PAPER + BACKTESTED), 1h strategies now activating
@@ -128,7 +169,7 @@ Key hardcoded limits found:
 - **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53 ✅
 - **live_trading.enabled:** TRUE
 - **PAPER conviction threshold:** 70 (lowered from 73 via Settings UI)
-- **Latest commit:** `bc10c5b`
+- **Latest commit:** `82d192e`
 
 ---
 
@@ -243,23 +284,31 @@ System state:
 - PAPER conviction threshold: 70 (lowered from 73 on 2026-05-14)
 - LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53, strategy 918b0c99 ✅
 - live_trading.enabled: TRUE
-- Latest commit: bc10c5b
+- Latest commit: 82d192e
 
 Key changes this session (do not re-patch):
+- Conviction scorer: 5 fairness fixes for SHORT/low-freq strategies (82d192e)
+  1. Per-asset-class effective denominator: stock/etf=101, forex=104, crypto=106, commodity=98, index=100
+  2. Low-freq trade confidence: sqrt(trades/8) for SHORT mean_reversion/volatility strategies
+  3. Degradation penalty gated by trade count: trades>=8 gets softer penalty (-3/-1.5)
+  4. Parabolic/Exhaustion/Volume Climax SHORT → mean_reversion type in _detect_strategy_type
+  5. Stock base asset score: 10→12, commodity: 11→12
+  Expected: F SHORT, BB VEEV, Stoch Midrange FOREX, NATGAS Parabolic, SMA Env FOREX now pass 70
+  Watch: ENPH/SHOP/Exhaustion VEEV near threshold (63-70), may pass with good signal persistence
+
+Key changes from 2026-05-14 (do not re-patch):
 - Optimistic position write: DB row created at order submit time with pending_ placeholder (b5a8495)
   → etoro_position_id is now nullable (migration applied on EC2)
 - Zombie exit: forex no longer exempt — ±2% flat for 14d+ now flagged (3cf814d)
-- Book page: quick filter pills added to Positions and Orders tabs (a3dd268)
 - Avg-loss gate: interval-aware 1h=5×, 4h=4×, 1d=3× (00b35f7)
 - WF cache TTL: 2d → 1h; MC bootstrap p5 ≥ -0.1 for 1h equity (bc10c5b)
-- Transaction costs corrected for eToro Diamond+:
-  stock/etf: spread=0, overnight=0 (non-leveraged BUY has no fees)
-  crypto: commission=0.75% (Diamond tier), spread=0
-  forex: spread=0.01% (1 pip)
-  (autonomous_trading.yaml updated and pushed to EC2 — NOT committed to git)
+- Transaction costs corrected for eToro Diamond+ (autonomous_trading.yaml on EC2 — NOT in git)
 - min_trades_dsl_1h: 12 (was 15) — set via Settings UI
 
 Next priorities:
+- Monitor SHORT strategies: first paper trades should appear within 1-2 cycles
+- Monitor LONG score changes: Fix 1+5 also raise LONG stock/commodity/index scores ~5-9pts
+  → watch for activation surge; if too many new strategies activate, review threshold
 - Monitor 70–72 conviction band performance (first trades placed 2026-05-14 ~16:49)
 - Monitor 1h strategy activation rate over next few cycles
 - Review crypto min_return_per_trade thresholds (now that 1.5% round-trip is modelled correctly)
