@@ -466,12 +466,17 @@ class IntelAnalyst:
         from sqlalchemy import text
         session = self.db.get_session()
         try:
+            # Only flag strategies that have signals but no paper trades.
+            # Strategies with 0 signals are already covered by A1 — suppress A6
+            # for those to avoid duplicate findings on the same strategy.
             rows = session.execute(text("""
                 SELECT id, name, activated_at,
                        COALESCE((performance->>'paper_trades')::int, 0) as pt
                 FROM strategies WHERE status = 'BACKTESTED'
                 AND activated_at < NOW() - INTERVAL '7 days'
                 AND COALESCE((performance->>'paper_trades')::int, 0) = 0
+                AND performance->>'last_signal_at' IS NOT NULL
+                AND (performance->>'last_signal_at')::timestamp > NOW() - INTERVAL '7 days'
             """)).fetchall()
         finally:
             session.close()
@@ -482,18 +487,18 @@ class IntelAnalyst:
         findings = []
         for row in rows:
             days_since = (datetime.now() - row[2]).days if row[2] else "?"
-            evidence = f"Strategy: {row[1]}\nActivated: {days_since}d ago\nPaper trades: 0"
+            evidence = f"Strategy: {row[1]}\nActivated: {days_since}d ago\nPaper trades: 0\nNote: signals ARE firing but not converting to trades"
             findings.append(Finding(
                 check_id="A6",
                 key=f"strategy:{row[0]}",
                 category="A",
                 severity="P1",
-                title=f"A6: {row[1]} — BACKTESTED {days_since}d with 0 paper trades",
-                detail="Strategy has been BACKTESTED for over 7 days without generating a single paper trade. Conviction threshold may be too high for this strategy's asset class or direction.",
+                title=f"A6: {row[1]} — BACKTESTED {days_since}d with 0 paper trades (signals firing)",
+                detail="Strategy is generating signals but none are converting to paper trades. Conviction threshold may be too high, or signals are being blocked by a gate after passing conviction.",
                 evidence=evidence,
-                recommended_action="Check signal_decisions for this strategy_id — look for filter:conviction rejections and compare score to threshold.",
+                recommended_action="Check signal_decisions for this strategy_id — look for filter:conviction rejections or gate_blocked decisions.",
                 context_links=[{"label": "Guard / Audit", "url": "/guard/audit"}],
-                ask_kiro_prompt=f'Intel finding [A6]: "{row[1]} — BACKTESTED {days_since}d with 0 paper trades."\n\nEvidence: {evidence}\n\nRecommended action: Check signal_decisions for conviction rejections. Investigate and fix.',
+                ask_kiro_prompt=f'Intel finding [A6]: "{row[1]} — BACKTESTED {days_since}d with 0 paper trades (signals firing)."\n\nEvidence: {evidence}\n\nRecommended action: Check signal_decisions for conviction rejections or gate blocks.',
             ))
         return findings if findings else None
 
@@ -1467,7 +1472,19 @@ class IntelAnalyst:
 
         findings = []
         for row in rows:
-            name = row[1] or row[0]
+            # Fallback name lookup for strategies not found via LEFT JOIN
+            name = row[1]
+            if not name:
+                try:
+                    from sqlalchemy import text as _text
+                    sess2 = self.db.get_session()
+                    try:
+                        nr = sess2.execute(_text("SELECT name FROM strategies WHERE id=:id"), {"id": row[0]}).fetchone()
+                        name = nr[0] if nr else row[0]
+                    finally:
+                        sess2.close()
+                except Exception:
+                    name = row[0]
             evidence = (f"Strategy: {name}\nInterval: {row[5]}\n"
                        f"Gate blocks ({lookback_days}d): {row[2]}\n"
                        f"Orders submitted ({lookback_days}d): {row[3]}\n"
@@ -1896,8 +1913,9 @@ class IntelAnalyst:
                        COALESCE((backtest_results->>'total_trades')::int, 0) as trades
                 FROM strategies WHERE status IN ('BACKTESTED','PAPER')
                 AND (strategy_metadata->>'wf_performance_degradation') IS NOT NULL
-                AND (strategy_metadata->>'wf_performance_degradation')::float < -500
+                AND (strategy_metadata->>'wf_performance_degradation')::float < -1000
                 AND COALESCE((backtest_results->>'total_trades')::int, 0) >= 8
+                AND (strategy_metadata->>'wf_train_sharpe')::float > 0
             """)).fetchall()
         finally:
             session.close()
@@ -1914,9 +1932,9 @@ class IntelAnalyst:
                 category="G",
                 severity="P2",
                 title=f"G9: {row[1]} — extreme degradation {row[2]:.0f}% (regime luck)",
-                detail="Extreme WF performance degradation with sufficient trade count indicates the strategy captured a single regime event. Test Sharpe is 6x+ above train Sharpe.",
+                detail="Extreme WF performance degradation with sufficient trade count and positive train Sharpe indicates the strategy captured a single regime event. Test Sharpe is 11x+ above train Sharpe.",
                 evidence=evidence,
-                recommended_action="Consider retiring or requiring re-validation with stricter consistency gate.",
+                recommended_action="Consider retiring or requiring re-validation with stricter consistency gate: (test_sharpe - train_sharpe) ≤ 1.5.",
                 context_links=[{"label": "Strategies", "url": "/strategies"}],
                 ask_kiro_prompt=f'Intel finding [G9]: "{row[1]} — extreme degradation {row[2]:.0f}%."\n\nEvidence: {evidence}\n\nRecommended action: Consider retiring strategy.',
             ))
