@@ -16,6 +16,7 @@ const Strategies = lazy(() => import('./pages/strategies/Strategies').then((m) =
 const Guard = lazy(() => import('./pages/guard/Guard').then((m) => ({ default: m.Guard })))
 const Research = lazy(() => import('./pages/research/Research').then((m) => ({ default: m.Research })))
 const Settings = lazy(() => import('./pages/settings/Settings').then((m) => ({ default: m.Settings })))
+const Intel = lazy(() => import('./pages/intel/Intel').then((m) => ({ default: m.Intel })))
 const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })))
 
 const queryClient = new QueryClient({
@@ -94,6 +95,14 @@ function AppRoutes() {
           element={
             <Suspense fallback={<PageFallback />}>
               <Research />
+            </Suspense>
+          }
+        />
+        <Route
+          path="intel/*"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <Intel />
             </Suspense>
           }
         />

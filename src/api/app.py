@@ -443,7 +443,10 @@ def create_app() -> FastAPI:
     
     from src.api.routers import live as live_router
     app.include_router(live_router.router)
-    
+
+    from src.api.routers import intel as intel_router
+    app.include_router(intel_router.router)
+
     logger.info("FastAPI application configured")
     
     return app

@@ -35,6 +35,7 @@ export function KeyboardShortcutHelp({ open, onOpenChange }: KeyboardShortcutHel
             <Row keys={['g', 's']} label="Go to Strategies" />
             <Row keys={['g', 'g']} label="Go to Guard" />
             <Row keys={['g', 'r']} label="Go to Research" />
+            <Row keys={['g', 'i']} label="Go to Intel" />
             <Row keys={['g', ',']} label="Go to Settings" />
           </Group>
           <Group title="Utilities">

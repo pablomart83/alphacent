@@ -106,6 +106,17 @@ const COMMANDS: CommandItem[] = [
     },
   },
   {
+    id: 'nav-intel',
+    label: 'Go to Intel',
+    keywords: 'analyst findings checks health audit recommendations',
+    section: 'Navigate',
+    icon: TrendingUp,
+    run: ({ navigate, close }) => {
+      navigate('/intel')
+      close()
+    },
+  },
+  {
     id: 'nav-settings',
     label: 'Go to Settings',
     keywords: 'configuration preferences',
