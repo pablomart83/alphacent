@@ -1,8 +1,8 @@
 """Intel page API — /intel/*
 
 Endpoints:
-  POST /intel/run?lookback_days=N   — trigger analysis run
-  GET  /intel/runs                  — run history
+  POST /intel/run?lookback_days=N   — trigger analysis run (async, returns run_id immediately)
+  GET  /intel/runs                  — run history (poll this for status=complete)
   GET  /intel/findings              — findings with filters
   GET  /intel/findings/{id}         — single finding
   POST /intel/findings/{id}/dismiss — dismiss with reason
@@ -13,7 +13,9 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Optional
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -24,6 +26,9 @@ from src.api.dependencies import get_current_user, get_db_session
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/intel", tags=["intel"])
 
+# Track running analysis threads to prevent concurrent runs
+_running_analysis: Optional[str] = None  # run_id of currently running analysis
+
 
 # ── Request / Response models ─────────────────────────────────────────────────
 
@@ -31,12 +36,10 @@ class DismissBody(BaseModel):
     reason: str = ""
 
 
-class RunResponse(BaseModel):
+class RunStartedResponse(BaseModel):
     run_id: str
-    findings_created: int
-    findings_updated: int
-    findings_count: int
-    duration_s: float
+    status: str = "running"
+    message: str = "Analysis started. Poll GET /intel/runs for completion."
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -79,26 +82,77 @@ def _row_to_finding(row) -> dict:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
-@router.post("/run", response_model=RunResponse)
+@router.post("/run", response_model=RunStartedResponse)
 async def run_analysis(
     lookback_days: int = Query(default=7, ge=1, le=90),
     username: str = Depends(get_current_user),
 ):
-    """Trigger a full analysis run. Runs synchronously (5-15s). Returns summary."""
-    from src.models.database import get_database
-    from src.analytics.intel_log_reader import IntelLogReader
-    from src.analytics.intel_analyst import IntelAnalyst
+    """Trigger a full analysis run in a background thread.
 
-    db = get_database()
-    log_reader = IntelLogReader()
-    analyst = IntelAnalyst(db, log_reader)
+    Returns immediately with run_id and status='running'.
+    Poll GET /intel/runs to check when status becomes 'complete'.
+    Prevents concurrent runs — returns 409 if one is already running.
+    """
+    global _running_analysis
 
-    try:
-        result = analyst.run(lookback_days=lookback_days)
-        return RunResponse(**result)
-    except Exception as exc:
-        logger.error(f"Intel run failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+    if _running_analysis is not None:
+        # Check if the thread is actually still alive via DB
+        from src.models.database import get_database
+        db = get_database()
+        sess = db.get_session()
+        try:
+            row = sess.execute(
+                text("SELECT status FROM intel_runs WHERE id=:id"),
+                {"id": _running_analysis},
+            ).fetchone()
+            if row and row[0] == "running":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Analysis already running (run_id={_running_analysis}). Wait for it to complete.",
+                )
+            else:
+                _running_analysis = None
+        finally:
+            sess.close()
+
+    run_id = str(uuid4())
+    _running_analysis = run_id
+
+    def _run_in_background():
+        global _running_analysis
+        try:
+            from src.models.database import get_database
+            from src.analytics.intel_log_reader import IntelLogReader
+            from src.analytics.intel_analyst import IntelAnalyst
+
+            db = get_database()
+            log_reader = IntelLogReader()
+            analyst = IntelAnalyst(db, log_reader)
+            analyst.run(lookback_days=lookback_days)
+        except Exception as exc:
+            logger.error(f"Intel background run {run_id} failed: {exc}", exc_info=True)
+            # Mark run as error in DB
+            try:
+                from src.models.database import get_database
+                db = get_database()
+                sess = db.get_session()
+                try:
+                    sess.execute(
+                        text("UPDATE intel_runs SET status='error', error=:err, completed_at=NOW() WHERE id=:id"),
+                        {"id": run_id, "err": str(exc)[:500]},
+                    )
+                    sess.commit()
+                finally:
+                    sess.close()
+            except Exception:
+                pass
+        finally:
+            _running_analysis = None
+
+    t = threading.Thread(target=_run_in_background, name=f"intel-run-{run_id[:8]}", daemon=True)
+    t.start()
+
+    return RunStartedResponse(run_id=run_id)
 
 
 @router.get("/runs")

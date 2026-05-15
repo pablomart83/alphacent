@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Play, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/primitives'
 import { cn } from '@/lib/utils'
@@ -27,6 +27,7 @@ export function IntelPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [lookback, setLookback] = useState(7)
   const [showLookbackPicker, setShowLookbackPicker] = useState(false)
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [filters, setFilters] = useState<IntelFindingsFilters & { statusTab: string }>({
     statusTab: 'open',
     status: 'open',
@@ -44,25 +45,53 @@ export function IntelPage() {
   const runs = useIntelRuns()
   const runAnalysis = useRunAnalysis()
 
+  // Poll runs every 3s while a run is active, stop when complete/error
+  const isRunning = activeRunId !== null
+  const { data: runsData, refetch: refetchRuns } = runs
+
+  useEffect(() => {
+    if (!isRunning) return
+    const interval = setInterval(() => {
+      refetchRuns().then((result) => {
+        const latest = result.data?.find((r) => r.id === activeRunId)
+        if (latest && (latest.status === 'complete' || latest.status === 'error')) {
+          setActiveRunId(null)
+          // Refresh findings and summary once run completes
+          findings.refetch()
+          summary.refetch()
+        }
+      })
+    }, 3000)
+    return () => clearInterval(interval)
+  }, [isRunning, activeRunId, refetchRuns, findings, summary])
+
   const handleFiltersChange = (
     patch: Partial<IntelFindingsFilters & { statusTab: string }>,
   ) => {
     setFilters((prev) => {
       const next = { ...prev, ...patch }
-      // Keep status in sync with statusTab
       if (patch.statusTab !== undefined) {
         next.status = patch.statusTab === 'all' ? undefined : patch.statusTab
       }
       return next
     })
-    // Clear selection when filters change
     setSelectedId(null)
   }
 
   const handleRun = () => {
     setShowLookbackPicker(false)
-    runAnalysis.mutate(lookback)
+    runAnalysis.mutate(lookback, {
+      onSuccess: (data) => {
+        setActiveRunId(data.run_id)
+        refetchRuns()
+      },
+    })
   }
+
+  // Derive running state from active run in runs list
+  const activeRun = runsData?.find((r) => r.id === activeRunId)
+  const lastCompleteRun = runsData?.find((r) => r.status === 'complete')
+  const showRunning = isRunning || runAnalysis.isPending
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)]">
@@ -73,7 +102,7 @@ export function IntelPage() {
             summary={summary.data}
             loading={summary.isLoading}
           />
-          <RunHistoryPanel runs={runs.data ?? []} loading={runs.isLoading} />
+          <RunHistoryPanel runs={runsData ?? []} loading={runs.isLoading} />
         </div>
 
         {/* Run controls */}
@@ -83,15 +112,15 @@ export function IntelPage() {
               variant="primary"
               size="sm"
               onClick={() => setShowLookbackPicker((v) => !v)}
-              disabled={runAnalysis.isPending}
+              disabled={showRunning}
               className="gap-1.5"
             >
-              {runAnalysis.isPending ? (
+              {showRunning ? (
                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <Play className="h-3.5 w-3.5" />
               )}
-              {runAnalysis.isPending ? 'Running…' : 'Run Analysis'}
+              {showRunning ? 'Running…' : 'Run Analysis'}
             </Button>
 
             {showLookbackPicker && (
@@ -148,12 +177,17 @@ export function IntelPage() {
             )}
           </div>
 
-          {runAnalysis.isSuccess && runAnalysis.data && (
-            <p className="text-[10px] text-[var(--pnl-up)]">
-              ✓ {runAnalysis.data.findings_count} findings in {runAnalysis.data.duration_s.toFixed(1)}s
+          {showRunning && (
+            <p className="text-[10px] text-[var(--text-3)] animate-pulse">
+              Analysing… this takes 30-90s
             </p>
           )}
-          {runAnalysis.isError && (
+          {!showRunning && lastCompleteRun && (
+            <p className="text-[10px] text-[var(--pnl-up)]">
+              ✓ {lastCompleteRun.findings_total} findings in {lastCompleteRun.duration_s?.toFixed(1)}s
+            </p>
+          )}
+          {activeRun?.status === 'error' && (
             <p className="text-[10px] text-[var(--pnl-down)]">Run failed</p>
           )}
         </div>

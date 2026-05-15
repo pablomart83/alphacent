@@ -61,10 +61,8 @@ export interface IntelSummary {
 
 export interface IntelRunResponse {
   run_id: string
-  findings_created: number
-  findings_updated: number
-  findings_count: number
-  duration_s: number
+  status: string
+  message: string
 }
 
 export interface IntelFindingsFilters {
