@@ -26,6 +26,18 @@ have a bad technical entry, and a weak company can still have a valid breakout.
 Alpha Edge strategies ARE the fundamental signal; conviction should amplify it.
 
 Only signals with conviction > threshold are traded.
+
+Normalization note (2026-05-15):
+The 111-point DSL denominator includes carry(5) and crypto cycle(5) that only
+apply to forex and crypto respectively. Normalizing stock/commodity/index
+strategies against 111 structurally depresses their scores by ~9 points vs
+what they can actually earn. We use per-asset-class effective denominators:
+  Stock/ETF DSL:  40+25+20+15+1 = 101
+  Forex DSL:      40+25+20+13+5+1 = 104  (carry applies, asset max 13)
+  Crypto DSL:     40+25+20+15+5+1 = 106  (crypto cycle applies)
+  Commodity DSL:  40+25+20+12+1 = 98     (asset 12 after fix)
+  Index DSL:      40+25+20+14+1 = 100
+  AE path:        unchanged at 132 (AE strategies are equity-only)
 """
 
 import logging
@@ -67,10 +79,24 @@ class ConvictionScorer:
     """
 
     # Theoretical max raw scores per path (used for normalization)
-    # DSL:  WF(40) + Signal(25) + Regime(20) + Asset(15) + Carry(5) + Crypto(5) + News(1) = 111
-    # AE:   DSL(111) + Fundamental(15) + Factor(6) = 132
-    _THEORETICAL_MAX_DSL = 111.0
+    # DSL global max: WF(40) + Signal(25) + Regime(20) + Asset(15) + Carry(5) + Crypto(5) + News(1) = 111
+    # AE:             DSL(111) + Fundamental(15) + Factor(6) = 132
+    #
+    # Per-asset-class effective DSL denominators (2026-05-15):
+    # Carry(5) is forex-only; crypto cycle(5) is crypto-only. Normalizing stock/commodity/index
+    # strategies against 111 structurally depresses their scores by ~9 pts vs what they can earn.
+    # Asset max also varies by class (stock base 12, commodity 12, index 14, forex 13, crypto 15).
+    _THEORETICAL_MAX_DSL = 111.0  # kept for AE path and legacy references
     _THEORETICAL_MAX_AE  = 132.0
+    _DSL_EFFECTIVE_MAX = {
+        # asset_class → effective max raw score
+        'stock':     101,  # WF(40)+Signal(25)+Regime(20)+Asset(12)+News(1)   — no carry, no crypto
+        'etf':       101,  # same as stock
+        'forex':     104,  # WF(40)+Signal(25)+Regime(20)+Asset(13)+Carry(5)+News(1)
+        'crypto':    106,  # WF(40)+Signal(25)+Regime(20)+Asset(15)+Crypto(5)+News(1)
+        'commodity':  98,  # WF(40)+Signal(25)+Regime(20)+Asset(12)+News(1)
+        'index':     100,  # WF(40)+Signal(25)+Regime(20)+Asset(14)+News(1)
+    }
 
     def __init__(
         self,
@@ -163,11 +189,16 @@ class ConvictionScorer:
             total_score += factor_adj
 
         # ── Normalize to 0-100 ───────────────────────────────────────────
-        # Different theoretical maxima per path so the threshold means the same
-        # thing regardless of which engine generated the signal.
-        # DSL max:  40+25+20+15+5+5+1 = 111
-        # AE max:   40+25+20+15+15+5+5+1+6 = 132
-        theoretical_max = self._THEORETICAL_MAX_AE if is_alpha_edge else self._THEORETICAL_MAX_DSL
+        # AE path: unchanged at 132 (AE strategies are equity-only).
+        # DSL path: use per-asset-class effective denominator so that a stock
+        # strategy that earns 95% of what it can possibly earn scores ~95/100,
+        # not ~86/100 because the denominator includes carry/crypto it can never earn.
+        if is_alpha_edge:
+            theoretical_max = self._THEORETICAL_MAX_AE
+        else:
+            asset_class = (strategy.metadata or {}).get('asset_class', 'stock') if strategy.metadata else 'stock'
+            theoretical_max = float(self._DSL_EFFECTIVE_MAX.get(asset_class, self._THEORETICAL_MAX_DSL))
+
         total_score = min(100.0, total_score * (100.0 / theoretical_max))
 
         breakdown = {
@@ -259,14 +290,22 @@ class ConvictionScorer:
 
         Breakdown:
         - OOS Sharpe × trade-count confidence: 0-20 points
-          Multiplicative: Sharpe 3.9 on 4 trades scores the same as Sharpe 1.5
-          on 15 trades. High Sharpe on few trades is noise, not edge.
+          Multiplicative: confidence = sqrt(trades / denominator).
+          Standard denominator is 15 (full confidence at 15+ trades).
+          Low-frequency SHORT strategies (exhaustion, parabolic, BB squeeze,
+          volume climax) use denominator 8 — these setups fire 3-6× per year
+          by design; 8 trades is the natural "full confidence" point for them.
+          Using 15 would halve their Sharpe component vs LONG trend strategies
+          that naturally accumulate 15-20 WF trades.
         - Win rate quality: 0-8 points (>60% is strong, >50% is acceptable)
         - Train/test consistency: 0-5 points (both positive = consistent edge)
         - WF degradation penalty: 0 to -7 points
           Extreme test-over-train outperformance (degradation < -100%) is a
           red flag for regime luck. The strategy object stores this as
           wf_performance_degradation (negative = test beat train).
+          Penalty is gated by trade count: strategies with 8+ trades absorb
+          a softer penalty because high trade count is itself evidence of
+          robustness, not regime luck.
 
         Total max: 20 + 8 + 5 + 7 (trade count additive bonus) = 40
         """
@@ -276,9 +315,6 @@ class ConvictionScorer:
         score = 0.0
 
         # --- OOS Sharpe × trade-count confidence (max 20) ---
-        # Multiplicative: confidence = sqrt(min(trades, 15) / 15)
-        # At 4 trades: 0.516x  |  At 8 trades: 0.730x  |  At 15+ trades: 1.0x
-        # This prevents a Sharpe 3.9 on 4 trades from outscore Sharpe 2.5 on 20 trades.
         test_sharpe = meta.get('wf_test_sharpe', 0)
         if perf and hasattr(perf, 'sharpe_ratio'):
             test_sharpe = test_sharpe or perf.sharpe_ratio
@@ -287,7 +323,20 @@ class ConvictionScorer:
         if perf and hasattr(perf, 'total_trades'):
             total_trades = perf.total_trades or 0
 
-        trade_confidence = min(1.0, math.sqrt(max(0, total_trades) / 15.0)) if total_trades > 0 else 0.0
+        # Fix (2026-05-15): low-frequency SHORT strategies use denominator 8.
+        # Parabolic/exhaustion/BB-squeeze/volume-climax setups fire 3-6× per year
+        # by design. Calibrating confidence against 15 (the LONG trend-following
+        # norm) halves their Sharpe component and is structurally unfair.
+        # Denominator 8 means full confidence at 8 trades — appropriate for
+        # setups that are selective by nature, not by lack of edge.
+        direction = (meta.get('direction') or 'long').lower()
+        strategy_type = self._detect_strategy_type(strategy)
+        is_low_freq_short = (
+            direction == 'short' and
+            strategy_type in ('mean_reversion', 'volatility')
+        )
+        trade_conf_denom = 8.0 if is_low_freq_short else 15.0
+        trade_confidence = min(1.0, math.sqrt(max(0, total_trades) / trade_conf_denom)) if total_trades > 0 else 0.0
 
         if test_sharpe and not (math.isinf(test_sharpe) or math.isnan(test_sharpe)):
             # Logarithmic scaling: Sharpe 0.5→8, 1.0→12, 2.0→17, 3.0→19, 5.0→20
@@ -340,16 +389,32 @@ class ConvictionScorer:
         # Penalty only fires when degradation is severe (< -100%) AND test_sharpe
         # is high (otherwise the strategy already scored low on Sharpe).
         # This catches the FDX pattern: WF 3.9 on 4 trades, train 0.62 → test 3.9.
+        #
+        # Fix (2026-05-15): gate penalty severity by trade count.
+        # With < 8 trades, the train period may have had only 1-2 trades → low
+        # train Sharpe → large degradation % even when the edge is real (e.g.
+        # PFE SHORT: 4 trades, 100% WR, deg=-470 — not regime luck, just rare setup).
+        # Strategies with 8+ trades have enough train-period data that a large
+        # degradation genuinely signals regime luck; apply full penalty there.
         degradation = meta.get('wf_performance_degradation')
         if degradation is not None and test_sharpe and test_sharpe > 0:
             try:
                 deg = float(degradation)
-                if deg < -200:
-                    score -= 7.0  # Extreme: test Sharpe 3x+ above train
-                elif deg < -100:
-                    score -= 4.0  # Significant: test Sharpe 2x+ above train
-                elif deg < -50:
-                    score -= 2.0  # Moderate: test Sharpe 1.5x above train
+                if total_trades >= 8:
+                    # High trade count: softer penalty — trade count itself is evidence
+                    if deg < -200:
+                        score -= 3.0
+                    elif deg < -100:
+                        score -= 1.5
+                    # deg < -50 with 8+ trades: no penalty (consistent edge, just volatile train)
+                else:
+                    # Low trade count: full penalty — can't distinguish edge from luck
+                    if deg < -200:
+                        score -= 7.0  # Extreme: test Sharpe 3x+ above train
+                    elif deg < -100:
+                        score -= 4.0  # Significant: test Sharpe 2x+ above train
+                    elif deg < -50:
+                        score -= 2.0  # Moderate: test Sharpe 1.5x above train
             except (TypeError, ValueError):
                 pass
 
@@ -444,7 +509,10 @@ class ConvictionScorer:
             # (same as old DSL baseline) so existing strategies aren't penalised
             # during the transition period before all signals carry the field.
             if persistence == 0 and not meta.get('entry_persistence'):
-                score = 8.0
+                # For mean_reversion strategies the neutral fallback is 12 pts
+                # (equivalent to persistence=1, the cleanest entry). Using 8 pts
+                # would under-score fresh counter-trend signals that fire exactly once.
+                score = 12.0 if is_mean_reversion else 8.0
 
         # ── R:R quality (0-10) — both paths ─────────────────────────────
         # Weighted higher than before (was max 8, now max 10) since it's the
@@ -675,7 +743,12 @@ class ConvictionScorer:
 
         - Tier 1 (15 pts): Ultra-liquid (SPY, QQQ, AAPL, BTC, ETH, major forex)
         - Tier 2 (13 pts): Very liquid (large-cap stocks, major ETFs, SOL, XRP)
-        - Tier 3 (11 pts): Liquid (mid-cap stocks, sector ETFs, indices, commodities)
+        - Tier 3 (12 pts): Liquid (mid-cap stocks, sector ETFs, indices-adj, commodities)
+          Fix (2026-05-15): stock base raised 10→12, commodity raised 11→12.
+          Most stocks in the strategy library are large/mid-cap names (PFE, NKE,
+          VEEV, ENPH, F) — more liquid than many ETFs that score 13. The 10pt
+          base was set conservatively and never revisited. Commodity raised to
+          match: NATGAS and GOLD are highly liquid CFDs on eToro.
         - Tier 4 (9 pts): Moderate (small-cap, minor crypto, minor ETFs)
         - Tier 5 (7 pts): Thin (NEAR, niche symbols)
 
@@ -711,7 +784,10 @@ class ConvictionScorer:
             # on eToro and the highest live win rate of any asset class.
             score = 14.0
         elif sym in set(DEMO_ALLOWED_COMMODITIES):
-            score = 11.0
+            # Raised from 11 → 12 (2026-05-15): NATGAS and GOLD are highly liquid
+            # CFDs. The 11pt base was set conservatively; 12 better reflects execution
+            # quality. Aligns with the effective denominator for commodity strategies.
+            score = 12.0
         elif sym in set(DEMO_ALLOWED_CRYPTO):
             # Crypto tiers by market cap
             CRYPTO_SCORES = {
@@ -722,8 +798,13 @@ class ConvictionScorer:
             }
             score = CRYPTO_SCORES.get(sym, 9.0)
         else:
-            # Stocks — base 10, most are liquid enough
-            score = 10.0
+            # Stocks — raised from 10 → 12 (2026-05-15).
+            # Most stocks in the strategy library are large/mid-cap names (PFE $150B,
+            # NKE $100B, VEEV $30B, ENPH $8B, F $40B). These are more liquid than
+            # many ETFs that score 13. The 10pt base was set conservatively and
+            # created an unfair gap vs forex/ETF strategies. 12 better reflects
+            # actual execution quality for the names we trade.
+            score = 12.0
 
         # Fundamental quality bonus for stocks (max +2)
         # This is a BONUS, not a requirement. Walk-forward already validated the strategy.
@@ -1029,7 +1110,27 @@ class ConvictionScorer:
 
     # ─── STRATEGY TYPE DETECTION ────────────────────────────────────────
     def _detect_strategy_type(self, strategy: Strategy) -> str:
-        """Detect strategy type from metadata or name."""
+        """Detect strategy type from metadata or name.
+
+        Fix (2026-05-15): Parabolic Move Short, Exhaustion Gap Short, and
+        Volume Climax Short are counter-trend setups that fire when a stock
+        has made an extreme move. They are mean_reversion strategies — a fresh
+        signal (persistence=1) is the BEST entry, not a noisy one. Previously
+        these were typed as 'volatility' from template_type metadata, which
+        routed them to trend-following persistence scoring (persistence=1 → 5pts
+        instead of 12pts). Corrected here by name-based override before the
+        metadata lookup.
+        """
+        if hasattr(strategy, 'name') and strategy.name:
+            name = strategy.name.lower()
+            # Counter-trend exhaustion setups: always mean_reversion regardless
+            # of what template_type says in metadata. A parabolic move short fires
+            # on extreme extension — fresh signal = cleanest entry.
+            if any(kw in name for kw in ['parabolic move short', 'exhaustion gap short',
+                                          'volume climax short', 'ema rejection short',
+                                          'macd divergence short']):
+                return 'mean_reversion'
+
         if strategy.metadata:
             st = strategy.metadata.get('template_type') or strategy.metadata.get('strategy_type')
             if st:
