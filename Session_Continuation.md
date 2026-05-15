@@ -12,6 +12,16 @@
 
 ## SESSION 2026-05-15 — WHAT WAS DONE
 
+### Intel page spec written
+| File | What |
+|---|---|
+| `INTEL_SPEC.md` | Complete spec for the Intel analyst page — 50 checks across 8 categories (Strategy Health, Execution Quality, Risk, Data Pipeline, Cycle/Signal, System Health, Alpha Opportunities, Config Integrity), full backend/frontend architecture, log rotation handling, nav integration, implementation order |
+
+### Regime gate removed from scheduler
+| Commit | What |
+|---|---|
+| `b625cdb` | Remove redundant regime gate — conviction scorer is single source of truth for regime fit. Scheduler gate was blocking uptrend exhaustion SHORTs that conviction correctly approved. Kept: SHORT concentration limit (max 3 equity shorts). |
+
 ### Conviction scorer: 5 fairness fixes for SHORT/low-frequency strategies
 
 **Root cause investigation:** All 16 SHORT strategies were generating signals but blocked at `signal_emitted` stage with conviction 57–61 against a 70 threshold. Zero paper trades across all SHORT strategies. Four compounding structural issues identified — none intentional SHORT discrimination, but all hitting SHORTs harder than LONGs.
@@ -280,38 +290,31 @@ scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent
 Read .kiro/steering/trading-system-context.md and Session_Continuation.md in full before doing anything.
 
 System state:
-- DEMO: ~$493K equity, ~62 open positions, trending_up_strong
+- DEMO: ~$493K equity, ~69 open positions, trending_up_strong
 - PAPER conviction threshold: 70 (lowered from 73 on 2026-05-14)
 - LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53, strategy 918b0c99 ✅
 - live_trading.enabled: TRUE
-- Latest commit: 82d192e
+- Latest commit: b625cdb
 
 Key changes this session (do not re-patch):
+- Regime gate REMOVED from trading_scheduler (b625cdb)
+  → Conviction scorer is now the single source of truth for regime fit
+  → SHORT concentration limit kept (max 3 open equity shorts, all regimes)
+  → ENPH SHORT now flows to order_executor, caught correctly by C3 trend-consistency gate
 - Conviction scorer: 5 fairness fixes for SHORT/low-freq strategies (82d192e)
   1. Per-asset-class effective denominator: stock/etf=101, forex=104, crypto=106, commodity=98, index=100
   2. Low-freq trade confidence: sqrt(trades/8) for SHORT mean_reversion/volatility strategies
   3. Degradation penalty gated by trade count: trades>=8 gets softer penalty (-3/-1.5)
   4. Parabolic/Exhaustion/Volume Climax SHORT → mean_reversion type in _detect_strategy_type
   5. Stock base asset score: 10→12, commodity: 11→12
-  Expected: F SHORT, BB VEEV, Stoch Midrange FOREX, NATGAS Parabolic, SMA Env FOREX now pass 70
-  Watch: ENPH/SHOP/Exhaustion VEEV near threshold (63-70), may pass with good signal persistence
-
-Key changes from 2026-05-14 (do not re-patch):
-- Optimistic position write: DB row created at order submit time with pending_ placeholder (b5a8495)
-  → etoro_position_id is now nullable (migration applied on EC2)
-- Zombie exit: forex no longer exempt — ±2% flat for 14d+ now flagged (3cf814d)
-- Avg-loss gate: interval-aware 1h=5×, 4h=4×, 1d=3× (00b35f7)
-- WF cache TTL: 2d → 1h; MC bootstrap p5 ≥ -0.1 for 1h equity (bc10c5b)
-- Transaction costs corrected for eToro Diamond+ (autonomous_trading.yaml on EC2 — NOT in git)
-- min_trades_dsl_1h: 12 (was 15) — set via Settings UI
+- Guard System tab fixes: MonitoringServiceCard flattens nested payload, DataQualityTable filter fixed (3c83730)
+- Attribution tab: removed h-full/shrink-0 wrappers causing chart overlap (3c83730)
+- Intel page spec written: INTEL_SPEC.md — read this before building Intel
 
 Next priorities:
-- Monitor SHORT strategies: first paper trades should appear within 1-2 cycles
-- Monitor LONG score changes: Fix 1+5 also raise LONG stock/commodity/index scores ~5-9pts
-  → watch for activation surge; if too many new strategies activate, review threshold
-- Monitor 70–72 conviction band performance (first trades placed 2026-05-14 ~16:49)
-- Monitor 1h strategy activation rate over next few cycles
-- Review crypto min_return_per_trade thresholds (now that 1.5% round-trip is modelled correctly)
-- Consider wiring key hardcoded limits (MAX_ORDERS_PER_RUN, MINIMUM_ORDER_SIZE, symbol cap) into Settings UI
-- Graduation gate review once 70–72 band accumulates 15+ trades per strategy
+1. **BUILD INTEL PAGE** — read INTEL_SPEC.md, implement end-to-end in one session
+2. Monitor SHORT strategies: first paper trades should appear within 1-2 cycles
+3. Monitor LONG score changes: Fix 1+5 also raise LONG stock/commodity/index scores ~5-9pts
+4. Review crypto min_return_per_trade thresholds (1.5% round-trip now correctly modelled)
+5. Graduation gate: raise min_trades back to 20 once live system stable
 ```
