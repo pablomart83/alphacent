@@ -600,12 +600,12 @@ class IntelAnalyst:
         return findings if findings else None
 
     def _check_a10_overtrading(self, lookback_days: int) -> Optional[List[Finding]]:
-        """Flag strategies generating more signals per symbol per day than their interval allows.
+        """Flag strategies where orders are being submitted at an anomalous rate.
 
-        A 1D strategy should fire at most once per symbol per day.
-        A 4H strategy at most 6 times per symbol per day.
-        A 1H strategy at most 24 times per symbol per day.
-        We allow 3× headroom for quick-update cycles and multi-symbol strategies.
+        Signals firing repeatedly is expected (quick-update runs every 10min).
+        What matters is whether orders are actually being submitted — that's
+        the real overtrading signal. A 1D strategy should submit at most 1
+        order per symbol per day. A 4H strategy at most 6.
         """
         from sqlalchemy import text
         session = self.db.get_session()
@@ -613,12 +613,12 @@ class IntelAnalyst:
             rows = session.execute(text("""
                 SELECT sd.strategy_id, s.name,
                        COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))) as symbol_days,
-                       COUNT(*) as total_signals,
-                       COUNT(*) / NULLIF(COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))), 0) as signals_per_symbol_day,
+                       COUNT(*) as total_orders,
+                       COUNT(*) / NULLIF(COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))), 0) as orders_per_symbol_day,
                        COALESCE(s.strategy_metadata->>'interval', '1d') as interval
                 FROM signal_decisions sd
                 LEFT JOIN strategies s ON s.id = sd.strategy_id
-                WHERE sd.stage = 'signal_emitted' AND sd.decision = 'emitted'
+                WHERE sd.stage = 'order_submitted'
                 AND sd.timestamp > NOW() - INTERVAL '24 hours'
                 GROUP BY sd.strategy_id, s.name, s.strategy_metadata->>'interval'
             """)).fetchall()
@@ -628,34 +628,31 @@ class IntelAnalyst:
         if not rows:
             return None
 
-        # Max signals per (symbol, day) — 3× headroom over bar count
-        # 1D: 1 bar/day × 3 = 3 max
-        # 4H: 6 bars/day × 3 = 18 max
-        # 1H: 24 bars/day × 3 = 72 max
-        MAX_PER_SYMBOL_DAY = {'1d': 3, '4h': 18, '1h': 72}
+        # Max orders per (symbol, day) — 2× headroom over bar count
+        MAX_ORDERS_PER_SYMBOL_DAY = {'1d': 2, '4h': 12, '1h': 48}
 
         findings = []
         for row in rows:
             interval = row[5] or '1d'
-            threshold = MAX_PER_SYMBOL_DAY.get(interval, 3)
-            signals_per_sd = row[4] or 0
-            if signals_per_sd <= threshold:
+            threshold = MAX_ORDERS_PER_SYMBOL_DAY.get(interval, 2)
+            orders_per_sd = row[4] or 0
+            if orders_per_sd <= threshold:
                 continue
             name = row[1] or row[0]
             evidence = (f"Strategy: {name}\nInterval: {interval}\n"
-                       f"Total signals (24h): {row[2]}\nSymbol-days: {row[1]}\n"
-                       f"Signals per symbol-day: {signals_per_sd:.1f} (max: {threshold})")
+                       f"Orders submitted (24h): {row[3]}\nSymbol-days: {row[2]}\n"
+                       f"Orders per symbol-day: {orders_per_sd:.1f} (max: {threshold})")
             findings.append(Finding(
                 check_id="A10",
                 key=f"strategy:{row[0]}",
                 category="A",
                 severity="P2",
-                title=f"A10: {name} — {signals_per_sd:.0f} signals/symbol/day (overtrading, {interval})",
-                detail=f"Strategy is generating {signals_per_sd:.0f} signals per symbol per day for a {interval} strategy (max {threshold}). Frequency filter may be too loose.",
+                title=f"A10: {name} — {orders_per_sd:.0f} orders/symbol/day (overtrading, {interval})",
+                detail=f"Strategy is submitting {orders_per_sd:.0f} orders per symbol per day for a {interval} strategy (max {threshold}). Frequency filter may be too loose.",
                 evidence=evidence,
-                recommended_action="Check alpha_edge.max_trades_per_strategy_per_month or add signal cooldown.",
+                recommended_action="Check alpha_edge.max_trades_per_strategy_per_month or add order cooldown.",
                 context_links=[{"label": "Guard / Audit", "url": "/guard/audit"}],
-                ask_kiro_prompt=f'Intel finding [A10]: "{name} — {signals_per_sd:.0f} signals/symbol/day (overtrading, {interval})."\n\nEvidence: {evidence}\n\nRecommended action: Check frequency filter.',
+                ask_kiro_prompt=f'Intel finding [A10]: "{name} — {orders_per_sd:.0f} orders/symbol/day (overtrading, {interval})."\n\nEvidence: {evidence}\n\nRecommended action: Check frequency filter.',
             ))
         return findings if findings else None
 
@@ -1449,18 +1446,18 @@ class IntelAnalyst:
         from sqlalchemy import text
         session = self.db.get_session()
         try:
-            rows = session.execute(text("""
+            rows = session.execute(text(f"""
                 SELECT sd.strategy_id, s.name,
-                       COUNT(*) as blocked_count,
-                       COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))) as symbol_days,
-                       COUNT(*) / NULLIF(COUNT(DISTINCT (sd.symbol, DATE(sd.timestamp))), 0) as blocks_per_symbol_day,
-                       MAX(sd.reason) as last_reason,
+                       SUM(CASE WHEN sd.stage = 'gate_blocked' THEN 1 ELSE 0 END) as blocked,
+                       SUM(CASE WHEN sd.stage = 'order_submitted' THEN 1 ELSE 0 END) as submitted,
+                       MAX(CASE WHEN sd.stage = 'gate_blocked' THEN sd.reason ELSE NULL END) as last_reason,
                        COALESCE(s.strategy_metadata->>'interval', '1d') as interval
                 FROM signal_decisions sd
                 LEFT JOIN strategies s ON s.id = sd.strategy_id
-                WHERE sd.stage = 'gate_blocked'
-                AND sd.timestamp > NOW() - INTERVAL '24 hours'
+                WHERE sd.timestamp > NOW() - INTERVAL '{lookback_days} days'
                 GROUP BY sd.strategy_id, s.name, s.strategy_metadata->>'interval'
+                HAVING SUM(CASE WHEN sd.stage = 'gate_blocked' THEN 1 ELSE 0 END) >= 10
+                   AND SUM(CASE WHEN sd.stage = 'order_submitted' THEN 1 ELSE 0 END) = 0
             """)).fetchall()
         finally:
             session.close()
@@ -1468,32 +1465,24 @@ class IntelAnalyst:
         if not rows:
             return None
 
-        # Max gate blocks per (symbol, day) — same as A10 thresholds
-        MAX_PER_SYMBOL_DAY = {'1d': 3, '4h': 18, '1h': 72}
-
         findings = []
         for row in rows:
-            interval = row[6] or '1d'
-            threshold = MAX_PER_SYMBOL_DAY.get(interval, 3)
-            blocks_per_sd = row[4] or 0
-            if blocks_per_sd <= threshold:
-                continue
             name = row[1] or row[0]
-            evidence = (f"Strategy: {name}\nInterval: {interval}\n"
-                       f"Gate blocks (24h): {row[2]}\nSymbol-days: {row[3]}\n"
-                       f"Blocks per symbol-day: {blocks_per_sd:.1f} (max: {threshold})\n"
-                       f"Last reason: {row[5]}")
+            evidence = (f"Strategy: {name}\nInterval: {row[5]}\n"
+                       f"Gate blocks ({lookback_days}d): {row[2]}\n"
+                       f"Orders submitted ({lookback_days}d): {row[3]}\n"
+                       f"Last gate reason: {row[4]}")
             findings.append(Finding(
                 check_id="E5",
                 key=f"gate_loop:{row[0]}",
                 category="E",
                 severity="P1",
-                title=f"E5: {name} — {blocks_per_sd:.0f} gate blocks/symbol/day ({interval})",
-                detail="Strategy is being blocked by a runtime gate at an anomalous rate per symbol per day. Either the gate logic is wrong for this strategy type, or the strategy should be retired.",
+                title=f"E5: {name} — {row[2]} gate blocks, 0 orders in {lookback_days}d (permanent loop)",
+                detail="Strategy is permanently blocked by a runtime gate — signals fire but no orders ever get through. Either the gate logic is wrong for this strategy type, or the strategy should be retired.",
                 evidence=evidence,
                 recommended_action="Review gate logic vs conviction scorer — they should be consistent. If gate is correct, retire the strategy.",
                 context_links=[{"label": "Guard / Gates", "url": "/guard/gates"}, {"label": "Guard / Audit", "url": "/guard/audit"}],
-                ask_kiro_prompt=f'Intel finding [E5]: "{name} — blocked by gate {row[2]}x in 24h ({interval})."\n\nEvidence: {evidence}\n\nRecommended action: Review gate logic for this strategy type.',
+                ask_kiro_prompt=f'Intel finding [E5]: "{name} — {row[2]} gate blocks, 0 orders in {lookback_days}d."\n\nEvidence: {evidence}\n\nRecommended action: Review gate logic for this strategy type.',
             ))
         return findings if findings else None
 
