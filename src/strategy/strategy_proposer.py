@@ -2772,6 +2772,23 @@ class StrategyProposer:
                 primary_class = self._get_asset_class(primary)
                 validated_symbols = [primary]  # Primary already passed WF
 
+                # Build the set of symbols already claimed by OTHER strategies of the
+                # same template in this proposal batch. A secondary watchlist symbol
+                # that is already the primary of a sibling strategy would create a
+                # permanent gate-block: the sibling holds the position, this strategy
+                # generates signals for it, the coordinator blocks them every cycle.
+                # Exclude those symbols from this strategy's watchlist entirely.
+                sibling_claimed_symbols: set = set()
+                for _sib in strategies:
+                    if _sib is strategy:
+                        continue
+                    _sib_tmpl = (_sib.metadata or {}).get('template_name', '') if _sib.metadata else ''
+                    if _sib_tmpl != template_name:
+                        continue
+                    # The sibling's primary symbol is its "owned" slot — exclude it
+                    if _sib.symbols:
+                        sibling_claimed_symbols.add(_sib.symbols[0])
+
                 # Detect template direction for regime compatibility check
                 template_direction = 'long'
                 if strategy.metadata:
@@ -2780,6 +2797,19 @@ class StrategyProposer:
                 for sym in strategy.symbols[1:]:
                     # Hard cap: primary + 2 max
                     if len(validated_symbols) >= _WL_MAX + 1:
+                        wl_pruned_total += 1
+                        continue
+
+                    # Exclude symbols already claimed as the primary of a sibling strategy
+                    # using the same template. If sibling "Keltner TQQQ LONG" exists, then
+                    # "Keltner TSM LONG" must not include TQQQ as a secondary — the sibling
+                    # will hold the TQQQ position and the coordinator will block every signal
+                    # this strategy generates for TQQQ, creating a permanent gate loop.
+                    if sym in sibling_claimed_symbols:
+                        logger.debug(
+                            f"  Watchlist skip: {template_name} on {sym} — already primary "
+                            f"of a sibling strategy in this batch"
+                        )
                         wl_pruned_total += 1
                         continue
 

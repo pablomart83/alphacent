@@ -1831,35 +1831,62 @@ class TradingScheduler:
                         continue
 
                     # ── Watchlist-trapped detection ──────────────────────────────────────
-                    # If ALL of this strategy's signals this cycle were rejected as
-                    # same-template duplicate, it's trapped — it only fires on symbols
-                    # already occupied by the same template and can never trade.
-                    # Retire immediately after 3 consecutive trapped cycles rather than
-                    # waiting 48 cycles for the normal TTL.
+                    # A strategy is "trapped" only if its PRIMARY symbol is generating
+                    # signals that are being blocked by the same-template duplicate gate.
+                    # If the primary symbol isn't firing (no breakout condition), the
+                    # strategy is simply waiting — that's normal, not trapped.
+                    # Secondary watchlist symbols being blocked is expected behaviour:
+                    # the same template can trade any number of symbols, but not the
+                    # same symbol twice. Secondary symbols occupied by sibling strategies
+                    # are correctly blocked; the strategy should trade its primary.
                     total_this_cycle = _strategy_total_signals.get(sid, 0)
                     dup_this_cycle = _template_dup_rejected.get(sid, 0)
                     if total_this_cycle > 0 and dup_this_cycle == total_this_cycle:
-                        # Every signal was a template-dup rejection
-                        trapped_cycles = meta.get('template_trapped_cycles', 0) + 1
-                        meta['template_trapped_cycles'] = trapped_cycles
-                        s_orm.strategy_metadata = meta
-                        if trapped_cycles >= 3:
-                            s_orm.status = StrategyStatus.RETIRED
-                            s_orm.retired_at = datetime.now()
-                            expired_count += 1
-                            logger.info(
-                                f"  🚫 Retired BACKTESTED strategy {s_orm.name}: "
-                                f"watchlist-trapped ({trapped_cycles} consecutive cycles "
-                                f"with all signals rejected as same-template duplicate)"
+                        # Every signal was a template-dup rejection — but only retire if
+                        # the PRIMARY symbol was among the blocked ones. If only secondary
+                        # watchlist symbols were blocked, the strategy is not trapped.
+                        primary_symbol = None
+                        try:
+                            strat_obj, _ = strategy_map.get(sid, (None, None))
+                            if strat_obj and strat_obj.symbols:
+                                from src.utils.symbol_normalizer import normalize_symbol as _ns_trap
+                                primary_symbol = _ns_trap(strat_obj.symbols[0])
+                        except Exception:
+                            pass
+
+                        blocked_symbols = _template_dup_rejected_symbols.get(sid, set())
+                        primary_was_blocked = primary_symbol and primary_symbol in blocked_symbols
+
+                        if primary_was_blocked:
+                            # Primary symbol is occupied by the same template — genuinely trapped
+                            trapped_cycles = meta.get('template_trapped_cycles', 0) + 1
+                            meta['template_trapped_cycles'] = trapped_cycles
+                            s_orm.strategy_metadata = meta
+                            if trapped_cycles >= 3:
+                                s_orm.status = StrategyStatus.RETIRED
+                                s_orm.retired_at = datetime.now()
+                                expired_count += 1
+                                logger.info(
+                                    f"  🚫 Retired BACKTESTED strategy {s_orm.name}: "
+                                    f"watchlist-trapped on primary symbol {primary_symbol} "
+                                    f"({trapped_cycles} consecutive cycles with primary blocked)"
+                                )
+                        else:
+                            # Only secondary symbols were blocked — not trapped, just waiting
+                            # for the primary symbol to enter a tradeable condition.
+                            if meta.get('template_trapped_cycles', 0) > 0:
+                                meta['template_trapped_cycles'] = 0
+                                s_orm.strategy_metadata = meta
+                            logger.debug(
+                                f"  Strategy {s_orm.name}: secondary watchlist symbols blocked "
+                                f"({blocked_symbols - {primary_symbol}} occupied), primary {primary_symbol} not firing — not trapped"
                             )
                         continue
-                    else:
-                        # Not trapped this cycle — reset trapped counter
-                        if meta.get('template_trapped_cycles', 0) > 0:
-                            meta['template_trapped_cycles'] = 0
-                            s_orm.strategy_metadata = meta
 
                     # No signal — increment counter
+                    # (Also reset trapped counter if this cycle had non-dup signals)
+                    if meta.get('template_trapped_cycles', 0) > 0:
+                        meta['template_trapped_cycles'] = 0
                     cycles = meta.get('signal_cycles_without_trade', 0) + 1
                     meta['signal_cycles_without_trade'] = cycles
                     s_orm.strategy_metadata = meta
@@ -2588,8 +2615,9 @@ class TradingScheduler:
         pending_order_duplicate_count = 0
         # Track strategies whose every signal was rejected as same-template duplicate.
         # These are "watchlist-trapped" — they only fire on occupied symbols and can never trade.
-        _template_dup_rejected: dict = {}   # strategy_id -> count of template-dup rejections this cycle
-        _strategy_total_signals: dict = {}  # strategy_id -> total signals this cycle
+        _template_dup_rejected: dict = {}        # strategy_id -> count of template-dup rejections this cycle
+        _template_dup_rejected_symbols: dict = {}  # strategy_id -> set of symbols that were dup-rejected
+        _strategy_total_signals: dict = {}       # strategy_id -> total signals this cycle
         symbol_limit_count = 0
         correlation_filtered_count = 0
         
@@ -2779,6 +2807,7 @@ class TradingScheduler:
                         )
                         position_duplicate_count += 1
                         _template_dup_rejected[strategy_id] = _template_dup_rejected.get(strategy_id, 0) + 1
+                        _template_dup_rejected_symbols.setdefault(strategy_id, set()).add(normalized_symbol)
                         _strategy_total_signals[strategy_id] = _strategy_total_signals.get(strategy_id, 0) + 1
                         continue
 
@@ -2792,6 +2821,7 @@ class TradingScheduler:
                                 rejection_reason=f"Same-template duplicate: {tmpl} already queued for {normalized_symbol} (lower confidence)",
                             )
                             _template_dup_rejected[existing_entry[0]] = _template_dup_rejected.get(existing_entry[0], 0) + 1
+                            _template_dup_rejected_symbols.setdefault(existing_entry[0], set()).add(normalized_symbol)
                             _strategy_total_signals[existing_entry[0]] = _strategy_total_signals.get(existing_entry[0], 0) + 1
                             seen_template_names[tmpl] = (strategy_id, signal, strategy_name)
                         else:
@@ -2801,6 +2831,7 @@ class TradingScheduler:
                                 rejection_reason=f"Same-template duplicate: {tmpl} already queued for {normalized_symbol} (lower confidence)",
                             )
                             _template_dup_rejected[strategy_id] = _template_dup_rejected.get(strategy_id, 0) + 1
+                            _template_dup_rejected_symbols.setdefault(strategy_id, set()).add(normalized_symbol)
                             _strategy_total_signals[strategy_id] = _strategy_total_signals.get(strategy_id, 0) + 1
                     else:
                         if tmpl:
