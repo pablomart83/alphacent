@@ -1940,6 +1940,48 @@ class StrategyProposer:
                         _min_trades = _at_cfg.get('min_trades_dsl_4h', 12)
                     else:
                         _min_trades = _at_cfg.get('min_trades_dsl', 15)
+
+                    # Uptrend-specific SHORT exception: templates designed to fire on
+                    # exhaustion/reversal within uptrends (Exhaustion Gap, BB Squeeze,
+                    # Parabolic Move, EMA Rejection, MACD Divergence, Volume Climax) fire
+                    # 1-3 times per month by design. Applying the standard 8-trade floor
+                    # to a 365-day test window that is dominated by an uptrend means these
+                    # templates almost always fail het=False even when the edge is real.
+                    # Lower the floor to 3 when: direction=short AND template explicitly
+                    # targets trending_up regimes AND current regime is trending_up.
+                    _is_uptrend_short = False
+                    try:
+                        _tmpl_meta = strategy.metadata or {}
+                        _tmpl_direction = _tmpl_meta.get('direction', 'long').lower()
+                        if _tmpl_direction == 'short' and not _is_crypto:
+                            _trending_up_regimes = {'trending_up', 'trending_up_weak', 'trending_up_strong'}
+                            _regime_str = market_regime.value if hasattr(market_regime, 'value') else str(market_regime)
+                            if _regime_str in _trending_up_regimes:
+                                # Check if the template's market_regimes include a trending_up variant
+                                # by looking at the template object in the strategy library
+                                _tmpl_name = _tmpl_meta.get('template_name', '')
+                                if _tmpl_name:
+                                    _lib_tmpl = next(
+                                        (t for t in self.template_library.templates if t.name == _tmpl_name),
+                                        None
+                                    )
+                                    if _lib_tmpl:
+                                        _lib_regimes = set(
+                                            r.value if hasattr(r, 'value') else str(r)
+                                            for r in (getattr(_lib_tmpl, 'market_regimes', None) or [])
+                                        )
+                                        if _lib_regimes & _trending_up_regimes:
+                                            _is_uptrend_short = True
+                    except Exception:
+                        pass
+
+                    if _is_uptrend_short:
+                        # These templates fire 1-3x/month by design — 3 trades is sufficient
+                        # evidence in a 365-day test window. Standard floor would always reject.
+                        _min_trades = min(_min_trades, 3)
+                        logger.debug(
+                            f"Uptrend-short min_trades exception: {strategy.name} → floor={_min_trades}"
+                        )
                     
                     has_enough_trades = test_trades >= _min_trades and train_trades >= max(2, _min_trades // 3)
 
@@ -2368,7 +2410,9 @@ class StrategyProposer:
                 # Fallback for excellent OOS performers with negative train Sharpe.
                 # Train period may have had an adverse regime for this strategy type.
                 # SHORTs don't get this relaxed path — too much risk of late-cycle overfitting.
-                elif ts >= -0.3 and tes >= min_sharpe * 2 and test_trades >= 3 and test_return >= min_return and test_win_rate >= min_win_rate and not is_short:
+                # Consistency gate: test_sharpe - train_sharpe ≤ 1.5 — if the jump is larger
+                # than that, the test period was regime-lucky, not a genuine edge confirmation.
+                elif ts >= -0.3 and tes >= min_sharpe * 2 and test_trades >= 5 and test_return >= min_return and test_win_rate >= min_win_rate and not is_short and (tes - ts) <= 1.5:
                     validated_strategies.append((s, wf))
                     _decision_rows.append({**_row_base, "stage": "wf_validated", "decision": "accepted",
                                            "score": tes, "reason": "excellent_oos"})
@@ -2395,7 +2439,26 @@ class StrategyProposer:
                 record_batch(_decision_rows)
             except Exception as _dl_err:
                 logger.debug(f"decision_log WF batch failed: {_dl_err}")
-            
+
+            # WF failure blacklist: pairs that fail WF 3+ consecutive times get the same
+            # 14-day cooldown as activation rejections. This stops the proposer from
+            # re-proposing known-bad pairs every cycle (e.g. Keltner×OIL rejected 1,170
+            # times in 7 days). The zero-trade blacklist only catches 0-trade results;
+            # this catches structural failures (mc_bootstrap, below_thresholds, overfitted).
+            # Reset on WF pass so a pair that improves over time gets a fresh start.
+            _wf_validated_ids = {s.id for s, _ in validated_strategies}
+            for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
+                _tmpl = (s.metadata or {}).get('template_name') or s.name
+                _sym = s.symbols[0] if s.symbols else None
+                if not _tmpl or not _sym:
+                    continue
+                if s.id in _wf_validated_ids:
+                    # Passed WF — reset any accumulated failure count
+                    self.reset_rejection(_tmpl, _sym)
+                else:
+                    # Failed WF — increment failure counter (same mechanism as activation rejections)
+                    self.record_rejection(_tmpl, _sym)
+
             logger.info(
                 f"Walk-forward validation (direction-aware): {len(validated_strategies)}/{len(all_wf_results)} "
                 f"strategies passed ({len(validated_strategies)/max(len(all_wf_results),1)*100:.1f}%)"
