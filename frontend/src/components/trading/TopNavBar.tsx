@@ -6,7 +6,6 @@ import { WebSocketIndicator } from './WebSocketIndicator'
 import { useCommandPalette, useNotificationsStore, useUiOverlays } from '@/stores'
 import { useLogout } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
-import { useIntelSummary } from '@/pages/intel/useIntelData'
 
 const NAV_ITEMS = [
   { path: '/', label: 'Command', shortcut: 'G C' },
@@ -28,11 +27,6 @@ export function TopNavBar({ liveEnabled = false }: TopNavBarProps) {
   const setShortcutHelpOpen = useUiOverlays((s) => s.setShortcutHelpOpen)
   const unreadCount = useNotificationsStore((s) => s.unreadCount)
   const logout = useLogout()
-  const intelSummary = useIntelSummary()
-
-  const intelBadgeCount = (intelSummary.data?.p0_open ?? 0) + (intelSummary.data?.p1_open ?? 0)
-  const intelBadgeColor =
-    (intelSummary.data?.p0_open ?? 0) > 0 ? 'var(--pnl-down)' : 'var(--status-warning)'
   const handleLogout = async () => {
     await logout.mutateAsync()
     navigate('/login', { replace: true })
@@ -86,15 +80,6 @@ export function TopNavBar({ liveEnabled = false }: TopNavBarProps) {
               }
             >
               {item.label}
-              {item.path === '/intel' && intelBadgeCount > 0 && (
-                <span
-                  className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] px-1 rounded-full text-[9px] font-semibold mono tabular-nums text-white flex items-center justify-center"
-                  style={{ background: intelBadgeColor }}
-                  aria-label={`${intelBadgeCount} open Intel findings`}
-                >
-                  {intelBadgeCount > 99 ? '99+' : intelBadgeCount}
-                </span>
-              )}
             </NavLink>
           ))}
         </nav>
