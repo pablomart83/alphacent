@@ -163,7 +163,7 @@ export function GraduationTab() {
             </Badge>
           </div>
           <div className="text-[10px] text-[var(--text-3)]">
-            ≥ 15 trades (4H) · Sharpe 60–200% of WF · Win ≥ 55% · avg P&L/trade {'>'} 0
+            ≥ 10–25 trades · Sharpe 60–200% of WF · Win ≥ 55% · avg P&L/trade {'>'} 0
           </div>
         </div>
       </section>
