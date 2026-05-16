@@ -1113,7 +1113,8 @@ class TradingScheduler:
                         signal=signal,
                         account=account_info,
                         positions=position_dataclasses,
-                        strategy_allocation_pct=strategy.allocation_percent
+                        strategy_allocation_pct=strategy.allocation_percent,
+                        is_paper=True,  # PAPER pass: use flat sizing, skip scaling gates
                     )
 
                     # Broadcast signal validation result

@@ -198,6 +198,52 @@ export function useUpdateLiveTradingConfig() {
 }
 
 /* ============================================================
+ * Paper trading config
+ * ============================================================ */
+
+export interface PaperTradingConfigShape {
+  flat_position_size: number
+  conviction_threshold: number
+  conviction_threshold_crypto: number
+  min_sharpe: number
+  min_sharpe_crypto: number
+  min_sharpe_commodity: number
+  min_win_rate: number          // percentage (e.g. 40.0)
+  min_win_rate_crypto: number
+  min_win_rate_commodity: number
+  min_trades_dsl: number
+  min_trades_dsl_4h: number
+  min_trades_dsl_1h: number
+  min_trades_alpha_edge: number
+  min_trades_commodity: number
+  disable_min_return_per_trade: boolean
+  disable_avg_loss_gate: boolean
+  grad_min_trades_1d: number
+  grad_min_trades_4h: number
+  grad_min_trades_1h: number
+  grad_min_avg_pnl_per_trade: number
+}
+
+export function usePaperTradingConfig() {
+  return useQuery<PaperTradingConfigShape>({
+    queryKey: ['config-paper-trading'],
+    queryFn: () => api.get<PaperTradingConfigShape>('/config/paper-trading'),
+    staleTime: 30_000,
+  })
+}
+
+export function useUpdatePaperTradingConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: Partial<PaperTradingConfigShape>) =>
+      api.put('/config/paper-trading', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['config-paper-trading'] })
+    },
+  })
+}
+
+/* ============================================================
  * Users (admin only — tolerant on 403)
  * ============================================================ */
 

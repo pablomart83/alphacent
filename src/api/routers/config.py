@@ -1759,6 +1759,176 @@ class LiveTradingConfigRequest(BaseModel):
     graduation_rejection_cooldown_days: Optional[int] = Field(None, ge=1, le=90)
 
 
+# ── Paper trading config models ───────────────────────────────────────────────
+
+class PaperTradingConfigResponse(BaseModel):
+    """Paper trading configuration response — data-collection pipeline parameters."""
+    flat_position_size: float = 5000.0
+    conviction_threshold: int = 60
+    conviction_threshold_crypto: int = 55
+    # Activation thresholds (paper-specific relaxed values)
+    min_sharpe: float = 0.5
+    min_sharpe_crypto: float = 0.2
+    min_sharpe_commodity: float = 0.3
+    min_win_rate: float = 40.0          # percentage
+    min_win_rate_crypto: float = 25.0
+    min_win_rate_commodity: float = 30.0
+    min_trades_dsl: int = 5
+    min_trades_dsl_4h: int = 5
+    min_trades_dsl_1h: int = 8
+    min_trades_alpha_edge: int = 4
+    min_trades_commodity: int = 4
+    disable_min_return_per_trade: bool = True
+    disable_avg_loss_gate: bool = True
+    # Graduation gate (interval-aware)
+    grad_min_trades_1d: int = 10
+    grad_min_trades_4h: int = 15
+    grad_min_trades_1h: int = 25
+    grad_min_avg_pnl_per_trade: float = 0.0
+
+
+class PaperTradingConfigRequest(BaseModel):
+    """Paper trading configuration update request. All fields optional."""
+    flat_position_size: Optional[float] = Field(None, ge=500.0, le=50000.0)
+    conviction_threshold: Optional[int] = Field(None, ge=40, le=100)
+    conviction_threshold_crypto: Optional[int] = Field(None, ge=40, le=100)
+    min_sharpe: Optional[float] = Field(None, ge=-2.0, le=5.0)
+    min_sharpe_crypto: Optional[float] = Field(None, ge=-2.0, le=5.0)
+    min_sharpe_commodity: Optional[float] = Field(None, ge=-2.0, le=5.0)
+    min_win_rate: Optional[float] = Field(None, ge=10.0, le=80.0)
+    min_win_rate_crypto: Optional[float] = Field(None, ge=10.0, le=80.0)
+    min_win_rate_commodity: Optional[float] = Field(None, ge=10.0, le=80.0)
+    min_trades_dsl: Optional[int] = Field(None, ge=1, le=50)
+    min_trades_dsl_4h: Optional[int] = Field(None, ge=1, le=50)
+    min_trades_dsl_1h: Optional[int] = Field(None, ge=1, le=100)
+    min_trades_alpha_edge: Optional[int] = Field(None, ge=1, le=50)
+    min_trades_commodity: Optional[int] = Field(None, ge=1, le=50)
+    disable_min_return_per_trade: Optional[bool] = None
+    disable_avg_loss_gate: Optional[bool] = None
+    grad_min_trades_1d: Optional[int] = Field(None, ge=3, le=100)
+    grad_min_trades_4h: Optional[int] = Field(None, ge=3, le=100)
+    grad_min_trades_1h: Optional[int] = Field(None, ge=5, le=200)
+    grad_min_avg_pnl_per_trade: Optional[float] = Field(None, ge=-1000.0, le=10000.0)
+
+
+@router.get("/paper-trading", response_model=PaperTradingConfigResponse)
+async def get_paper_trading_config(
+    username: str = Depends(get_current_user),
+    config: Configuration = Depends(get_configuration),
+):
+    """Read paper_trading section from autonomous_trading.yaml."""
+    import yaml
+    from pathlib import Path
+
+    config_file = Path(config.config_dir) / "autonomous_trading.yaml"
+    full_config: Dict[str, Any] = {}
+    if config_file.exists():
+        with open(config_file, "r") as f:
+            full_config = yaml.safe_load(f) or {}
+
+    pt = full_config.get("paper_trading", {}) or {}
+    pt_act = pt.get("activation_thresholds", {}) or {}
+    pt_gg = pt.get("graduation_gate", {}) or {}
+
+    return PaperTradingConfigResponse(
+        flat_position_size=float(pt.get("flat_position_size", 5000.0)),
+        conviction_threshold=int(pt.get("conviction_threshold", 60)),
+        conviction_threshold_crypto=int(pt.get("conviction_threshold_crypto", 55)),
+        min_sharpe=float(pt_act.get("min_sharpe", 0.5)),
+        min_sharpe_crypto=float(pt_act.get("min_sharpe_crypto", 0.2)),
+        min_sharpe_commodity=float(pt_act.get("min_sharpe_commodity", 0.3)),
+        min_win_rate=float(pt_act.get("min_win_rate", 0.40)) * 100,
+        min_win_rate_crypto=float(pt_act.get("min_win_rate_crypto", 0.25)) * 100,
+        min_win_rate_commodity=float(pt_act.get("min_win_rate_commodity", 0.30)) * 100,
+        min_trades_dsl=int(pt_act.get("min_trades_dsl", 5)),
+        min_trades_dsl_4h=int(pt_act.get("min_trades_dsl_4h", 5)),
+        min_trades_dsl_1h=int(pt_act.get("min_trades_dsl_1h", 8)),
+        min_trades_alpha_edge=int(pt_act.get("min_trades_alpha_edge", 4)),
+        min_trades_commodity=int(pt_act.get("min_trades_commodity", 4)),
+        disable_min_return_per_trade=bool(pt_act.get("disable_min_return_per_trade", True)),
+        disable_avg_loss_gate=bool(pt_act.get("disable_avg_loss_gate", True)),
+        grad_min_trades_1d=int(pt_gg.get("min_trades_1d", 10)),
+        grad_min_trades_4h=int(pt_gg.get("min_trades_4h", 15)),
+        grad_min_trades_1h=int(pt_gg.get("min_trades_1h", 25)),
+        grad_min_avg_pnl_per_trade=float(pt_gg.get("min_avg_pnl_per_trade", 0.0)),
+    )
+
+
+@router.put("/paper-trading", response_model=CredentialsResponse)
+async def update_paper_trading_config(
+    request: PaperTradingConfigRequest,
+    username: str = Depends(get_current_user),
+    config: Configuration = Depends(get_configuration),
+):
+    """Update paper_trading section in autonomous_trading.yaml."""
+    import yaml
+    from pathlib import Path
+
+    config_file = Path(config.config_dir) / "autonomous_trading.yaml"
+    full_config: Dict[str, Any] = {}
+    if config_file.exists():
+        with open(config_file, "r") as f:
+            full_config = yaml.safe_load(f) or {}
+
+    full_config.setdefault("paper_trading", {})
+    pt = full_config["paper_trading"]
+    pt.setdefault("activation_thresholds", {})
+    pt.setdefault("graduation_gate", {})
+    pt_act = pt["activation_thresholds"]
+    pt_gg = pt["graduation_gate"]
+
+    if request.flat_position_size is not None:
+        pt["flat_position_size"] = float(request.flat_position_size)
+    if request.conviction_threshold is not None:
+        pt["conviction_threshold"] = int(request.conviction_threshold)
+    if request.conviction_threshold_crypto is not None:
+        pt["conviction_threshold_crypto"] = int(request.conviction_threshold_crypto)
+
+    # Activation thresholds — stored as decimals in YAML (win_rate as 0.40, not 40.0)
+    if request.min_sharpe is not None:
+        pt_act["min_sharpe"] = float(request.min_sharpe)
+    if request.min_sharpe_crypto is not None:
+        pt_act["min_sharpe_crypto"] = float(request.min_sharpe_crypto)
+    if request.min_sharpe_commodity is not None:
+        pt_act["min_sharpe_commodity"] = float(request.min_sharpe_commodity)
+    if request.min_win_rate is not None:
+        pt_act["min_win_rate"] = float(request.min_win_rate) / 100.0
+    if request.min_win_rate_crypto is not None:
+        pt_act["min_win_rate_crypto"] = float(request.min_win_rate_crypto) / 100.0
+    if request.min_win_rate_commodity is not None:
+        pt_act["min_win_rate_commodity"] = float(request.min_win_rate_commodity) / 100.0
+    if request.min_trades_dsl is not None:
+        pt_act["min_trades_dsl"] = int(request.min_trades_dsl)
+    if request.min_trades_dsl_4h is not None:
+        pt_act["min_trades_dsl_4h"] = int(request.min_trades_dsl_4h)
+    if request.min_trades_dsl_1h is not None:
+        pt_act["min_trades_dsl_1h"] = int(request.min_trades_dsl_1h)
+    if request.min_trades_alpha_edge is not None:
+        pt_act["min_trades_alpha_edge"] = int(request.min_trades_alpha_edge)
+    if request.min_trades_commodity is not None:
+        pt_act["min_trades_commodity"] = int(request.min_trades_commodity)
+    if request.disable_min_return_per_trade is not None:
+        pt_act["disable_min_return_per_trade"] = bool(request.disable_min_return_per_trade)
+    if request.disable_avg_loss_gate is not None:
+        pt_act["disable_avg_loss_gate"] = bool(request.disable_avg_loss_gate)
+
+    # Graduation gate
+    if request.grad_min_trades_1d is not None:
+        pt_gg["min_trades_1d"] = int(request.grad_min_trades_1d)
+    if request.grad_min_trades_4h is not None:
+        pt_gg["min_trades_4h"] = int(request.grad_min_trades_4h)
+    if request.grad_min_trades_1h is not None:
+        pt_gg["min_trades_1h"] = int(request.grad_min_trades_1h)
+    if request.grad_min_avg_pnl_per_trade is not None:
+        pt_gg["min_avg_pnl_per_trade"] = float(request.grad_min_avg_pnl_per_trade)
+
+    with open(config_file, "w") as f:
+        yaml.dump(full_config, f, default_flow_style=False, sort_keys=False)
+
+    logger.info(f"Paper trading config updated by {username}: {request.model_dump(exclude_none=True)}")
+    return CredentialsResponse(success=True, message="Paper trading configuration updated")
+
+
 @router.get("/live-trading", response_model=LiveTradingConfigResponse)
 async def get_live_trading_config(
     username: str = Depends(get_current_user),

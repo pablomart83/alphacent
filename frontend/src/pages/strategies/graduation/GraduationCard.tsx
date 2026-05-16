@@ -378,6 +378,36 @@ function EvidenceKpis({ row }: { row: GraduationQueueRow }) {
             )
           }
         />
+        <Kpi
+          label="Avg P&L / trade"
+          value={
+            row.avg_paper_pnl_per_trade != null ? (
+              <PnLNumber
+                value={row.avg_paper_pnl_per_trade}
+                format="currency"
+                precision={2}
+                size="sm"
+                showSign
+              />
+            ) : row.paper_total_pnl != null && row.paper_trades > 0 ? (
+              <PnLNumber
+                value={row.paper_total_pnl / row.paper_trades}
+                format="currency"
+                precision={2}
+                size="sm"
+                showSign
+              />
+            ) : (
+              '—'
+            )
+          }
+          emphasis={
+            (row.avg_paper_pnl_per_trade ?? (row.paper_total_pnl != null && row.paper_trades > 0 ? row.paper_total_pnl / row.paper_trades : null)) != null
+              ? ((row.avg_paper_pnl_per_trade ?? row.paper_total_pnl! / row.paper_trades) > 0 ? 'positive' : 'negative')
+              : null
+          }
+        />
+        <StatSigKpi trades={row.paper_trades} winRate={row.paper_win_rate} />
       </div>
     </section>
   )
@@ -793,3 +823,87 @@ function ImpactRow({ label, value }: { label: string; value: React.ReactNode }) 
 
 /* Silence unused formatter imports. */
 export const __fmts = [formatCurrency, formatPercentage]
+
+/* ──────────────────────────── statistical significance ──────────────────── */
+
+/**
+ * Compute one-sided binomial p-value: P(X >= k | n, p0=0.5).
+ * Normal approximation — accurate enough for n >= 10.
+ * H0: win rate <= 50% (coin flip). H1: win rate > 50%.
+ */
+function binomialPValue(wins: number, n: number, p0 = 0.5): number {
+  if (n <= 0) return 1.0
+  // Normal approximation with continuity correction
+  const mean = n * p0
+  const std = Math.sqrt(n * p0 * (1 - p0))
+  if (std === 0) return wins > mean ? 0 : 1
+  const z = (wins - 0.5 - mean) / std  // continuity correction
+  // Standard normal CDF approximation (Abramowitz & Stegun 26.2.17)
+  const t = 1 / (1 + 0.2316419 * Math.abs(z))
+  const poly =
+    t * (0.319381530 +
+      t * (-0.356563782 +
+        t * (1.781477937 +
+          t * (-1.821255978 +
+            t * 1.330274429))))
+  const phi = (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * z * z) * poly
+  // One-sided p-value: P(Z >= z)
+  return z >= 0 ? phi : 1 - phi
+}
+
+/**
+ * Statistical significance KPI tile.
+ *
+ * Shows the one-sided binomial p-value for the observed win rate vs H0: WR=50%.
+ * This is NOT a gate — it's context for the CIO. The graduation gate is a
+ * consistency check, not a significance test. At 15 trades / 55% WR, p ≈ 0.50.
+ */
+function StatSigKpi({
+  trades,
+  winRate,
+}: {
+  trades: number
+  winRate?: number | null
+}) {
+  if (winRate == null || trades < 5) {
+    return (
+      <Kpi
+        label="Stat significance"
+        value="—"
+        emphasis={null}
+      />
+    )
+  }
+
+  const wins = Math.round(trades * winRate)
+  const p = binomialPValue(wins, trades)
+  const pStr = p < 0.001 ? 'p < 0.001' : `p = ${p.toFixed(3)}`
+
+  let label: string
+  let emphasis: 'positive' | 'negative' | null = null
+  if (p < 0.05) {
+    label = `${pStr} ✓`
+    emphasis = 'positive'
+  } else if (p < 0.10) {
+    label = `${pStr} ~`
+    emphasis = null
+  } else {
+    label = pStr
+    emphasis = null
+  }
+
+  return (
+    <Kpi
+      label="Stat significance"
+      value={
+        <span
+          title={`One-sided binomial test (H₀: WR ≤ 50%). ${wins}/${trades} wins. p < 0.05 = significant, p < 0.10 = weak evidence. At 15 trades / 55% WR, p ≈ 0.50 — the graduation gate is a consistency check, not a significance test.`}
+          className="cursor-help"
+        >
+          {label}
+        </span>
+      }
+      emphasis={emphasis}
+    />
+  )
+}

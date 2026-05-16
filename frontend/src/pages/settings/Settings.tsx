@@ -9,6 +9,7 @@ import { AutonomousTab } from './tabs/AutonomousTab'
 import { AlphaEdgeSettingsTab } from './tabs/AlphaEdgeSettingsTab'
 import { AlertsSettingsTab } from './tabs/AlertsSettingsTab'
 import { LiveTradingSettingsTab } from './tabs/LiveTradingSettingsTab'
+import { PaperTradingSettingsTab } from './tabs/PaperTradingSettingsTab'
 import { UsersTab } from './tabs/UsersTab'
 import { ShortcutsTab } from './tabs/ShortcutsTab'
 
@@ -29,6 +30,7 @@ type TabValue =
   | 'autonomous'
   | 'alpha-edge'
   | 'alerts'
+  | 'paper-trading'
   | 'live-trading'
   | 'users'
   | 'shortcuts'
@@ -40,6 +42,7 @@ const TABS: Array<{ value: TabValue; label: string; group?: string }> = [
   { value: 'position-management', label: 'Position management', group: 'Risk' },
   { value: 'autonomous', label: 'Autonomous', group: 'System' },
   { value: 'alpha-edge', label: 'Alpha Edge', group: 'System' },
+  { value: 'paper-trading', label: 'Paper trading', group: 'System' },
   { value: 'live-trading', label: 'Live trading', group: 'System' },
   { value: 'alerts', label: 'Alerts', group: 'Notifications' },
   { value: 'users', label: 'Users', group: 'Admin' },
@@ -112,6 +115,8 @@ function SettingsShell() {
         <AlphaEdgeSettingsTab />
       ) : current === 'alerts' ? (
         <AlertsSettingsTab />
+      ) : current === 'paper-trading' ? (
+        <PaperTradingSettingsTab />
       ) : current === 'live-trading' ? (
         <LiveTradingSettingsTab />
       ) : current === 'users' ? (

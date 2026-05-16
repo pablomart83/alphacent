@@ -67,6 +67,52 @@ except Exception:
     pass  # Fall back to hardcoded defaults — never crash at import time
 
 
+def _get_min_trades_for_interval(interval: Optional[str]) -> int:
+    """
+    Return interval-aware min_trades for graduation.
+
+    Reads paper_trading.graduation_gate.min_trades_{interval} from YAML.
+    Falls back to graduation_gate.min_trades (MIN_PAPER_TRADES) if not set.
+
+    Rationale:
+      1D strategies fire ~1 trade/month → 10 trades ≈ 10 months of data
+      4H strategies fire ~2 trades/month → 15 trades ≈ 7 months of data
+      1H strategies fire ~5 trades/month → 25 trades ≈ 5 months of data
+    """
+    try:
+        import yaml as _y
+        from pathlib import Path as _P
+        _p = _P("config/autonomous_trading.yaml")
+        if _p.exists():
+            with open(_p, "r") as _f:
+                _c = _y.safe_load(_f) or {}
+            pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
+            iv = (interval or "1d").lower()
+            if iv in ("1h", "2h"):
+                return int(pt_gg.get("min_trades_1h", MIN_PAPER_TRADES))
+            elif iv == "4h":
+                return int(pt_gg.get("min_trades_4h", MIN_PAPER_TRADES))
+            else:
+                return int(pt_gg.get("min_trades_1d", MIN_PAPER_TRADES))
+    except Exception:
+        pass
+    return MIN_PAPER_TRADES
+
+
+def _get_min_avg_pnl_per_trade() -> float:
+    """Return min avg P&L per trade from paper_trading.graduation_gate.min_avg_pnl_per_trade."""
+    try:
+        import yaml as _y
+        from pathlib import Path as _P
+        _p = _P("config/autonomous_trading.yaml")
+        if _p.exists():
+            with open(_p, "r") as _f:
+                _c = _y.safe_load(_f) or {}
+            return float(_c.get("paper_trading", {}).get("graduation_gate", {}).get("min_avg_pnl_per_trade", 0.0))
+    except Exception:
+        return 0.0
+
+
 def get_paper_stats_for_strategy(
     session: Session,
     strategy_id: str,
@@ -179,12 +225,18 @@ def get_aggregated_paper_stats(
 def is_qualified(
     paper_stats: Dict[str, Any],
     wf_sharpe: Optional[float],
+    interval: Optional[str] = None,
 ) -> tuple[bool, List[str]]:
     """
     Check whether a (strategy, symbol) pair meets graduation criteria.
 
     Returns (qualified: bool, reasons: list[str])
     reasons is empty when qualified, contains failure reasons when not.
+
+    Args:
+        paper_stats: Dict with paper_trades, paper_sharpe, paper_win_rate, paper_total_pnl
+        wf_sharpe: Walk-forward Sharpe from the representative strategy
+        interval: Strategy interval ('1d', '4h', '1h') for interval-aware min_trades
     """
     reasons = []
 
@@ -193,11 +245,23 @@ def is_qualified(
     win_rate = paper_stats.get("paper_win_rate")
     pnl = paper_stats.get("paper_total_pnl")
 
-    if trades < MIN_PAPER_TRADES:
-        reasons.append(f"paper_trades={trades} < {MIN_PAPER_TRADES}")
+    # Interval-aware min_trades — 1D strategies fire less often than 1H
+    min_trades = _get_min_trades_for_interval(interval)
+    if trades < min_trades:
+        reasons.append(f"paper_trades={trades} < {min_trades} (interval={interval or '1d'})")
 
     if pnl is None or pnl <= MIN_PAPER_PNL:
         reasons.append(f"paper_pnl={pnl} not > 0")
+
+    # Avg P&L per trade gate — prevents graduating strategies with technically
+    # positive total P&L but near-zero per-trade expectancy
+    min_avg_pnl = _get_min_avg_pnl_per_trade()
+    if trades > 0 and pnl is not None:
+        avg_pnl_per_trade = pnl / trades
+        if avg_pnl_per_trade <= min_avg_pnl:
+            reasons.append(
+                f"avg_pnl_per_trade=${avg_pnl_per_trade:.2f} not > ${min_avg_pnl:.2f}"
+            )
 
     if win_rate is None or win_rate < MIN_PAPER_WIN_RATE:
         reasons.append(f"paper_win_rate={win_rate} < {MIN_PAPER_WIN_RATE}")
@@ -288,7 +352,9 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                         / NULLIF(COUNT(*), 0)::numeric, 2
                     )                                                   AS win_rate_pct,
                     ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2)        AS total_pnl,
-                    COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions
+                    ROUND(COALESCE(AVG(tj.pnl), 0)::numeric, 4)        AS avg_pnl,
+                    COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions,
+                    MIN(tj.closed_at)                                   AS first_trade_at
                 FROM trade_journal tj
                 JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
@@ -329,7 +395,9 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 ps.paper_sharpe,
                 ps.win_rate_pct,
                 ps.total_pnl,
-                ps.strategy_versions
+                ps.avg_pnl,
+                ps.strategy_versions,
+                ps.first_trade_at
             FROM pair_stats ps
             JOIN latest_strategy ls
               ON ls.template_name = ps.template_name
@@ -356,6 +424,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
         representative_id = row.representative_strategy_id
         wf_sharpe = None
         strategy_name = row.template_name
+        strategy_interval = None
         if representative_id:
             strategy = session.query(StrategyORM).filter_by(id=representative_id).first()
             if strategy:
@@ -366,14 +435,19 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     or meta.get("walk_forward_sharpe")
                     or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
                 )
+                strategy_interval = meta.get("interval") or (
+                    strategy.rules.get("interval") if isinstance(strategy.rules, dict) else None
+                )
 
-        qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe)
+        qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe, interval=strategy_interval)
         if not qualified:
             continue
 
         ratio = None
         if wf_sharpe and wf_sharpe > 0 and paper_stats["paper_sharpe"] is not None:
             ratio = round(paper_stats["paper_sharpe"] / wf_sharpe, 3)
+
+        avg_pnl_per_trade = float(row.avg_pnl) if row.avg_pnl is not None else None
 
         queue.append({
             "strategy_id": representative_id,  # most recent strategy_id for this pair
@@ -384,9 +458,12 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             "paper_sharpe": paper_stats["paper_sharpe"],
             "paper_win_rate": paper_stats["paper_win_rate"],
             "paper_total_pnl": paper_stats["paper_total_pnl"],
+            "avg_paper_pnl_per_trade": avg_pnl_per_trade,
             "wf_sharpe": wf_sharpe,
             "qualification_ratio": ratio,
             "strategy_versions": int(row.strategy_versions),
+            "strategy_interval": strategy_interval,
+            "first_paper_trade": row.first_trade_at.isoformat() if row.first_trade_at else None,
         })
 
     # Sort by qualification_ratio desc (best candidates first)

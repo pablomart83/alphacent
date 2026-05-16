@@ -865,8 +865,11 @@ export interface GraduationQueueRow {
   paper_sharpe?: number | null
   paper_win_rate?: number | null
   paper_total_pnl?: number | null
+  avg_paper_pnl_per_trade?: number | null
   wf_sharpe?: number | null
   qualification_ratio?: number | null
+  strategy_interval?: string | null
+  strategy_versions?: number | null
   first_paper_trade?: string | null
 }
 

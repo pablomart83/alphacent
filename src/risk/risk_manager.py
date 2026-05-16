@@ -560,7 +560,8 @@ class RiskManager:
         account: AccountInfo,
         positions: List[Position],
         strategy_allocation_pct: float = 1.0,
-        portfolio_manager=None
+        portfolio_manager=None,
+        is_paper: bool = False,
     ) -> ValidationResult:
         """
         Validate trading signal against risk parameters.
@@ -621,7 +622,7 @@ class RiskManager:
                     logger.debug(f"Could not fetch price history for vol-scaling: {e}")
 
             # Calculate base position size with strategy allocation
-            base_position_size = self.calculate_position_size(signal, account, positions, strategy_allocation_pct)
+            base_position_size = self.calculate_position_size(signal, account, positions, strategy_allocation_pct, is_paper=is_paper)
             
             if base_position_size <= 0:
                 # Use the detailed rejection reason stashed by
@@ -758,7 +759,8 @@ class RiskManager:
         signal: TradingSignal,
         account: AccountInfo,
         positions: List[Position],
-        strategy_allocation_pct: float = 1.0
+        strategy_allocation_pct: float = 1.0,
+        is_paper: bool = False,
     ) -> float:
         """
         Calculate position size using risk-based fixed-fractional sizing.
@@ -846,6 +848,74 @@ class RiskManager:
         # Step 11 minimum-floor bump is suppressed and we return 0 instead.
         # Bumping a penalty-reduced size back to $5K defeats the penalty.
         penalty_applied = False
+
+        # ── Paper-mode flat sizing ───────────────────────────────────────────
+        # When is_paper=True, bypass all scaling gates (vol, drawdown, conviction
+        # tier, heat cap) and use a fixed flat size from paper_trading.flat_position_size.
+        # Purpose: every paper strategy gets equal data quality regardless of
+        # market conditions. The graduation gate is the quality filter.
+        # Only hard limits apply: symbol cap and available balance.
+        if is_paper:
+            try:
+                import yaml as _yaml_ps
+                from pathlib import Path as _Path_ps
+                _cfg_ps = {}
+                _cfg_path_ps = _Path_ps("config/autonomous_trading.yaml")
+                if _cfg_path_ps.exists():
+                    with open(_cfg_path_ps, "r") as _f_ps:
+                        _cfg_ps = _yaml_ps.safe_load(_f_ps) or {}
+                _flat_size = float(_cfg_ps.get("paper_trading", {}).get("flat_position_size", 5000.0))
+            except Exception:
+                _flat_size = 5000.0
+
+            # Apply symbol concentration cap (hard limit — still enforced for paper)
+            _symbol_cap_ps = equity * 0.05
+            try:
+                from src.models.database import get_database as _gdb_ps
+                from src.models.orm import PositionORM as _PosORM_ps, OrderORM as _OrdORM_ps
+                from src.models.enums import OrderStatus as _OS_ps
+                _db_ps = _gdb_ps()
+                _sess_ps = _db_ps.get_session()
+                try:
+                    _filled_exp = sum(
+                        float(p.invested_amount or 0)
+                        for p in _sess_ps.query(_PosORM_ps).filter(
+                            _PosORM_ps.symbol == signal.symbol,
+                            _PosORM_ps.closed_at.is_(None),
+                        ).all()
+                    )
+                    _pending_exp = sum(
+                        float(o.quantity or 0) * float(o.price or 0)
+                        for o in _sess_ps.query(_OrdORM_ps).filter(
+                            _OrdORM_ps.symbol == signal.symbol,
+                            _OrdORM_ps.status == _OS_ps.PENDING,
+                        ).all()
+                    )
+                    _existing_exp = _filled_exp + _pending_exp
+                finally:
+                    _sess_ps.close()
+            except Exception:
+                _existing_exp = 0.0
+
+            if _existing_exp >= _symbol_cap_ps:
+                self._last_sizing_reason = (
+                    f"paper_symbol_cap_exhausted ({signal.symbol} at "
+                    f"${_existing_exp:.0f}/${_symbol_cap_ps:.0f})"
+                )
+                return 0.0
+
+            _paper_size = min(_flat_size, _symbol_cap_ps - _existing_exp, available_balance)
+            if _paper_size < MINIMUM_ORDER_SIZE:
+                self._last_sizing_reason = (
+                    f"paper_size_below_minimum (${_paper_size:.0f} < ${MINIMUM_ORDER_SIZE:.0f})"
+                )
+                return 0.0
+
+            logger.debug(
+                f"Paper flat sizing: {signal.symbol} → ${_paper_size:.0f} "
+                f"(flat=${_flat_size:.0f}, symbol_headroom=${_symbol_cap_ps - _existing_exp:.0f})"
+            )
+            return _paper_size
 
         # ── Step 1: Base risk per trade ──────────────────────────────────────
         # 0.6% of equity = ~$2,800 at current $470K equity.

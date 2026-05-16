@@ -683,7 +683,11 @@ class PortfolioManager:
             )
 
         # Get base thresholds from config file (activation_thresholds section)
-        # Falls back to hardcoded defaults if config not available
+        # Falls back to hardcoded defaults if config not available.
+        #
+        # Paper-mode overlay: if paper_trading.activation_thresholds exists in YAML,
+        # merge it over the standard thresholds. This lets PAPER use relaxed bars
+        # (data collection) while LIVE uses the strict activation_thresholds.* values.
         config_thresholds = {}
         try:
             import yaml
@@ -693,6 +697,18 @@ class PortfolioManager:
                 with open(config_path, 'r') as f:
                     config = yaml.safe_load(f)
                     config_thresholds = config.get('activation_thresholds', {})
+                    # Overlay paper_trading.activation_thresholds — these are the
+                    # relaxed thresholds for the data-collection pipeline.
+                    paper_act = config.get('paper_trading', {}).get('activation_thresholds', {})
+                    if paper_act:
+                        config_thresholds = {**config_thresholds, **paper_act}
+                        logger.debug(
+                            f"Paper-mode activation thresholds applied for {strategy.name}: "
+                            f"min_sharpe={paper_act.get('min_sharpe', '—')}, "
+                            f"min_win_rate={paper_act.get('min_win_rate', '—')}, "
+                            f"disable_rpt={paper_act.get('disable_min_return_per_trade', False)}, "
+                            f"disable_expectancy={paper_act.get('disable_avg_loss_gate', False)}"
+                        )
         except Exception:
             pass
 
@@ -994,54 +1010,70 @@ class PortfolioManager:
         # Expectancy gate: if we have enough trades, use expectancy instead of
         # raw win rate. Expectancy = (avg_win × WR) - (avg_loss × (1-WR)).
         # Positive expectancy = profitable system regardless of win rate.
-        use_expectancy_gate = (
-            backtest_results.total_trades >= 15
-            and backtest_results.avg_win > 0
-            and backtest_results.avg_loss != 0
-        )
-        
-        if use_expectancy_gate:
-            wr = backtest_results.win_rate
-            expectancy = (backtest_results.avg_win * wr) - (abs(backtest_results.avg_loss) * (1 - wr))
-            
-            if expectancy > 0:
-                # Positive expectancy — pass even if win rate is below threshold.
-                # Still enforce a hard floor (25%) to filter out degenerate strategies
-                # that "win" once with a huge outlier.
-                hard_floor_wr = 0.25
-                if wr < hard_floor_wr:
-                    reason = (
-                        f"WinRate {wr:.0%} < {hard_floor_wr:.0%} hard floor "
-                        f"(expectancy ${expectancy:.2f} positive but WR too low for reliability)"
-                    )
-                    logger.info(f"Strategy {strategy.name} failed activation: {reason}")
-                    return False, reason
-                
-                logger.info(
-                    f"Expectancy gate PASSED: ${expectancy:.2f}/trade "
-                    f"(WR={wr:.0%}, avg_win=${backtest_results.avg_win:.2f}, "
-                    f"avg_loss=${abs(backtest_results.avg_loss):.2f}) — "
-                    f"win rate {wr:.0%} {'below' if wr < min_win_rate else 'above'} "
-                    f"threshold {min_win_rate:.0%} but expectancy is positive"
-                )
-            else:
-                # Negative expectancy — reject regardless of win rate
-                reason = (
-                    f"Negative expectancy ${expectancy:.2f}/trade "
-                    f"(WR={wr:.0%}, avg_win=${backtest_results.avg_win:.2f}, "
-                    f"avg_loss=${abs(backtest_results.avg_loss):.2f})"
-                )
+        #
+        # Paper-mode: skip this gate entirely when disable_avg_loss_gate=true.
+        # We want data on borderline strategies — the graduation gate is the
+        # real quality filter.
+        _skip_expectancy = bool(config_thresholds.get('disable_avg_loss_gate', False))
+        if _skip_expectancy:
+            logger.debug(
+                f"Expectancy/avg-loss gate skipped for {strategy.name} "
+                f"(paper_trading.activation_thresholds.disable_avg_loss_gate=true)"
+            )
+            # Still enforce the raw win-rate floor so we don't activate
+            # strategies with 0% win rate
+            if backtest_results.win_rate < min_win_rate:
+                reason = f"WinRate {backtest_results.win_rate:.0%} < {min_win_rate:.0%}"
                 logger.info(f"Strategy {strategy.name} failed activation: {reason}")
                 return False, reason
         else:
-            # Not enough trades for reliable expectancy — fall back to win rate gate
-            if backtest_results.win_rate < min_win_rate:
-                reason = (
-                    f"WinRate {backtest_results.win_rate:.0%} < {min_win_rate:.0%}"
-                )
-                logger.info(f"Strategy {strategy.name} failed activation: {reason}")
-                return False, reason
-        
+            use_expectancy_gate = (
+                backtest_results.total_trades >= 15
+                and backtest_results.avg_win > 0
+                and backtest_results.avg_loss != 0
+            )
+
+            if use_expectancy_gate:
+                wr = backtest_results.win_rate
+                expectancy = (backtest_results.avg_win * wr) - (abs(backtest_results.avg_loss) * (1 - wr))
+
+                if expectancy > 0:
+                    # Positive expectancy — pass even if win rate is below threshold.
+                    # Still enforce a hard floor (25%) to filter out degenerate strategies
+                    # that "win" once with a huge outlier.
+                    hard_floor_wr = 0.25
+                    if wr < hard_floor_wr:
+                        reason = (
+                            f"WinRate {wr:.0%} < {hard_floor_wr:.0%} hard floor "
+                            f"(expectancy ${expectancy:.2f} positive but WR too low for reliability)"
+                        )
+                        logger.info(f"Strategy {strategy.name} failed activation: {reason}")
+                        return False, reason
+
+                    logger.info(
+                        f"Expectancy gate PASSED: ${expectancy:.2f}/trade "
+                        f"(WR={wr:.0%}, avg_win=${backtest_results.avg_win:.2f}, "
+                        f"avg_loss=${abs(backtest_results.avg_loss):.2f}) — "
+                        f"win rate {wr:.0%} {'below' if wr < min_win_rate else 'above'} "
+                        f"threshold {min_win_rate:.0%} but expectancy is positive"
+                    )
+                else:
+                    # Negative expectancy — reject regardless of win rate
+                    reason = (
+                        f"Negative expectancy ${expectancy:.2f}/trade "
+                        f"(WR={wr:.0%}, avg_win=${backtest_results.avg_win:.2f}, "
+                        f"avg_loss=${abs(backtest_results.avg_loss):.2f})"
+                    )
+                    logger.info(f"Strategy {strategy.name} failed activation: {reason}")
+                    return False, reason
+            else:
+                # Not enough trades for reliable expectancy — fall back to win rate gate
+                if backtest_results.win_rate < min_win_rate:
+                    reason = (
+                        f"WinRate {backtest_results.win_rate:.0%} < {min_win_rate:.0%}"
+                    )
+                    logger.info(f"Strategy {strategy.name} failed activation: {reason}")
+                    return False, reason
         # Check risk/reward ratio (avg_win / avg_loss)
         # Scale minimum R:R by win rate — high win-rate strategies are profitable
         # even with lower R:R. Formula: min_rr = max(0.4, 1.0 - win_rate)
@@ -1139,6 +1171,8 @@ class PortfolioManager:
         # Net-of-costs profitability check using per-asset-class cost model.
         # eToro charges zero commission on stocks/ETFs — the real cost is spread + slippage.
         # Each asset class has its own cost profile loaded from config.
+        class _PaperModeRPTSkip(Exception):
+            """Sentinel: paper mode skipped the RPT gate — not a real error."""
         try:
             # Determine asset class for the primary symbol
             asset_class = 'stock'  # default
@@ -1260,6 +1294,22 @@ class PortfolioManager:
             # Interval-aware: 1h/4h/1d strategies have different hold periods and
             # per-trade return expectations — use interval-specific thresholds.
             #
+            # Paper-mode: skip entirely when disable_min_return_per_trade=true.
+            # For data collection we want borderline strategies in the pipeline.
+            if config_thresholds.get('disable_min_return_per_trade', False):
+                logger.debug(
+                    f"min_return_per_trade gate skipped for {strategy.name} "
+                    f"(paper_trading.activation_thresholds.disable_min_return_per_trade=true)"
+                )
+                # Log the pass so the cost check line still appears in logs
+                _pass_rpt = backtest_results.total_return / max(backtest_results.total_trades, 1)
+                logger.info(
+                    f"Cost check skipped (paper mode): net={backtest_results.total_return:.2%}, "
+                    f"rpt={_pass_rpt:.3%}, asset_class={asset_class}"
+                )
+                # Skip the rest of the RPT block — jump to the final log line
+                raise _PaperModeRPTSkip()
+
             # For crypto the YAML floor is the fallback for unknown regime.
             # The actual floor is regime-aware (see below) so it self-adjusts
             # when crypto moves between trending and ranging without manual edits.
@@ -1485,6 +1535,8 @@ class PortfolioManager:
                 f"Cost check passed: net={net_return:.2%}, rpt={_pass_rpt:.3%} ({_pass_basis}), "
                 f"asset_class={asset_class}, edge_ratio={locals().get('_er_act', 0.0):.2f}"
             )
+        except _PaperModeRPTSkip:
+            pass  # Paper mode: RPT gate intentionally skipped
         except Exception as e:
             logger.debug(f"Could not check net-of-costs return: {e}")
 
