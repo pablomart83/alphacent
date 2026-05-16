@@ -4745,8 +4745,19 @@ Generate a CORRECTED strategy that addresses all errors:"""
             ae_type_meta = (ae_template.metadata or {}).get('alpha_edge_type', '')
 
             # Fixed-symbol templates (sector rotation) — use as-is
+            # but still check if this template is already active to prevent duplicates.
             if ae_template.metadata and 'fixed_symbols' in ae_template.metadata:
                 strategy_symbols = ae_template.metadata['fixed_symbols']
+                # Dedup: skip if this template already has an active strategy
+                # (fixed-symbol templates always produce the same primary symbol,
+                # so one active instance is enough)
+                _fixed_primary = strategy_symbols[0] if strategy_symbols else ''
+                if (ae_type, _fixed_primary) in active_ae_template_symbols:
+                    logger.debug(
+                        f"AE skip (already active): '{ae_template.name}' "
+                        f"primary={_fixed_primary}"
+                    )
+                    continue
             else:
                 # Build watchlist: score all eligible symbols, take top 5
                 candidate_symbols = []
