@@ -340,7 +340,7 @@ class StrategyTemplateLibrary:
             name="Moving Average Crossover",
             description="Buy when fast MA crosses above slow MA with trend filter and volume confirmation",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "SMA(20) CROSSES_ABOVE SMA(50) AND VOLUME > VOLUME_MA(20)"  # Add volume confirmation
             ],
@@ -390,7 +390,7 @@ class StrategyTemplateLibrary:
             name="Price Breakout",
             description="Buy on breakout above 10-day resistance with buffer, sell on breakdown",
             strategy_type=StrategyType.BREAKOUT,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.RANGING],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.RANGING, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "CLOSE > RESISTANCE * 0.998"  # Reduced buffer to 0.2% to allow more entries
             ],
@@ -414,7 +414,7 @@ class StrategyTemplateLibrary:
             name="EMA Trend Following",
             description="Buy when price above EMA and trending up, sell when below",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "CLOSE > EMA(20) AND EMA(20) > EMA(50)"
             ],
@@ -440,7 +440,7 @@ class StrategyTemplateLibrary:
             name="ATR Volatility Breakout",
             description="Buy on price move greater than 1.5x ATR, exit on reversion",
             strategy_type=StrategyType.VOLATILITY,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.RANGING],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.RANGING, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "PRICE_CHANGE_PCT(1) > ATR(14) * 1.0"  # Relaxed from 2.0x to 1.0x ATR
             ],
@@ -492,7 +492,7 @@ class StrategyTemplateLibrary:
             name="Price Momentum Breakout",
             description="Buy on 20-day high breakout, exit on 10-day low breakdown",
             strategy_type=StrategyType.BREAKOUT,
-            market_regimes=[MarketRegime.TRENDING_UP],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "CLOSE > RESISTANCE"  # 20-day high
             ],
@@ -517,7 +517,7 @@ class StrategyTemplateLibrary:
             name="MACD Rising Momentum",
             description="Buy when MACD > signal AND MACD rising, exit when MACD < signal",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "MACD() > MACD_SIGNAL() AND MACD() > MACD().shift(1)"  # MACD above signal and rising
             ],
@@ -542,7 +542,7 @@ class StrategyTemplateLibrary:
             name="ADX Trend Following",
             description="Buy when ADX > 25 (strong trend) AND price > SMA(50), exit when ADX < 20",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "ADX(14) > 25 AND CLOSE > SMA(50)"  # Strong trend + price above MA
             ],
@@ -597,7 +597,7 @@ class StrategyTemplateLibrary:
             name="Bollinger Squeeze Breakout",
             description="Buy when Bollinger Bands narrow then price breaks above upper band",
             strategy_type=StrategyType.VOLATILITY,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.TRENDING_UP],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "(BB_UPPER(20, 2) - BB_LOWER(20, 2)) < ATR(14) * 4 AND CLOSE > BB_UPPER(20, 2)"  # Very relaxed squeeze (4x)
             ],
@@ -623,7 +623,7 @@ class StrategyTemplateLibrary:
             name="ATR Expansion Breakout",
             description="Buy when price moves > 1.5*ATR from 20-day MA (volatility expansion)",
             strategy_type=StrategyType.VOLATILITY,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.RANGING],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.RANGING, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "CLOSE > SMA(20) + ATR(14) * 1.5"  # Relaxed from 2.0 to 1.5
             ],
@@ -791,7 +791,7 @@ class StrategyTemplateLibrary:
             name="SMA Trend Momentum",
             description="Buy when price crosses above SMA(20) with moderate RSI, exit on cross below",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "CLOSE > SMA(20) AND RSI(14) > 45 AND RSI(14) < 65"
             ],
@@ -818,7 +818,7 @@ class StrategyTemplateLibrary:
             name="EMA Pullback Momentum",
             description="Buy pullbacks to EMA(10) when EMA(10) > EMA(30), exit on EMA cross",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "CLOSE > EMA(10) AND EMA(10) > EMA(30)"
             ],
@@ -842,7 +842,7 @@ class StrategyTemplateLibrary:
             name="RSI Midrange Momentum",
             description="Buy when RSI crosses above 50 (bullish momentum shift), exit when RSI drops below 40",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP],
             entry_conditions=[
                 "RSI(14) > 50 AND RSI(14) < 65 AND CLOSE > SMA(20)"
             ],
@@ -947,7 +947,7 @@ class StrategyTemplateLibrary:
             name="Dual MA Volume Surge",
             description="Buy when price above both MAs and volume surges above average, exit on MA breakdown",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "CLOSE > SMA(20) AND CLOSE > SMA(50) AND VOLUME > VOLUME_MA(20)"
             ],
@@ -999,7 +999,7 @@ class StrategyTemplateLibrary:
             name="MACD RSI Confirmed Momentum",
             description="Buy on MACD bullish crossover when RSI is in neutral zone (not overbought), exit on MACD bearish",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
                 "MACD() CROSSES_ABOVE MACD_SIGNAL() AND RSI(14) > 40 AND RSI(14) < 65"
             ],
@@ -1028,7 +1028,7 @@ class StrategyTemplateLibrary:
             name="Stochastic Momentum",
             description="Buy when Stochastic crosses above 30 (momentum shift), sell when overbought",
             strategy_type=StrategyType.MOMENTUM,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "STOCH(14) CROSSES_ABOVE 30"
             ],
@@ -1054,7 +1054,7 @@ class StrategyTemplateLibrary:
             name="Triple EMA Alignment",
             description="Buy when EMA(10) > EMA(20) > EMA(50) and price above all three, exit on EMA(10) < EMA(20)",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING_LOW_VOL],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "CLOSE > EMA(10) AND EMA(10) > EMA(20) AND EMA(20) > EMA(50)"
             ],
@@ -1671,7 +1671,7 @@ class StrategyTemplateLibrary:
                 MarketRegime.TRENDING_UP,
                 MarketRegime.TRENDING_UP_STRONG,
                 MarketRegime.TRENDING_UP_WEAK,
-                MarketRegime.RANGING
+                MarketRegime.RANGING,
             ],
             entry_conditions=[
                 "Market cap between $300M and $2B",
@@ -3338,6 +3338,8 @@ class StrategyTemplateLibrary:
             market_regimes=[
                 MarketRegime.TRENDING_UP,
                 MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.TRENDING_UP_STRONG,
+                MarketRegime.TRENDING_UP_WEAK,
             ],
             entry_conditions=[
                 "CLOSE > BB_UPPER(20, 2) AND RSI(14) > 50"
@@ -3520,6 +3522,7 @@ class StrategyTemplateLibrary:
             market_regimes=[
                 MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING,
                 MarketRegime.TRENDING_UP,
+                MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK,
             ],
             entry_conditions=[
                 "(BB_UPPER(20, 2) - BB_LOWER(20, 2)) < ATR(14) * 3 AND CLOSE > BB_UPPER(20, 2)"
@@ -3688,6 +3691,7 @@ class StrategyTemplateLibrary:
             market_regimes=[
                 MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL,
                 MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
             ],
             entry_conditions=[
                 "EMA(5) > EMA(13) AND CLOSE > EMA(5)"
@@ -3743,6 +3747,7 @@ class StrategyTemplateLibrary:
             market_regimes=[
                 MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL,
                 MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
             ],
             entry_conditions=[
                 "MACD(12,26) CROSSES_ABOVE MACD_SIGNAL(12,26,9) AND RSI(14) > 40"
@@ -4253,6 +4258,7 @@ class StrategyTemplateLibrary:
             market_regimes=[
                 MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL,
                 MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
             ],
             entry_conditions=[
                 "VOLUME CROSSES_ABOVE VOLUME_MA(20) * 2.0 AND CLOSE > SMA(20)"
@@ -4573,6 +4579,7 @@ class StrategyTemplateLibrary:
             market_regimes=[
                 MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
                 MarketRegime.RANGING, MarketRegime.RANGING_LOW_VOL,
+                MarketRegime.TRENDING_UP_STRONG,
             ],
             entry_conditions=[
                 "EMA(8) CROSSES_ABOVE EMA(13) AND EMA(13) > EMA(21) AND RSI(14) > 40"
@@ -4931,7 +4938,7 @@ class StrategyTemplateLibrary:
             name="Crypto 4H BB Squeeze Breakout",
             description="Buy when 4H price breaks above tight BB upper band (1.5 std) after squeeze. Crypto consolidation on 4H often precedes 5-10% moves.",
             strategy_type=StrategyType.BREAKOUT,
-            market_regimes=[MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "CLOSE CROSSES_ABOVE BB_UPPER(20, 1.5) AND RSI(14) > 50"
             ],
@@ -5037,7 +5044,7 @@ class StrategyTemplateLibrary:
             name="4H MACD Trend Continuation",
             description="Buy when MACD crosses above signal line with price above EMA(20) on 4H. Trend continuation entry.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING_HIGH_VOL],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "MACD(12,26) CROSSES_ABOVE MACD_SIGNAL(12,26,9) AND CLOSE > EMA(20)"
             ],
@@ -5379,7 +5386,7 @@ class StrategyTemplateLibrary:
             name="Crypto Hourly EMA Momentum",
             description="Buy when EMA(8) crosses above EMA(21) with RSI > 50. Ride the hourly trend. Exit when EMA(8) crosses back below.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "EMA(8) CROSSES_ABOVE EMA(21) AND RSI(14) > 50"
             ],
@@ -5403,7 +5410,7 @@ class StrategyTemplateLibrary:
             name="Crypto Hourly Breakout Continuation",
             description="Buy when price breaks above 20-bar high with RSI > 55 and volume above average. Momentum continuation on hourly.",
             strategy_type=StrategyType.BREAKOUT,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "CLOSE > HIGH_N(20) AND RSI(14) > 55 AND VOLUME > VOLUME_MA(20)"
             ],
@@ -5451,7 +5458,7 @@ class StrategyTemplateLibrary:
             name="Crypto Hourly BB Expansion Ride",
             description="Buy when price breaks above BB middle band while bandwidth is expanding (upper-lower > ATR*3). Volatility expansion = directional move starting.",
             strategy_type=StrategyType.BREAKOUT,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             # DSL FIX 2026-05-02: was `CLOSE > BB_MIDDLE AND (expansion) AND RSI>50` (state)
             # which fired every hour price held above the middle band. 86-92 trades per
             # ~180 days vs advertised 3-6/month = ~18-36 expected. Use `CROSSES_ABOVE` on
@@ -5480,7 +5487,7 @@ class StrategyTemplateLibrary:
             name="Crypto Hourly MACD Momentum",
             description="Buy when MACD crosses above signal line with RSI > 45. Momentum building on hourly timeframe.",
             strategy_type=StrategyType.MOMENTUM,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "MACD() CROSSES_ABOVE MACD_SIGNAL() AND RSI(14) > 45"
             ],
@@ -5508,7 +5515,7 @@ class StrategyTemplateLibrary:
             name="4H Crypto Trend Rider",
             description="Buy when price > EMA(10) > EMA(30) with RSI 50-75. Strong 4H trend alignment. Exit when structure breaks.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "CLOSE > EMA(10) AND EMA(10) > EMA(30) AND RSI(14) > 50 AND RSI(14) < 75"
             ],
@@ -5532,7 +5539,7 @@ class StrategyTemplateLibrary:
             name="4H Crypto Volume Breakout",
             description="Buy when price breaks above 20-bar high on 4H with volume > 2x average. Explosive crypto moves start with volume.",
             strategy_type=StrategyType.BREAKOUT,
-            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_WEAK],
+            market_regimes=[MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "CLOSE > HIGH_N(20) AND VOLUME > VOLUME_MA(20) * 2"
             ],
@@ -6169,7 +6176,7 @@ class StrategyTemplateLibrary:
             name="Crypto Hourly Trend Pullback",
             description="Buy when price pulls back to EMA(10) in an uptrend (EMA(10) > EMA(30)) with RSI 40-60. Classic institutional dip-buy in a trend.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "CLOSE < EMA(10) * 1.005 AND CLOSE > EMA(10) * 0.99 AND EMA(10) > EMA(30) AND RSI(14) > 40 AND RSI(14) < 60"
             ],
@@ -6280,7 +6287,7 @@ class StrategyTemplateLibrary:
             name="Crypto Hourly VWAP Trend",
             description="Buy when price pulls back to VWAP in an uptrend (price > VWAP and RSI > 45). Institutional execution anchor — price respects VWAP as dynamic support.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL],
+            market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK, MarketRegime.RANGING, MarketRegime.RANGING_HIGH_VOL, MarketRegime.TRENDING_UP_STRONG],
             entry_conditions=[
                 "CLOSE > VWAP() * 0.998 AND CLOSE < VWAP() * 1.005 AND RSI(14) > 45"
             ],
@@ -6622,7 +6629,7 @@ class StrategyTemplateLibrary:
             name="EMA Ribbon Expansion Long",
             description="Buy when EMA(10) crosses above EMA(20) after compression period. Trend initiation from quiet market.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING_LOW_VOL],
+            market_regimes=[MarketRegime.RANGING_LOW_VOL, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP],
             entry_conditions=[
                 "EMA(10) > EMA(20) AND CLOSE > EMA(10)"
             ],
@@ -6672,7 +6679,7 @@ class StrategyTemplateLibrary:
             name="MACD Zero Cross Long",
             description="Buy when MACD crosses above zero line in low vol — momentum shift from neutral. Simple and effective.",
             strategy_type=StrategyType.TREND_FOLLOWING,
-            market_regimes=[MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING],
+            market_regimes=[MarketRegime.RANGING_LOW_VOL, MarketRegime.RANGING, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK, MarketRegime.TRENDING_UP],
             entry_conditions=[
                 "MACD(12,26) CROSSES_ABOVE 0"
             ],
@@ -7260,6 +7267,7 @@ class StrategyTemplateLibrary:
             market_regimes=[
                 MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_WEAK,
                 MarketRegime.TRENDING_DOWN_WEAK,
+                MarketRegime.TRENDING_UP_STRONG,
             ],
             entry_conditions=[
                 "CLOSE > SMA(20) AND CLOSE > SMA(50) AND RSI(14) > 50 AND RSI(14) < 65 AND ADX(14) > 20"
