@@ -659,10 +659,38 @@ class RiskManager:
             MINIMUM_ORDER_SIZE_POST = 2000.0
 
             if 0 < position_size < MINIMUM_ORDER_SIZE_POST:
-                logger.info(
-                    f"Post-adjustment size ${position_size:.2f} below eToro minimum "
-                    f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bumping to minimum"
-                )
+                # Only bump if we actually have the balance to cover it.
+                # If available_balance < minimum, the trade is not viable — skip it
+                # cleanly here rather than letting it reach order_executor and log an ERROR.
+                _avail = account.balance
+                try:
+                    from src.models.database import get_database as _gdb_post
+                    from src.models.orm import AccountInfoORM as _AIO_post
+                    _db_post = _gdb_post()
+                    _sess_post = _db_post.get_session()
+                    try:
+                        _row_post = _sess_post.query(_AIO_post).order_by(_AIO_post.updated_at.desc()).first()
+                        if _row_post and _row_post.balance is not None:
+                            _avail = float(_row_post.balance)
+                    finally:
+                        _sess_post.close()
+                except Exception:
+                    pass
+
+                if _avail < MINIMUM_ORDER_SIZE_POST:
+                    logger.info(
+                        f"Post-adjustment size ${position_size:.2f} below minimum "
+                        f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} AND "
+                        f"insufficient balance (${_avail:.2f}) — skipping trade"
+                    )
+                    return ValidationResult(
+                        is_valid=False,
+                        position_size=0.0,
+                        reason=(
+                            f"insufficient_balance_for_min (size=${position_size:.2f}, "
+                            f"available=${_avail:.2f}, min=${MINIMUM_ORDER_SIZE_POST:.0f})"
+                        ),
+                    )
                 logger.info(
                     f"Post-adjustment size ${position_size:.2f} below eToro minimum "
                     f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bumping to minimum"

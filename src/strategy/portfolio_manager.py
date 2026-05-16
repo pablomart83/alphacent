@@ -795,6 +795,23 @@ class PortfolioManager:
                             f"Commodity asset class: Using min_win_rate_commodity={base_win_rate_threshold} "
                             f"(from config)"
                         )
+
+                from src.core.tradeable_instruments import DEMO_ALLOWED_INDICES
+                if primary_symbol.upper() in set(DEMO_ALLOWED_INDICES):
+                    index_sharpe = config_thresholds.get('min_sharpe_index')
+                    if index_sharpe is not None:
+                        base_sharpe_threshold = index_sharpe
+                        logger.info(
+                            f"Index asset class: Using min_sharpe_index={base_sharpe_threshold} "
+                            f"(from config) — indices have 85.7% live WR, lower WF bar appropriate"
+                        )
+                    index_wr = config_thresholds.get('min_win_rate_index')
+                    if index_wr is not None:
+                        base_win_rate_threshold = index_wr
+                        logger.info(
+                            f"Index asset class: Using min_win_rate_index={base_win_rate_threshold} "
+                            f"(from config)"
+                        )
             except ImportError:
                 pass
         
