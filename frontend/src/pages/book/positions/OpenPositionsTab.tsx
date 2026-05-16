@@ -42,7 +42,7 @@ export function OpenPositionsTab() {
 
   const [filters, setFilters] = useState<PositionFilters>(DEFAULT_FILTERS)
   const [sorting, setSorting] = useState<SortingState>([
-    { id: 'pnl', desc: true },
+    { id: 'opened', desc: true },
   ])
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
