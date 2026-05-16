@@ -354,7 +354,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2)        AS total_pnl,
                     ROUND(COALESCE(AVG(tj.pnl), 0)::numeric, 4)        AS avg_pnl,
                     COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions,
-                    MIN(tj.closed_at)                                   AS first_trade_at
+                    MIN(tj.entry_time)                                  AS first_trade_at
                 FROM trade_journal tj
                 JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
