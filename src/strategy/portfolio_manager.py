@@ -1082,6 +1082,11 @@ class PortfolioManager:
             min_trades_required = config_thresholds.get('min_trades_commodity', 2)
         elif is_crypto and interval == '4h':
             min_trades_required = config_thresholds.get('min_trades_crypto_4h', 4)
+        elif is_alpha_edge:
+            # Alpha Edge uses fundamental signals — check AE-specific threshold first,
+            # regardless of interval. Previously this was at the bottom of the chain,
+            # so 4H AE strategies hit min_trades_dsl_4h (8) instead of min_trades_alpha_edge (6).
+            min_trades_required = config_thresholds.get('min_trades_alpha_edge', config_thresholds.get('min_trades', 5))
         elif is_crypto and interval in ('1h', '2h'):
             min_trades_required = config_thresholds.get('min_trades_crypto_1h', 15)
         elif is_crypto:
@@ -1090,8 +1095,6 @@ class PortfolioManager:
             min_trades_required = config_thresholds.get('min_trades_dsl_4h', config_thresholds.get('min_trades_4h', 3))
         elif interval in ('1h', '2h'):
             min_trades_required = config_thresholds.get('min_trades_dsl_1h', config_thresholds.get('min_trades_dsl', 5))
-        elif is_alpha_edge:
-            min_trades_required = config_thresholds.get('min_trades_alpha_edge', config_thresholds.get('min_trades', 5))
         else:
             min_trades_required = config_thresholds.get('min_trades_dsl', config_thresholds.get('min_trades', 5))
         

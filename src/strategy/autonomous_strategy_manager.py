@@ -1528,9 +1528,9 @@ class AutonomousStrategyManager:
                     # fall back to factor-based validation. Fundamental strategies fire
                     # quarterly — expecting 2+ trades in a 2-year window on a single symbol
                     # is unrealistic. Instead, validate the underlying factor's edge.
-                    min_ae_trades = 10
+                    min_ae_trades = 6
                     try:
-                        min_ae_trades = self.config.get('activation_thresholds', {}).get('min_trades_alpha_edge', 10)
+                        min_ae_trades = self.config.get('activation_thresholds', {}).get('min_trades_alpha_edge', 6)
                     except Exception:
                         pass
                     

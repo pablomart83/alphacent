@@ -4774,14 +4774,20 @@ Generate a CORRECTED strategy that addresses all errors:"""
 
                     asset_class = self._get_asset_class(sym)
 
-                    # Template-specific eligibility filter
+                    # Template-specific eligibility filter and scoring.
+                    # CRITICAL: use the same factor rank that the factor gate checks,
+                    # not the generic composite score. Mismatched scoring caused the
+                    # proposer to assign RIVN (composite rank 50) to Revenue Acceleration
+                    # which then failed the growth_rank quintile gate every cycle.
                     ae_score = 50.0
                     vol = sym_stats.get('volatility_metrics', {}).get('volatility', 0)
+                    ranker = (self._ranker_results or {}).get(sym, {}) if self._ranker_results else {}
 
                     if 'earnings' in ae_type or 'revenue' in ae_type or 'analyst' in ae_type:
                         if asset_class != 'stock':
                             continue
-                        ae_score += vol * 100
+                        # Use growth_rank as primary signal — matches the factor gate check
+                        ae_score = ranker.get('growth_rank', 50.0) if ranker else 50.0 + vol * 100
                     elif 'dividend' in ae_type or 'aristocrat' in ae_type:
                         if asset_class != 'stock':
                             continue
@@ -4792,7 +4798,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
                     elif 'insider' in ae_type or 'buyback' in ae_type:
                         if asset_class != 'stock':
                             continue
-                        ae_score += vol * 50
+                        # Use momentum_rank — matches the factor gate check for insider buying
+                        ae_score = ranker.get('momentum_rank', 50.0) if ranker else 50.0 + vol * 50
                     elif 'sector' in ae_type:
                         if asset_class == 'etf':
                             ae_score += 30
@@ -4801,24 +4808,35 @@ Generate a CORRECTED strategy that addresses all errors:"""
                     elif 'quality' in ae_type or 'value' in ae_type or 'relative' in ae_type:
                         if asset_class != 'stock':
                             continue
+                        # Use quality_rank — matches the factor gate check
+                        ae_score = ranker.get('quality_rank', 50.0) if ranker else 50.0
                         mr = sym_stats.get('mean_reversion_metrics', {}).get('mean_reversion_score', 0)
-                        ae_score += mr * 30
+                        ae_score += mr * 10  # small boost for mean-reversion setup
                     elif 'composite' in ae_type or 'multi' in ae_type:
                         if asset_class != 'stock':
                             continue
-                        # Use ranker composite score directly if available
-                        if self._ranker_results and sym in self._ranker_results:
-                            ae_score = self._ranker_results[sym].get('composite_score', 50.0)
-                        else:
-                            ae_score += vol * 50
+                        # Use composite_score directly — matches the factor gate check
+                        ae_score = ranker.get('composite_score', 50.0) if ranker else 50.0 + vol * 50
+                    elif 'profitability' in ae_type or 'fcf' in ae_type or 'shareholder' in ae_type or 'deleveraging' in ae_type:
+                        if asset_class != 'stock':
+                            continue
+                        # Use quality_rank for profitability/FCF/shareholder yield templates
+                        ae_score = ranker.get('quality_rank', 50.0) if ranker else 50.0
+                    elif 'momentum' in ae_type or '52' in ae_type or 'drift' in ae_type:
+                        if asset_class != 'stock':
+                            continue
+                        # Use momentum_rank for momentum/52-week-high/post-earnings-drift
+                        ae_score = ranker.get('momentum_rank', 50.0) if ranker else 50.0
+                    elif 'accruals' in ae_type:
+                        if asset_class != 'stock':
+                            continue
+                        # Accruals quality: use composite_score (lower = better for shorts)
+                        ae_score = ranker.get('composite_score', 50.0) if ranker else 50.0
                     else:
                         if asset_class in ('crypto', 'forex', 'commodity', 'index'):
                             continue
-
-                    # Boost from ranker if available
-                    if self._ranker_results and sym in self._ranker_results:
-                        ranker_score = self._ranker_results[sym].get('composite_score', 50.0)
-                        ae_score = ae_score * 0.4 + ranker_score * 0.6  # 60% ranker, 40% template-specific
+                        # Generic fallback: use composite score
+                        ae_score = ranker.get('composite_score', 50.0) if ranker else ae_score
 
                     candidate_symbols.append((ae_score, sym))
 
@@ -7647,14 +7665,20 @@ Make this strategy distinct and innovative while following all threshold and pai
             else:
                 dsl_templates.append(t)
         
-        # Force-add ALL Alpha Edge templates from the library (they self-filter by regime)
-        if len(alpha_edge_templates) < 3:
-            all_library = self.template_library.get_all_templates() if hasattr(self.template_library, 'get_all_templates') else []
-            ae_names = {t.name for t in alpha_edge_templates}
-            for t in all_library:
-                if t.metadata and t.metadata.get('strategy_category') == 'alpha_edge' and t.name not in ae_names:
-                    alpha_edge_templates.append(t)
-                    ae_names.add(t.name)
+        # Force-add ALL Alpha Edge templates from the library (they self-filter by regime
+        # in their own fundamental validation and factor gate — the regime filter here is
+        # redundant and harmful: it silently drops 17 of 25 AE templates in trending_up_strong
+        # because only 8 match the regime, and the old condition `< 3` never fires).
+        # AE templates are regime-agnostic at the proposal stage — a Dividend Aristocrat
+        # strategy is valid in any regime; the factor gate decides if the specific symbol
+        # qualifies right now.
+        all_library = self.template_library.get_all_templates() if hasattr(self.template_library, 'get_all_templates') else []
+        ae_names = {t.name for t in alpha_edge_templates}
+        for t in all_library:
+            if t.metadata and t.metadata.get('strategy_category') == 'alpha_edge' and t.name not in ae_names:
+                alpha_edge_templates.append(t)
+                ae_names.add(t.name)
+        logger.info(f"AE templates after force-add: {len(alpha_edge_templates)} total")
         
         # VIX risk-off: additionally exclude momentum/breakout from DSL set
         if vix > 30:
