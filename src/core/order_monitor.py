@@ -1803,34 +1803,67 @@ class OrderMonitor:
                         PositionORM.account_type == account_type,  # only same account — cross-account reuse is handled above
                     ).first()
                     if closed_dup:
-                        # Reopen the closed position instead of creating a duplicate —
-                        # BUT only if it was closed without a reason (sync artifact).
-                        # If it has a closure_reason, our system intentionally closed it;
-                        # the eToro position is still open because the close order is pending.
-                        if closed_dup.closure_reason:
+                        # Two distinct scenarios when a closed row exists with the same etoro_position_id:
+                        #
+                        # A) Close order pending — our system closed it, eToro hasn't confirmed yet.
+                        #    The eToro position is still open because the close is in-flight.
+                        #    → Reopen only if closed WITHOUT a reason (sync artifact).
+                        #    → Skip if closure_reason is set (intentional close, order pending).
+                        #
+                        # B) eToro ID reuse — eToro closed the old position AND opened a brand-new
+                        #    position that happens to have the same numeric ID. The new position's
+                        #    opened_at will be AFTER the old position's closed_at.
+                        #    → Must create the new position (with synthetic ID already set above).
+                        #    → Do NOT skip — fall through to the INSERT below.
+                        #
+                        # Distinguish A from B: if the new position opened AFTER the old one closed,
+                        # it's a genuine ID reuse (scenario B). Use a 5-minute buffer for clock skew.
+                        new_opened_at = getattr(pos, 'opened_at', None)
+                        old_closed_at = closed_dup.closed_at
+                        is_id_reuse = (
+                            new_opened_at is not None
+                            and old_closed_at is not None
+                            and (new_opened_at.replace(tzinfo=None) if hasattr(new_opened_at, 'tzinfo') and new_opened_at.tzinfo else new_opened_at)
+                            > (old_closed_at.replace(tzinfo=None) if hasattr(old_closed_at, 'tzinfo') and old_closed_at.tzinfo else old_closed_at)
+                        )
+
+                        if is_id_reuse:
+                            # Scenario B: genuine eToro ID reuse. The PK collision guard already
+                            # assigned a synthetic ID above. Fall through to create the new position.
+                            logger.info(
+                                f"eToro ID reuse detected: {normalized_symbol} position ID "
+                                f"{pos.etoro_position_id} was closed at {old_closed_at} and "
+                                f"eToro has reused it for a new position opened at {new_opened_at}. "
+                                f"Creating new row with synthetic ID {pos_id_to_use}."
+                            )
+                            # Fall through — do NOT continue
+                        elif closed_dup.closure_reason:
+                            # Scenario A: our system closed it, close order still pending on eToro.
                             logger.debug(
                                 f"Skipping reopen of {closed_dup.id} ({normalized_symbol}) — "
                                 f"closed with reason '{closed_dup.closure_reason}' (close order pending)"
                             )
                             continue
-                        logger.info(
-                            f"Reopening closed position {closed_dup.id} ({normalized_symbol}) — "
-                            f"eToro ID {pos.etoro_position_id} exists on eToro but was closed in DB"
-                        )
-                        closed_dup.closed_at = None
-                        closed_dup.current_price = pos.current_price
-                        closed_dup.unrealized_pnl = pos.unrealized_pnl
-                        closed_dup.entry_price = pos.entry_price
-                        if pos.stop_loss is not None:
-                            closed_dup.stop_loss = pos.stop_loss
-                        if pos.take_profit is not None:
-                            closed_dup.take_profit = pos.take_profit
-                        if pos.invested_amount:
-                            closed_dup.invested_amount = pos.invested_amount
-                        if matched_strategy_id and matched_strategy_id != 'etoro_position':
-                            closed_dup.strategy_id = matched_strategy_id
-                        updated_count += 1
-                        continue
+                        else:
+                            # Scenario A (no reason): sync artifact — reopen the closed position.
+                            logger.info(
+                                f"Reopening closed position {closed_dup.id} ({normalized_symbol}) — "
+                                f"eToro ID {pos.etoro_position_id} exists on eToro but was closed in DB"
+                            )
+                            closed_dup.closed_at = None
+                            closed_dup.current_price = pos.current_price
+                            closed_dup.unrealized_pnl = pos.unrealized_pnl
+                            closed_dup.entry_price = pos.entry_price
+                            if pos.stop_loss is not None:
+                                closed_dup.stop_loss = pos.stop_loss
+                            if pos.take_profit is not None:
+                                closed_dup.take_profit = pos.take_profit
+                            if pos.invested_amount:
+                                closed_dup.invested_amount = pos.invested_amount
+                            if matched_strategy_id and matched_strategy_id != 'etoro_position':
+                                closed_dup.strategy_id = matched_strategy_id
+                            updated_count += 1
+                            continue
 
                     # SAFETY: Validate position side against strategy direction.
                     # If a strategy is "long" only, don't create a SHORT position for it.
