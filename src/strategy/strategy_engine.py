@@ -5568,12 +5568,36 @@ class StrategyEngine:
                 market_analyzer=getattr(self, 'market_analyzer', None)
             )
             
-            # Get min conviction threshold from config
+            # Get min conviction threshold from config.
+            #
+            # Stage-aware threshold (G-43, 2026-05-17):
+            #   PAPER (account_type='demo', no LIVE override): paper_trading.conviction_threshold (data collection — lower bar)
+            #   LIVE  (account_type='live' OR conviction_override set): alpha_edge.min_conviction_score (capital preservation)
+            #
+            # The LIVE pass always passes conviction_override from live_strategies.conviction_min, so
+            # LIVE takes the override branch below. PAPER falls through to paper_trading.* if present;
+            # if those keys are missing the alpha_edge values are the fallback (preserves prior behaviour).
             _ae_config = config.get('alpha_edge', {}) if config else {}
-            min_conviction = _ae_config.get('min_conviction_score', 57)
-            # Crypto-specific threshold — calibrated to what crypto DSL strategies
-            # can realistically achieve (no fundamentals component, cycle adjustments).
-            min_conviction_crypto = _ae_config.get('min_conviction_score_crypto', 68)
+            _is_paper_account = (account_type == 'demo') and (conviction_override is None)
+            if _is_paper_account:
+                _paper_cfg = config.get('paper_trading', {}) if config else {}
+                min_conviction = _paper_cfg.get(
+                    'conviction_threshold',
+                    _ae_config.get('min_conviction_score', 70),
+                )
+                # Crypto-specific paper threshold — calibrated to what crypto DSL strategies
+                # can realistically achieve (no fundamentals component, cycle adjustments).
+                min_conviction_crypto = _paper_cfg.get(
+                    'conviction_threshold_crypto',
+                    _ae_config.get('min_conviction_score_crypto', 62),
+                )
+                logger.info(
+                    f"Conviction thresholds (PAPER): min={min_conviction}, crypto_min={min_conviction_crypto} "
+                    f"(from paper_trading.conviction_threshold; fallback to alpha_edge.* if absent)"
+                )
+            else:
+                min_conviction = _ae_config.get('min_conviction_score', 70)
+                min_conviction_crypto = _ae_config.get('min_conviction_score_crypto', 62)
 
             # Apply per-strategy conviction override (used by live-independent pass
             # to enforce the CIO-approved conviction_min from live_strategies).
