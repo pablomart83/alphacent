@@ -751,3 +751,98 @@ Make **stage-awareness a first-class concept** in the risk framework. Two concre
 - Cons: bigger refactor.
 
 **Recommendation: Option A as a P1 patch (closes G-44/G-45/G-46/G-48/G-50 quickly), then Option B as a P3 cleanup once the patch stabilises.**
+
+
+---
+
+## 20. Final Prioritisation — P0 / P1 / P2 / P3 (post-G-43, lifecycle-aware)
+
+After fixing G-43 (commit `b1378e1`, deployed and verified at 16:22 UTC 2026-05-17), the remaining gaps reorder into four tiers driven by:
+
+- **P0** = real-capital risk that breaks at scale OR actively biases the graduation gate. Must ship before adding LIVE strategy #2.
+- **P1** = lifecycle adaptation + statistical robustness. Ship in the current sprint to unblock data collection and stop misleading the graduation gate.
+- **P2** = quality-of-life / methodology improvements. Schedule for next sprint.
+- **P3** = future cleanup, research-heavy work, or improvements that need data accumulation first.
+
+### P0 — Ship before LIVE strategy #2
+
+These are the gaps that would cause real-capital harm if left in place once the LIVE book grows beyond the current single-strategy state. They are masked today because there is exactly 1 LIVE strategy.
+
+| ID | Component | Fix | Why P0 |
+|---|---|---|---|
+| **G-44** | LIVE risk validation | Call `RiskManager.validate_signal` in LIVE pass | At LIVE strategy #2 there are no concentration caps. No heat cap, no sector cap, no directional balance, no correlation cluster, no circuit breaker — the risk framework is bypassed |
+| **G-45** | LIVE sizing | Run `RiskManager.calculate_position_size` in LIVE pass with `is_live=True`; CIO size becomes the cap | At LIVE strategy #2 there is no vol scaling, no drawdown sizing, no MQS multiplier, no conviction-tier sizing. The CIO size from graduation is fixed for the strategy's lifetime regardless of regime |
+
+Both close together — same architectural change (pass `account_type` through and add an `is_live=True` branch parallel to `is_paper=True`). Estimated effort: 1-2 days including verification.
+
+### P1 — Current sprint (lifecycle + statistical robustness)
+
+| ID | Stage | Component | Fix |
+|---|---|---|---|
+| **G-46** | PAPER | Coordination | `MAX_PER_SYMBOL_PER_TIMEFRAME` 4→8 for PAPER (broader data collection); LIVE stays at 4 |
+| **G-48** | PAPER | Activation | Honour `disable_avg_loss_gate` in `autonomous_strategy_manager.py:2258` |
+| **G-50** | PAPER | Runtime gates | Skip C1 VIX gate and C3 trend gate on PAPER orders (paper Sharpe is currently upward-biased — directly misleads graduation `qualification_ratio`) |
+| **G-01** | RESEARCH | WF | Add `(test_S − train_S) ≤ 1.5` consistency gate to test-dominant path |
+| **G-02** | RESEARCH | WF | Implement Deflated Sharpe Ratio at activation gate (`bootstrap_service.py` + `evaluate_for_activation`) |
+| **G-09** | RESEARCH | Proposer | Reject proposals correlated > 0.65 with active strategies (post-WF dedup) |
+| **G-10** | LIVE+PAPER | Risk config | Wire `position_management.correlation_adjustment.{threshold, reduction_factor}` from YAML (currently hardcoded 0.7 / 0.5 in `risk_manager.py`) |
+| **G-19** | RESEARCH+LIVE | Execution | Real slippage model trained from `trade_journal.slippage` data |
+| **G-35** | All | Observability | Write `cycle_error` stage to `signal_decisions` on every cycle-stage exception |
+
+### P2 — Next sprint
+
+| ID | Stage | Component | Fix |
+|---|---|---|---|
+| **G-57** | LIVE | Frontend / Guard | Surface LIVE-specific risk metrics on Guard → Risk tab: LIVE heat used vs cap (e.g. "12% of 90%"), LIVE symbol exposure per position, vol scalar applied to last LIVE fill, CIO cap vs pipeline size. Backend `/risk/metrics` already scopes by `account_type`; frontend needs a LIVE section alongside the existing DEMO view. Add after G-44/G-45 are verified stable. |
+| **G-03** | RESEARCH | WF | Block bootstrap (replace IID resampling) |
+| **G-04** | RESEARCH | WF | Remove Pass-2 relaxed admit path |
+| **G-05** | LIVE | Sizing | Per-strategy-type vol target (15/14/10/13/12) |
+| **G-06** | PAPER | Sizing | Recompute paper sizing strategy after research |
+| **G-11** | LIVE | Risk | Daily-updated correlation matrix table |
+| **G-14** | All | Regime | Cache regime once per cycle in `cycle_run.metadata` |
+| **G-17** | All | Retirement | `pending_retirement_force_close_days = 14` |
+| **G-20** | LIVE | Execution | Implementation Shortfall TCA in `execution_quality_daily` |
+| **G-21** | All | Execution | Order state machine (no position row until fill confirmed) |
+| **G-22** | All | Execution | `OrderStatus.DEFERRED` instead of FAILED for market-closed |
+| **G-23** | LIVE | Risk | Re-enable VaR with historical simulation (after 90 days history) |
+| **G-24** | LIVE | Risk | Heat cap uses actual SL distance, not 6% proxy |
+| **G-26** | LIVE | Risk | Track CFD margin separately from equity |
+| **G-27** | All | SHORT | Recalibrate SHORT conviction threshold post-May 15 fixes |
+| **G-31** | All | Graduation | Interval-aware SQL HAVING in graduation queue |
+| **G-32** | All | Data | Real-time bar gap detection with auto-refetch |
+| **G-33** | All | Data | Decide on FMP plan upgrade for insider data |
+| **G-36** | All | Analytics | Carhart 4-factor attribution daily |
+| **G-38** | All | Templates | Named-placeholder DSL substitution (Triple EMA fix) |
+| **G-39** | All | Templates | Fix Sector Rotation (11 sectors) + rewrite Pairs Trading |
+| **G-47** | PAPER | Sizing | Raise PAPER symbol cap 5%→10% |
+| **G-49** | PAPER | Frequency limiter | Bypass AE trade-frequency cap on PAPER; keep on LIVE |
+
+### P3 — Future / nice-to-have
+
+| ID | Component | Fix |
+|---|---|---|
+| G-08 | Sizing | Conviction-tier multipliers refit after 200+ trades per bucket |
+| G-12 | Code | Rename two `CorrelationAnalyzer` classes |
+| G-13 | Regime | HMM regime detection as tiebreaker |
+| G-15 | Regime | Per-coin crypto regime |
+| G-16 | Decay | Timeframe-aware recovery rate |
+| G-18 | Retirement | Composite kill score |
+| G-25 | Risk | Tighter drawdown sizing ladder |
+| G-28 | SHORT | Explicit `is_uptrend_short_template()` helper |
+| G-29 | Graduation | Recalibrate qualification ratio caps after 6 months |
+| G-30 | Graduation | Toggle for cross-strategy_id min_trades aggregation |
+| G-37 | Analytics | Sharpe decomposition by source |
+| G-40 | DSL | Support `.shift(N)` in grammar |
+| G-41 | Live | In-code conviction threshold default 73 |
+| G-42 | Live | Reduce live-order cooldown 4h → 1h |
+| G-51 | PAPER | Skip circuit breaker on PAPER |
+| G-52 | PAPER | Closed (already correct via `is_paper` short-circuit) |
+| G-53 | PAPER | Closed (already correct) |
+| G-56 | PAPER | `flat_position_size` as percentage of demo equity |
+
+### Resolved (this session)
+
+| ID | Component | Status |
+|---|---|---|
+| **G-43** | Conviction wiring | **Closed 2026-05-17, commit `b1378e1`**. PAPER signal gen now reads `paper_trading.conviction_threshold` (60/55); LIVE unchanged via `conviction_override`. Verified at runtime. |
+| G-34 | MQS persistence | Resolved May 12 (pre-audit) |

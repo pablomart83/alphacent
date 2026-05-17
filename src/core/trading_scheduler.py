@@ -1384,14 +1384,13 @@ class TradingScheduler:
                                             # for live sizing — live equity is $10K virtual.
                                             _live_account_info = None
                                             try:
-                                                _live_account_info = self._live_order_executor._etoro_client.get_account_info()
+                                                _live_account_info = self._live_order_executor.etoro_client.get_account_info()
                                             except Exception as _acct_err:
                                                 logger.warning(f"Could not fetch live account info: {_acct_err} — using approval.position_size directly")
 
                                             # Enforce live order bounds from yaml
                                             _live_min = float(_live_cfg.get("min_order_size", 200))
                                             _live_max = float(_live_cfg.get("max_order_size", 1500))
-                                            _live_size = max(_live_min, min(_live_max, float(_approval.position_size)))
 
                                             # Conviction gate: live threshold is independent of DEMO threshold.
                                             # Allows DEMO to run looser (more data) while live stays selective.
@@ -1406,7 +1405,77 @@ class TradingScheduler:
                                                 )
                                                 # Skip live fill — DEMO fill already happened above
                                             else:
-                                                # Override risk params with CIO-approved values
+                                                # ── Risk validation (G-44) + sizing pipeline (G-45) ──
+                                                # Fetch live positions for portfolio risk checks.
+                                                _live_pos_orms = session.query(PositionORM).filter(
+                                                    PositionORM.account_type == 'live',
+                                                    PositionORM.closed_at.is_(None),
+                                                ).all()
+                                                _live_pos_dcs = [
+                                                    Position(
+                                                        id=p.id,
+                                                        strategy_id=p.strategy_id,
+                                                        symbol=p.symbol,
+                                                        side=PositionSide(p.side),
+                                                        quantity=p.quantity,
+                                                        entry_price=p.entry_price,
+                                                        current_price=p.current_price,
+                                                        unrealized_pnl=p.unrealized_pnl,
+                                                        realized_pnl=p.realized_pnl,
+                                                        opened_at=p.opened_at,
+                                                        etoro_position_id=p.etoro_position_id,
+                                                        stop_loss=p.stop_loss,
+                                                        take_profit=p.take_profit,
+                                                        closed_at=p.closed_at,
+                                                        pending_closure=getattr(p, 'pending_closure', False),
+                                                    )
+                                                    for p in _live_pos_orms
+                                                ]
+
+                                                _live_size = max(_live_min, min(_live_max, float(_approval.position_size)))
+                                                if self._risk_manager is not None and _live_account_info is not None:
+                                                    try:
+                                                        _live_val = self._risk_manager.validate_signal(
+                                                            signal=signal,
+                                                            account=_live_account_info,
+                                                            positions=_live_pos_dcs,
+                                                            strategy_allocation_pct=2.0,
+                                                            is_paper=False,
+                                                            is_live=True,
+                                                        )
+                                                    except Exception as _val_err:
+                                                        logger.error(
+                                                            f"Live fill routing: validate_signal raised for {_sig_sym}: "
+                                                            f"{_val_err} — skipping",
+                                                            exc_info=True,
+                                                        )
+                                                        continue
+
+                                                    if not _live_val.is_valid:
+                                                        logger.info(
+                                                            f"Live fill routing: validate_signal rejected {_sig_sym}: "
+                                                            f"{_live_val.reason}"
+                                                        )
+                                                        continue
+
+                                                    _cio_cap = float(_approval.position_size)
+                                                    _live_size = max(
+                                                        _live_min,
+                                                        min(_live_max, min(_live_val.position_size, _cio_cap))
+                                                    )
+                                                    logger.info(
+                                                        f"Live fill routing sizing: {_sig_sym} "
+                                                        f"pipeline=${_live_val.position_size:.0f} "
+                                                        f"CIO_cap=${_cio_cap:.0f} "
+                                                        f"→ final=${_live_size:.0f}"
+                                                    )
+                                                else:
+                                                    logger.warning(
+                                                        f"Live fill routing: risk_manager or account_info unavailable "
+                                                        f"for {_sig_sym} — falling back to CIO size"
+                                                    )
+
+                                                # Execute with CIO-approved SL/TP
                                                 _live_order = self._live_order_executor.execute_signal(
                                                     signal=signal,
                                                     position_size=_live_size,
@@ -1974,7 +2043,55 @@ class TradingScheduler:
                         finally:
                             _ls2.close()
 
+                        # ── Fetch live account info and positions once per cycle ──────
+                        # These are passed to validate_signal for every signal in the
+                        # loop. Fetching once avoids repeated API/DB calls per strategy.
+                        # live account info: must use the live eToro client, NOT the
+                        # DEMO client — live equity ($10K virtual) ≠ DEMO equity ($479K).
+                        _live_account_info2 = None
+                        try:
+                            _live_account_info2 = self._live_order_executor.etoro_client.get_account_info()
+                        except Exception as _acct_err2:
+                            logger.warning(
+                                f"Live pass: could not fetch live account info: {_acct_err2} "
+                                f"— validate_signal will use fallback balance"
+                            )
+
+                        # Live open positions (account_type='live') for risk validation.
+                        # Scoped to live account so heat cap, symbol cap, and correlation
+                        # checks only see real-capital positions, not the 70-position DEMO book.
+                        _live_pos_orms2 = session.query(PositionORM).filter(
+                            PositionORM.account_type == 'live',
+                            PositionORM.closed_at.is_(None),
+                        ).all()
+                        _live_position_dcs2 = [
+                            Position(
+                                id=p.id,
+                                strategy_id=p.strategy_id,
+                                symbol=p.symbol,
+                                side=PositionSide(p.side),
+                                quantity=p.quantity,
+                                entry_price=p.entry_price,
+                                current_price=p.current_price,
+                                unrealized_pnl=p.unrealized_pnl,
+                                realized_pnl=p.realized_pnl,
+                                opened_at=p.opened_at,
+                                etoro_position_id=p.etoro_position_id,
+                                stop_loss=p.stop_loss,
+                                take_profit=p.take_profit,
+                                closed_at=p.closed_at,
+                                pending_closure=getattr(p, 'pending_closure', False),
+                            )
+                            for p in _live_pos_orms2
+                        ]
+                        logger.debug(
+                            f"Live pass: {len(_live_position_dcs2)} open live position(s) "
+                            f"loaded for risk validation"
+                        )
+
                         for _appr in _all_approvals:
+                            _live_strat_id = _appr.strategy_id
+                            _live_sym = _appr.symbol
                             _live_strat_id = _appr.strategy_id
                             _live_sym = _appr.symbol
 
@@ -2131,10 +2248,66 @@ class TradingScheduler:
                                         )
                                         continue
 
-                                    # Size and execute
+                                    # ── Risk validation (G-44) + sizing pipeline (G-45) ──────
+                                    # Call validate_signal with is_live=True so the full
+                                    # 11-step sizing pipeline runs with LIVE parameters
+                                    # (symbol_cap=20%, heat_cap=90%, min_order=$200).
+                                    # validate_signal also enforces: kill switch, circuit
+                                    # breaker, correlation adjustment, VaR, exposure limits.
                                     _live_min2 = float(_live_cfg2.get("min_order_size", 200))
                                     _live_max2 = float(_live_cfg2.get("max_order_size", 1500))
-                                    _live_size2 = max(_live_min2, min(_live_max2, float(_appr.position_size)))
+                                    _live_validation2 = None
+                                    if self._risk_manager is not None and _live_account_info2 is not None:
+                                        try:
+                                            _live_validation2 = self._risk_manager.validate_signal(
+                                                signal=_lsig,
+                                                account=_live_account_info2,
+                                                positions=_live_position_dcs2,
+                                                strategy_allocation_pct=2.0,
+                                                is_paper=False,
+                                                is_live=True,
+                                            )
+                                        except Exception as _val_err2:
+                                            logger.error(
+                                                f"Live pass: validate_signal raised for {_live_sym}: "
+                                                f"{_val_err2} — skipping signal",
+                                                exc_info=True,
+                                            )
+                                            continue
+
+                                        if not _live_validation2.is_valid:
+                                            logger.info(
+                                                f"Live pass: validate_signal rejected {_live_sym}: "
+                                                f"{_live_validation2.reason}"
+                                            )
+                                            continue
+
+                                        # Pipeline size is the vol-scaled, drawdown-adjusted,
+                                        # cap-checked size. CIO position_size is the ceiling —
+                                        # the pipeline can size lower but never higher.
+                                        _pipeline_size2 = _live_validation2.position_size
+                                        _cio_cap2 = float(_appr.position_size)
+                                        _live_size2 = max(
+                                            _live_min2,
+                                            min(_live_max2, min(_pipeline_size2, _cio_cap2))
+                                        )
+                                        logger.info(
+                                            f"Live pass sizing: {_live_sym} "
+                                            f"pipeline=${_pipeline_size2:.0f} "
+                                            f"CIO_cap=${_cio_cap2:.0f} "
+                                            f"→ final=${_live_size2:.0f} "
+                                            f"[min={_live_min2:.0f}, max={_live_max2:.0f}]"
+                                        )
+                                    else:
+                                        # Fallback: no risk_manager or no account info —
+                                        # use CIO size clamped to order bounds (old behaviour).
+                                        # This path should never fire in normal operation.
+                                        logger.warning(
+                                            f"Live pass: risk_manager or account_info unavailable "
+                                            f"for {_live_sym} — falling back to CIO size "
+                                            f"(validate_signal bypassed)"
+                                        )
+                                        _live_size2 = max(_live_min2, min(_live_max2, float(_appr.position_size)))
 
                                     try:
                                         _live_order2 = self._live_order_executor.execute_signal(

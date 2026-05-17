@@ -562,6 +562,7 @@ class RiskManager:
         strategy_allocation_pct: float = 1.0,
         portfolio_manager=None,
         is_paper: bool = False,
+        is_live: bool = False,
     ) -> ValidationResult:
         """
         Validate trading signal against risk parameters.
@@ -572,6 +573,8 @@ class RiskManager:
             positions: List of current positions
             strategy_allocation_pct: Percentage of portfolio allocated to this strategy (default: 1.0%)
             portfolio_manager: PortfolioManager instance for correlation analysis (optional)
+            is_paper: True for PAPER/DEMO flat-sizing short-circuit
+            is_live: True for LIVE pass — uses live_trading.* YAML parameters in sizing
 
         Returns:
             ValidationResult with validation outcome and position size
@@ -622,7 +625,7 @@ class RiskManager:
                     logger.debug(f"Could not fetch price history for vol-scaling: {e}")
 
             # Calculate base position size with strategy allocation
-            base_position_size = self.calculate_position_size(signal, account, positions, strategy_allocation_pct, is_paper=is_paper)
+            base_position_size = self.calculate_position_size(signal, account, positions, strategy_allocation_pct, is_paper=is_paper, is_live=is_live)
             
             if base_position_size <= 0:
                 # Use the detailed rejection reason stashed by
@@ -761,6 +764,7 @@ class RiskManager:
         positions: List[Position],
         strategy_allocation_pct: float = 1.0,
         is_paper: bool = False,
+        is_live: bool = False,
     ) -> float:
         """
         Calculate position size using risk-based fixed-fractional sizing.
@@ -780,18 +784,27 @@ class RiskManager:
           3. Volatility scalar: TARGET_VOL / realized_vol (Yang-Zhang / Parkinson / EWMA)
           4. Convert to position size: risk_dollars / stop_loss_pct
           5. Strategy concurrent-position cap (only legitimate early-zero)
-          6. Symbol concentration cap (5% of equity)
+          6. Symbol concentration cap (5% of equity; 20% for LIVE)
           7. Sector soft cap (30% of equity → halve)
-          8. Portfolio heat cap (total open risk-dollars ≤ 8% of equity)
+          8. Portfolio heat cap (total open risk-dollars ≤ 30% of equity; 90% for LIVE)
           9. Drawdown sizing (50%/75% reduction at 5%/10% drawdown)
          10. Available balance cap — re-read live from DB (not stale account object)
-         11. Minimum floor ($2,000) — applied last, after all caps
+         11. Minimum floor ($2,000 DEMO; $200 LIVE) — applied last, after all caps
+
+        Stage behaviour:
+          is_paper=True  → flat $5,000 short-circuit; only symbol cap + balance apply.
+          is_live=True   → full 11-step pipeline with LIVE-specific parameters from
+                           live_trading.* YAML block. CIO position_size cap applied
+                           by the caller (trading_scheduler) after this function returns.
+          default        → full 11-step pipeline with DEMO parameters.
 
         Args:
             signal: Trading signal (may include price_history in metadata)
             account: Account information
             positions: Current open positions
             strategy_allocation_pct: Strategy's portfolio weight % (default 1.0%)
+            is_paper: True for PAPER/DEMO flat-sizing short-circuit
+            is_live: True for LIVE pass — uses live_trading.* YAML parameters
 
         Returns:
             Position size in dollars, or 0.0 only on a hard limit.
@@ -833,7 +846,9 @@ class RiskManager:
             equity = account.balance
 
         MINIMUM_ORDER_SIZE = 2000.0
-        if available_balance < MINIMUM_ORDER_SIZE:
+        if available_balance < MINIMUM_ORDER_SIZE and not is_live:
+            # For LIVE, the minimum is $200 (live_trading.min_order_size) — checked
+            # after the LIVE parameter block below loads the correct value.
             logger.warning(
                 f"Insufficient balance for {symbol}: ${available_balance:.0f} available "
                 f"(minimum order ${MINIMUM_ORDER_SIZE:.0f}) — skipping"
@@ -848,6 +863,57 @@ class RiskManager:
         # Step 11 minimum-floor bump is suppressed and we return 0 instead.
         # Bumping a penalty-reduced size back to $5K defeats the penalty.
         penalty_applied = False
+
+        # ── LIVE-mode parameter override ─────────────────────────────────────
+        # When is_live=True, load LIVE-specific risk parameters from
+        # live_trading.* YAML block. These override the DEMO hardcoded values
+        # used in Steps 1, 6, 8, and 11. The full 11-step pipeline still runs —
+        # only the parameter values change.
+        #
+        # Key differences vs DEMO:
+        #   base_risk_pct:      0.6% (same — risk per trade is the same fraction)
+        #   symbol_cap_pct:     20% of equity (vs 5% DEMO) — LIVE book is $10K
+        #                       virtual; 20% = $2K cap, above the CIO $1K size
+        #   portfolio_heat_cap: 90% (vs 30% DEMO) — permissive; CIO cap and
+        #                       symbol cap are the binding constraints on a small book
+        #   min_order_size:     $200 (vs $2,000 DEMO) — LIVE orders are small
+        #
+        # The CIO position_size cap (live_strategies.position_size) is applied
+        # by the caller (trading_scheduler) AFTER this function returns, so the
+        # pipeline can size lower than the CIO cap but never higher.
+        _live_base_risk_pct = 0.006
+        _live_symbol_cap_pct = 0.20
+        _live_heat_cap_pct = 0.90
+        _live_min_order_size = 200.0
+        if is_live:
+            try:
+                import yaml as _yaml_live
+                from pathlib import Path as _Path_live
+                _cfg_live = {}
+                _cfg_path_live = _Path_live("config/autonomous_trading.yaml")
+                if _cfg_path_live.exists():
+                    with open(_cfg_path_live, "r") as _f_live:
+                        _cfg_live = _yaml_live.safe_load(_f_live) or {}
+                _lt = _cfg_live.get("live_trading", {})
+                _live_base_risk_pct = float(_lt.get("base_risk_pct", 0.006))
+                _live_symbol_cap_pct = float(_lt.get("symbol_cap_pct", 0.20))
+                _live_heat_cap_pct = float(_lt.get("portfolio_heat_cap", 0.90))
+                _live_min_order_size = float(_lt.get("min_order_size", 200.0))
+            except Exception as _live_cfg_err:
+                logger.debug(f"Could not load live_trading config for sizing: {_live_cfg_err} — using defaults")
+
+            # For LIVE, the minimum order size check uses the LIVE floor, not $2,000.
+            # Re-check balance against the LIVE minimum.
+            if available_balance < _live_min_order_size:
+                logger.warning(
+                    f"Insufficient balance for LIVE {symbol}: ${available_balance:.0f} available "
+                    f"(LIVE minimum order ${_live_min_order_size:.0f}) — skipping"
+                )
+                self._last_sizing_reason = (
+                    f"live_insufficient_balance (${available_balance:.0f} < "
+                    f"${_live_min_order_size:.0f} minimum)"
+                )
+                return 0.0
 
         # ── Paper-mode flat sizing ───────────────────────────────────────────
         # When is_paper=True, bypass all scaling gates (vol, drawdown, conviction
@@ -926,7 +992,8 @@ class RiskManager:
         # a concentrated 40-60 position book deploying ~$400K of $470K equity.
         # (Was 0.2% — produced $1,567 raw → bumped to $2,000 minimum → avg $3,457.
         #  That's 130 positions × $3.5K = noise trading, not systematic alpha.)
-        BASE_RISK_PCT = 0.006  # 0.6% of equity per trade
+        # For LIVE: same 0.6% fraction but against live equity ($10K virtual).
+        BASE_RISK_PCT = _live_base_risk_pct if is_live else 0.006  # 0.6% of equity per trade
 
         # ── Step 2: Confidence scalar ────────────────────────────────────────
         # Scales risk linearly from 0.5× at confidence floor to 1.0× at max.
@@ -1041,7 +1108,9 @@ class RiskManager:
             return 0.0
 
         # ── Step 6: Symbol concentration cap ────────────────────────────────
-        # No single symbol > 5% of equity across all strategies.
+        # No single symbol > 5% of equity across all strategies (DEMO).
+        # LIVE: 20% of equity (live_trading.symbol_cap_pct) — at $10K virtual
+        # equity this is $2K, which is above the typical CIO cap of $1K.
         # Raised from 3% on 2026-05-02 after audit — 3% was too tight given
         # typical per-trade size ($5-10K) and the 50+ position book. At 5% of
         # ~$480K equity the cap is ~$24K per symbol, which lets a 2-3 position
@@ -1053,7 +1122,7 @@ class RiskManager:
         # watchlist symbol during market-closed hours each sized to the
         # full 5% budget (each saw filled_exposure=0) and combined to
         # breach the cap on market open. See `_get_pending_entry_exposure`.
-        symbol_cap = equity * 0.05
+        symbol_cap = equity * (_live_symbol_cap_pct if is_live else 0.05)
         filled_symbol_exposure = sum(
             self._get_position_value(pos)
             for pos in positions
@@ -1111,7 +1180,11 @@ class RiskManager:
         # At 30%: $141K max heat allows ~50 positions × $8K × 6% = $24K — well within.
         # This is still conservative: a 30% heat cap means worst-case drawdown if
         # every single stop fires simultaneously is 30% of equity.
-        MAX_PORTFOLIO_HEAT_PCT = 0.30
+        #
+        # LIVE: 90% heat cap (live_trading.portfolio_heat_cap). The LIVE book is
+        # $10K virtual / $1K real. With 1-5 LIVE strategies the CIO cap and symbol
+        # cap are the binding constraints; the heat cap is a backstop only.
+        MAX_PORTFOLIO_HEAT_PCT = _live_heat_cap_pct if is_live else 0.30
         max_heat = equity * MAX_PORTFOLIO_HEAT_PCT
         current_heat = sum(
             self._get_position_value(pos) * 0.06  # assume 6% SL as proxy
@@ -1304,19 +1377,14 @@ class RiskManager:
             logger.debug(f"Conviction-tier sizing check failed (non-fatal): {_ct_err}")
 
         # ── Step 11: Minimum floor — applied last ────────────────────────────
-        # If caps reduced the size below $2K but no penalty fired, bump to minimum.
+        # If caps reduced the size below the minimum but no penalty fired, bump to minimum.
         # If ANY risk-reducing penalty (drawdown sizing, vol scale <1.0, loser
         # penalty) fired, DO NOT bump — bumping would defeat the penalty. Return
         # 0 instead so the trade is skipped.
         #
-        # Minimum lowered from $5,000 → $2,000 (2026-05-06).
-        # Rationale: at $488K equity, $5K minimum = 1.02% per trade — too high
-        # for vol-penalised signals on high-volatility instruments (crypto, leveraged
-        # ETFs) where the vol scalar legitimately reduces size to $2-4K. $2K = 0.41%
-        # of equity, still meaningful and above eToro's $10 minimum. The penalty
-        # logic is preserved — we just lower the floor so valid penalised signals
-        # aren't killed entirely when the vol scalar does its job correctly.
-        MINIMUM_ORDER_SIZE = 2000.0
+        # DEMO minimum: $2,000 (lowered from $5,000 on 2026-05-06).
+        # LIVE minimum: $200 (live_trading.min_order_size) — LIVE orders are small.
+        MINIMUM_ORDER_SIZE = _live_min_order_size if is_live else 2000.0
         if position_size <= 0:
             # Earlier caps brought size to 0 without explicit early return
             # (shouldn't happen in practice but defensive). Reason was
