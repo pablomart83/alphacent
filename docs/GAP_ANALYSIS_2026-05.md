@@ -107,14 +107,15 @@ The gaps are grouped by component cluster. The end of this document has a **prio
 
 ## 3. Correlation Management
 
-### G-09 — Correlation is not consulted at proposal time
-- **Component**: Proposer / correlation
+### G-09 — Correlation dedup post-WF against LIVE strategies only
+- **Component**: LIVE / correlation
 - **Current state**: Correlation is checked at sizing time and activation time, never at proposal time. The `similarity_detection` block in YAML is gated off (`enabled: false`).
-- **Industry standard**: Diversification at the proposal stage is cheaper than fixing it at sizing time. Standard practice (Narang, *Inside the Black Box*) is to maintain a per-strategy correlation matrix and reject new proposals whose backtest returns correlate > 0.6 with an active strategy.
-- **Impact**: **High** — current portfolio has many "different rules, same bet" overlaps. Ranger Trader Trend on NVDA and 4H EMA Ribbon on NVDA are 0.85+ correlated despite being different templates.
-- **Effort**: **Medium** — extend `_match_templates_to_symbols` to dedupe by simulated-returns correlation against active strategies.
+- **Industry standard**: Diversification matters for real capital. Standard practice (Narang, *Inside the Black Box*) is to maintain a per-strategy correlation matrix and reject new LIVE entries whose backtest returns correlate > 0.6 with an existing LIVE strategy.
+- **Lifecycle classification**: **LIVE only.** PAPER is a data-collection sandbox — correlation between paper strategies is irrelevant and deduping would reduce the breadth of data we collect for the graduation gate. Applying this to PAPER would be the wrong direction entirely.
+- **Impact**: **High for LIVE** — once there are 5+ LIVE strategies, "different rules, same bet" overlaps concentrate real-capital risk. Ranger Trader Trend on NVDA and 4H EMA Ribbon on NVDA are 0.85+ correlated despite being different templates.
+- **Effort**: **Medium** — check correlation at the graduation approval step, not at proposal time.
 - **Priority**: **P1**.
-- **Proposed fix**: After WF validation, compute backtest-returns correlation between each new validated strategy and active strategies. Reject (or de-rank) any new strategy with `correlation > 0.65` to an existing active. Add a `signal_decisions` row with stage `correlation_dedup`.
+- **Proposed fix**: In `graduation_gate.approve_graduation`, before creating the `live_strategies` row, compute backtest-returns correlation between the candidate and all existing LIVE strategies. Reject if `correlation > 0.65` to any existing LIVE strategy. Add a `signal_decisions` row with stage `correlation_dedup`. Do NOT apply at proposal/WF time — that would incorrectly restrict PAPER breadth.
 
 ### G-10 — `position_management.correlation_adjustment.*` is dead config
 - **Component**: Risk / config integrity
@@ -620,6 +621,7 @@ This section catalogues the lifecycle adaptation gaps. Many of these supersede o
 - **Component**: Activation / paper
 - **Current state**: `autonomous_strategy_manager.py:2258` rejects strategies with `avg_loss > N×SL` and 20+ trades. Has no `is_paper` short-circuit. PAPER strategies hit this gate the same as LIVE candidates.
 - **Industry standard**: Activation gates that reject based on bad trade outcomes prevent data collection on those exact strategies. PAPER should pass through.
+- **Lifecycle classification**: **Bypass for PAPER, keep for LIVE.** The gate is a capital-preservation tool — it makes sense on real money, actively hurts data collection on demo. The `disable_avg_loss_gate` flag already exists in `paper_trading.activation_thresholds` but is not wired to the gate.
 - **Impact**: **Medium** — strategies that would have been valuable data points get killed before reaching PAPER.
 - **Effort**: **Low**.
 - **Priority**: **P1**.
@@ -705,11 +707,11 @@ Re-prioritised with the lifecycle lens. The structural realisation in §17 reord
 | **G-45** | LIVE | Sizing | Run `RiskManager.calculate_position_size` in LIVE pass with `is_live=True`; CIO size becomes the cap, not the absolute |
 | **G-43** | PAPER | Conviction wiring | Branch signal-time conviction threshold by `account_type` to honour `paper_trading.conviction_threshold = 60` |
 | **G-46** | PAPER | Coordination | `MAX_PER_SYMBOL_PER_TIMEFRAME` 4→8 for PAPER (broader data collection) |
-| **G-48** | PAPER | Activation | Honour `disable_avg_loss_gate` in `autonomous_strategy_manager.py:2258` |
+| **G-48** | PAPER | Activation | Honour `disable_avg_loss_gate` in `autonomous_strategy_manager.py:2258` — bypass for PAPER, keep for LIVE |
 | **G-50** | PAPER | Runtime gates | Skip C1 VIX gate and C3 trend gate on PAPER orders (don't bias paper Sharpe) |
 | **G-01** | RESEARCH | WF | Add `(test_S − train_S) ≤ 1.5` consistency gate to test-dominant path |
 | **G-02** | RESEARCH | WF | Implement Deflated Sharpe Ratio at activation gate |
-| **G-09** | RESEARCH | Proposer | Reject proposals correlated > 0.65 with active strategies (post-WF dedup) |
+| **G-09** | LIVE | Graduation | Correlation dedup at graduation approval — reject candidate if correlation > 0.65 with any existing LIVE strategy. PAPER proposals unaffected. |
 | **G-10** | LIVE+PAPER | Risk config | Wire `position_management.correlation_adjustment.{threshold, reduction_factor}` from YAML |
 | **G-19** | RESEARCH+LIVE | Execution | Real slippage model trained from `trade_journal.slippage` |
 | **G-35** | All | Observability | Write `cycle_error` stage to `signal_decisions` |
@@ -784,12 +786,23 @@ Both close together — same architectural change (pass `account_type` through a
 | **G-50** | PAPER | Runtime gates | Skip C1 VIX gate and C3 trend gate on PAPER orders (paper Sharpe is currently upward-biased — directly misleads graduation `qualification_ratio`) |
 | **G-01** | RESEARCH | WF | Add `(test_S − train_S) ≤ 1.5` consistency gate to test-dominant path |
 | **G-02** | RESEARCH | WF | Implement Deflated Sharpe Ratio at activation gate (`bootstrap_service.py` + `evaluate_for_activation`) |
-| **G-09** | RESEARCH | Proposer | Reject proposals correlated > 0.65 with active strategies (post-WF dedup) |
+| **G-09** | LIVE | Graduation | Correlation dedup at graduation approval — reject candidate if correlation > 0.65 with any existing LIVE strategy. PAPER proposals unaffected. |
 | **G-10** | LIVE+PAPER | Risk config | Wire `position_management.correlation_adjustment.{threshold, reduction_factor}` from YAML (currently hardcoded 0.7 / 0.5 in `risk_manager.py`) |
 | **G-19** | RESEARCH+LIVE | Execution | Real slippage model trained from `trade_journal.slippage` data |
 | **G-35** | All | Observability | Write `cycle_error` stage to `signal_decisions` on every cycle-stage exception |
 
 ### P2 — Next sprint
+
+Frontend surfaces for P1 backend changes (implement alongside or immediately after each P1 item):
+
+| P1 backend gap | Frontend surface needed |
+|---|---|
+| G-44/G-45 (LIVE risk framework) | Guard → Risk tab: LIVE heat used vs cap, vol scalar on last fill, CIO cap vs pipeline size (G-57) |
+| G-46 (MAX_PER_SYMBOL_PER_TIMEFRAME PAPER→8) | Library: show per-symbol strategy count by timeframe bucket |
+| G-48 (avg-loss gate bypass PAPER) | Guard → Gates tab: show which activation gates are bypassed for PAPER vs active for LIVE |
+| G-50 (skip C1/C3 on PAPER) | Guard → Gates tab: show C1/C3 gate status per account_type |
+| G-09 (correlation dedup at graduation) | Graduation queue UI: show correlation score vs existing LIVE strategies for each candidate |
+| G-10 (wire correlation_adjustment config) | Settings → Risk: confirm correlation threshold/reduction_factor fields are live (not dead) |
 
 | ID | Stage | Component | Fix |
 |---|---|---|---|
