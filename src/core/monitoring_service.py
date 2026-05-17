@@ -3111,7 +3111,9 @@ class MonitoringService:
                         exit_amount = exit_quantity * pos.current_price  # dollars for eToro
 
                         # Submit partial close order
-                        side = OrderSide.SELL if pos.side == PositionSide.LONG else OrderSide.BUY
+                        # side stores the POSITION direction (BUY=was LONG, SELL=was SHORT)
+                        # NOT the close action direction. eToro close API has no side concept.
+                        side = OrderSide.BUY if pos.side == PositionSide.LONG else OrderSide.SELL
                         order_id = str(uuid.uuid4())
 
                         order_orm = OrderORM(
@@ -3344,7 +3346,11 @@ class MonitoringService:
         )
         from src.api.etoro_client import EToroAPIError, CircuitBreakerOpen
 
-        side = OrderSide.SELL if pos.side == PositionSide.LONG else OrderSide.BUY
+        # side stores the POSITION direction (BUY=was LONG, SELL=was SHORT)
+        # NOT the close action direction. eToro close API has no side concept —
+        # you close by position ID only. Storing position direction here makes
+        # close orders consistent with entry orders (BUY=LONG, SELL=SHORT).
+        side = OrderSide.BUY if pos.side == PositionSide.LONG else OrderSide.SELL
         order_id = str(uuid.uuid4())
 
         # Create order record in DB for tracking
@@ -5868,7 +5874,8 @@ class MonitoringService:
                     for pos in open_positions:
                         pnl_pct = 0
                         if pos.entry_price and pos.entry_price > 0 and pos.current_price:
-                            if pos.side == "BUY":
+                            _pos_side_str = pos.side.value if hasattr(pos.side, 'value') else str(pos.side)
+                            if _pos_side_str.upper() in ('BUY', 'LONG'):
                                 pnl_pct = ((pos.current_price - pos.entry_price) / pos.entry_price) * 100
                             else:
                                 pnl_pct = ((pos.entry_price - pos.current_price) / pos.entry_price) * 100

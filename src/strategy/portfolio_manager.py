@@ -2123,10 +2123,12 @@ class PortfolioManager:
                 try:
                     if self.etoro_client:
                         # Direct close via eToro API
+                        # side stores the POSITION direction (BUY=was LONG, SELL=was SHORT)
+                        # NOT the close action direction. eToro close API has no side concept.
                         side = (
-                            OrderSide.SELL
+                            OrderSide.BUY
                             if position.side == PositionSide.LONG
-                            else OrderSide.BUY
+                            else OrderSide.SELL
                         )
                         order_id = str(uuid.uuid4())
 

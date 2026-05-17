@@ -709,6 +709,7 @@ class IntelAnalyst:
                 SELECT strategy_id, symbol, side, COUNT(*) as count
                 FROM orders WHERE submitted_at > NOW() - INTERVAL '1 hour'
                 AND account_type = 'demo'
+                AND (order_action = 'entry' OR order_action IS NULL)
                 GROUP BY strategy_id, symbol, side HAVING COUNT(*) > 3
             """)).fetchall()
         finally:

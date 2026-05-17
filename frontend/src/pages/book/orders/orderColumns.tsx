@@ -40,10 +40,15 @@ export function slippageBps(row: OrderRow): number | null {
     row.side
   ) {
     const raw = (row.filled_price - row.expected_price) / row.expected_price
-    // SELL slippage is inverted — filling below expected is adverse for LONG,
-    // filling above expected is adverse for SHORT. We surface signed bps
-    // where positive = adverse cost to the trader.
-    const sign = row.side === 'SELL' ? -1 : 1
+    const action = row.order_action || ''
+    const isClose = action === 'close' || action === 'retirement'
+    // For entry orders: BUY=LONG entry, adverse = filled above expected → sign +1
+    //                   SELL=SHORT entry, adverse = filled below expected → sign -1
+    // For close orders: BUY=closed LONG, adverse = filled below expected → sign -1
+    //                   SELL=closed SHORT, adverse = filled above expected → sign +1
+    // In both cases: close orders invert the sign vs entry orders.
+    const isLong = row.side === 'BUY'
+    const sign = isClose ? (isLong ? -1 : 1) : (isLong ? 1 : -1)
     return raw * sign * 10_000
   }
   return null
@@ -131,11 +136,26 @@ export function buildOrderColumns(actions: OrderColumnActions): ColumnDef<OrderR
       header: 'Side',
       size: 60,
       accessorFn: (r) => r.side,
-      cell: ({ row }) => (
-        <Badge variant={row.original.side === 'SELL' ? 'error' : 'success'} size="sm">
-          {row.original.side}
-        </Badge>
-      ),
+      cell: ({ row }) => {
+        const side = row.original.side
+        const action = row.original.order_action || ''
+        // For close/retirement orders: BUY means "closed a LONG", SELL means "closed a SHORT"
+        // For entry orders: BUY = opened LONG, SELL = opened SHORT
+        // Either way: BUY → LONG (green), SELL → SHORT (red)
+        const isLong = side === 'BUY'
+        const label = isLong ? 'LONG' : 'SHORT'
+        const isClose = action === 'close' || action === 'retirement'
+        return (
+          <Badge
+            variant={isLong ? 'success' : 'error'}
+            size="sm"
+            className={isClose ? 'opacity-60' : undefined}
+            title={isClose ? `Closed a ${label} position` : `Opened ${label}`}
+          >
+            {label}
+          </Badge>
+        )
+      },
     },
     {
       id: 'action',

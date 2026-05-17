@@ -2165,11 +2165,14 @@ class OrderMonitor:
                     if is_phantom and db_pos.strategy_id:
                         try:
                             from src.models.enums import OrderStatus as _OrderStatus, StrategyStatus as _StrategyStatus
-                            # Fail the associated order
+                            # Fail the associated order — only entry orders, never close orders.
+                            # A close order being the most recent FILLED order is normal and
+                            # must not be marked FAILED by phantom cleanup.
                             recent_order = session.query(OrderORM).filter(
                                 OrderORM.strategy_id == db_pos.strategy_id,
                                 OrderORM.symbol == db_pos.symbol,
                                 OrderORM.status == _OrderStatus.FILLED,
+                                OrderORM.order_action.in_(['entry', None]),
                             ).order_by(OrderORM.submitted_at.desc()).first()
                             if recent_order:
                                 recent_order.status = _OrderStatus.FAILED
