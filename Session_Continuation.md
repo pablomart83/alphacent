@@ -69,9 +69,18 @@ Conversely, PAPER inherits gates that hurt data collection:
 
 ### P0/P1/P2/P3 prioritisation (full list in `docs/GAP_ANALYSIS_2026-05.md` §20)
 
-**P0 — CLOSED (both gaps resolved 2026-05-17, commit `8d07eef`):**
-- ~~G-44: Call `RiskManager.validate_signal` in LIVE pass~~ ✅
-- ~~G-45: Run `RiskManager.calculate_position_size` in LIVE pass with `is_live=True`; CIO size becomes the cap, not the absolute~~ ✅
+**P1 — CLOSED (batch 1 deployed 2026-05-17, commit `c158650`):**
+- ~~G-46: MAX_PER_SYMBOL_PER_TIMEFRAME 4→8 for PAPER~~ ✅
+- ~~G-48: avg-loss gate bypass for PAPER~~ ✅
+- ~~G-50: Skip C1/C3 gates on PAPER orders~~ ✅
+- ~~G-10: Wire correlation_adjustment config from YAML~~ ✅
+- ~~G-35: Write cycle_error to signal_decisions~~ ✅
+
+**P1 — OPEN (next session):**
+- G-01: WF test-dominant consistency gate
+- G-02: Deflated Sharpe Ratio at activation
+- G-09: Correlation dedup at graduation approval (LIVE only)
+- G-19: Real slippage model from trade_journal data
 
 **P1 — current sprint (lifecycle + statistical robustness):**
 - G-46: PAPER `MAX_PER_SYMBOL_PER_TIMEFRAME` 4→8
@@ -293,7 +302,7 @@ Key hardcoded limits found:
 - **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, current 396.82, +$16.63, SL 365.82 ✅
 - **PAPER conviction threshold:** 60 (crypto 55) — **NEW: G-43 fix deployed today**, now reading `paper_trading.conviction_threshold`
 - **LIVE conviction threshold:** 73 (crypto 67) via `live_strategies.conviction_min`
-- **Latest commit:** `8d07eef` (G-44/G-45 — LIVE risk framework wired)
+- **Latest commit:** `c158650` (P1 batch 1: G-46, G-48, G-50, G-10, G-35)
 
 ---
 
