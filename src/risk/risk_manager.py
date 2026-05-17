@@ -1754,7 +1754,25 @@ class RiskManager:
         if same_symbol_positions:
             # Same symbol = correlation 1.0
             correlation = 1.0
-            adjusted_size = base_position_size * (1 - correlation * 0.5)
+            # G-10 (2026-05-17): read reduction_factor from YAML instead of hardcoding 0.5.
+            # position_management.correlation_adjustment.reduction_factor in autonomous_trading.yaml.
+            _corr_reduction = 0.5
+            try:
+                import yaml as _yaml_corr
+                from pathlib import Path as _Path_corr
+                _cfg_corr = {}
+                _cfg_path_corr = _Path_corr("config/autonomous_trading.yaml")
+                if _cfg_path_corr.exists():
+                    with open(_cfg_path_corr, "r") as _f_corr:
+                        _cfg_corr = _yaml_corr.safe_load(_f_corr) or {}
+                _corr_reduction = float(
+                    _cfg_corr.get("position_management", {})
+                    .get("correlation_adjustment", {})
+                    .get("reduction_factor", 0.5)
+                )
+            except Exception:
+                pass
+            adjusted_size = base_position_size * (1 - correlation * _corr_reduction)
             
             reason = (
                 f"Reduced to {adjusted_size:.2f} (from {base_position_size:.2f}) "
@@ -1763,7 +1781,7 @@ class RiskManager:
             
             logger.info(
                 f"Correlation-adjusted position sizing for {signal.symbol}: "
-                f"${base_position_size:.2f} → ${adjusted_size:.2f} (50% reduction). "
+                f"${base_position_size:.2f} → ${adjusted_size:.2f} ({(1-_corr_reduction):.0%} of base). "
                 f"Reason: {reason}"
             )
             
@@ -1772,10 +1790,27 @@ class RiskManager:
         # Check for strategy correlation if PortfolioManager is available
         if portfolio_manager is not None:
             try:
+                # G-10 (2026-05-17): read threshold and reduction_factor from YAML.
+                _corr_threshold = 0.7
+                _corr_reduction2 = 0.5
+                try:
+                    import yaml as _yaml_corr2
+                    from pathlib import Path as _Path_corr2
+                    _cfg_corr2 = {}
+                    _cfg_path_corr2 = _Path_corr2("config/autonomous_trading.yaml")
+                    if _cfg_path_corr2.exists():
+                        with open(_cfg_path_corr2, "r") as _f_corr2:
+                            _cfg_corr2 = _yaml_corr2.safe_load(_f_corr2) or {}
+                    _corr_adj = _cfg_corr2.get("position_management", {}).get("correlation_adjustment", {})
+                    _corr_threshold = float(_corr_adj.get("threshold", 0.7))
+                    _corr_reduction2 = float(_corr_adj.get("reduction_factor", 0.5))
+                except Exception:
+                    pass
+
                 correlated_positions = portfolio_manager.get_correlated_positions(
                     new_trade_symbol=signal.symbol,
                     new_trade_strategy_id=signal.strategy_id,
-                    correlation_threshold=0.7
+                    correlation_threshold=_corr_threshold,
                 )
 
                 if correlated_positions:
@@ -1783,7 +1818,7 @@ class RiskManager:
                     max_correlation = max(pos['correlation'] for pos in correlated_positions)
                     
                     # Apply adjustment formula
-                    adjusted_size = base_position_size * (1 - max_correlation * 0.5)
+                    adjusted_size = base_position_size * (1 - max_correlation * _corr_reduction2)
                     
                     correlated_symbols = [pos['symbol'] for pos in correlated_positions]
                     reason = (
@@ -1795,7 +1830,7 @@ class RiskManager:
                     logger.info(
                         f"Correlation-adjusted position sizing for {signal.symbol}: "
                         f"${base_position_size:.2f} → ${adjusted_size:.2f} "
-                        f"({(1 - max_correlation * 0.5):.1%} of base). "
+                        f"({(1 - max_correlation * _corr_reduction2):.1%} of base). "
                         f"Reason: {reason}"
                     )
                     

@@ -1481,6 +1481,7 @@ class TradingScheduler:
                                                     position_size=_live_size,
                                                     stop_loss_pct=_approval.sl_pct,
                                                     take_profit_pct=_approval.tp_pct,
+                                                    account_type='live',
                                                 )
                                                 # Persist live order with account_type='live'
                                                 _live_order_orm = OrderORM(
@@ -2315,6 +2316,7 @@ class TradingScheduler:
                                             position_size=_live_size2,
                                             stop_loss_pct=_appr.sl_pct,
                                             take_profit_pct=_appr.tp_pct,
+                                            account_type='live',
                                         )
                                         _live_order_orm2 = OrderORM(
                                             id=_live_order2.id,
@@ -2636,6 +2638,19 @@ class TradingScheduler:
             except (RuntimeError, NameError):
                 pass
             logger.error(f"Error in trading cycle: {e}", exc_info=True)
+            # G-35: write cycle_error to signal_decisions so the observability
+            # funnel surfaces cycle-level failures, not just per-signal rejections.
+            # Fire-and-forget — never let analytics break the error handler.
+            try:
+                from src.analytics.decision_log import record_decision as _rec_cycle_err
+                _rec_cycle_err(
+                    stage="cycle_error",
+                    decision="error",
+                    reason=f"{type(e).__name__}: {str(e)[:400]}",
+                    metadata={"exc_type": type(e).__name__},
+                )
+            except Exception:
+                pass
 
     def _coordinate_signals(
         self,
@@ -2799,9 +2814,15 @@ class TradingScheduler:
         # 1d BTC LONG, 4h BTC LONG, and 1h BTC LONG are different trades —
         # they capture different market dynamics and shouldn't compete for slots.
         # Buckets: "1d" (daily), "4h" (4-hour), "1h" (hourly/intraday)
-        # Set to 4 — dollar exposure is bounded by the 5% symbol cap regardless,
-        # so 4 per timeframe (max 12 total across 1d/4h/1h) is safe.
-        MAX_PER_SYMBOL_PER_TIMEFRAME = 4
+        #
+        # G-46 (2026-05-17): raised 4→8 for PAPER.
+        # This function is only called for the PAPER/DEMO cycle — LIVE strategies
+        # run their own independent pass and never reach here. The old limit of 4
+        # was a capital-concentration guard that makes no sense on demo capital.
+        # Raising to 8 doubles the breadth of paper data per symbol per timeframe,
+        # which directly accelerates graduation pipeline fill.
+        # LIVE equivalent (4) is enforced separately in the live pass duplicate guard.
+        MAX_PER_SYMBOL_PER_TIMEFRAME = 8
         
         # Correlation analyzer disabled — same-symbol dedup handles concentration risk.
         # The pairwise correlation calculations were running hundreds of times per cycle

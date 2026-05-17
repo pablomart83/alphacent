@@ -2264,7 +2264,31 @@ class AutonomousStrategyManager:
                 # don't — a news event can gap through a stop in a single bar, producing
                 # avg losses of 3-4× the stop even on a well-designed strategy.
                 # 1h: 5× | 4h: 4× | 1d: 3× (daily bars have the least gap risk)
-                if (strategy.backtest_results and strategy.risk_params
+                #
+                # G-48 (2026-05-17): bypass for PAPER when disable_avg_loss_gate=true.
+                # This gate is a capital-preservation tool — it makes sense for LIVE
+                # but actively prevents data collection on PAPER. The flag is already
+                # wired in portfolio_manager.evaluate_for_activation; this gate must
+                # honour the same flag.
+                _skip_avg_loss_gate = False
+                try:
+                    import yaml as _yaml_alg
+                    from pathlib import Path as _Path_alg
+                    _cfg_alg = {}
+                    _cfg_path_alg = _Path_alg("config/autonomous_trading.yaml")
+                    if _cfg_path_alg.exists():
+                        with open(_cfg_path_alg, "r") as _f_alg:
+                            _cfg_alg = _yaml_alg.safe_load(_f_alg) or {}
+                    _skip_avg_loss_gate = bool(
+                        _cfg_alg.get("paper_trading", {})
+                        .get("activation_thresholds", {})
+                        .get("disable_avg_loss_gate", False)
+                    )
+                except Exception:
+                    pass
+
+                if (not _skip_avg_loss_gate
+                        and strategy.backtest_results and strategy.risk_params
                         and strategy.risk_params.stop_loss_pct > 0
                         and strategy.backtest_results.avg_loss != 0
                         and strategy.backtest_results.total_trades >= 20):

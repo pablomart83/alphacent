@@ -108,7 +108,8 @@ class OrderExecutor:
         signal: TradingSignal,
         position_size: float,
         stop_loss_pct: Optional[float] = None,
-        take_profit_pct: Optional[float] = None
+        take_profit_pct: Optional[float] = None,
+        account_type: str = 'demo',
     ) -> Order:
         """Create and submit order from validated signal.
         
@@ -117,6 +118,9 @@ class OrderExecutor:
             position_size: Position size (quantity or dollar amount)
             stop_loss_pct: Stop loss percentage (optional)
             take_profit_pct: Take profit percentage (optional)
+            account_type: 'demo' or 'live'. C1/C3 gates only apply to 'live' —
+                          PAPER (demo) skips them to avoid biasing paper Sharpe
+                          upward and blocking data collection (G-50, 2026-05-17).
             
         Returns:
             Created order
@@ -139,7 +143,12 @@ class OrderExecutor:
         # Crypto 24/7 spikes frequently so excluded. Fail-open if VIX
         # unavailable — don't block valid orders on data issues.
         # Existing LONG positions continue to exit normally.
-        if signal.action == SignalAction.ENTER_LONG:
+        #
+        # G-50 (2026-05-17): LIVE only. PAPER skips C1 — blocking a signal
+        # during a VIX spike means we don't collect the data point we need to
+        # learn from, and it biases paper Sharpe upward (no losses on blocked
+        # setups), which misleads the graduation qualification_ratio.
+        if signal.action == SignalAction.ENTER_LONG and account_type == 'live':
             try:
                 vix_gate_reason = self._check_vix_entry_gate(normalized_symbol)
                 if vix_gate_reason:
@@ -161,19 +170,24 @@ class OrderExecutor:
         # higher-timeframe direction. TSLA shorts in April fired at 355/358
         # after a 15%+ drop — bouncing off double-bottom. Catches that class
         # of losing setup. Fail-open on data errors.
-        try:
-            gate_reason = self._check_trend_consistency_gate(normalized_symbol, signal.action)
-            if gate_reason:
-                self._log_decision(signal, normalized_symbol, stage="gate_blocked",
-                                   decision="blocked", reason=f"trend_consistency: {gate_reason}")
-                raise OrderExecutionError(
-                    f"Trend-consistency gate blocked {signal.action.value} for "
-                    f"{normalized_symbol}: {gate_reason}. Signal discarded."
-                )
-        except OrderExecutionError:
-            raise
-        except Exception as _tc_err:
-            logger.debug(f"Trend-consistency gate skipped for {normalized_symbol}: {_tc_err}")
+        #
+        # G-50 (2026-05-17): LIVE only. PAPER skips C3 — same rationale as C1.
+        # Blocking counter-trend setups on PAPER biases paper Sharpe upward and
+        # removes exactly the data points we need to learn from.
+        if account_type == 'live':
+            try:
+                gate_reason = self._check_trend_consistency_gate(normalized_symbol, signal.action)
+                if gate_reason:
+                    self._log_decision(signal, normalized_symbol, stage="gate_blocked",
+                                       decision="blocked", reason=f"trend_consistency: {gate_reason}")
+                    raise OrderExecutionError(
+                        f"Trend-consistency gate blocked {signal.action.value} for "
+                        f"{normalized_symbol}: {gate_reason}. Signal discarded."
+                    )
+            except OrderExecutionError:
+                raise
+            except Exception as _tc_err:
+                logger.debug(f"Trend-consistency gate skipped for {normalized_symbol}: {_tc_err}")
 
         try:
             # Validate minimum order size.
