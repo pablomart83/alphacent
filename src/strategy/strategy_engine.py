@@ -5601,9 +5601,28 @@ class StrategyEngine:
 
             # Apply per-strategy conviction override (used by live-independent pass
             # to enforce the CIO-approved conviction_min from live_strategies).
+            # Only override min_conviction_crypto if the strategy actually trades a
+            # crypto symbol — an equity strategy's conviction_min has nothing to do
+            # with the crypto threshold. Without this guard, GOOGL LIVE (conviction_min=73)
+            # would set crypto min to 73, corrupting the threshold for any crypto signal
+            # that might appear in the same pass.
             if conviction_override is not None:
                 min_conviction = conviction_override
-                min_conviction_crypto = conviction_override
+                # Resolve crypto symbol set before deciding whether to override crypto threshold
+                _crypto_symbols_override: set = set()
+                try:
+                    from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+                    _crypto_symbols_override = set(DEMO_ALLOWED_CRYPTO)
+                except ImportError:
+                    pass
+                _strategy_symbols = getattr(strategy, 'symbols', []) or []
+                _strategy_is_crypto = any(
+                    s.upper() in _crypto_symbols_override for s in _strategy_symbols
+                )
+                if _strategy_is_crypto:
+                    min_conviction_crypto = conviction_override
+                # else: leave min_conviction_crypto at the YAML value (equity strategy
+                # override must not bleed into the crypto threshold)
 
             # Resolve crypto symbol set once for the loop
             _crypto_symbols: set = set()
