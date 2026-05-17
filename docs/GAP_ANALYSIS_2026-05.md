@@ -844,5 +844,7 @@ Both close together — same architectural change (pass `account_type` through a
 
 | ID | Component | Status |
 |---|---|---|
+| **G-44** | LIVE risk validation | **Closed 2026-05-17, commit `8d07eef`**. `validate_signal(is_live=True)` now called in both LIVE pass paths. Kill switch, circuit breaker, correlation, VaR, exposure limits all enforced on real capital. |
+| **G-45** | LIVE sizing pipeline | **Closed 2026-05-17, commit `8d07eef`**. `calculate_position_size(is_live=True)` runs the full 11-step pipeline with LIVE parameters (symbol_cap=20%, heat_cap=90%, min=$200). CIO `position_size` is now a cap, not the absolute. Vol scaling, drawdown sizing, conviction-tier, MQS multiplier all apply to LIVE. |
 | **G-43** | Conviction wiring | **Closed 2026-05-17, commit `b1378e1`**. PAPER signal gen now reads `paper_trading.conviction_threshold` (60/55); LIVE unchanged via `conviction_override`. Verified at runtime. |
 | G-34 | MQS persistence | Resolved May 12 (pre-audit) |

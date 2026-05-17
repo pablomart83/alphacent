@@ -6,7 +6,92 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Platform is in active iteration — live trading is running, graduation pipeline is working, Intel page is live.**
+**Platform is in active iteration — live trading is running, graduation pipeline is working, Intel page is live, full system audit + gap analysis just completed. P0 gaps G-44/G-45 closed.**
+
+---
+
+## SESSION 2026-05-17 — WHAT WAS DONE (continued)
+
+### G-44 + G-45 fixed and deployed (P0 closure)
+| Commit | What |
+|---|---|
+| `8d07eef` | G-44/G-45: wire `validate_signal` + `calculate_position_size` into LIVE pass. Both LIVE pass paths (independent pass + DEMO-cycle routing) now call the full risk framework with `is_live=True`. CIO `position_size` becomes a cap, not the absolute. Verified: GOOGL position unaffected, conviction gate (73) still fires, no new errors. |
+
+**What changed:**
+
+`risk_manager.py`:
+- `calculate_position_size`: new `is_live=True` parameter. LIVE parameter override block reads `live_trading.{base_risk_pct, symbol_cap_pct, portfolio_heat_cap, min_order_size}` from YAML. Steps 1/6/8/11 use LIVE values when `is_live=True`. Early balance check skipped for LIVE ($200 minimum, not $2,000).
+- `validate_signal`: new `is_live=True` parameter, passed through to `calculate_position_size`.
+
+`trading_scheduler.py`:
+- Independent LIVE pass: fetches live account info (`etoro_client.get_account_info()`) + live positions (scoped to `account_type='live'`) once per cycle. Calls `validate_signal(is_live=True)`. Applies CIO cap after pipeline. Logs `pipeline=$X CIO_cap=$Y → final=$Z`.
+- DEMO-cycle LIVE routing: same pattern.
+
+**Order of operations for LIVE sizing:**
+1. 11-step pipeline runs with LIVE parameters → `pipeline_size`
+2. CIO cap: `min(pipeline_size, live_strategies.position_size)`
+3. Final clamp: `max(min_order_size=200, min(max_order_size=1500, ...))`
+
+**P2 note added:** G-57 — surface LIVE risk metrics (heat used, vol scalar, CIO cap vs pipeline size) on Guard → Risk tab frontend. Backend `/risk/metrics` already scopes by `account_type`; frontend needs a LIVE section. Deferred until G-44/G-45 are stable.
+
+**Rollback:** `git revert 8d07eef --no-edit` then scp both files + restart.
+
+---
+
+## SESSION 2026-05-17 — WHAT WAS DONE
+
+### Full system audit + gap analysis
+| File | What |
+|---|---|
+| `docs/ALPHACENT_SYSTEM_AUDIT_2026-05.md` | 1,169-line component-by-component documentation. Architecture diagram, 15 sections covering data pipeline / proposer / WF / conviction / activation / sizing / execution / monitoring / graduation / decay / analytics / frontend / infrastructure. Adds §16 Strategy Lifecycle (RESEARCH→PAPER→LIVE) — the structural realisation that PAPER inherits LIVE-grade risk discipline it doesn't need (slowing data collection) AND LIVE bypasses the risk framework entirely (concentrating risk on real capital). |
+| `docs/GAP_ANALYSIS_2026-05.md` | 56 gaps catalogued (G-01 through G-56), file:line refs, lifecycle-aware. P0/P1/P2/P3 prioritisation in §20. |
+
+### G-43 fixed and deployed
+| Commit | What |
+|---|---|
+| `b1378e1` | G-43: branch signal-time conviction by account_type. PAPER reads `paper_trading.conviction_threshold` (60/55) — was reading `alpha_edge.min_conviction_score` (70/62). LIVE unchanged via `conviction_override` from `live_strategies.conviction_min`. Patched `src/strategy/strategy_engine.py:5572-5605`, deployed to EC2, verified at runtime — logs show `Conviction thresholds (PAPER): min=60, crypto_min=55` and `Applying conviction scoring (min: 73, crypto min: 73)` for LIVE. The 60-69 conviction band is now unblocked for PAPER data collection. |
+
+### The lifecycle realisation (most important takeaway)
+
+The system was originally built **research → paper** as one pipeline. LIVE was added later as a separate signal pass that **completely bypasses the risk framework**:
+
+- `_live_order_executor.execute_signal` is called directly in `trading_scheduler._run_trading_cycle:2148+` with a CIO-clamped size.
+- `RiskManager.validate_signal` is **NOT** called for LIVE — no heat cap, sector cap, directional balance, VaR, correlation, circuit breaker.
+- `RiskManager.calculate_position_size` is **NOT** called for LIVE — no vol scaling, drawdown sizing, conviction-tier sizing, MQS multiplier, sector cap, loser penalty. The CIO `position_size` is fixed at graduation and clamped to `[live_trading.min_order_size, live_trading.max_order_size]`.
+
+This is masked today because there's only **1 LIVE strategy (GOOGL LONG)**. Breaks at LIVE strategy #2.
+
+Conversely, PAPER inherits gates that hurt data collection:
+- `MAX_PER_SYMBOL_PER_TIMEFRAME = 4` (limits paper book breadth)
+- C1 VIX gate + C3 trend-consistency gate run on PAPER (block exactly the data points we need to learn from; bias paper Sharpe upward, misleading the graduation `qualification_ratio`)
+- Avg-loss gate at `autonomous_strategy_manager.py:2258` has no paper-mode disable
+- AE frequency limiter (4 trades/month) caps paper data accumulation
+
+### P0/P1/P2/P3 prioritisation (full list in `docs/GAP_ANALYSIS_2026-05.md` §20)
+
+**P0 — CLOSED (both gaps resolved 2026-05-17, commit `8d07eef`):**
+- ~~G-44: Call `RiskManager.validate_signal` in LIVE pass~~ ✅
+- ~~G-45: Run `RiskManager.calculate_position_size` in LIVE pass with `is_live=True`; CIO size becomes the cap, not the absolute~~ ✅
+
+**P1 — current sprint (lifecycle + statistical robustness):**
+- G-46: PAPER `MAX_PER_SYMBOL_PER_TIMEFRAME` 4→8
+- G-48: PAPER avg-loss gate disable
+- G-50: Skip C1/C3 gates on PAPER
+- G-01: WF test-dominant path consistency gate
+- G-02: Deflated Sharpe Ratio at activation
+- G-09: Reject proposals correlated >0.65 with active strategies (post-WF)
+- G-10: Wire dead `position_management.correlation_adjustment.*` config
+- G-19: Real slippage model from trade_journal data
+- G-35: `cycle_error` stage in signal_decisions
+
+**P2 (22 gaps), P3 (16 gaps)** — see §20.
+
+### State pulled from EC2 at audit time
+- DEMO equity: $479,224 · 70 open positions / 1,025 lifetime
+- LIVE equity: $9,903 · 1 GOOGL LONG +$16.63 unrealised
+- 267 BACKTESTED · 46 PAPER · 1 LIVE
+- Regime: trending_up_strong (confidence 0.87) · MQS 84 (high)
+- errors.log: 15,965 lines since 2026-05-01 (mostly DSL parse errors on broken templates)
 
 ---
 
@@ -200,15 +285,15 @@ Key hardcoded limits found:
 
 ---
 
-## CURRENT SYSTEM STATE (2026-05-15 end of session)
+## CURRENT SYSTEM STATE (2026-05-17 end of session)
 
-- **DEMO equity:** ~$493K | **Open positions:** ~74 | **Regime:** trending_up_strong
-- **DEMO strategies:** ~43 active (mix of PAPER + BACKTESTED), 1h strategies now activating
+- **DEMO equity:** ~$479K | **Open positions:** 70 / 1,025 lifetime | **Regime:** trending_up_strong (conf 0.87) | **MQS:** 84 (high)
+- **DEMO strategies:** 267 BACKTESTED · 46 PAPER · 1 LIVE
 - **LIVE strategy:** `4H EMA Ribbon Trend Long GOOGL LIVE` (id: `918b0c99`) — status LIVE
-- **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53 ✅
-- **live_trading.enabled:** TRUE
-- **PAPER conviction threshold:** 70 (lowered from 73 via Settings UI)
-- **Latest commit:** `74e0d84`
+- **LIVE positions:** 1 open — GOOGL LONG, entry 389.2, current 396.82, +$16.63, SL 365.82 ✅
+- **PAPER conviction threshold:** 60 (crypto 55) — **NEW: G-43 fix deployed today**, now reading `paper_trading.conviction_threshold`
+- **LIVE conviction threshold:** 73 (crypto 67) via `live_strategies.conviction_min`
+- **Latest commit:** `8d07eef` (G-44/G-45 — LIVE risk framework wired)
 
 ---
 
@@ -316,36 +401,66 @@ scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent
 ## NEXT SESSION PROMPT
 
 ```
-Read .kiro/steering/trading-system-context.md and Session_Continuation.md in full before doing anything.
+Read .kiro/steering/trading-system-context.md and Session_Continuation.md in full
+before doing anything. Then read docs/ALPHACENT_SYSTEM_AUDIT_2026-05.md §16
+(Strategy Lifecycle) and docs/GAP_ANALYSIS_2026-05.md §17–§20 (lifecycle gaps +
+prioritisation).
 
-System state:
-- DEMO: ~$493K equity, ~69 open positions, trending_up_strong
-- PAPER conviction threshold: 70 (lowered from 73 on 2026-05-14)
-- LIVE: 1 open position — GOOGL LONG, entry 389.2, SL 365.82, TP 447.53, strategy 918b0c99 ✅
+System state at start of this session:
+- DEMO: ~$479K equity, 70 open positions, trending_up_strong, MQS 84
+- PAPER conviction threshold: 60 / 55 (crypto) — G-43 fix landed 2026-05-17
+- LIVE: 1 open position — GOOGL LONG +$16.63, strategy 918b0c99
 - live_trading.enabled: TRUE
-- Latest commit: 9ad34ad
+- Latest commit: b1378e1 (G-43)
 
-Key changes this session (do not re-patch):
-- Intel page live at /intel — 101 calibrated findings (9ad34ad and prior)
-  Calibration fixes: C1/C2 use equity not balance, A7 distinct strategies,
-  A10/E5 use order_submitted not signal_emitted, A6 deduped vs A1,
-  G9 threshold -1000% + train>0, E5 UUID fallback name lookup
-- Regime gate REMOVED from trading_scheduler (b625cdb)
-  → Conviction scorer is now the single source of truth for regime fit
-  → SHORT concentration limit kept (max 3 open equity shorts, all regimes)
-- Conviction scorer: 5 fairness fixes for SHORT/low-freq strategies (82d192e)
-  → F SHORT, BB VEEV, Stoch Midrange FOREX, NATGAS Parabolic now pass 70
-- Guard System tab: MonitoringServiceCard flattens nested payload (3c83730)
-- Attribution tab: removed h-full/shrink-0 wrappers causing chart overlap (3c83730)
+Mission this session — close the P0 gaps before LIVE strategy #2
 
-Next priorities (use Intel page to triage):
-1. P0 B5: eToro position ID collision demo/live — investigate
-2. P0 F1: 5367 errors in errors.log — check what they are
-3. P0 F2: 33 SQLAlchemy InFailedSqlTransaction — fix transaction handling
-4. P1 E5: 18 strategies with gate blocks + 0 orders (Keltner TSM 302 blocks) — investigate gate
-5. P2 G5: GOOGL LIVE Sharpe -17.23 vs WF 2.73 — live strategy underperforming
-6. P2 E2: WF cache hit rate 27% — cycles slower than needed
-7. Monitor SHORT strategies: first paper trades should appear within 1-2 cycles
-8. Review crypto min_return_per_trade thresholds (1.5% round-trip now correctly modelled)
-9. Graduation gate: raise min_trades back to 20 once live system stable
+P0 gaps (LIVE pass currently bypasses the entire risk framework):
+  G-44: trading_scheduler._run_trading_cycle:2148+ does NOT call
+        RiskManager.validate_signal for LIVE. No heat cap, sector cap,
+        directional balance, VaR, correlation, circuit breaker on real capital.
+  G-45: LIVE pass does NOT call RiskManager.calculate_position_size. No vol
+        scaling, drawdown sizing, conviction-tier sizing, MQS multiplier on
+        LIVE. CIO size at graduation is fixed for the strategy's lifetime
+        regardless of regime.
+
+Both close together — same architectural change. The pattern is already there
+for PAPER (is_paper=True branch in calculate_position_size). LIVE needs the
+parallel is_live=True branch.
+
+Steps:
+  1. Study the lifecycle adaptation gaps
+     - Read trading_scheduler._run_trading_cycle:1948-2200 (LIVE pass).
+     - Read risk_manager.calculate_position_size:757-1370 (the 11-step
+       pipeline) and validate_signal:557-755.
+     - Confirm the gap by tracing the LIVE call path.
+  2. Make a plan for G-44 + G-45 together (Option A from §19: pass account_type
+     through and add an is_live=True branch). Write the plan as a steering note
+     OR a doc in docs/ before coding.
+  3. Implement:
+     - Add is_live=True parameter to calculate_position_size with branching:
+       - LIVE base risk: live_trading.base_risk_pct (0.6%)
+       - LIVE symbol cap: live_trading.symbol_cap_pct (20%)
+       - LIVE heat cap: live_trading.portfolio_heat_cap (90%)
+       - LIVE min order: live_trading.min_order_size (200)
+       - LIVE max order: live_trading.max_order_size (1500)
+       - Apply vol scaling, conviction tier, drawdown sizing, MQS multiplier,
+         sector cap, correlation adjustment.
+       - Cap final size at CIO live_strategies.position_size (the CIO sets
+         the max; the pipeline sizes lower if risk demands).
+     - Call validate_signal(..., is_paper=False) and
+       calculate_position_size(..., is_live=True) in the LIVE pass.
+  4. Verify:
+     - Restart, watch logs/alphacent.log for LIVE pass invocation.
+     - Confirm the existing GOOGL position is still tracked correctly.
+     - Confirm LIVE pass conviction gate (73) still fires on signals.
+     - Sanity-check that on the next signal cycle, sizing logs show vol
+       scaling, sector cap, etc applied to LIVE.
+  5. Document in Session_Continuation post-fix and commit.
+
+Do NOT touch P1/P2/P3 in this session unless directly required to land G-44/G-45.
+Stage discipline: this is a foundational architectural change; ship it clean.
+
+If anything in the gap analysis or audit feels wrong, say so — those documents
+are working artefacts, not gospel. Read the code, then decide.
 ```
