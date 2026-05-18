@@ -841,6 +841,42 @@ class RiskManager:
         except Exception as _bal_err:
             logger.debug(f"Could not refresh balance from DB for {symbol}: {_bal_err} — using account object")
 
+        # Part 1 fix (2026-05-18): deduct pending order exposure from available balance.
+        # The DB balance is the last synced value from eToro — it doesn't know about
+        # orders submitted in the last few minutes that haven't filled yet. Without this,
+        # a burst of signals in one cycle each see the full balance and all get sized,
+        # then eToro rejects them all with 604 (insufficient funds) because the first
+        # few orders already consumed the capital.
+        # Deduct all PENDING entry orders submitted in the last 30 minutes.
+        try:
+            from src.models.database import get_database as _gdb_pending
+            from src.models.orm import OrderORM as _OrdORM_pending
+            from src.models.enums import OrderStatus as _OS_pending
+            from datetime import timedelta as _td_pending
+            _db_p = _gdb_pending()
+            _sess_p = _db_p.get_session()
+            try:
+                _recent_cutoff = datetime.now() - _td_pending(minutes=30)
+                _pending_committed = sum(
+                    float(o.quantity or 0)
+                    for o in _sess_p.query(_OrdORM_pending).filter(
+                        _OrdORM_pending.status == _OS_pending.PENDING,
+                        _OrdORM_pending.order_action == 'entry',
+                        _OrdORM_pending.submitted_at >= _recent_cutoff,
+                    ).all()
+                )
+                if _pending_committed > 0:
+                    logger.debug(
+                        f"Balance adjustment for {symbol}: ${available_balance:.0f} - "
+                        f"${_pending_committed:.0f} pending = "
+                        f"${available_balance - _pending_committed:.0f} effective"
+                    )
+                    available_balance = max(0.0, available_balance - _pending_committed)
+            finally:
+                _sess_p.close()
+        except Exception as _pending_bal_err:
+            logger.debug(f"Could not deduct pending orders from balance for {symbol}: {_pending_bal_err}")
+
         equity = getattr(account, 'equity', None) or account.balance
         if equity <= 0:
             equity = account.balance

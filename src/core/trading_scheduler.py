@@ -699,7 +699,39 @@ class TradingScheduler:
             # In-run dedup: track (strategy_id, symbol, direction) to prevent a single
             # strategy from opening multiple positions on the same symbol in one batch.
             # Keyed on strategy_id so different strategies can still trade the same symbol.
-            orders_submitted_this_run = set()  # (strategy_id, normalized_symbol, direction)
+            #
+            # Part 3 fix (2026-05-18): seed from recent DB orders so a crash-restart
+            # doesn't re-submit what was already submitted in the previous (crashed) cycle.
+            # Without this, the in-memory set is empty on restart and the cycle re-fires
+            # every signal from the crashed cycle, causing duplicate orders and 604 cascades.
+            # Seed window: 30 minutes — covers the longest pre-market window and any
+            # reasonable cycle duration. Orders older than 30 min are fair game to retry.
+            orders_submitted_this_run: set = set()
+            try:
+                from src.utils.symbol_normalizer import normalize_symbol as _norm_seed
+                from src.models.enums import OrderSide as _OrdSide_seed
+                from datetime import timedelta as _td_seed
+                _seed_cutoff = datetime.now() - _td_seed(minutes=30)
+                _recent_seed_orders = session.query(OrderORM).filter(
+                    OrderORM.submitted_at >= _seed_cutoff,
+                    OrderORM.order_action == 'entry',
+                    OrderORM.status.in_([OrderStatus.PENDING, OrderStatus.FILLED]),
+                    OrderORM.account_type != 'live',  # LIVE has its own duplicate guard
+                ).all()
+                for _seed_ord in _recent_seed_orders:
+                    try:
+                        _seed_sym = _norm_seed(_seed_ord.symbol)
+                        _seed_dir = 'LONG' if _seed_ord.side == _OrdSide_seed.BUY else 'SHORT'
+                        orders_submitted_this_run.add((_seed_ord.strategy_id, _seed_sym, _seed_dir))
+                    except Exception:
+                        pass
+                if orders_submitted_this_run:
+                    logger.info(
+                        f"Seeded orders_submitted_this_run with {len(orders_submitted_this_run)} "
+                        f"recent orders (crash-restart dedup guard)"
+                    )
+            except Exception as _seed_err:
+                logger.debug(f"Could not seed orders_submitted_this_run from DB: {_seed_err}")
 
             # G-14: compute regime once per cycle, reuse in the per-signal loop.
             # Previously detect_sub_regime() and get_market_context() were called
@@ -1791,43 +1823,39 @@ class TradingScheduler:
                                     logger.debug(f"Immediate position creation skipped: {pos_err}")
                                     # Non-critical — order monitor will pick it up
 
-        except Exception as e:
-            _msg = str(e)
-            if "Market closed" in _msg and "re-fire at next open" in _msg:
-                # G-22: market-closed is a deferral, not a failure. Log at INFO,
-                # write a 'deferred' signal_decision (not 'rejected') so the funnel
-                # correctly shows these as expected deferrals, not errors.
-                logger.info(f"Signal deferred (market closed): {signal.symbol}")
-                try:
-                    from src.analytics.decision_log import record_decision as _rec_deferred
-                    _sig_meta_d = getattr(signal, 'metadata', None) or {}
-                    _rec_deferred(
-                        stage="gate_blocked",
-                        decision="deferred",
-                        strategy_id=getattr(signal, 'strategy_id', None),
-                        template=_sig_meta_d.get('template_name') or strategy.name,
-                        symbol=signal.symbol,
-                        direction=('long' if 'LONG' in str(getattr(signal, 'action', '')) else 'short'),
-                        reason="market_closed_deferred",
-                        metadata={"strategy_name": strategy.name},
-                    )
-                except Exception:
-                    pass
-            elif "gate blocked" in _emsg.lower() or "trend-consistency gate" in _emsg.lower() or "vix gate" in _emsg.lower():
-                # Gate blocks are expected behaviour — not errors
-                logger.warning(f"Gate blocked signal for {signal.symbol}: {e}")
-            else:
-                logger.error(f"Failed to execute signal for {signal.symbol}: {e}")
-            # Count as rejected so the cycle summary is accurate
-            signals_rejected += 1
-            self._log_signal_decision(
-                session=session,
-                signal=signal,
-                strategy_name=strategy.name,
-                decision="REJECTED",
-                rejection_reason=f"Order execution failed: {str(e)[:200]}",
-            )
-            continue
+                        except Exception as e:
+                            _emsg = str(e)
+                            if "Market closed" in _emsg and "re-fire at next open" in _emsg:
+                                # G-22: market-closed is a deferral, not a failure.
+                                logger.info(f"Signal deferred (market closed): {signal.symbol}")
+                                try:
+                                    from src.analytics.decision_log import record_decision as _rec_deferred
+                                    _sig_meta_d = getattr(signal, 'metadata', None) or {}
+                                    _rec_deferred(
+                                        stage="gate_blocked",
+                                        decision="deferred",
+                                        strategy_id=getattr(signal, 'strategy_id', None),
+                                        template=_sig_meta_d.get('template_name') or strategy.name,
+                                        symbol=signal.symbol,
+                                        direction=('long' if 'LONG' in str(getattr(signal, 'action', '')) else 'short'),
+                                        reason="market_closed_deferred",
+                                        metadata={"strategy_name": strategy.name},
+                                    )
+                                except Exception:
+                                    pass
+                            elif "gate blocked" in _emsg.lower() or "trend-consistency gate" in _emsg.lower() or "vix gate" in _emsg.lower():
+                                logger.warning(f"Gate blocked signal for {signal.symbol}: {e}")
+                            else:
+                                logger.error(f"Failed to execute signal for {signal.symbol}: {e}")
+                            signals_rejected += 1
+                            self._log_signal_decision(
+                                session=session,
+                                signal=signal,
+                                strategy_name=strategy.name,
+                                decision="REJECTED",
+                                rejection_reason=f"Order execution failed: {str(e)[:200]}",
+                            )
+                            continue
                     else:
                         # Log rejected signal decision
                         self._log_signal_decision(

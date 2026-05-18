@@ -910,6 +910,25 @@ class OrderMonitor:
                                     failed_count += 1
                                     # Invalidate order cache on state change
                                     self.invalidate_order_cache(order.etoro_order_id)
+                                    # Part 2 fix (2026-05-18): delete the optimistic position row
+                                    # that was written at order-submit time. If eToro rejected the
+                                    # order (e.g. 604 insufficient funds), the position was never
+                                    # real. Without this, the position sync finds it missing from
+                                    # eToro and closes it as "Etoro Closed" — polluting the DB
+                                    # with ghost positions and misleading closure reasons.
+                                    try:
+                                        from src.models.orm import PositionORM as _PosORM_del
+                                        _ghost_pos = session.query(_PosORM_del).filter(
+                                            _PosORM_del.etoro_position_id == f"pending_{order.id}",
+                                        ).first()
+                                        if _ghost_pos:
+                                            session.delete(_ghost_pos)
+                                            logger.info(
+                                                f"Deleted ghost optimistic position for rejected "
+                                                f"order {order.id[:8]} (error {error_code}: {error_message})"
+                                            )
+                                    except Exception as _del_err:
+                                        logger.debug(f"Could not delete ghost position for {order.id[:8]}: {_del_err}")
                                     continue
                                 
                                 # Update based on statusID
