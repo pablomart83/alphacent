@@ -1345,23 +1345,26 @@ class RiskManager:
         # with negative net P&L, halve the size. Prevents repeatedly sizing up
         # into a combo that has demonstrated it doesn't work. Resets naturally
         # once a winning trade flips net P&L positive (TSLA audit 2026-05-01).
-        try:
-            _tname = None
-            if signal.metadata and isinstance(signal.metadata, dict):
-                _tname = signal.metadata.get('template_name')
-            if _tname and symbol:
-                pair_stats = self._get_symbol_template_loser_stats(symbol, _tname)
-                if pair_stats and pair_stats.get('trades', 0) >= 3 and pair_stats.get('pnl', 0) < 0:
-                    old_size = position_size
-                    position_size *= 0.5
-                    penalty_applied = True
-                    logger.info(
-                        f"Loser penalty: {symbol} × {_tname} has "
-                        f"{pair_stats['trades']} trades / ${pair_stats['pnl']:.0f} P&L "
-                        f"→ size halved ${old_size:.0f} → ${position_size:.0f}"
-                    )
-        except Exception as _lp_err:
-            logger.debug(f"Loser penalty check failed (non-fatal): {_lp_err}")
+        # LIVE orders are exempt — LIVE strategies are new and must not be
+        # penalised by DEMO paper trading history.
+        if not is_live:
+            try:
+                _tname = None
+                if signal.metadata and isinstance(signal.metadata, dict):
+                    _tname = signal.metadata.get('template_name')
+                if _tname and symbol:
+                    pair_stats = self._get_symbol_template_loser_stats(symbol, _tname)
+                    if pair_stats and pair_stats.get('trades', 0) >= 3 and pair_stats.get('pnl', 0) < 0:
+                        old_size = position_size
+                        position_size *= 0.5
+                        penalty_applied = True
+                        logger.info(
+                            f"Loser penalty: {symbol} × {_tname} has "
+                            f"{pair_stats['trades']} trades / ${pair_stats['pnl']:.0f} P&L "
+                            f"→ size halved ${old_size:.0f} → ${position_size:.0f}"
+                        )
+            except Exception as _lp_err:
+                logger.debug(f"Loser penalty check failed (non-fatal): {_lp_err}")
 
         # ── Step 10c: Conviction-tier size multiplier ────────────────────────
         # Signals with high conviction scores have demonstrated better P&L
