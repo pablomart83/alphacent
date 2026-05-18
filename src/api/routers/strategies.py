@@ -1891,6 +1891,34 @@ async def get_approaching_graduation(
         from src.strategy.graduation_gate import _get_strategy_type_win_rate_floor, _get_regime_adjusted_max_ratio
         _request_effective_max_ratio = _get_regime_adjusted_max_ratio()
 
+        # Bulk-fetch strategy_type for all (template, symbol) pairs in one query
+        # instead of one DB round-trip per candidate (was 20 queries per request).
+        _strat_type_rows = session.execute(
+            text("""
+                SELECT DISTINCT ON (
+                    COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
+                    tj.symbol
+                )
+                    COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')) AS template_name,
+                    tj.symbol,
+                    COALESCE(
+                        s.strategy_metadata->>'template_type',
+                        s.strategy_metadata->>'strategy_type'
+                    ) AS strategy_type
+                FROM strategies s
+                JOIN trade_journal tj ON tj.strategy_id = s.id
+                WHERE tj.account_type = 'demo'
+                ORDER BY
+                    COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
+                    tj.symbol,
+                    s.created_at DESC
+            """),
+        ).fetchall()
+        _strat_type_by_pair: dict = {
+            (r.template_name, r.symbol): r.strategy_type
+            for r in _strat_type_rows
+        }
+
         # --- Build approaching list ---
         approaching = []
         for row in rows:
@@ -1914,26 +1942,8 @@ async def get_approaching_graduation(
             pnl_ok = total_pnl > MIN_PAPER_PNL
 
             # Fix 2: strategy-type-aware win rate floor.
-            # Get strategy_type from the most recent strategy for this template.
-            _strat_type = None
-            try:
-                from sqlalchemy import text as _text2
-                _st_row = session.execute(_text2("""
-                    SELECT COALESCE(
-                        s.strategy_metadata->>'template_type',
-                        s.strategy_metadata->>'strategy_type'
-                    ) as strategy_type
-                    FROM strategies s
-                    JOIN trade_journal tj ON tj.strategy_id = s.id
-                    WHERE tj.symbol = :sym
-                      AND COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')) = :tname
-                      AND tj.account_type = 'demo'
-                    ORDER BY s.created_at DESC LIMIT 1
-                """), {"sym": sym, "tname": tname}).fetchone()
-                if _st_row:
-                    _strat_type = _st_row.strategy_type
-            except Exception:
-                pass
+            # Look up from the pre-fetched bulk dict (one query for all pairs).
+            _strat_type = _strat_type_by_pair.get((tname, sym))
             effective_wr_floor = _get_strategy_type_win_rate_floor(_strat_type)
             # Use the pre-computed regime-adjusted max ratio (computed once per request above)
             effective_max_ratio = _request_effective_max_ratio
