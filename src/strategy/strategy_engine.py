@@ -5129,7 +5129,9 @@ class StrategyEngine:
         # Adding random symbols based on generic SMA distance scoring adds noise
         # and lets strategies trade symbols they were never validated on.
         # Each strategy trades only its assigned symbols (from proposal + watchlist).
-        symbols_to_trade = list(strategy.symbols) if strategy.symbols else []
+        # Watchlist elimination (2026-05-18): each strategy is a single (template, symbol) pair.
+        # Use symbols[0] only — no watchlist loop.
+        symbols_to_trade = [strategy.symbols[0]] if strategy.symbols else []
         fundamental_filter = None
         data_provider = None
         fundamental_config = {}

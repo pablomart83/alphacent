@@ -2786,230 +2786,9 @@ class StrategyProposer:
             self.track_approvals(strategies)
 
             # === WATCHLIST VALIDATION ===
-            # Walk-forward each watchlist symbol for every validated DSL strategy.
-            # Only symbols that pass WF stay in the watchlist. This ensures every
-            # symbol a strategy can trade has been proven to work with that template.
-            #
-            # Tiered thresholds by asset class relationship to primary symbol:
-            #   Same class (stock→stock, forex→forex):  S > 0.2, t >= 3
-            #   Adjacent   (stock→ETF/index):            S > 0.3, t >= 4
-            #   Cross-asset (stock→forex/commodity/crypto): S > 0.5, t >= 6
-            #
-            # Max watchlist size: 3 total (primary + 2). No floor guarantee —
-            # a single-symbol strategy is better than one with a weak second symbol.
-            _WL_MAX = 2  # max extra symbols beyond primary
+            # Watchlist elimination (2026-05-18): each strategy is already single-symbol.
+            # The watchlist WF validation loop has been removed.
 
-            def _wl_thresholds(primary_class: str, sym_class: str):
-                """Return (min_sharpe, min_trades) for a watchlist symbol."""
-                if primary_class == sym_class:
-                    return 0.2, 3   # same class — relaxed
-                # Adjacent: equity ↔ ETF/index
-                _equity = {"stock", "etf", "index"}
-                if primary_class in _equity and sym_class in _equity:
-                    return 0.3, 4   # adjacent
-                # Cross-asset: anything else
-                return 0.5, 6
-
-            # Detect current regime once — reused for all watchlist regime checks
-            _wl_regime = "unknown"
-            try:
-                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-                from src.data.market_data_manager import get_market_data_manager
-                _wl_mdm = get_market_data_manager()
-                if _wl_mdm:
-                    _wl_analyzer = MarketStatisticsAnalyzer(_wl_mdm)
-                    _wl_sub, _, _, _ = _wl_analyzer.detect_sub_regime()
-                    _wl_regime = _wl_sub.value
-            except Exception:
-                pass
-
-            import time as _wl_time
-            wl_validated_total = 0
-            wl_pruned_total = 0
-            for strategy in strategies:
-                if not strategy.symbols or len(strategy.symbols) <= 1:
-                    continue
-                # Skip Alpha Edge (they don't use DSL walk-forward)
-                if strategy.metadata and strategy.metadata.get('strategy_category') == 'alpha_edge':
-                    continue
-                template_name = strategy.metadata.get('template_name', '') if strategy.metadata else ''
-                if not template_name:
-                    continue
-
-                primary = strategy.symbols[0]
-                primary_class = self._get_asset_class(primary)
-                validated_symbols = [primary]  # Primary already passed WF
-
-                # Build the set of symbols already claimed by OTHER strategies of the
-                # same template in this proposal batch. A secondary watchlist symbol
-                # that is already the primary of a sibling strategy would create a
-                # permanent gate-block: the sibling holds the position, this strategy
-                # generates signals for it, the coordinator blocks them every cycle.
-                # Exclude those symbols from this strategy's watchlist entirely.
-                sibling_claimed_symbols: set = set()
-                for _sib in strategies:
-                    if _sib is strategy:
-                        continue
-                    _sib_tmpl = (_sib.metadata or {}).get('template_name', '') if _sib.metadata else ''
-                    if _sib_tmpl != template_name:
-                        continue
-                    # The sibling's primary symbol is its "owned" slot — exclude it
-                    if _sib.symbols:
-                        sibling_claimed_symbols.add(_sib.symbols[0])
-
-                # Detect template direction for regime compatibility check
-                template_direction = 'long'
-                if strategy.metadata:
-                    template_direction = strategy.metadata.get('direction', 'long').lower()
-
-                for sym in strategy.symbols[1:]:
-                    # Hard cap: primary + 2 max
-                    if len(validated_symbols) >= _WL_MAX + 1:
-                        wl_pruned_total += 1
-                        continue
-
-                    # Exclude symbols already claimed as the primary of a sibling strategy
-                    # using the same template. If sibling "Keltner TQQQ LONG" exists, then
-                    # "Keltner TSM LONG" must not include TQQQ as a secondary — the sibling
-                    # will hold the TQQQ position and the coordinator will block every signal
-                    # this strategy generates for TQQQ, creating a permanent gate loop.
-                    if sym in sibling_claimed_symbols:
-                        logger.debug(
-                            f"  Watchlist skip: {template_name} on {sym} — already primary "
-                            f"of a sibling strategy in this batch"
-                        )
-                        wl_pruned_total += 1
-                        continue
-
-                    # Skip daily-only LME metals — no intraday OR reliable daily data
-                    # via Yahoo/FMP for these symbols. Stale _wf_validated_combos.json
-                    # entries can inject them here even after the proposal-stage filter.
-                    if sym.upper() in _DAILY_ONLY_SYMBOLS:
-                        logger.debug(f"  Watchlist WF skip: {sym} is daily-only LME metal, no data for WF")
-                        wl_pruned_total += 1
-                        continue
-
-                    sym_class = self._get_asset_class(sym)
-                    min_sharpe, min_trades = _wl_thresholds(primary_class, sym_class)
-
-                    # Regime compatibility: skip if symbol's regime is incompatible
-                    # with the template direction (reuse already-computed regime)
-                    if _wl_regime != "unknown":
-                        _is_short = template_direction == 'short'
-                        _trending_up = 'trending_up' in _wl_regime
-                        _trending_down = 'trending_down' in _wl_regime
-                        # Short templates in strong uptrend — skip
-                        if _is_short and _trending_up and 'strong' in _wl_regime:
-                            wl_pruned_total += 1
-                            continue
-                        # Long templates in strong downtrend — skip
-                        if not _is_short and _trending_down and 'strong' in _wl_regime:
-                            wl_pruned_total += 1
-                            continue
-
-                    # Check blacklist first (cheap)
-                    bl_key = (template_name, sym)
-                    if bl_key in self._zero_trade_blacklist and self._zero_trade_blacklist[bl_key] >= self._zero_trade_blacklist_threshold:
-                        wl_pruned_total += 1
-                        continue
-
-                    # Check WF cache (already validated in a previous cycle?)
-                    wf_key = (template_name, sym)
-                    cached = self._wf_results_cache.get(wf_key)
-                    if cached is not None:
-                        cached_result, cached_at = cached
-                        if _wl_time.time() - cached_at < self._wf_cache_ttl:
-                            test_sharpe = cached_result[1]
-                            has_trades = cached_result[2]
-                            is_overfitted = cached_result[3]
-                            if test_sharpe > min_sharpe and has_trades and not is_overfitted:
-                                validated_symbols.append(sym)
-                                wl_validated_total += 1
-                            else:
-                                wl_pruned_total += 1
-                            continue
-
-                    # No cache — run WF on this symbol
-                    try:
-                        import copy
-                        temp_strategy = copy.deepcopy(strategy)
-                        temp_strategy.symbols = [sym]
-
-                        if hasattr(strategy_engine, 'indicator_library'):
-                            strategy_engine.indicator_library.clear_cache()
-                        if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
-                            strategy_engine.market_data._historical_memory_cache.clear()
-
-                        # Per-strategy WF window — single source of truth via
-                        # _select_wf_window(). Helper reads the temp_strategy's
-                        # primary symbol + metadata, so cross-class watchlists
-                        # (e.g. stock strategy with an ETF watchlist entry)
-                        # correctly pick per-(asset_class, interval) windows.
-                        _wl_train_days, _wl_test_days, _wl_start, _wl_end = self._select_wf_window(
-                            temp_strategy, end_date
-                        )
-
-                        wf_result = strategy_engine.walk_forward_validate(
-                            strategy=temp_strategy,
-                            start=_wl_start,
-                            end=_wl_end,
-                            train_days=_wl_train_days,
-                            test_days=_wl_test_days
-                        )
-
-                        ts = wf_result['train_sharpe']
-                        tes = wf_result['test_sharpe']
-                        ov = wf_result['is_overfitted']
-                        test_trades = wf_result['test_results'].total_trades if wf_result.get('test_results') else 0
-                        train_trades = wf_result['train_results'].total_trades if wf_result.get('train_results') else 0
-                        het = test_trades >= min_trades and train_trades >= min_trades
-                        tv = not (math.isinf(ts) or math.isnan(ts))
-                        tev = not (math.isinf(tes) or math.isnan(tes))
-
-                        # Cache the result
-                        self._wf_results_cache[wf_key] = (
-                            (ts, tes, het, ov, tv, tev, wf_result),
-                            _wl_time.time()
-                        )
-
-                        if tev and tes > min_sharpe and het and not ov:
-                            validated_symbols.append(sym)
-                            wl_validated_total += 1
-                            self._wf_validated[wf_key] = {
-                                'sharpe': round(tes, 3),
-                                'trades': test_trades,
-                                'timestamp': datetime.now().isoformat(),
-                            }
-                            self._save_wf_validated_to_disk()
-                            logger.info(
-                                f"  Watchlist WF PASS: {template_name} on {sym} "
-                                f"(S={tes:.2f}, t={test_trades}, threshold=S>{min_sharpe}/t>={min_trades}, "
-                                f"class={primary_class}→{sym_class})"
-                            )
-                        else:
-                            wl_pruned_total += 1
-                            self._save_wf_failed_to_disk()
-                            if test_trades == 0 or train_trades == 0:
-                                self._zero_trade_blacklist[bl_key] = self._zero_trade_blacklist.get(bl_key, 0) + 1
-                                self._zero_trade_blacklist_timestamps[bl_key] = datetime.now().isoformat()
-                                self._save_blacklist_to_disk()
-                            logger.info(
-                                f"  Watchlist WF FAIL: {template_name} on {sym} "
-                                f"(S={tes:.2f}, t={test_trades}, need S>{min_sharpe}/t>={min_trades})"
-                            )
-                    except Exception as wl_err:
-                        logger.debug(f"  Watchlist WF error for {template_name} on {sym}: {wl_err}")
-                        wl_pruned_total += 1
-
-                strategy.symbols = validated_symbols
-
-            if wl_validated_total > 0 or wl_pruned_total > 0:
-                logger.info(
-                    f"Watchlist validation: {wl_validated_total} symbols passed WF, "
-                    f"{wl_pruned_total} pruned (threshold/regime/blacklist/cap)"
-                )
-
-            # Enforce max 1 strategy per (symbol, direction, type, interval) to prevent concentration
             # Different intervals on the same symbol ARE allowed — they capture different timeframes
             seen_combos = set()
             deduped_strategies = []
@@ -4477,15 +4256,8 @@ Generate a CORRECTED strategy that addresses all errors:"""
         except Exception as e:
             logger.warning(f"Could not load active strategies for proposal dedup: {e}")
 
-        # _match_templates_to_symbols already scored all (template, symbol) pairs internally.
-        # We need the all_pairs data to build watchlists. Store it during matching.
-        watchlists = self._build_watchlists(
-            all_pairs=getattr(self, '_last_scored_pairs', []),
-            assignments=template_symbol_assignments,
-            watchlist_size=watchlist_size,
-            active_symbol_template_pairs=active_symbol_template_pairs,
-        )
-        logger.info(f"Built watchlists for {len(watchlists)} templates (size: {watchlist_size})")
+        # Watchlist elimination (2026-05-18): each strategy is a single (template, symbol) pair.
+        # _build_watchlists is no longer called — watchlists are gone.
 
         # === PHASE 2: Generate unique strategies with parameter variations ===
         # Each template produces one strategy per variation (different params, same watchlist).
@@ -4561,33 +4333,12 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 skipped_dupes += 1
                 continue
 
-            # Build watchlist: primary symbol is the assigned one, rest from template's watchlist
+            # Single-symbol strategy: each proposal is exactly (template, symbol).
+            # Watchlist elimination (2026-05-18) — no multi-symbol strategies.
             if template.metadata and 'fixed_symbols' in template.metadata:
                 strategy_symbol = template.metadata['fixed_symbols']
             else:
-                watchlist = watchlists.get(template_name, [assigned_symbol])
-                if assigned_symbol in watchlist:
-                    strategy_symbol = [assigned_symbol] + [s for s in watchlist if s != assigned_symbol]
-                else:
-                    strategy_symbol = [assigned_symbol] + watchlist[:watchlist_size - 1]
-
-            # Strip daily-only LME metals from watchlist of intraday/4h strategies.
-            # The watchlist builder filters them for new entries, but stale validated
-            # combos cache may still contain ALUMINUM/ZINC/NICKEL for intraday templates.
-            if (_is_intraday or _is_4h) and isinstance(strategy_symbol, list):
-                strategy_symbol = [s for s in strategy_symbol if s.upper() not in _DAILY_ONLY_SYMBOLS]
-                if not strategy_symbol:
-                    logger.debug(f"Skipping {template_name} — all symbols are daily-only after LME filter")
-                    skipped_dupes += 1
-                    continue
-
-            # Strip no-1H-data symbols (OIL, COPPER) from 1H-only strategy watchlists.
-            if _is_1h_only and isinstance(strategy_symbol, list):
-                strategy_symbol = [s for s in strategy_symbol if s.upper() not in _NO_1H_SYMBOLS]
-                if not strategy_symbol:
-                    logger.debug(f"Skipping {template_name} — all symbols have no 1H data after filter")
-                    skipped_dupes += 1
-                    continue
+                strategy_symbol = [assigned_symbol]
             
             # Use market-customized params (no parameter variations —
             # diversity comes from different symbols, not different BB std_dev)

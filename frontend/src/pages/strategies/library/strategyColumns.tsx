@@ -8,14 +8,11 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
 } from '@/components/primitives'
 import { ConvictionBar } from '@/components/trading/ConvictionBar'
 import { RegimePill } from '@/components/trading/RegimePill'
 import { PnLNumber } from '@/components/trading/PnLNumber'
-import { cn, formatCurrency, formatPercentage, formatTimestamp } from '@/lib/utils'
+import { formatCurrency, formatPercentage, formatTimestamp } from '@/lib/utils'
 import type { StrategyRow, StrategyStatus } from '../useStrategiesData'
 
 /* ─────────────────────────── formatters ─────────────────────────── */
@@ -196,66 +193,6 @@ export function buildStrategyColumns(
           null
         if (!regime) return <span className="text-[var(--text-3)] text-[10px]">—</span>
         return <RegimePill regime={regime} size="sm" showConfidence={false} />
-      },
-    },
-    {
-      id: 'symbols',
-      header: 'Symbols',
-      accessorFn: (row) => row.symbols?.length ?? 0,
-      size: 80,
-      cell: ({ row }) => {
-        const symbols = row.original.symbols ?? []
-        const traded = row.original.traded_symbols ?? []
-        if (symbols.length === 0)
-          return <span className="text-[var(--text-3)] text-[10px]">—</span>
-        return (
-          <Popover>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                onClick={(e) => e.stopPropagation()}
-                className="mono tabular-nums text-[var(--text-1)] hover:text-[var(--accent-primary)]"
-                title={`${symbols.length} symbols`}
-              >
-                {symbols.length}
-                {traded.length > 0 && (
-                  <span className="text-[var(--text-3)] ml-0.5">
-                    ({traded.length}●)
-                  </span>
-                )}
-              </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="max-w-[320px]">
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-3)] mb-1">
-                Watchlist ({symbols.length})
-              </div>
-              <div className="flex flex-wrap gap-1 mb-2">
-                {symbols.map((s) => {
-                  const isTraded = traded.includes(s)
-                  return (
-                    <span
-                      key={s}
-                      className={cn(
-                        'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[2px] mono text-[10px]',
-                        isTraded
-                          ? 'bg-[color-mix(in_oklab,var(--pnl-up)_12%,transparent)] text-[var(--pnl-up)]'
-                          : 'bg-[var(--bg-2)] text-[var(--text-1)]',
-                      )}
-                    >
-                      {isTraded && <span className="h-1 w-1 rounded-full bg-current" />}
-                      {s}
-                    </span>
-                  )
-                })}
-              </div>
-              {traded.length > 0 && (
-                <div className="text-[10px] text-[var(--text-3)]">
-                  <span className="mono text-[var(--pnl-up)]">●</span> = has open position
-                </div>
-              )}
-            </PopoverContent>
-          </Popover>
-        )
       },
     },
     {

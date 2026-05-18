@@ -591,39 +591,11 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
 
     queue = []
 
-    # Best WF sharpe per template — used as fallback when the representative
-    # strategy's WF was run on a different primary symbol (watchlist trade case).
-    # A watchlist symbol (e.g. XLK traded by a SPY strategy) should be evaluated
-    # against the template's best proven edge, not the SPY strategy's WF sharpe.
+    # Best WF sharpe per template — kept as a secondary fallback from strategies table.
+    # After watchlist elimination (2026-05-18), the representative strategy's WF sharpe
+    # is always the correct one (WF was run on the primary symbol directly).
+    # wf_by_template_symbol from wf_validated_combos.json is no longer needed.
     best_wf_by_template = {}
-    # Symbol-specific WF sharpe from wf_validated_combos.json — this is the
-    # authoritative source for (template, symbol) WF sharpes including watchlist
-    # symbols that were walk-forward validated during watchlist construction.
-    wf_by_template_symbol: dict = {}
-    try:
-        import json as _json
-        from pathlib import Path as _wf_path
-        _wf_file = _wf_path("config/.wf_validated_combos.json")
-        if _wf_file.exists():
-            _wf_data = _json.loads(_wf_file.read_text())
-            # File is a list of {template, symbol, sharpe, trades, timestamp}
-            if isinstance(_wf_data, list):
-                for _entry in _wf_data:
-                    _t = _entry.get("template")
-                    _s = _entry.get("symbol")
-                    _sh = _entry.get("sharpe")
-                    if _t and _s and _sh is not None:
-                        key = (_t, _s)
-                        # Keep the highest sharpe if multiple entries exist
-                        if key not in wf_by_template_symbol or float(_sh) > wf_by_template_symbol[key]:
-                            wf_by_template_symbol[key] = float(_sh)
-                        # Also track best per template
-                        if _t not in best_wf_by_template or float(_sh) > best_wf_by_template[_t]:
-                            best_wf_by_template[_t] = float(_sh)
-    except Exception:
-        pass
-
-    # Also pull best WF sharpe from strategies table as a secondary source
     try:
         _wf_rows = session.execute(
             text("""
@@ -687,16 +659,13 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
                 )
 
-        # Use symbol-specific WF sharpe from wf_validated_combos.json first
-        # (this is the authoritative source — it's the actual WF run on this symbol).
-        # Fall back to best-template WF sharpe if not available.
-        symbol_specific_wf = wf_by_template_symbol.get((row.template_name, row.symbol))
-        if symbol_specific_wf and symbol_specific_wf > 0:
-            wf_sharpe = symbol_specific_wf
-        else:
-            best_template_wf = best_wf_by_template.get(row.template_name, 0.0)
-            if best_template_wf > 0 and (not wf_sharpe or wf_sharpe < best_template_wf):
-                wf_sharpe = best_template_wf
+        # Use symbol-specific WF sharpe from the representative strategy directly.
+        # After watchlist elimination (2026-05-18), the representative strategy's WF
+        # was always run on this exact symbol — no proxy fallback needed.
+        # best_wf_by_template is kept as a last-resort fallback only.
+        best_template_wf = best_wf_by_template.get(row.template_name, 0.0)
+        if best_template_wf > 0 and (not wf_sharpe or wf_sharpe < best_template_wf):
+            wf_sharpe = best_template_wf
 
         qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe, interval=strategy_interval, strategy_type=strategy_type)
         if not qualified:
