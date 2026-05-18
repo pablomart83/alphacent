@@ -4319,6 +4319,132 @@ class RejectGraduationRequest(BaseModel):
     notes: Optional[str] = None
 
 
+@router.get("/{strategy_id}/size-estimate")
+async def get_size_estimate(
+    strategy_id: str,
+    symbol: str,
+    session: Session = Depends(get_db_session),
+    username: str = Depends(get_current_user),
+):
+    """
+    Run the 11-step LIVE sizing pipeline for a (strategy, symbol) pair and return
+    the recommended position size with a step-by-step breakdown.
+
+    Used by the graduation card so the CIO can see what the pipeline recommends
+    before setting the final approved position size.
+    """
+    from src.models.orm import StrategyORM
+    from src.models.orm import AccountInfoORM
+    from src.risk.risk_manager import RiskManager
+    from src.models.dataclasses import AccountInfo, TradingSignal, SignalAction
+    import uuid as _uuid
+
+    try:
+        # Load strategy
+        strategy_orm = session.query(StrategyORM).filter_by(id=strategy_id).first()
+        if not strategy_orm:
+            raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found")
+
+        # Load live account info from DB
+        acct_row = session.query(AccountInfoORM).filter(
+            AccountInfoORM.mode == 'LIVE'
+        ).order_by(AccountInfoORM.updated_at.desc()).first()
+
+        if not acct_row:
+            raise HTTPException(status_code=503, detail="Live account info not available")
+
+        account = AccountInfo(
+            account_id=acct_row.account_id,
+            balance=float(acct_row.balance),
+            equity=float(acct_row.equity),
+            buying_power=float(acct_row.buying_power or acct_row.balance),
+            margin_used=float(acct_row.margin_used or 0),
+            margin_available=float(acct_row.margin_available or acct_row.balance),
+            daily_pnl=float(acct_row.daily_pnl or 0),
+            total_pnl=float(acct_row.total_pnl or 0),
+            positions_count=int(acct_row.positions_count or 0),
+        )
+
+        # Build a synthetic signal for sizing purposes
+        meta = strategy_orm.strategy_metadata or {}
+        risk_params = strategy_orm.risk_params or {}
+        sl_pct = float(risk_params.get('stop_loss_pct', 0.06))
+        tp_pct = float(risk_params.get('take_profit_pct', 0.15))
+
+        signal = TradingSignal(
+            id=str(_uuid.uuid4()),
+            strategy_id=strategy_id,
+            symbol=symbol,
+            action=SignalAction.ENTER_LONG,
+            confidence=0.95,
+            price=0.0,
+            stop_loss_pct=sl_pct,
+            take_profit_pct=tp_pct,
+            metadata={
+                'template_name': meta.get('template_name', strategy_orm.name),
+                'conviction_score': meta.get('conviction_score', 80),
+            },
+        )
+
+        # Load live positions for heat/sector cap checks
+        from src.models.orm import PositionORM
+        from src.models.dataclasses import Position
+        live_pos_orms = session.query(PositionORM).filter(
+            PositionORM.account_type == 'live',
+            PositionORM.closed_at.is_(None),
+        ).all()
+        live_positions = [
+            Position(
+                id=str(p.id),
+                strategy_id=p.strategy_id or '',
+                symbol=p.symbol,
+                side=p.side,
+                quantity=float(p.quantity or 0),
+                entry_price=float(p.entry_price or 0),
+                current_price=float(p.current_price or p.entry_price or 0),
+                unrealized_pnl=float(p.unrealized_pnl or 0),
+                stop_loss=float(p.stop_loss) if p.stop_loss else None,
+                take_profit=float(p.take_profit) if p.take_profit else None,
+            )
+            for p in live_pos_orms
+        ]
+
+        # Run the pipeline
+        risk_manager = RiskManager()
+        risk_manager._last_sizing_reason = None
+        recommended_size = risk_manager.calculate_position_size(
+            signal=signal,
+            account=account,
+            positions=live_positions,
+            strategy_allocation_pct=2.0,
+            is_paper=False,
+            is_live=True,
+        )
+        reason = getattr(risk_manager, '_last_sizing_reason', None)
+
+        return {
+            "strategy_id": strategy_id,
+            "symbol": symbol,
+            "recommended_size": round(recommended_size, 0),
+            "account_equity": account.equity,
+            "account_balance": account.balance,
+            "reason": reason,
+            "pipeline_inputs": {
+                "stop_loss_pct": sl_pct,
+                "take_profit_pct": tp_pct,
+                "base_risk_pct": 0.006,
+                "symbol_cap_pct": 0.20,
+                "heat_cap_pct": 0.90,
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing size estimate for {strategy_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{strategy_id}/graduate")
 async def graduate_strategy(
     strategy_id: str,

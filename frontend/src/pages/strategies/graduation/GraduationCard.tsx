@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { AlertTriangle, Check, X as Reject, XCircle } from 'lucide-react'
+import { AlertTriangle, Check, X as Reject, XCircle, Zap } from 'lucide-react'
 import {
   Badge,
   Button,
@@ -19,6 +19,8 @@ import { PnLNumber } from '@/components/trading/PnLNumber'
 import { RegimePill } from '@/components/trading/RegimePill'
 import { notifyError } from '@/lib/errors'
 import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/services/api'
 import {
   assetClassForSymbol,
   liveConvictionThresholdFor,
@@ -72,6 +74,18 @@ export function GraduationCard({
   const meta = detailQuery.data?.metadata ?? null
   const assetClass = assetClassForSymbol(row.symbol, meta?.asset_class)
   const isCrypto = assetClass === 'crypto'
+
+  // Fetch pipeline size estimate from backend
+  const sizeEstimateQuery = useQuery({
+    queryKey: ['size-estimate', row.strategy_id, row.symbol],
+    queryFn: () =>
+      api.get<{ recommended_size: number; account_equity: number; reason: string | null }>(
+        `/strategies/${row.strategy_id}/size-estimate?symbol=${encodeURIComponent(row.symbol)}`
+      ),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const pipelineSize = sizeEstimateQuery.data?.recommended_size ?? null
 
   const convictionThreshold =
     (isCrypto
@@ -217,6 +231,7 @@ export function GraduationCard({
           sizeWarning={sizeWarning}
           slTpWarning={slTpWarning}
           sizeRange={{ min: minSize, max: maxSize }}
+          pipelineSize={pipelineSize}
         />
 
         <ImpactPreview
@@ -581,6 +596,7 @@ interface ConfigFormProps {
   sizeWarning: string | null
   slTpWarning: string | null
   sizeRange: { min: number; max: number }
+  pipelineSize: number | null
 }
 
 function ConfigForm({
@@ -597,15 +613,38 @@ function ConfigForm({
   sizeWarning,
   slTpWarning,
   sizeRange,
+  pipelineSize,
 }: ConfigFormProps) {
   return (
     <section>
-      <SectionLabel>Live config overrides</SectionLabel>
+      <SectionLabel>Live config — CIO decision</SectionLabel>
       <div className="space-y-2 rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] p-2">
+
+        {/* Pipeline recommendation banner */}
+        {pipelineSize != null && (
+          <div className="flex items-center gap-2 rounded-[2px] bg-[color-mix(in_oklab,var(--accent-primary)_8%,transparent)] border border-[color-mix(in_oklab,var(--accent-primary)_20%,transparent)] px-2 py-1.5">
+            <Zap className="h-3 w-3 text-[var(--accent-primary)] shrink-0" />
+            <span className="text-[10px] text-[var(--text-2)]">
+              11-step pipeline recommends{' '}
+              <span className="mono font-semibold text-[var(--text-0)]">
+                ${pipelineSize.toFixed(0)}
+              </span>
+              {' '}virtual — CIO sets the final size below
+            </span>
+            <button
+              type="button"
+              onClick={() => onPositionSizeChange(pipelineSize)}
+              className="ml-auto text-[9px] uppercase tracking-wider text-[var(--accent-primary)] hover:underline shrink-0"
+            >
+              Use
+            </button>
+          </div>
+        )}
+
         <div>
           <div className="flex items-baseline justify-between">
             <Label className="text-[10px] uppercase tracking-wider">
-              Position size (virtual $)
+              Position size (virtual $) — CIO approved
             </Label>
             <span className="mono tabular-nums text-[12px] text-[var(--text-0)]">
               ${positionSize.toFixed(0)}
@@ -630,6 +669,9 @@ function ConfigForm({
               {sizeWarning}
             </div>
           )}
+          <p className="text-[9px] text-[var(--text-3)] mt-1">
+            This size is used exactly as-is at order time. No pipeline re-run, no ATR scaling.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-2">

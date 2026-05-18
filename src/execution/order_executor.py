@@ -342,7 +342,18 @@ class OrderExecutor:
                                                     take_profit_pct = round(_sl_max * original_rr, 4)
                                             # Scale position size down proportionally to preserve dollar risk.
                                             # Risk model sized using old_sl — if SL widens, size must shrink.
-                                            if old_sl > 0 and stop_loss_pct > old_sl:
+                                            # LIVE exception: the CIO approved a specific position size.
+                                            # The pipeline already ran at graduation time. Do NOT re-scale
+                                            # at order time — the CIO decision is final. Only SL/TP adjust.
+                                            if account_type == 'live':
+                                                logger.info(
+                                                    f"ATR floor at order time for {normalized_symbol} ({_atr_interval}): "
+                                                    f"SL {old_sl:.2%} → {stop_loss_pct:.2%} "
+                                                    f"(ATR={_atr_pct:.2%}, floor={_atr_multiplier:.1f}x ATR={_atr_floor:.2%}). "
+                                                    f"TP adjusted to {take_profit_pct:.2%} (R:R={original_rr:.1f}x). "
+                                                    f"Size unchanged at ${position_size:.0f} (CIO-approved, no re-scaling)."
+                                                )
+                                            elif old_sl > 0 and stop_loss_pct > old_sl:
                                                 size_scale = old_sl / stop_loss_pct
                                                 old_size = position_size
                                                 position_size = max(
