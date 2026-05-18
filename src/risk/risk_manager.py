@@ -824,14 +824,19 @@ class RiskManager:
         # only $4K cash, every order after the first would be sized against the
         # same stale balance and hit eToro error 604 (insufficient funds).
         # Each order is independent — it checks the real current balance right now.
+        # CRITICAL: scope by account_type — LIVE and DEMO have separate balances.
         available_balance = account.balance  # fallback if DB read fails
+        _acct_type_filter = 'live' if is_live else 'demo'
         try:
             from src.models.database import get_database
             from src.models.orm import AccountInfoORM
             _db = get_database()
             _sess = _db.get_session()
             try:
-                _acct_row = _sess.query(AccountInfoORM).order_by(
+                _acct_mode = 'LIVE' if is_live else 'DEMO'
+                _acct_row = _sess.query(AccountInfoORM).filter(
+                    AccountInfoORM.mode == _acct_mode
+                ).order_by(
                     AccountInfoORM.updated_at.desc()
                 ).first()
                 if _acct_row and _acct_row.balance is not None:
@@ -848,6 +853,7 @@ class RiskManager:
         # then eToro rejects them all with 604 (insufficient funds) because the first
         # few orders already consumed the capital.
         # Deduct all PENDING entry orders submitted in the last 30 minutes.
+        # CRITICAL: scope by account_type — DEMO pending orders must not reduce LIVE balance.
         try:
             from src.models.database import get_database as _gdb_pending
             from src.models.orm import OrderORM as _OrdORM_pending
@@ -863,11 +869,12 @@ class RiskManager:
                         _OrdORM_pending.status == _OS_pending.PENDING,
                         _OrdORM_pending.order_action == 'entry',
                         _OrdORM_pending.submitted_at >= _recent_cutoff,
+                        _OrdORM_pending.account_type == _acct_type_filter,
                     ).all()
                 )
                 if _pending_committed > 0:
                     logger.debug(
-                        f"Balance adjustment for {symbol}: ${available_balance:.0f} - "
+                        f"Balance adjustment for {symbol} [{_acct_type_filter}]: ${available_balance:.0f} - "
                         f"${_pending_committed:.0f} pending = "
                         f"${available_balance - _pending_committed:.0f} effective"
                     )

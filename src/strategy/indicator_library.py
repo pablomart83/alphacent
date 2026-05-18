@@ -23,16 +23,21 @@ class CacheKey:
     symbol: str
     indicator: str
     params: str  # JSON string of parameters
+    data_len: int  # Length of the data used
+    data_start: str  # ISO date of first bar — prevents collision when two strategies
+                     # fetch the same symbol with different date ranges but same bar count
     
     def __hash__(self):
-        return hash((self.symbol, self.indicator, self.params))
+        return hash((self.symbol, self.indicator, self.params, self.data_len, self.data_start))
     
     def __eq__(self, other):
         if not isinstance(other, CacheKey):
             return False
         return (self.symbol == other.symbol and 
                 self.indicator == other.indicator and 
-                self.params == other.params)
+                self.params == other.params and
+                self.data_len == other.data_len and
+                self.data_start == other.data_start)
 
 
 class IndicatorLibrary:
@@ -75,9 +80,17 @@ class IndicatorLibrary:
         Raises:
             ValueError: If indicator name is not recognized
         """
-        # Create cache key
+        # Create cache key — include data length AND start date to prevent stale results
+        # from a different date range that happens to have the same bar count.
+        # Example: 4H ADX SOXL (170d window) and 4H EMA Ribbon SOXL LIVE (220d window)
+        # both produce 299 bars from the DB but cover different date ranges.
         params_str = json.dumps(params, sort_keys=True)
-        cache_key = CacheKey(symbol=symbol, indicator=indicator_name, params=params_str)
+        try:
+            data_start = str(data.index[0].date()) if len(data) > 0 else ""
+        except Exception:
+            data_start = ""
+        cache_key = CacheKey(symbol=symbol, indicator=indicator_name, params=params_str,
+                             data_len=len(data), data_start=data_start)
         
         # Generate standardized indicator key name
         standardized_key = self._get_standardized_key(indicator_name, params)
