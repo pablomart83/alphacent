@@ -6,7 +6,140 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Platform is in active iteration — live trading is running, graduation pipeline is working, Intel page is live, full system audit + gap analysis just completed. P0 gaps G-44/G-45 closed.**
+**Platform is in active iteration — live trading is running (GOOGL + SOXL LIVE), graduation pipeline working, P0+P1 batch 1 closed. MAJOR ARCHITECTURAL CHANGE DESIGNED AND READY TO IMPLEMENT.**
+
+---
+
+## SESSION 2026-05-18 — WHAT WAS DONE
+
+### Crash fix + 604 cascade prevention
+| Commit | What |
+|---|---|
+| `8a1b753` | Fix `_template_dup_rejected_symbols` NameError crash at 00:58 UTC |
+| `c9dfebf` | Fix 604 cascade: deduct pending orders from balance (Part 1), delete ghost positions on rejection (Part 2), seed dedup from DB on restart (Part 3) |
+
+### P2 batch deployed
+| Commit | What |
+|---|---|
+| `d1b6b26` | G-22 (market-closed deferred), G-24 (heat cap actual SL), G-31 (graduation SQL HAVING), G-17 (pending_retirement force-close 14d), G-14 (cache regime per cycle), G-49 (AE freq cap bypass PAPER), G-47 (PAPER symbol cap 5%→10%) |
+
+### Graduation gate overhaul
+| Commit | What |
+|---|---|
+| `ec808aa` | Regime-adjusted ratio cap (3.5× in trending_up_strong), strategy-type win rate floor (45% trend, 55% mean_reversion), expand list to 20 |
+| `e866cb6` | Fix template_type field name |
+| `b8a5f92` | Restore _get_min_avg_pnl_per_trade, cache regime detection (10min TTL) |
+| `c86eb0f` | Bulk-fetch strategy_type (1 query vs 20) |
+| `7ac51e9` | Fix interval from rules fallback in graduation SQL CTE |
+| `8ce2153` | High-conviction trade count exception (Sharpe≥2.0 + WR≥70% → 40% reduction), fix UI threshold display |
+| `15cdef7` | Use best-template WF sharpe for watchlist symbol pairs |
+| `d8caac1` | Use wf_validated_combos.json for symbol-specific WF sharpe (interim fix) |
+
+### SOXL graduated to LIVE
+- `4H EMA Ribbon Trend Long SOXL LIVE` — strategy_id `0d0b75d6`, position_size $900, SL 6%, TP 15%, conviction_min 73
+- Now 2 LIVE strategies: GOOGL + SOXL
+
+### Market hours fix
+| Commit | What |
+|---|---|
+| `77f031b` | Fix DST-aware UTC offsets in market-hours.ts (was showing Pre-market at 14:55 London) |
+
+---
+
+## 🚨 NEXT SESSION MISSION: WATCHLIST ELIMINATION
+
+**This is the most important architectural change since the LIVE pass was added.**
+
+### The problem
+A Strategy is currently `(template, primary_symbol, watchlist=[sym1, sym2, sym3])`. One strategy row trades multiple symbols. This causes:
+- Identity confusion in the Library (strategy named "SPY LONG" has a position in XLK)
+- Graduation gate broken (WF sharpe from SPY used for XLK's qualification ratio)
+- Performance attribution wrong (P&L aggregated across 5 symbols)
+- Risk management confused (symbol cap, sector cap operate on positions but strategy view is misleading)
+
+### The decision
+**A Strategy IS a `(template, symbol)` pair. One strategy row = one symbol. Always.**
+
+### Answers to design questions
+1. Watchlist symbols that fail full WF → **do not exist** (delete/retire, no PAPER status)
+2. Watchlist WF validation (lighter pass) → **remove entirely**. Full WF only.
+3. Frontend migration → **migrate backend first, frontend follows naturally**
+
+### Implementation plan (5 phases, implement in order)
+
+**Phase 1 — Stop service, run migration script**
+
+Migration script (`scripts/migrate_watchlist_to_single_symbol.py`):
+
+For each strategy where `json_array_length(symbols) > 1`:
+  - For each watchlist symbol (symbols[1:]):
+    - Run full WF on `(template, watchlist_symbol)` using the parent strategy's rules
+    - If WF passes: create new strategy row (clone parent rules/risk_params/metadata, `symbols=[watchlist_symbol]`, name=`{template} {watchlist_symbol}`, status=PAPER if has paper trades else BACKTESTED, store wf_test_sharpe)
+    - If WF fails: do NOT create strategy. Reassign positions/orders/trades to a "retired watchlist" holding strategy or just close them.
+    - Reassign `positions`, `orders`, `trade_journal`, `signal_decisions` rows where `strategy_id=parent AND symbol=watchlist_symbol` → new strategy_id (or close if WF failed)
+  - Update parent: `symbols = [symbols[0]]` (primary only)
+
+LIVE strategies (GOOGL, SOXL) are already single-symbol — skip them.
+
+**Phase 2 — Proposer change (`strategy_proposer.py`)**
+
+- Remove `_build_watchlists` method entirely
+- Remove watchlist WF validation loop (lines ~2789-3011)
+- Remove `config/.wf_validated_combos.json` usage for watchlist building
+- Each proposal is a single `(template, symbol)` pair
+- `generate_strategies_from_templates` outputs strategies with `symbols=[symbol]` always
+- The per-cycle cap (200) applies to total `(template, symbol)` proposals
+- Dedup: if `(template, symbol)` strategy already exists in PAPER/BACKTESTED/LIVE → skip
+
+**Phase 3 — Signal generation (`strategy_engine.py`)**
+
+- `generate_signals`: replace `for symbol in strategy.symbols:` loop with single `symbol = strategy.symbols[0]`
+- Remove all watchlist-related branching in signal gen
+- `_coordinate_signals` in trading_scheduler: already works per symbol, no change needed
+
+**Phase 4 — Graduation gate (`graduation_gate.py`)**
+
+- `latest_strategy` CTE: trivial now — just pick most recent strategy for `(template, symbol)`. No proxy WF sharpe needed.
+- Remove `wf_by_template_symbol` and `best_wf_by_template` fallback logic (added in d8caac1) — no longer needed
+- `is_qualified`: no changes needed
+
+**Phase 5 — Frontend (`Library`, `ApproachingGraduationPanel`)**
+
+- Remove "versions" badge from Library rows
+- Strategy name is always `{template} {symbol}` — no parsing needed
+- `ApproachingGraduationPanel`: already works correctly after migration (each row is a real strategy)
+- Library filters: "Promoted today", "Activated today", "Live today" — no change needed
+
+### Key invariants to preserve
+- LIVE GOOGL and SOXL positions must not be touched
+- TSL continues to work (reads position.strategy_id → strategy rules — rules are identical after clone)
+- trade_journal reassignment preserves graduation stats (graduation gate already groups by template+symbol across all strategy_ids)
+- The `wf_validated_combos.json` cache can be kept as a performance hint for the proposer (which symbols pass WF for a template) but is no longer used for watchlist building
+
+### Files to change
+| File | Change |
+|---|---|
+| `scripts/migrate_watchlist_to_single_symbol.py` | NEW — migration script |
+| `src/strategy/strategy_proposer.py` | Remove `_build_watchlists`, watchlist WF loop, multi-symbol strategy creation |
+| `src/strategy/strategy_engine.py` | `generate_signals`: use `symbols[0]` only |
+| `src/strategy/graduation_gate.py` | Simplify `latest_strategy` CTE, remove WF proxy fallback |
+| `frontend/src/pages/strategies/Library*.tsx` | Remove "versions" badge |
+
+### Rollback
+If migration fails mid-way: `git revert` the migration script commit. The DB changes are the hard part — run migration in a transaction so it's atomic per strategy.
+
+---
+
+## CURRENT SYSTEM STATE (2026-05-18 end of session)
+
+- **DEMO equity:** ~$479K | **Open positions:** 96 (burst from crash cascade today) | **Regime:** trending_up_strong
+- **LIVE strategies:** 2 — GOOGL LONG (id: `918b0c99`) + SOXL LONG (id: `0d0b75d6`)
+- **LIVE positions:** GOOGL LONG entry 389.2, SOXL LONG entry ~$900 position
+- **Latest commit:** `d8caac1` (graduation interim fix)
+- **P0:** ✅ G-44, G-45 closed
+- **P1 batch 1:** ✅ G-46, G-48, G-50, G-10, G-35 closed
+- **P1 open:** G-01, G-02, G-09, G-19 (defer until watchlist migration complete)
+- **P2 batch:** ✅ G-22, G-24, G-31, G-17, G-14, G-49, G-47 closed
 
 ---
 
