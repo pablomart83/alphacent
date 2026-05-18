@@ -666,7 +666,7 @@ class TradingScheduler:
             )
 
             # Coordinate signals to avoid redundancy and check existing positions
-            coordinated_results, _strategy_total_signals, _template_dup_rejected = self._coordinate_signals(
+            coordinated_results, _strategy_total_signals, _template_dup_rejected, _template_dup_rejected_symbols = self._coordinate_signals(
                 batch_results,
                 strategy_map,
                 existing_positions=position_dataclasses,
@@ -3150,7 +3150,7 @@ class TradingScheduler:
                     f"(confidence: {signal.confidence:.2f})"
                 )
 
-        return coordinated_results, _strategy_total_signals, _template_dup_rejected
+        return coordinated_results, _strategy_total_signals, _template_dup_rejected, _template_dup_rejected_symbols
 
     def _adjust_opposing_position_sl(
         self,
