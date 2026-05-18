@@ -177,8 +177,8 @@ class HistoricalDataCache:
     strategies trading the same symbol share a single data fetch.
     """
 
-    def __init__(self, ttl_seconds: int = 3600):
-        """Initialize cache with TTL (default 1 hour).
+    def __init__(self, ttl_seconds: int = 600):
+        """Initialize cache with TTL (default 10 minutes — aligned with quick price update cycle).
         
         Args:
             ttl_seconds: Time-to-live for cached data in seconds
@@ -258,12 +258,13 @@ class HistoricalDataCache:
 _historical_cache: Optional['HistoricalDataCache'] = None
 
 
-def get_historical_cache(ttl_seconds: int = 3500) -> HistoricalDataCache:
+def get_historical_cache(ttl_seconds: int = 600) -> HistoricalDataCache:
     """Get or create the global historical data cache.
     
     Args:
-        ttl_seconds: TTL for cache entries (default 3500s — just under 1 hour
-                     so hourly signal loop always gets fresh data)
+        ttl_seconds: TTL for cache entries (default 600s — 10 minutes,
+                     aligned with the quick price update cycle so signal
+                     gen never sees data older than one update interval)
         
     Returns:
         HistoricalDataCache instance
@@ -677,7 +678,7 @@ class MarketDataManager:
             if cache_key in self._historical_memory_cache:
                 cached_data, cached_at = self._historical_memory_cache[cache_key]
                 cache_age = (datetime.now() - cached_at).total_seconds()
-                if cache_age < 3600:  # 1 hour TTL for in-memory cache
+                if cache_age < 600:  # 10 min TTL — aligned with quick price update cycle
                     logger.debug(f"Using in-memory cached data for {normalized_symbol} (age: {cache_age:.0f}s)")
                     return cached_data
 
@@ -851,7 +852,7 @@ class MarketDataManager:
             if raw_cache_key in self._raw_fetch_cache:
                 raw_data, raw_ts = self._raw_fetch_cache[raw_cache_key]
                 cache_age = (datetime.now() - raw_ts).total_seconds()
-                if cache_age < 3600 and raw_data:  # 1h TTL
+                if cache_age < 600 and raw_data:  # 10 min TTL — aligned with quick price update cycle
                     start_naive = start.replace(tzinfo=None) if hasattr(start, 'tzinfo') and start.tzinfo else start
                     end_naive = end.replace(tzinfo=None) if hasattr(end, 'tzinfo') and end.tzinfo else end
                     sliced = [d for d in raw_data 

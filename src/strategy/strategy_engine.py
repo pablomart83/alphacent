@@ -5410,19 +5410,22 @@ class StrategyEngine:
                     data_list = shared_data[symbol]
                     logger.info(f"Using shared cached data for {symbol} ({len(data_list)} points)")
                 else:
-                    # Fetch from cache or Yahoo Finance
+                    # Fetch from cache or FMP. Cache TTL is 10 minutes (aligned with
+                    # quick price update cycle) so data is never more than one update
+                    # interval stale. shared_data (populated by generate_signals_batch)
+                    # is preferred — it's a single fresh fetch shared across all
+                    # strategies trading the same symbol in the same cycle.
                     from src.data.market_data_manager import get_historical_cache
                     hist_cache = get_historical_cache()
                     cache_key = f"{symbol}:{symbol_interval}:{signal_gen_days}"
                     data_list = hist_cache.get(cache_key)
-                    
+
                     if data_list is None:
                         data_list = self.market_data.get_historical_data(
-                            symbol, start, end, interval=symbol_interval, prefer_yahoo=True
+                            symbol, start, end, interval=symbol_interval,
                         )
                         if data_list:
-                            hist_cache.set(cache_key, data_list)
-                
+                            hist_cache.set(cache_key, data_list)                
                 fetch_time = _time.time() - t_fetch
                 
                 if not data_list or len(data_list) < 20:
