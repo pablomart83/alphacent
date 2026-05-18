@@ -658,14 +658,16 @@ class RiskManager:
             )
 
             # Post-adjustment minimum floor: if correlation or regime adjustments
-            # pushed the size below eToro's minimum, bump back up to minimum.
+            # pushed the size below the minimum, bump back up to minimum.
             # The system decided to trade this signal — submit at minimum rather than failing.
-            MINIMUM_ORDER_SIZE_POST = 2000.0
+            # LIVE minimum is $200 (live_trading.min_order_size), DEMO is $2,000.
+            MINIMUM_ORDER_SIZE_POST = 200.0 if is_live else 2000.0
 
             if 0 < position_size < MINIMUM_ORDER_SIZE_POST:
                 # Only bump if we actually have the balance to cover it.
                 # If available_balance < minimum, the trade is not viable — skip it
                 # cleanly here rather than letting it reach order_executor and log an ERROR.
+                _acct_mode_post = 'LIVE' if is_live else 'DEMO'
                 _avail = account.balance
                 try:
                     from src.models.database import get_database as _gdb_post
@@ -673,7 +675,9 @@ class RiskManager:
                     _db_post = _gdb_post()
                     _sess_post = _db_post.get_session()
                     try:
-                        _row_post = _sess_post.query(_AIO_post).order_by(_AIO_post.updated_at.desc()).first()
+                        _row_post = _sess_post.query(_AIO_post).filter(
+                            _AIO_post.mode == _acct_mode_post
+                        ).order_by(_AIO_post.updated_at.desc()).first()
                         if _row_post and _row_post.balance is not None:
                             _avail = float(_row_post.balance)
                     finally:
@@ -696,7 +700,7 @@ class RiskManager:
                         ),
                     )
                 logger.info(
-                    f"Post-adjustment size ${position_size:.2f} below eToro minimum "
+                    f"Post-adjustment size ${position_size:.2f} below minimum "
                     f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bumping to minimum"
                 )
                 position_size = MINIMUM_ORDER_SIZE_POST
