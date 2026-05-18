@@ -196,6 +196,21 @@ export function buildStrategyColumns(
       },
     },
     {
+      id: 'symbol',
+      header: 'Symbol',
+      accessorFn: (row) => row.symbols?.[0] ?? '',
+      size: 72,
+      cell: ({ row }) => {
+        const sym = row.original.symbols?.[0]
+        if (!sym) return <span className="text-[var(--text-3)] text-[10px]">—</span>
+        return (
+          <span className="mono text-[11px] font-medium text-[var(--text-1)]">
+            {sym}
+          </span>
+        )
+      },
+    },
+    {
       id: 'allocation_percent',
       header: 'Alloc %',
       accessorKey: 'allocation_percent',
