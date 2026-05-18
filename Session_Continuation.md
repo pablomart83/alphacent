@@ -6,11 +6,51 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Platform is in active iteration — live trading is running (GOOGL + SOXL LIVE), graduation pipeline working, P0+P1 batch 1 closed. MAJOR ARCHITECTURAL CHANGE DESIGNED AND READY TO IMPLEMENT.**
+**Platform is in active iteration — live trading is running (GOOGL + SOXL LIVE), graduation pipeline working. WATCHLIST ELIMINATION COMPLETE (2026-05-18). Every strategy is now a single (template, symbol) pair.**
 
 ---
 
-## SESSION 2026-05-18 — WHAT WAS DONE
+## SESSION 2026-05-18 — WATCHLIST ELIMINATION
+
+### Architectural change: Strategy IS a (template, symbol) pair
+
+| Commit | What |
+|---|---|
+| `e70a2f5` | Phase 1 migration + Phase 2-5 code changes |
+| `3bd873f` | Library: replace watchlist count with symbol name column |
+| `b291073` | Fix open position orphans from watchlist migration |
+
+**Phase 1 — DB migration** (`scripts/migrate_watchlist_to_single_symbol.py`):
+- 256 multi-symbol strategies trimmed to `symbols=[primary]`
+- 87 new single-symbol PAPER strategies created for watchlist symbols with actual trades
+- 184 positions, 163 orders, 175 trades, 14,114 signal_decisions reassigned
+- 33 open positions that had no closed trades (missed by first pass) fixed by `scripts/fix_open_position_orphans.py` — reassigned to correct single-symbol strategies
+- 0 multi-symbol strategies remaining across all statuses
+
+**Phase 2 — Proposer** (`strategy_proposer.py`):
+- `_build_watchlists` call removed
+- 224-line watchlist WF validation loop removed
+- Every proposal is `symbols=[single_symbol]` always
+
+**Phase 3 — Signal gen** (`strategy_engine.py`):
+- `symbols_to_trade = [symbols[0]]` — no multi-symbol loop
+
+**Phase 4 — Graduation gate** (`graduation_gate.py`):
+- `wf_by_template_symbol` proxy (wf_validated_combos.json) removed
+- Representative strategy WF sharpe is always correct now
+
+**Phase 5 — Frontend** (`strategyColumns.tsx`):
+- Watchlist count column replaced with actual symbol name (AAPL, GOOGL, etc.)
+
+### Post-migration state
+- 0 multi-symbol strategies (all statuses)
+- PAPER = has open position or recently traded, BACKTESTED = passed WF waiting for signal
+- GOOGL LIVE intact, SOXL LIVE strategy active (no position yet)
+- `_demote_idle_strategies` in monitoring_service handles PAPER→BACKTESTED automatically when positions close
+
+---
+
+## SESSION 2026-05-18 — CRASH FIX + P2 BATCH (earlier)
 
 ### Crash fix + 604 cascade prevention
 | Commit | What |
@@ -46,7 +86,13 @@
 
 ---
 
-## 🚨 NEXT SESSION MISSION: WATCHLIST ELIMINATION
+## 🚨 NEXT SESSION MISSION: P1 OPEN GAPS
+
+Watchlist elimination is done. Resume P1 open gaps:
+- G-01: WF test-dominant consistency gate
+- G-02: Deflated Sharpe Ratio at activation
+- G-09: Correlation dedup at graduation approval (LIVE only)
+- G-19: Real slippage model from trade_journal data
 
 **This is the most important architectural change since the LIVE pass was added.**
 
@@ -132,14 +178,12 @@ If migration fails mid-way: `git revert` the migration script commit. The DB cha
 
 ## CURRENT SYSTEM STATE (2026-05-18 end of session)
 
-- **DEMO equity:** ~$479K | **Open positions:** 96 (burst from crash cascade today) | **Regime:** trending_up_strong
+- **DEMO equity:** ~$479K | **Open positions:** 128 PAPER (draining to 1:1 as pre-migration watchlist positions close) | **Regime:** trending_up_strong
 - **LIVE strategies:** 2 — GOOGL LONG (id: `918b0c99`) + SOXL LONG (id: `0d0b75d6`)
-- **LIVE positions:** GOOGL LONG entry 389.2, SOXL LONG entry ~$900 position
-- **Latest commit:** `d8caac1` (graduation interim fix)
-- **P0:** ✅ G-44, G-45 closed
-- **P1 batch 1:** ✅ G-46, G-48, G-50, G-10, G-35 closed
-- **P1 open:** G-01, G-02, G-09, G-19 (defer until watchlist migration complete)
-- **P2 batch:** ✅ G-22, G-24, G-31, G-17, G-14, G-49, G-47 closed
+- **LIVE positions:** GOOGL LONG entry 389.2, current ~403, +$31 unrealised. SOXL no position yet.
+- **Strategy counts:** ~134 PAPER · ~267 BACKTESTED · 2 LIVE
+- **Architecture:** Every strategy is now a single (template, symbol) pair. 0 multi-symbol strategies.
+- **Latest commit:** `b291073` (fix open position orphans)
 
 ---
 
