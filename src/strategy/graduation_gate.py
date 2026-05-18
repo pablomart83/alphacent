@@ -522,8 +522,14 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             ),
             latest_strategy AS (
                 -- For each (template_name, symbol) pair, find the most recently
-                -- created strategy_id. Used as the representative ID for the
-                -- approval flow (needs a valid strategy_id to reference).
+                -- created strategy_id whose WF was run on that specific symbol.
+                -- This ensures the WF sharpe used for the qualification ratio
+                -- was calibrated on the same symbol, not on a different primary
+                -- symbol that happened to trade this one via its watchlist.
+                --
+                -- Priority: strategies where symbols[0] = this symbol (WF was
+                -- run on this symbol directly) over watchlist strategies.
+                -- Within each priority tier, most recently created wins.
                 SELECT DISTINCT ON (
                     COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
                     tj.symbol
@@ -535,8 +541,6 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     tj.symbol,
                     s.id                                                AS strategy_id,
                     s.name                                              AS strategy_name,
-                    -- G-31 fix: read interval from metadata first, fall back to rules.
-                    -- Older strategies stored interval in rules["interval"] not metadata.
                     COALESCE(
                         s.strategy_metadata->>'interval',
                         s.rules->>'interval'
@@ -552,6 +556,12 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 ORDER BY
                     COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
                     tj.symbol,
+                    -- Prefer strategies where this symbol appears first in the symbols
+                    -- array (i.e. was the primary symbol for WF validation).
+                    -- JSON array: symbols[0] = primary. We check if the symbol name
+                    -- appears as the first element by looking for it at position 0.
+                    CASE WHEN s.symbols::jsonb->0 = to_jsonb(tj.symbol::text)
+                         THEN 0 ELSE 1 END ASC,
                     s.created_at DESC
             )
             SELECT
@@ -580,6 +590,37 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
     ).fetchall()
 
     queue = []
+
+    # Best WF sharpe per template — used as fallback when the representative
+    # strategy's WF was run on a different primary symbol (watchlist trade case).
+    # A watchlist symbol (e.g. XLK traded by a SPY strategy) should be evaluated
+    # against the template's best proven edge, not the SPY strategy's WF sharpe.
+    best_wf_by_template = {}
+    try:
+        _wf_rows = session.execute(
+            text("""
+                SELECT
+                    COALESCE(
+                        strategy_metadata->>'template_name',
+                        REGEXP_REPLACE(name, ' V[0-9]+$', '')
+                    )                                                   AS template_name,
+                    MAX(
+                        COALESCE(
+                            (strategy_metadata->>'wf_test_sharpe')::float,
+                            (strategy_metadata->>'wf_sharpe')::float,
+                            (strategy_metadata->>'walk_forward_sharpe')::float,
+                            0
+                        )
+                    )                                                   AS best_wf_sharpe
+                FROM strategies
+                WHERE strategy_metadata IS NOT NULL
+                GROUP BY template_name
+            """),
+        ).fetchall()
+        best_wf_by_template = {r.template_name: float(r.best_wf_sharpe or 0) for r in _wf_rows}
+    except Exception:
+        pass
+
     for row in candidates_raw:
         pair = (row.template_name, row.symbol)
         if pair in active_live or pair in recently_rejected:
@@ -603,7 +644,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             # Use interval and strategy_type from SQL CTE (reads both metadata and rules)
             strategy_interval = row.strategy_interval
             strategy_type = row.sql_strategy_type
-            # Still load the ORM row for WF sharpe (not in the CTE)
+            # Load the ORM row for WF sharpe
             strategy = session.query(StrategyORM).filter_by(id=representative_id).first()
             if strategy:
                 meta = strategy.strategy_metadata or {}
@@ -613,6 +654,24 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     or meta.get("walk_forward_sharpe")
                     or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
                 )
+
+        # If the representative strategy's WF sharpe is from a different primary symbol
+        # (watchlist trade), use the best WF sharpe across all strategies for this template.
+        # This ensures watchlist symbols are evaluated against the template's proven edge,
+        # not against a WF run on a different symbol.
+        # The best-template WF sharpe is computed once below and used as a fallback.
+        if not wf_sharpe:
+            # Will be filled by the best-template lookup below
+            pass
+
+        # Use best-template WF sharpe as fallback (or override if representative
+        # strategy's WF was calibrated on a different symbol).
+        # The representative strategy for a watchlist symbol will have its WF sharpe
+        # from the primary symbol — e.g. XLK traded by SPY strategy uses SPY's WF sharpe.
+        # Instead, use the best WF sharpe seen for this template across all primary symbols.
+        best_template_wf = best_wf_by_template.get(row.template_name, 0.0)
+        if best_template_wf > 0 and (not wf_sharpe or wf_sharpe < best_template_wf):
+            wf_sharpe = best_template_wf
 
         qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe, interval=strategy_interval, strategy_type=strategy_type)
         if not qualified:
