@@ -5677,7 +5677,8 @@ class StrategyEngine:
                         pass  # never let observability break signal gen
 
                 # Check frequency limits first (cheapest check)
-                freq_check = frequency_limiter.check_signal_allowed(signal, strategy)
+                # G-49: pass account_type so PAPER bypasses the AE monthly cap
+                freq_check = frequency_limiter.check_signal_allowed(signal, strategy, account_type=account_type)
                 if not freq_check.allowed:
                     frequency_limiter.log_rejected_signal(signal, strategy, freq_check)
                     logger.info(

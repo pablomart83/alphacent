@@ -99,6 +99,36 @@ def _get_min_trades_for_interval(interval: Optional[str]) -> int:
     return MIN_PAPER_TRADES
 
 
+def _get_min_sql_having_trades() -> int:
+    """
+    Return the minimum trades threshold for the graduation SQL HAVING clause.
+
+    G-31: The SQL HAVING must use the LOWEST per-interval threshold so that
+    1d strategies with fewer trades than MIN_PAPER_TRADES still appear in the
+    query result. The per-interval bar is then enforced by is_qualified().
+
+    Without this, a 1d strategy with 10 trades (which passes min_trades_1d=8)
+    is filtered out by HAVING COUNT(*) >= 15 and never reaches is_qualified.
+    """
+    try:
+        import yaml as _y
+        from pathlib import Path as _P
+        _p = _P("config/autonomous_trading.yaml")
+        if _p.exists():
+            with open(_p, "r") as _f:
+                _c = _y.safe_load(_f) or {}
+            pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
+            candidates = [
+                int(pt_gg.get("min_trades_1d", MIN_PAPER_TRADES)),
+                int(pt_gg.get("min_trades_4h", MIN_PAPER_TRADES)),
+                int(pt_gg.get("min_trades_1h", MIN_PAPER_TRADES)),
+            ]
+            return min(candidates)
+    except Exception:
+        pass
+    return MIN_PAPER_TRADES
+
+
 def _get_min_avg_pnl_per_trade() -> float:
     """Return min avg P&L per trade from paper_trading.graduation_gate.min_avg_pnl_per_trade."""
     try:
@@ -403,7 +433,10 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
               ON ls.template_name = ps.template_name
              AND ls.symbol        = ps.symbol
         """),
-        {"min_trades": MIN_PAPER_TRADES},
+        # G-31: use the minimum per-interval threshold so 1d strategies with
+        # fewer trades than MIN_PAPER_TRADES still appear. is_qualified() applies
+        # the correct per-interval bar after the SQL filter.
+        {"min_trades": _get_min_sql_having_trades()},
     ).fetchall()
 
     queue = []

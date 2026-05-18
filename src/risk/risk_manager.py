@@ -935,7 +935,12 @@ class RiskManager:
                 _flat_size = 5000.0
 
             # Apply symbol concentration cap (hard limit — still enforced for paper)
-            _symbol_cap_ps = equity * 0.05
+            # G-47: raised from 5% to 10% of equity for PAPER.
+            # At 5% of $479K equity the cap was $24K — allowing only ~4 strategies
+            # per symbol before blocking. At 10% ($48K) we allow ~8 strategies per
+            # symbol, matching the G-46 MAX_PER_SYMBOL_PER_TIMEFRAME=8 limit.
+            # Capital preservation is irrelevant on demo capital; breadth is the goal.
+            _symbol_cap_ps = equity * 0.10
             try:
                 from src.models.database import get_database as _gdb_ps
                 from src.models.orm import PositionORM as _PosORM_ps, OrderORM as _OrdORM_ps
@@ -1187,7 +1192,15 @@ class RiskManager:
         MAX_PORTFOLIO_HEAT_PCT = _live_heat_cap_pct if is_live else 0.30
         max_heat = equity * MAX_PORTFOLIO_HEAT_PCT
         current_heat = sum(
-            self._get_position_value(pos) * 0.06  # assume 6% SL as proxy
+            self._get_position_value(pos) * (
+                # G-24: use actual SL distance when available, fall back to 6% proxy.
+                # actual_sl_pct = |entry_price - stop_loss| / entry_price
+                # This fixes crypto (8% SL counted as 6%) and forex (2% SL counted as 6%).
+                (abs(pos.entry_price - pos.stop_loss) / pos.entry_price)
+                if (pos.stop_loss and pos.entry_price and pos.entry_price > 0
+                    and abs(pos.entry_price - pos.stop_loss) / pos.entry_price < 0.30)
+                else 0.06  # fallback: 6% proxy when SL not set or implausible
+            )
             for pos in positions
             if pos.closed_at is None
             and not getattr(pos, 'pending_closure', False)

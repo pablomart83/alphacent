@@ -700,7 +700,20 @@ class TradingScheduler:
             # strategy from opening multiple positions on the same symbol in one batch.
             # Keyed on strategy_id so different strategies can still trade the same symbol.
             orders_submitted_this_run = set()  # (strategy_id, normalized_symbol, direction)
-            
+
+            # G-14: compute regime once per cycle, reuse in the per-signal loop.
+            # Previously detect_sub_regime() and get_market_context() were called
+            # once per signal — creating a fresh MarketStatisticsAnalyzer each time.
+            _cycle_sub_regime = None
+            _cycle_market_context = None
+            try:
+                from src.strategy.market_analyzer import MarketStatisticsAnalyzer as _MSA_cycle
+                _msa_cycle = _MSA_cycle(self._market_data)
+                _cycle_sub_regime, _, _, _ = _msa_cycle.detect_sub_regime()
+                _cycle_market_context = _msa_cycle.get_market_context()
+            except Exception as _regime_cache_err:
+                logger.debug(f"Cycle regime cache failed: {_regime_cache_err}")
+
             for strategy_id, signals in coordinated_results.items():
                 if not signals:
                     continue
@@ -1081,9 +1094,12 @@ class TradingScheduler:
                                                and _sig_sym not in set(DEMO_ALLOWED_INDICES)
                                                and _sig_sym not in set(DEMO_ALLOWED_ETFS))
                             if _is_equity_long2:
-                                from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-                                _analyzer_yc = MarketStatisticsAnalyzer(self._market_data)
-                                _macro = _analyzer_yc.get_market_context()
+                                # G-14: use cycle-cached market context instead of re-fetching per signal
+                                _macro = _cycle_market_context
+                                if _macro is None:
+                                    from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                                    _analyzer_yc = MarketStatisticsAnalyzer(self._market_data)
+                                    _macro = _analyzer_yc.get_market_context()
                                 _yc_spread = None
                                 if _macro and isinstance(_macro, dict):
                                     _fred_data = _macro.get("fred_data", {})
@@ -1161,9 +1177,12 @@ class TradingScheduler:
 
                                 regime_sizing = sizing_config.get('position_management', {}).get('regime_based_sizing', {})
                                 if regime_sizing.get('enabled', False):
-                                    from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-                                    analyzer = MarketStatisticsAnalyzer(self._market_data)
-                                    sub_regime, _, _, _ = analyzer.detect_sub_regime()
+                                    # G-14: use cycle-cached regime instead of re-detecting per signal
+                                    sub_regime = _cycle_sub_regime
+                                    if sub_regime is None:
+                                        from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+                                        analyzer = MarketStatisticsAnalyzer(self._market_data)
+                                        sub_regime, _, _, _ = analyzer.detect_sub_regime()
 
                                     multipliers = regime_sizing.get('multipliers', {})
                                     regime_name = sub_regime.value.lower()
@@ -1772,25 +1791,43 @@ class TradingScheduler:
                                     logger.debug(f"Immediate position creation skipped: {pos_err}")
                                     # Non-critical — order monitor will pick it up
 
-                        except Exception as e:
-                            _emsg = str(e)
-                            if "Market closed" in _emsg and "re-fire at next open" in _emsg:
-                                logger.info(f"Signal deferred (market closed): {signal.symbol}")
-                            elif "gate blocked" in _emsg.lower() or "trend-consistency gate" in _emsg.lower() or "vix gate" in _emsg.lower():
-                                # Gate blocks are expected behaviour — not errors
-                                logger.warning(f"Gate blocked signal for {signal.symbol}: {e}")
-                            else:
-                                logger.error(f"Failed to execute signal for {signal.symbol}: {e}")
-                            # Count as rejected so the cycle summary is accurate
-                            signals_rejected += 1
-                            self._log_signal_decision(
-                                session=session,
-                                signal=signal,
-                                strategy_name=strategy.name,
-                                decision="REJECTED",
-                                rejection_reason=f"Order execution failed: {str(e)[:200]}",
-                            )
-                            continue
+        except Exception as e:
+            _msg = str(e)
+            if "Market closed" in _msg and "re-fire at next open" in _msg:
+                # G-22: market-closed is a deferral, not a failure. Log at INFO,
+                # write a 'deferred' signal_decision (not 'rejected') so the funnel
+                # correctly shows these as expected deferrals, not errors.
+                logger.info(f"Signal deferred (market closed): {signal.symbol}")
+                try:
+                    from src.analytics.decision_log import record_decision as _rec_deferred
+                    _sig_meta_d = getattr(signal, 'metadata', None) or {}
+                    _rec_deferred(
+                        stage="gate_blocked",
+                        decision="deferred",
+                        strategy_id=getattr(signal, 'strategy_id', None),
+                        template=_sig_meta_d.get('template_name') or strategy.name,
+                        symbol=signal.symbol,
+                        direction=('long' if 'LONG' in str(getattr(signal, 'action', '')) else 'short'),
+                        reason="market_closed_deferred",
+                        metadata={"strategy_name": strategy.name},
+                    )
+                except Exception:
+                    pass
+            elif "gate blocked" in _emsg.lower() or "trend-consistency gate" in _emsg.lower() or "vix gate" in _emsg.lower():
+                # Gate blocks are expected behaviour — not errors
+                logger.warning(f"Gate blocked signal for {signal.symbol}: {e}")
+            else:
+                logger.error(f"Failed to execute signal for {signal.symbol}: {e}")
+            # Count as rejected so the cycle summary is accurate
+            signals_rejected += 1
+            self._log_signal_decision(
+                session=session,
+                signal=signal,
+                strategy_name=strategy.name,
+                decision="REJECTED",
+                rejection_reason=f"Order execution failed: {str(e)[:200]}",
+            )
+            continue
                     else:
                         # Log rejected signal decision
                         self._log_signal_decision(

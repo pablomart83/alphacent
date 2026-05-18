@@ -4196,6 +4196,30 @@ class MonitoringService:
                         f"({pnl_pct:+.1f}%) for {age_days:.0f} days — blocking strategy demotion"
                     )
 
+                # G-17: force-close after pending_retirement_force_close_days (default 14).
+                # After 14 days in a pending_retirement strategy, close the position
+                # regardless of P&L — dead capital should not be held indefinitely.
+                if not reason and is_pending_retirement:
+                    try:
+                        import yaml as _yaml_g17
+                        from pathlib import Path as _Path_g17
+                        _cfg_g17 = {}
+                        _cfg_path_g17 = _Path_g17("config/autonomous_trading.yaml")
+                        if _cfg_path_g17.exists():
+                            with open(_cfg_path_g17, "r") as _f_g17:
+                                _cfg_g17 = _yaml_g17.safe_load(_f_g17) or {}
+                        _force_days = int(
+                            _cfg_g17.get("retirement_logic", {})
+                            .get("pending_retirement_force_close_days", 14)
+                        )
+                    except Exception:
+                        _force_days = 14
+                    if age_days >= _force_days:
+                        reason = (
+                            f"Force-close: strategy pending retirement for {age_days:.0f} days "
+                            f"(>{_force_days}d limit) — capital redeployment"
+                        )
+
                 # Category 2: stale position — differentiated by asset class and strategy type
                 elif not reason:
                     strategy_type_str = ''

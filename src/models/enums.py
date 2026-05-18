@@ -41,6 +41,7 @@ class OrderStatus(str, Enum):
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     CANCELLED = "CANCELLED"
     FAILED = "FAILED"
+    DEFERRED = "DEFERRED"  # G-22: market-closed deferral — not a failure, will re-fire at next open
 
 
 class PositionSide(str, Enum):

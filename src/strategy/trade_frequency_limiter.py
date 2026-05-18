@@ -71,7 +71,8 @@ class TradeFrequencyLimiter:
     def check_signal_allowed(
         self,
         signal: TradingSignal,
-        strategy: Strategy
+        strategy: Strategy,
+        account_type: str = 'demo',
     ) -> TradeFrequencyCheck:
         """
         Check if a signal is allowed based on frequency limits.
@@ -83,6 +84,11 @@ class TradeFrequencyLimiter:
         DSL strategies (EMA crossover, RSI dip buy, etc.) should trade whenever
         the signal fires. Applying a monthly cap to a systematic DSL strategy
         defeats the purpose of running it.
+
+        G-49 (2026-05-18): PAPER (account_type='demo') bypasses the AE frequency
+        cap entirely. PAPER needs to accumulate trades for graduation; capping at
+        4/month means 5+ months to reach the 20-trade graduation minimum. LIVE
+        keeps the cap to control turnover costs.
         """
         is_alpha_edge = (
             hasattr(strategy, 'metadata') and
@@ -92,7 +98,8 @@ class TradeFrequencyLimiter:
 
         trades_this_month = self._get_trades_this_month(strategy.id)
 
-        if is_alpha_edge:
+        if is_alpha_edge and account_type == 'live':
+            # LIVE Alpha Edge: enforce monthly cap and minimum holding period
             # Alpha Edge: enforce monthly cap and minimum holding period
             if trades_this_month >= self.max_trades_per_strategy_per_month:
                 return TradeFrequencyCheck(
@@ -120,7 +127,7 @@ class TradeFrequencyLimiter:
             else:
                 days_since_last_trade = None
         else:
-            # DSL strategies: no frequency constraints — trade on every valid signal
+            # DSL strategies (or PAPER AE): no frequency constraints — trade on every valid signal
             days_since_last_trade = None
 
         return TradeFrequencyCheck(
