@@ -518,7 +518,17 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     )                                                   AS template_name,
                     tj.symbol,
                     s.id                                                AS strategy_id,
-                    s.name                                              AS strategy_name
+                    s.name                                              AS strategy_name,
+                    -- G-31 fix: read interval from metadata first, fall back to rules.
+                    -- Older strategies stored interval in rules["interval"] not metadata.
+                    COALESCE(
+                        s.strategy_metadata->>'interval',
+                        s.rules->>'interval'
+                    )                                                   AS strategy_interval,
+                    COALESCE(
+                        s.strategy_metadata->>'template_type',
+                        s.strategy_metadata->>'strategy_type'
+                    )                                                   AS strategy_type
                 FROM trade_journal tj
                 JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
@@ -533,6 +543,8 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 ps.symbol,
                 ls.strategy_id  AS representative_strategy_id,
                 ls.strategy_name,
+                ls.strategy_interval,
+                ls.strategy_type AS sql_strategy_type,
                 ps.trades,
                 ps.paper_sharpe,
                 ps.win_rate_pct,
@@ -570,7 +582,12 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
         wf_sharpe = None
         strategy_name = row.template_name
         strategy_interval = None
+        strategy_type = None
         if representative_id:
+            # Use interval and strategy_type from SQL CTE (reads both metadata and rules)
+            strategy_interval = row.strategy_interval
+            strategy_type = row.sql_strategy_type
+            # Still load the ORM row for WF sharpe (not in the CTE)
             strategy = session.query(StrategyORM).filter_by(id=representative_id).first()
             if strategy:
                 meta = strategy.strategy_metadata or {}
@@ -580,10 +597,6 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     or meta.get("walk_forward_sharpe")
                     or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
                 )
-                strategy_interval = meta.get("interval") or (
-                    strategy.rules.get("interval") if isinstance(strategy.rules, dict) else None
-                )
-                strategy_type = meta.get("template_type") or meta.get("strategy_type")
 
         qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe, interval=strategy_interval, strategy_type=strategy_type)
         if not qualified:
