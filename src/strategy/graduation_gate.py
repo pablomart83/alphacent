@@ -129,6 +129,20 @@ def _get_min_sql_having_trades() -> int:
     return MIN_PAPER_TRADES
 
 
+def _get_min_avg_pnl_per_trade() -> float:
+    """Return min avg P&L per trade from paper_trading.graduation_gate.min_avg_pnl_per_trade."""
+    try:
+        import yaml as _y
+        from pathlib import Path as _P
+        _p = _P("config/autonomous_trading.yaml")
+        if _p.exists():
+            with open(_p, "r") as _f:
+                _c = _y.safe_load(_f) or {}
+            return float(_c.get("paper_trading", {}).get("graduation_gate", {}).get("min_avg_pnl_per_trade", 0.0))
+    except Exception:
+        return 0.0
+
+
 def _get_regime_adjusted_max_ratio() -> float:
     """
     Return the regime-adjusted qualification ratio cap.
@@ -144,7 +158,17 @@ def _get_regime_adjusted_max_ratio() -> float:
       trending_down:       1.5× (bear — outperformance vs WF is suspicious)
       high_vol:            1.5× (volatile — same)
       unknown / fallback:  2.0×
+
+    Result is cached for 10 minutes to avoid hitting the market data manager
+    on every graduation candidate evaluation.
     """
+    import time as _time
+    _now = _time.time()
+    _cache = getattr(_get_regime_adjusted_max_ratio, '_cache', None)
+    if _cache and (_now - _cache[0]) < 600:  # 10-minute TTL
+        return _cache[1]
+
+    result = MAX_QUALIFICATION_RATIO  # fallback
     try:
         from src.data.market_data_manager import get_market_data_manager
         from src.strategy.market_analyzer import MarketStatisticsAnalyzer
@@ -154,16 +178,18 @@ def _get_regime_adjusted_max_ratio() -> float:
             _regime, _, _, _ = _msa.detect_sub_regime()
             _regime_name = _regime.value.lower() if _regime else ""
             if "trending_up_strong" in _regime_name:
-                return 3.5
+                result = 3.5
             elif "trending_up" in _regime_name:
-                return 3.0
+                result = 3.0
             elif "trending_down" in _regime_name or "high_vol" in _regime_name:
-                return 1.5
+                result = 1.5
             else:
-                return 2.0
+                result = 2.0
     except Exception:
         pass
-    return MAX_QUALIFICATION_RATIO  # fallback to configured value
+
+    _get_regime_adjusted_max_ratio._cache = (_now, result)
+    return result
 
 
 def _get_strategy_type_win_rate_floor(strategy_type: Optional[str]) -> float:

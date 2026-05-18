@@ -1885,6 +1885,12 @@ async def get_approaching_graduation(
         ).fetchall()
         wf_by_template = {r.template_name: float(r.best_wf_sharpe or 0) for r in wf_rows}
 
+        # Compute regime-adjusted max ratio ONCE per request — calling
+        # _get_regime_adjusted_max_ratio() per candidate would hit the market
+        # data manager 20 times and make the endpoint very slow.
+        from src.strategy.graduation_gate import _get_strategy_type_win_rate_floor, _get_regime_adjusted_max_ratio
+        _request_effective_max_ratio = _get_regime_adjusted_max_ratio()
+
         # --- Build approaching list ---
         approaching = []
         for row in rows:
@@ -1907,9 +1913,8 @@ async def get_approaching_graduation(
             trades_ok = trades >= MIN_PAPER_TRADES
             pnl_ok = total_pnl > MIN_PAPER_PNL
 
-            # Fix 2: strategy-type-aware win rate floor
-            from src.strategy.graduation_gate import _get_strategy_type_win_rate_floor, _get_regime_adjusted_max_ratio
-            # Get strategy_type from the most recent strategy for this template
+            # Fix 2: strategy-type-aware win rate floor.
+            # Get strategy_type from the most recent strategy for this template.
             _strat_type = None
             try:
                 from sqlalchemy import text as _text2
@@ -1930,7 +1935,8 @@ async def get_approaching_graduation(
             except Exception:
                 pass
             effective_wr_floor = _get_strategy_type_win_rate_floor(_strat_type)
-            effective_max_ratio = _get_regime_adjusted_max_ratio()
+            # Use the pre-computed regime-adjusted max ratio (computed once per request above)
+            effective_max_ratio = _request_effective_max_ratio
 
             wr_ok = win_rate >= effective_wr_floor
             ratio = (sharpe / wf_sharpe) if wf_sharpe > 0 and sharpe > 0 else None
