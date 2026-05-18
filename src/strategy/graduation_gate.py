@@ -129,7 +129,75 @@ def _get_min_sql_having_trades() -> int:
     return MIN_PAPER_TRADES
 
 
-def _get_min_avg_pnl_per_trade() -> float:
+def _get_regime_adjusted_max_ratio() -> float:
+    """
+    Return the regime-adjusted qualification ratio cap.
+
+    Fix 1 (2026-05-18): A flat 2.0× cap blocks everything during a bull run
+    because paper Sharpe is inflated for all LONG strategies simultaneously.
+    The cap should be calibrated to what's actually surprising given the regime.
+
+    Regime → cap:
+      trending_up_strong:  3.5× (strong bull — outperformance vs WF is expected)
+      trending_up / weak:  3.0×
+      ranging / neutral:   2.0× (WF test period is a fair comparison)
+      trending_down:       1.5× (bear — outperformance vs WF is suspicious)
+      high_vol:            1.5× (volatile — same)
+      unknown / fallback:  2.0×
+    """
+    try:
+        from src.data.market_data_manager import get_market_data_manager
+        from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+        _mdm = get_market_data_manager()
+        if _mdm:
+            _msa = MarketStatisticsAnalyzer(_mdm)
+            _regime, _, _, _ = _msa.detect_sub_regime()
+            _regime_name = _regime.value.lower() if _regime else ""
+            if "trending_up_strong" in _regime_name:
+                return 3.5
+            elif "trending_up" in _regime_name:
+                return 3.0
+            elif "trending_down" in _regime_name or "high_vol" in _regime_name:
+                return 1.5
+            else:
+                return 2.0
+    except Exception:
+        pass
+    return MAX_QUALIFICATION_RATIO  # fallback to configured value
+
+
+def _get_strategy_type_win_rate_floor(strategy_type: Optional[str]) -> float:
+    """
+    Return the win rate floor appropriate for the strategy type.
+
+    Fix 2 (2026-05-18): A flat 55% win rate floor is wrong for trend-following
+    strategies, which make money on large winners with many small losses.
+    The P&L and qualification ratio are the right gates for trend-following.
+    Mean-reversion relies on high hit rate — 55% is appropriate there.
+
+    strategy_type → floor:
+      trend_following / momentum / breakout / ema_* / adx_* / atr_*: 45%
+      mean_reversion / volatility / rsi_* / bb_* / stochastic:        55%
+      everything else:                                                  50%
+    """
+    if not strategy_type:
+        return MIN_PAPER_WIN_RATE
+
+    st = strategy_type.lower()
+    trend_types = {
+        'trend_following', 'momentum', 'breakout', 'trend',
+        'ema_crossover', 'macd_trend', 'adx_trend', 'vwap_trend',
+        'ema_ribbon', 'atr_trend', 'sma_trend',
+    }
+    reversion_types = {
+        'mean_reversion', 'volatility', 'rsi_dip', 'bb_midband',
+        'stochastic', 'reversion', 'oscillator',
+    }
+    if any(t in st for t in trend_types):
+        return 0.45
+    if any(t in st for t in reversion_types):
+        return 0.55
+    return 0.50
     """Return min avg P&L per trade from paper_trading.graduation_gate.min_avg_pnl_per_trade."""
     try:
         import yaml as _y
@@ -256,6 +324,7 @@ def is_qualified(
     paper_stats: Dict[str, Any],
     wf_sharpe: Optional[float],
     interval: Optional[str] = None,
+    strategy_type: Optional[str] = None,
 ) -> tuple[bool, List[str]]:
     """
     Check whether a (strategy, symbol) pair meets graduation criteria.
@@ -267,6 +336,7 @@ def is_qualified(
         paper_stats: Dict with paper_trades, paper_sharpe, paper_win_rate, paper_total_pnl
         wf_sharpe: Walk-forward Sharpe from the representative strategy
         interval: Strategy interval ('1d', '4h', '1h') for interval-aware min_trades
+        strategy_type: Strategy type string for type-aware win rate floor (Fix 2)
     """
     reasons = []
 
@@ -293,21 +363,37 @@ def is_qualified(
                 f"avg_pnl_per_trade=${avg_pnl_per_trade:.2f} not > ${min_avg_pnl:.2f}"
             )
 
-    if win_rate is None or win_rate < MIN_PAPER_WIN_RATE:
-        reasons.append(f"paper_win_rate={win_rate} < {MIN_PAPER_WIN_RATE}")
+    # Fix 2: strategy-type-aware win rate floor.
+    # Trend-following strategies make money on large winners with many small
+    # losses — a 45% win rate with positive P&L is fine. Mean-reversion relies
+    # on high hit rate — 55% is appropriate. Flat 55% was blocking valid
+    # trend-following strategies (e.g. GOOGL 4H EMA Ribbon at 44% WR, +$91 P&L).
+    effective_win_rate_floor = _get_strategy_type_win_rate_floor(strategy_type)
+    if win_rate is None or win_rate < effective_win_rate_floor:
+        reasons.append(
+            f"paper_win_rate={win_rate:.1%} < {effective_win_rate_floor:.0%} "
+            f"(floor for {strategy_type or 'unknown'} strategy type)"
+        )
 
     if wf_sharpe and wf_sharpe > 0 and sharpe is not None:
         ratio = sharpe / wf_sharpe
+        # Fix 1: regime-adjusted max ratio cap.
+        # A flat 2.0× cap blocks everything in a bull run because paper Sharpe
+        # is inflated for all LONG strategies simultaneously. The cap scales
+        # with the current regime — outperformance vs WF is expected in
+        # trending_up_strong, suspicious in trending_down.
+        effective_max_ratio = _get_regime_adjusted_max_ratio()
         if ratio < MIN_QUALIFICATION_RATIO:
             reasons.append(
                 f"qualification_ratio={ratio:.2f} < {MIN_QUALIFICATION_RATIO} "
                 f"(paper_sharpe={sharpe:.2f}, wf_sharpe={wf_sharpe:.2f})"
             )
-        elif ratio > MAX_QUALIFICATION_RATIO:
+        elif ratio > effective_max_ratio:
             reasons.append(
-                f"qualification_ratio={ratio:.2f} > {MAX_QUALIFICATION_RATIO} "
+                f"qualification_ratio={ratio:.2f} > {effective_max_ratio:.1f} "
                 f"(paper_sharpe={sharpe:.2f} is {ratio:.1f}× wf_sharpe={wf_sharpe:.2f} "
-                f"— paper period was regime-lucky, not a genuine edge confirmation)"
+                f"— paper period was regime-lucky, not a genuine edge confirmation; "
+                f"regime-adjusted cap={effective_max_ratio:.1f}×)"
             )
     elif sharpe is None:
         reasons.append("paper_sharpe not computable (no trades with variance)")
@@ -471,8 +557,9 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 strategy_interval = meta.get("interval") or (
                     strategy.rules.get("interval") if isinstance(strategy.rules, dict) else None
                 )
+                strategy_type = meta.get("strategy_type")
 
-        qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe, interval=strategy_interval)
+        qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe, interval=strategy_interval, strategy_type=strategy_type)
         if not qualified:
             continue
 

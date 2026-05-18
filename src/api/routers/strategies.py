@@ -1906,9 +1906,32 @@ async def get_approaching_graduation(
             # be in the graduation queue (we excluded them above, but belt+braces).
             trades_ok = trades >= MIN_PAPER_TRADES
             pnl_ok = total_pnl > MIN_PAPER_PNL
-            wr_ok = win_rate >= MIN_PAPER_WIN_RATE
+
+            # Fix 2: strategy-type-aware win rate floor
+            from src.strategy.graduation_gate import _get_strategy_type_win_rate_floor, _get_regime_adjusted_max_ratio
+            # Get strategy_type from the most recent strategy for this template
+            _strat_type = None
+            try:
+                from sqlalchemy import text as _text2
+                _st_row = session.execute(_text2("""
+                    SELECT s.strategy_metadata->>'strategy_type' as strategy_type
+                    FROM strategies s
+                    JOIN trade_journal tj ON tj.strategy_id = s.id
+                    WHERE tj.symbol = :sym
+                      AND COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')) = :tname
+                      AND tj.account_type = 'demo'
+                    ORDER BY s.created_at DESC LIMIT 1
+                """), {"sym": sym, "tname": tname}).fetchone()
+                if _st_row:
+                    _strat_type = _st_row.strategy_type
+            except Exception:
+                pass
+            effective_wr_floor = _get_strategy_type_win_rate_floor(_strat_type)
+            effective_max_ratio = _get_regime_adjusted_max_ratio()
+
+            wr_ok = win_rate >= effective_wr_floor
             ratio = (sharpe / wf_sharpe) if wf_sharpe > 0 and sharpe > 0 else None
-            ratio_ok = ratio is not None and ratio >= MIN_QUALIFICATION_RATIO and ratio <= MAX_QUALIFICATION_RATIO
+            ratio_ok = ratio is not None and ratio >= MIN_QUALIFICATION_RATIO and ratio <= effective_max_ratio
 
             if trades_ok and pnl_ok and wr_ok and ratio_ok:
                 continue  # fully qualified — graduation gate should have it
@@ -1928,11 +1951,11 @@ async def get_approaching_graduation(
             if not pnl_ok:
                 missing.append(f"P&L {total_pnl:.0f} ≤ 0")
             if not wr_ok:
-                missing.append(f"win rate {win_rate*100:.1f}% < {MIN_PAPER_WIN_RATE*100:.0f}%")
+                missing.append(f"win rate {win_rate*100:.1f}% < {effective_wr_floor*100:.0f}% ({_strat_type or 'default'} floor)")
             if not ratio_ok:
                 if ratio is not None:
-                    if ratio > MAX_QUALIFICATION_RATIO:
-                        missing.append(f"qual ratio {ratio:.2f} > {MAX_QUALIFICATION_RATIO} (regime-lucky)")
+                    if ratio > effective_max_ratio:
+                        missing.append(f"qual ratio {ratio:.2f} > {effective_max_ratio:.1f}× (regime-adjusted cap)")
                     else:
                         missing.append(f"qual ratio {ratio:.2f} < {MIN_QUALIFICATION_RATIO}")
                 elif wf_sharpe <= 0:
@@ -1954,6 +1977,9 @@ async def get_approaching_graduation(
                 "last_trade": row.last_trade.isoformat() if row.last_trade else None,
                 "graduation_score": round(score, 1),
                 "missing_criteria": missing,
+                "strategy_type": _strat_type,
+                "effective_win_rate_floor": round(effective_wr_floor, 2),
+                "effective_max_ratio": round(effective_max_ratio, 1),
                 # Progress toward each threshold (0-1)
                 "progress": {
                     "trades": round(trades_pct, 3),

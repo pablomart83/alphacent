@@ -28,14 +28,16 @@ import {
  *      progress toward each gate so the closest candidates surface first.
  */
 
-// Graduation thresholds — mirror graduation_gate.py constants
-const MIN_TRADES = 15
-const MIN_WIN_RATE = 0.55
+// Graduation thresholds — these are defaults; the backend returns per-row
+// effective values (effective_win_rate_floor, effective_max_ratio) that
+// account for strategy type and current market regime.
+const MIN_TRADES = 8   // lowest per-interval threshold (1d strategies)
+const MIN_WIN_RATE = 0.45  // lowest floor (trend-following strategies)
 const MIN_QUAL_RATIO = 0.60
-const MAX_QUAL_RATIO = 2.0  // paper Sharpe must not exceed 2× WF Sharpe (regime-luck guard)
+const MAX_QUAL_RATIO = 3.5  // highest regime-adjusted cap (trending_up_strong)
 
 export function ApproachingGraduationPanel() {
-  const query = useApproachingGraduation(5, 10)
+  const query = useApproachingGraduation(5, 20)
 
   if (query.isLoading && !query.data) {
     return (
@@ -67,7 +69,7 @@ export function ApproachingGraduationPanel() {
       <SectionLabel
         actions={
           <span className="text-[10px] normal-case tracking-normal text-[var(--text-3)]">
-            {rows.length} candidates · thresholds: {MIN_TRADES} trades · Sharpe {MIN_QUAL_RATIO}–{MAX_QUAL_RATIO}× WF · WR ≥ {MIN_WIN_RATE * 100}% · P&L {'>'} 0
+            {rows.length} candidates · thresholds: {MIN_TRADES}+ trades · Sharpe {MIN_QUAL_RATIO}–{MAX_QUAL_RATIO}× WF · WR ≥ {MIN_WIN_RATE * 100}% · P&L {'>'} 0 · regime-adjusted
           </span>
         }
       >
@@ -83,21 +85,23 @@ export function ApproachingGraduationPanel() {
 }
 
 function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
+  // Use per-row effective thresholds from backend (regime + strategy-type aware)
+  // Fall back to module constants if backend doesn't return them yet.
+  const effectiveWrFloor = (row as any).effective_win_rate_floor ?? MIN_WIN_RATE
+  const effectiveMaxRatio = (row as any).effective_max_ratio ?? MAX_QUAL_RATIO
+
   const tradesPct = Math.min(100, (row.trades / MIN_TRADES) * 100)
-  // Win rate bar: show actual win rate as % of 100% (not % of threshold).
-  // Threshold line is shown via the `met` flag (turns green when crossed).
   const wrPct = Math.min(100, row.win_rate * 100)
   const qualPct =
     row.qualification_ratio != null
-      ? // Ratio bar: 0–100% maps to 0–MAX_QUAL_RATIO. Green zone = MIN to MAX.
-        Math.min(100, (row.qualification_ratio / MAX_QUAL_RATIO) * 100)
+      ? Math.min(100, (row.qualification_ratio / effectiveMaxRatio) * 100)
       : row.sharpe > 0
         ? Math.min(100, (row.sharpe / 1.0) * 100)
         : 0
   const pnlOk = row.total_pnl > 0
   const ratioMet =
     row.qualification_ratio != null
-      ? row.qualification_ratio >= MIN_QUAL_RATIO && row.qualification_ratio <= MAX_QUAL_RATIO
+      ? row.qualification_ratio >= MIN_QUAL_RATIO && row.qualification_ratio <= effectiveMaxRatio
       : row.sharpe >= 1.0
 
   return (
@@ -137,7 +141,7 @@ function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
           <Stat
             label="Win %"
             value={`${formatNumber(row.win_rate * 100, 1)}%`}
-            tone={row.win_rate >= MIN_WIN_RATE ? 'up' : 'neutral'}
+            tone={row.win_rate >= effectiveWrFloor ? 'up' : 'neutral'}
           />
           <Stat
             label="P&L"
@@ -157,7 +161,7 @@ function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
       {/* Progress bars */}
       <div className="grid grid-cols-3 gap-2">
         <ProgressBar label="Trades" pct={tradesPct} met={row.trades >= MIN_TRADES} />
-        <ProgressBar label="Win rate" pct={wrPct} met={row.win_rate >= MIN_WIN_RATE} />
+        <ProgressBar label="Win rate" pct={wrPct} met={row.win_rate >= effectiveWrFloor} />
         <ProgressBar
           label={row.qualification_ratio != null ? 'Qual ratio' : 'Sharpe'}
           pct={qualPct}
