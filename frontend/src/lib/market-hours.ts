@@ -45,17 +45,32 @@ function formatHours(openMin: number, closeMin: number): string {
 
 /**
  * US regular session: 09:30–16:00 America/New_York.
- * In UTC that is 14:30–21:00 during EDT, 13:30–20:00 on some weeks
- * (DST transitions: we pick the wider 13:30–21:00 window here since
- * this is UI-only — a conservative label during DST transition weeks).
+ * EDT (Mar–Nov): UTC-4 → 13:30–20:00 UTC
+ * EST (Nov–Mar): UTC-5 → 14:30–21:00 UTC
+ *
+ * We detect DST by checking whether the current UTC offset for New York
+ * is -4 (EDT) or -5 (EST) using the Intl API. Falls back to EDT (wider
+ * window) if detection fails — better to show "Open" when borderline
+ * than to show "Pre-market" when the market is actually open.
  */
-const US_OPEN_UTC = 14 * 60 + 30
-const US_CLOSE_UTC = 21 * 60
-const US_PRE_UTC = 9 * 60 // 09:00 UTC ≈ 04:00 ET pre-market start
-const US_POST_UTC = 24 * 60 // 00:00 next day, effectively until midnight
+function getUsSessionUTC(): { open: number; close: number; pre: number } {
+  try {
+    // Detect current NY offset by formatting a known time and parsing the offset
+    const now = new Date()
+    const nyStr = now.toLocaleString('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })
+    const isEDT = nyStr.includes('EDT') || nyStr.includes('GMT-4')
+    if (isEDT) {
+      return { open: 13 * 60 + 30, close: 20 * 60, pre: 8 * 60 } // EDT: UTC-4
+    }
+    return { open: 14 * 60 + 30, close: 21 * 60, pre: 9 * 60 } // EST: UTC-5
+  } catch {
+    return { open: 13 * 60 + 30, close: 20 * 60, pre: 8 * 60 } // fallback: EDT
+  }
+}
 
 function classifyUsEquities(now: Date): MarketStatusInfo {
   const day = now.getUTCDay() // 0 Sun … 6 Sat
+  const { open: US_OPEN_UTC, close: US_CLOSE_UTC, pre: US_PRE_UTC } = getUsSessionUTC()
   const sessionLabel = `NYSE/NASDAQ ${formatHours(US_OPEN_UTC, US_CLOSE_UTC)}`
   if (day === 0 || day === 6) {
     return {
@@ -71,7 +86,7 @@ function classifyUsEquities(now: Date): MarketStatusInfo {
   if (m >= US_PRE_UTC && m < US_OPEN_UTC) {
     return { status: 'pre', label: 'Pre-market', sessionLabel }
   }
-  if (m >= US_CLOSE_UTC && m < US_POST_UTC) {
+  if (m >= US_CLOSE_UTC) {
     return { status: 'post', label: 'After-hours', sessionLabel }
   }
   return { status: 'closed', label: 'Closed', sessionLabel }
