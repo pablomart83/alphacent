@@ -1452,7 +1452,9 @@ class RiskManager:
                 self._last_sizing_reason = "size_collapsed_after_all_caps"
             return 0.0
         if position_size < MINIMUM_ORDER_SIZE:
-            if penalty_applied:
+            if penalty_applied and not is_live:
+                # DEMO: penalty fired and size is below minimum — skip the trade.
+                # Bumping would defeat the penalty (vol scaling, drawdown sizing).
                 logger.info(
                     f"Size ${position_size:.0f} below minimum ${MINIMUM_ORDER_SIZE:.0f} "
                     f"for {symbol} AND penalty applied — skipping trade "
@@ -1463,6 +1465,10 @@ class RiskManager:
                     f"${MINIMUM_ORDER_SIZE:.0f}, penalty_applied=True)"
                 )
                 return 0.0
+            # LIVE: always bump to minimum — the CIO cap ($900) is the binding
+            # constraint applied by trading_scheduler after this function returns.
+            # Vol scaling on a 3x ETF would reduce a $54 base to $10, but the
+            # CIO has already approved the position size at graduation.
             if available_balance >= MINIMUM_ORDER_SIZE:
                 logger.info(
                     f"Size ${position_size:.0f} below minimum ${MINIMUM_ORDER_SIZE:.0f} "
