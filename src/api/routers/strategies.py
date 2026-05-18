@@ -1914,7 +1914,10 @@ async def get_approaching_graduation(
             try:
                 from sqlalchemy import text as _text2
                 _st_row = session.execute(_text2("""
-                    SELECT s.strategy_metadata->>'strategy_type' as strategy_type
+                    SELECT COALESCE(
+                        s.strategy_metadata->>'template_type',
+                        s.strategy_metadata->>'strategy_type'
+                    ) as strategy_type
                     FROM strategies s
                     JOIN trade_journal tj ON tj.strategy_id = s.id
                     WHERE tj.symbol = :sym

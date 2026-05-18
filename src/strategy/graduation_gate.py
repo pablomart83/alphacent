@@ -557,7 +557,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 strategy_interval = meta.get("interval") or (
                     strategy.rules.get("interval") if isinstance(strategy.rules, dict) else None
                 )
-                strategy_type = meta.get("strategy_type")
+                strategy_type = meta.get("template_type") or meta.get("strategy_type")
 
         qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe, interval=strategy_interval, strategy_type=strategy_type)
         if not qualified:
