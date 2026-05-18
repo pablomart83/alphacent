@@ -67,7 +67,7 @@ except Exception:
     pass  # Fall back to hardcoded defaults — never crash at import time
 
 
-def _get_min_trades_for_interval(interval: Optional[str]) -> int:
+def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional[float] = None, win_rate: Optional[float] = None) -> int:
     """
     Return interval-aware min_trades for graduation.
 
@@ -78,6 +78,13 @@ def _get_min_trades_for_interval(interval: Optional[str]) -> int:
       1D strategies fire ~1 trade/month → 10 trades ≈ 10 months of data
       4H strategies fire ~2 trades/month → 15 trades ≈ 7 months of data
       1H strategies fire ~5 trades/month → 25 trades ≈ 5 months of data
+
+    High-conviction exception (mirrors activation gate):
+      If paper_sharpe ≥ 2.0 AND win_rate ≥ 0.70, reduce min_trades by 40%.
+      A strategy with Sharpe 8.96 and 92% win rate across 13 trades is a
+      stronger signal than a strategy with Sharpe 1.2 and 55% win rate across
+      15 trades. The exception prevents the threshold from blocking obvious
+      graduation candidates.
     """
     try:
         import yaml as _y
@@ -89,11 +96,19 @@ def _get_min_trades_for_interval(interval: Optional[str]) -> int:
             pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
             iv = (interval or "1d").lower()
             if iv in ("1h", "2h"):
-                return int(pt_gg.get("min_trades_1h", MIN_PAPER_TRADES))
+                base = int(pt_gg.get("min_trades_1h", MIN_PAPER_TRADES))
             elif iv == "4h":
-                return int(pt_gg.get("min_trades_4h", MIN_PAPER_TRADES))
+                base = int(pt_gg.get("min_trades_4h", MIN_PAPER_TRADES))
             else:
-                return int(pt_gg.get("min_trades_1d", MIN_PAPER_TRADES))
+                base = int(pt_gg.get("min_trades_1d", MIN_PAPER_TRADES))
+
+            # High-conviction exception: strong Sharpe + high win rate → lower bar
+            if paper_sharpe is not None and win_rate is not None:
+                if paper_sharpe >= 2.0 and win_rate >= 0.70:
+                    reduced = max(5, int(base * 0.60))  # 40% reduction, floor at 5
+                    return reduced
+
+            return base
     except Exception:
         pass
     return MIN_PAPER_TRADES
@@ -372,7 +387,8 @@ def is_qualified(
     pnl = paper_stats.get("paper_total_pnl")
 
     # Interval-aware min_trades — 1D strategies fire less often than 1H
-    min_trades = _get_min_trades_for_interval(interval)
+    # High-conviction exception: strong Sharpe + high win rate → lower bar
+    min_trades = _get_min_trades_for_interval(interval, paper_sharpe=sharpe, win_rate=win_rate)
     if trades < min_trades:
         reasons.append(f"paper_trades={trades} < {min_trades} (interval={interval or '1d'})")
 

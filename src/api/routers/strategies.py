@@ -1904,7 +1904,11 @@ async def get_approaching_graduation(
                     COALESCE(
                         s.strategy_metadata->>'template_type',
                         s.strategy_metadata->>'strategy_type'
-                    ) AS strategy_type
+                    ) AS strategy_type,
+                    COALESCE(
+                        s.strategy_metadata->>'interval',
+                        s.rules->>'interval'
+                    ) AS strategy_interval
                 FROM strategies s
                 JOIN trade_journal tj ON tj.strategy_id = s.id
                 WHERE tj.account_type = 'demo'
@@ -1916,6 +1920,10 @@ async def get_approaching_graduation(
         ).fetchall()
         _strat_type_by_pair: dict = {
             (r.template_name, r.symbol): r.strategy_type
+            for r in _strat_type_rows
+        }
+        _strat_interval_by_pair: dict = {
+            (r.template_name, r.symbol): r.strategy_interval
             for r in _strat_type_rows
         }
 
@@ -1938,7 +1946,10 @@ async def get_approaching_graduation(
 
             # Skip pairs that have already crossed ALL thresholds — they should
             # be in the graduation queue (we excluded them above, but belt+braces).
-            trades_ok = trades >= MIN_PAPER_TRADES
+            _pair_interval = _strat_interval_by_pair.get((tname, sym))
+            from src.strategy.graduation_gate import _get_min_trades_for_interval
+            _effective_min_trades = _get_min_trades_for_interval(_pair_interval, paper_sharpe=sharpe, win_rate=win_rate)
+            trades_ok = trades >= _effective_min_trades
             pnl_ok = total_pnl > MIN_PAPER_PNL
 
             # Fix 2: strategy-type-aware win rate floor.
@@ -1957,7 +1968,7 @@ async def get_approaching_graduation(
 
             # Composite graduation score (0-100): weighted progress toward each gate.
             # Weights: trades 30%, sharpe/ratio 35%, win_rate 20%, pnl 15%.
-            trades_pct = min(1.0, trades / MIN_PAPER_TRADES)
+            trades_pct = min(1.0, trades / _effective_min_trades)
             sharpe_pct = min(1.0, max(0.0, sharpe) / 1.0)  # target Sharpe 1.0
             wr_pct = min(1.0, win_rate / MIN_PAPER_WIN_RATE)
             pnl_pct = 1.0 if total_pnl > 0 else max(0.0, 1.0 + total_pnl / max(abs(total_pnl), 1))
@@ -1966,7 +1977,7 @@ async def get_approaching_graduation(
             # Missing criteria — what's blocking graduation
             missing = []
             if not trades_ok:
-                missing.append(f"trades {trades}/{MIN_PAPER_TRADES}")
+                missing.append(f"trades {trades}/{_effective_min_trades}")
             if not pnl_ok:
                 missing.append(f"P&L {total_pnl:.0f} ≤ 0")
             if not wr_ok:
@@ -1986,6 +1997,7 @@ async def get_approaching_graduation(
                 "template_name": tname,
                 "symbol": sym,
                 "trades": trades,
+                "min_trades_threshold": _effective_min_trades,
                 "sharpe": round(sharpe, 3),
                 "win_rate": round(win_rate, 4),
                 "total_pnl": round(total_pnl, 2),

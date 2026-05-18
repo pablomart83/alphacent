@@ -89,8 +89,9 @@ function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
   // Fall back to module constants if backend doesn't return them yet.
   const effectiveWrFloor = (row as any).effective_win_rate_floor ?? MIN_WIN_RATE
   const effectiveMaxRatio = (row as any).effective_max_ratio ?? MAX_QUAL_RATIO
+  const effectiveMinTrades = (row as any).min_trades_threshold ?? MIN_TRADES
 
-  const tradesPct = Math.min(100, (row.trades / MIN_TRADES) * 100)
+  const tradesPct = Math.min(100, (row.trades / effectiveMinTrades) * 100)
   const wrPct = Math.min(100, row.win_rate * 100)
   const qualPct =
     row.qualification_ratio != null
@@ -130,8 +131,8 @@ function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
         <div className="flex items-center gap-3 shrink-0 text-[10px]">
           <Stat
             label="Trades"
-            value={`${row.trades}/${MIN_TRADES}`}
-            tone={row.trades >= MIN_TRADES ? 'up' : 'neutral'}
+            value={`${row.trades}/${effectiveMinTrades}`}
+            tone={row.trades >= effectiveMinTrades ? 'up' : 'neutral'}
           />
           <Stat
             label="Sharpe"
@@ -160,7 +161,7 @@ function ApproachingRow({ row }: { row: ApproachingGraduationRow }) {
 
       {/* Progress bars */}
       <div className="grid grid-cols-3 gap-2">
-        <ProgressBar label="Trades" pct={tradesPct} met={row.trades >= MIN_TRADES} />
+        <ProgressBar label="Trades" pct={tradesPct} met={row.trades >= effectiveMinTrades} />
         <ProgressBar label="Win rate" pct={wrPct} met={row.win_rate >= effectiveWrFloor} />
         <ProgressBar
           label={row.qualification_ratio != null ? 'Qual ratio' : 'Sharpe'}
