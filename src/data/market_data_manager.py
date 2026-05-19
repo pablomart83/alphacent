@@ -1344,17 +1344,82 @@ class MarketDataManager:
                                 f"FMP unavailable for {symbol} {interval} "
                                 f"({fe.reason}: {fe}); falling back to Yahoo"
                             )
+                elif interval == "4h" and _fmp_supported(symbol, "1h"):
+                    # FMP blocks 4H for this symbol (e.g. US indices: ^GSPC,
+                    # ^IXIC, ^DJI, ^FTSE, ^STOXX50E) but DOES serve 1H.
+                    # Synthesise 4H by fetching 1H from FMP and resampling —
+                    # same OHLCV aggregation used by the Yahoo fallback path,
+                    # but sourced from FMP so the bars stay fresh every cycle.
+                    # This keeps TSL recalc and signal-gen unblocked for index
+                    # 4H strategies without touching Yahoo at all.
+                    try:
+                        bars_1h = _fmp_fetch(symbol, start, end, "1h")
+                        if bars_1h:
+                            import pandas as pd
+                            df = pd.DataFrame([{
+                                "timestamp": b.timestamp,
+                                "open":   b.open,
+                                "high":   b.high,
+                                "low":    b.low,
+                                "close":  b.close,
+                                "volume": b.volume,
+                            } for b in bars_1h]).set_index("timestamp")
+                            df.index = pd.to_datetime(df.index)
+                            df_4h = df.resample("4h").agg({
+                                "open":   "first",
+                                "high":   "max",
+                                "low":    "min",
+                                "close":  "last",
+                                "volume": "sum",
+                            }).dropna(subset=["open", "close"])
+                            # Trim to source window (same invariant as Yahoo path)
+                            src_first = df.index.min()
+                            src_last  = df.index.max()
+                            df_4h = df_4h[
+                                (df_4h.index >= src_first) &
+                                (df_4h.index <= src_last)
+                            ]
+                            result = [
+                                MarketData(
+                                    symbol=symbol,
+                                    timestamp=ts.to_pydatetime().replace(tzinfo=None),
+                                    open=float(row["open"]),
+                                    high=float(row["high"]),
+                                    low=float(row["low"]),
+                                    close=float(row["close"]),
+                                    volume=float(row["volume"]),
+                                    source=DataSource.FMP,
+                                )
+                                for ts, row in df_4h.iterrows()
+                            ]
+                            if result:
+                                logger.info(
+                                    f"FMP 1H→4H resample: {len(result)} 4H bars for "
+                                    f"{symbol} ({result[0].timestamp.date()} → "
+                                    f"{result[-1].timestamp.date()})"
+                                )
+                                return result
+                        logger.debug(
+                            f"FMP 1H→4H resample: 0 bars for {symbol} "
+                            f"{start.date()}→{end.date()} (likely closed market)"
+                        )
+                        return []
+                    except _FMPAPIError as fe:
+                        logger.info(
+                            f"FMP 1H fetch for 4H resample failed for {symbol} "
+                            f"({fe.reason}: {fe}); DB cache will serve."
+                        )
+                        return []
                 elif interval in ("1h", "4h"):
                     # FMP explicitly does not support this (symbol, interval) combo
-                    # (e.g. OIL/COPPER at 1H, US indices at 4H). Yahoo will also
-                    # fail or return daily data masquerading as intraday — the
-                    # median-gap guard in _save_historical_to_db will reject it and
-                    # emit a WARNING every time. Skip Yahoo entirely for these
-                    # known-blocked intraday combos; the DB cache already holds the
-                    # correct data from the last successful FMP 4H or 1D fetch.
+                    # AND there is no 1H→4H resample path available
+                    # (e.g. non-US indices GER40/FR40, foreign listings RHM.DE/RR.L
+                    # which are blocked at both 1H and 4H). Yahoo will also fail or
+                    # return daily data masquerading as intraday — skip it entirely.
+                    # The DB cache holds the last successful fetch.
                     logger.debug(
-                        f"FMP does not support {symbol} {interval} (known-blocked); "
-                        f"skipping Yahoo fallback — DB cache will serve."
+                        f"FMP does not support {symbol} {interval} (known-blocked, "
+                        f"no 1H resample path); skipping Yahoo fallback — DB cache will serve."
                     )
                     return []
             except ImportError:
