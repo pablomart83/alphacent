@@ -72,15 +72,19 @@ export function CycleTab() {
               defaultSize: 40,
               minSize: 30,
               content: (
-                <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto">
-                  <CycleIntelligencePanel
-                    lastCycle={lastCycle}
-                    regime={autonomousQuery.data?.market_regime}
-                    regimeConfidence={autonomousQuery.data?.market_confidence}
-                    loading={cyclesQuery.isLoading}
-                  />
-                  <SignalFunnel />
-                  <CycleHistoryList limit={30} />
+                <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)]">
+                  <div className="shrink-0">
+                    <CycleIntelligencePanel
+                      lastCycle={lastCycle}
+                      regime={autonomousQuery.data?.market_regime}
+                      regimeConfidence={autonomousQuery.data?.market_confidence}
+                      loading={cyclesQuery.isLoading}
+                    />
+                  </div>
+                  <div className="shrink-0">
+                    <SignalFunnel />
+                  </div>
+                  <CycleHistoryList limit={30} className="flex-1 min-h-0" />
                 </div>
               ),
             },

@@ -27,8 +27,8 @@ export function CycleHistoryList({ className, limit = 30 }: CycleHistoryListProp
   const rows = query.data?.data ?? []
 
   return (
-    <section className={cn('flex flex-col gap-2 p-2 min-h-0', className)}>
-      <div className="flex items-center gap-2">
+    <section className={cn('flex flex-col min-h-0 p-2 gap-2', className)}>
+      <div className="flex items-center gap-2 shrink-0">
         <SectionLabel>Cycle history</SectionLabel>
         <span className="ml-auto text-[10px] text-[var(--text-3)] mono">
           {rows.length} cycles
@@ -42,7 +42,7 @@ export function CycleHistoryList({ className, limit = 30 }: CycleHistoryListProp
           onRetry={() => query.refetch()}
         />
       ) : query.isLoading ? (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1 shrink-0">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
           ))}
@@ -53,7 +53,7 @@ export function CycleHistoryList({ className, limit = 30 }: CycleHistoryListProp
           description="Trigger a cycle manually or wait for the next scheduled run."
         />
       ) : (
-        <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)]">
           <ul className="divide-y divide-[var(--border-subtle)]">
             {rows.map((row) => (
               <CycleRow
