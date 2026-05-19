@@ -367,8 +367,13 @@ export function LiveStrategyDetailPanel({
               <TrendingUp className="h-3.5 w-3.5 inline mr-1.5 text-[var(--pnl-up)]" />
               Gate open — next ENTER signal for{' '}
               <span className="mono font-medium text-[var(--pnl-up)]">{row.symbol}</span>{' '}
-              with conviction ≥ {row.conviction_min ?? 74} fires a real order.
+              with conviction ≥ {row.conviction_min ?? 73} fires a real order.
             </div>
+          )}
+
+          {/* Last signal cycle status */}
+          {row.last_signal_status && (
+            <LastSignalStatus status={row.last_signal_status} detail={row.last_signal_detail} />
           )}
         </PhaseSection>
 
@@ -479,6 +484,41 @@ function TradeTable({ trades, label }: { trades: TradeJournalEntry[]; label: str
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+function LastSignalStatus({
+  status,
+  detail,
+}: {
+  status: string
+  detail?: string | null
+}) {
+  const isBlocked = status.startsWith('blocked') || status === 'gate_blocked'
+  const isPending = status === 'order_pending'
+  const isSubmitted = status === 'order_submitted'
+  const isNoSignal = status === 'no_signal_yet'
+
+  const color = isPending || isSubmitted
+    ? 'var(--pnl-up)'
+    : isBlocked
+      ? 'var(--status-warning)'
+      : 'var(--text-3)'
+
+  const icon = isPending || isSubmitted ? '⏳' : isBlocked ? '⚠' : isNoSignal ? '○' : '●'
+
+  return (
+    <div
+      className="rounded-[3px] border px-2.5 py-1.5 text-[10px] flex items-center gap-1.5"
+      style={{
+        borderColor: `color-mix(in oklab, ${color} 25%, var(--border-subtle))`,
+        backgroundColor: `color-mix(in oklab, ${color} 5%, var(--bg-1))`,
+        color: 'var(--text-2)',
+      }}
+    >
+      <span style={{ color }}>{icon}</span>
+      <span>{detail ?? status.replace(/_/g, ' ')}</span>
     </div>
   )
 }

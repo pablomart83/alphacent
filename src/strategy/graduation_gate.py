@@ -935,6 +935,67 @@ def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
             d["open_position_entry"] = None
             d["open_position_current"] = None
 
+        # Add last signal cycle outcome for this live strategy
+        try:
+            from src.models.orm import OrderORM, SignalDecisionORM
+            from src.models.enums import OrderStatus
+
+            # Check for pending orders first
+            pending = session.query(OrderORM).filter(
+                OrderORM.strategy_id == row.strategy_id,
+                OrderORM.account_type == 'live',
+                OrderORM.status == OrderStatus.PENDING,
+            ).order_by(OrderORM.submitted_at.desc()).first()
+
+            if pending:
+                d["last_signal_status"] = "order_pending"
+                d["last_signal_detail"] = f"Order pending since {pending.submitted_at.strftime('%H:%M UTC') if pending.submitted_at else '—'}"
+            else:
+                # Get last signal_decisions row for this strategy
+                last_sd = session.execute(
+                    __import__('sqlalchemy').text("""
+                        SELECT stage, decision, reason, score, timestamp
+                        FROM signal_decisions
+                        WHERE strategy_id = :sid
+                        ORDER BY timestamp DESC LIMIT 1
+                    """),
+                    {"sid": row.strategy_id}
+                ).fetchone()
+
+                if last_sd:
+                    age_mins = int((datetime.now() - last_sd.timestamp).total_seconds() / 60)
+                    age_str = f"{age_mins}m ago" if age_mins < 60 else f"{age_mins // 60}h ago"
+                    if last_sd.stage == "order_submitted":
+                        d["last_signal_status"] = "order_submitted"
+                        d["last_signal_detail"] = f"Order submitted {age_str}"
+                    elif last_sd.stage == "signal_emitted" and last_sd.decision == "rejected":
+                        reason = last_sd.reason or ""
+                        if "conviction" in reason.lower():
+                            d["last_signal_status"] = "blocked_conviction"
+                            score = f" (score {last_sd.score:.0f})" if last_sd.score else ""
+                            d["last_signal_detail"] = f"Blocked: conviction{score} {age_str}"
+                        elif "frequency" in reason.lower():
+                            d["last_signal_status"] = "blocked_frequency"
+                            d["last_signal_detail"] = f"Blocked: frequency limit {age_str}"
+                        else:
+                            d["last_signal_status"] = "blocked"
+                            d["last_signal_detail"] = f"Blocked: {reason[:40]} {age_str}"
+                    elif last_sd.stage == "gate_blocked":
+                        d["last_signal_status"] = "gate_blocked"
+                        d["last_signal_detail"] = f"Gate blocked {age_str}"
+                    elif last_sd.stage == "signal_emitted":
+                        d["last_signal_status"] = "signal_emitted"
+                        d["last_signal_detail"] = f"Signal emitted {age_str}"
+                    else:
+                        d["last_signal_status"] = last_sd.stage
+                        d["last_signal_detail"] = f"{last_sd.stage} {age_str}"
+                else:
+                    d["last_signal_status"] = "no_signal_yet"
+                    d["last_signal_detail"] = "No signal generated yet"
+        except Exception:
+            d["last_signal_status"] = None
+            d["last_signal_detail"] = None
+
         # Divergence: live_sharpe vs paper_sharpe
         if row.live_sharpe and paper.get("paper_sharpe") and paper["paper_sharpe"] > 0:
             d["divergence_pct"] = round(row.live_sharpe / paper["paper_sharpe"] * 100, 1)

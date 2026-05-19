@@ -904,6 +904,9 @@ export interface LiveStrategyRow {
   unrealized_pnl?: number | null
   open_position_entry?: number | null
   open_position_current?: number | null
+  // Last signal cycle outcome
+  last_signal_status?: string | null
+  last_signal_detail?: string | null
 }
 
 export interface LiveStrategiesPayload {
