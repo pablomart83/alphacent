@@ -175,7 +175,7 @@ function LiveStrategyRow({
 
         {/* Stats */}
         <div className="flex items-center gap-2 shrink-0 text-[10px] mono">
-          {liveTrades > 0 ? (
+          {liveTrades > 0 || livePnl !== 0 ? (
             <span className={livePnl >= 0 ? 'text-[var(--pnl-up)]' : 'text-[var(--pnl-down)]'}>
               {livePnl >= 0 ? '+' : ''}{formatCurrency(livePnl, { precision: 0 })}
             </span>
