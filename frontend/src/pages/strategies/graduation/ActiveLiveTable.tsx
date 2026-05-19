@@ -335,18 +335,18 @@ export function LiveStrategyDetailPanel({
         {/* Phase 3: Live */}
         <PhaseSection label="Phase 3 — Live" color="var(--pnl-up)" badge="L">
           <div className="grid grid-cols-3 gap-1.5 mb-3">
-            <Metric label="Trades" value={liveTrades > 0 ? String(liveTrades) : (row.open_position_count ?? 0) > 0 ? '1 open' : '—'} />
+            <Metric label="Trades" value={liveTrades > 0 ? String(liveTrades) : livePnl !== 0 || (row.open_position_count ?? 0) > 0 ? '1 open' : '—'} />
             <Metric
               label="P&L"
               value={
-                liveTrades > 0
+                liveTrades > 0 || livePnl !== 0
                   ? formatCurrency(livePnl, { signed: true, precision: 0 })
                   : (row.open_position_count ?? 0) > 0 && row.unrealized_pnl != null
                     ? `${formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 })} unrlzd`
                     : 'Waiting'
               }
               tone={
-                liveTrades > 0
+                liveTrades > 0 || livePnl !== 0
                   ? (livePnl >= 0 ? 'up' : 'down')
                   : (row.open_position_count ?? 0) > 0 && row.unrealized_pnl != null
                     ? (row.unrealized_pnl >= 0 ? 'up' : 'down')
@@ -362,7 +362,7 @@ export function LiveStrategyDetailPanel({
               />
             )}
           </div>
-          {liveTrades === 0 && (row.open_position_count ?? 0) === 0 && (
+          {liveTrades === 0 && livePnl === 0 && (row.open_position_count ?? 0) === 0 && (
             <div className="rounded-[3px] border border-[color-mix(in_oklab,var(--pnl-up)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--pnl-up)_4%,var(--bg-1))] px-2.5 py-2 text-[11px] text-[var(--text-2)]">
               <TrendingUp className="h-3.5 w-3.5 inline mr-1.5 text-[var(--pnl-up)]" />
               Gate open — next ENTER signal for{' '}
