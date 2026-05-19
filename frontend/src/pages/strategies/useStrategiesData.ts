@@ -899,6 +899,11 @@ export interface LiveStrategyRow {
   current_paper_pnl?: number | null
   current_paper_trades?: number | null
   divergence_pct?: number | null
+  // Open position fields — populated even before first trade closes
+  open_position_count?: number | null
+  unrealized_pnl?: number | null
+  open_position_entry?: number | null
+  open_position_current?: number | null
 }
 
 export interface LiveStrategiesPayload {

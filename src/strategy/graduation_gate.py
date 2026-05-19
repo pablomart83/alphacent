@@ -891,7 +891,7 @@ def reject_graduation(
 
 def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
     """Return all active live_strategies rows with paper stats for comparison."""
-    from src.models.orm import LiveStrategyORM, StrategyORM
+    from src.models.orm import LiveStrategyORM, StrategyORM, PositionORM
 
     rows = (
         session.query(LiveStrategyORM)
@@ -914,6 +914,27 @@ def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
         d["current_paper_win_rate"] = paper.get("paper_win_rate")
         d["current_paper_pnl"] = paper.get("paper_total_pnl")
         d["current_paper_trades"] = paper.get("paper_trades")
+
+        # Add unrealized P&L from open live positions so the UI shows current
+        # exposure even before the first trade closes (live_trades=0 / live_pnl=0).
+        try:
+            open_pos = session.query(PositionORM).filter(
+                PositionORM.strategy_id == row.strategy_id,
+                PositionORM.account_type == 'live',
+                PositionORM.closed_at.is_(None),
+            ).all()
+            d["open_position_count"] = len(open_pos)
+            d["unrealized_pnl"] = round(
+                sum(float(p.unrealized_pnl or 0) for p in open_pos), 2
+            )
+            d["open_position_entry"] = float(open_pos[0].entry_price) if open_pos else None
+            d["open_position_current"] = float(open_pos[0].current_price) if open_pos else None
+        except Exception:
+            d["open_position_count"] = 0
+            d["unrealized_pnl"] = 0.0
+            d["open_position_entry"] = None
+            d["open_position_current"] = None
+
         # Divergence: live_sharpe vs paper_sharpe
         if row.live_sharpe and paper.get("paper_sharpe") and paper["paper_sharpe"] > 0:
             d["divergence_pct"] = round(row.live_sharpe / paper["paper_sharpe"] * 100, 1)
