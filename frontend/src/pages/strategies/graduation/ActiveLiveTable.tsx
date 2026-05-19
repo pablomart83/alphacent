@@ -179,6 +179,10 @@ function LiveStrategyRow({
             <span className={livePnl >= 0 ? 'text-[var(--pnl-up)]' : 'text-[var(--pnl-down)]'}>
               {livePnl >= 0 ? '+' : ''}{formatCurrency(livePnl, { precision: 0 })}
             </span>
+          ) : row.last_signal_status === 'order_pending' ? (
+            <span className="text-[var(--pnl-up)]">
+              ⏳ {row.pending_order?.etoro_status ?? 'pending'}
+            </span>
           ) : (
             <span className="text-[var(--text-3)]">waiting</span>
           )}
@@ -373,7 +377,7 @@ export function LiveStrategyDetailPanel({
 
           {/* Last signal cycle status */}
           {row.last_signal_status && (
-            <LastSignalStatus status={row.last_signal_status} detail={row.last_signal_detail} />
+            <LastSignalStatus status={row.last_signal_status} detail={row.last_signal_detail} pendingOrder={row.pending_order} />
           )}
         </PhaseSection>
 
@@ -491,9 +495,18 @@ function TradeTable({ trades, label }: { trades: TradeJournalEntry[]; label: str
 function LastSignalStatus({
   status,
   detail,
+  pendingOrder,
 }: {
   status: string
   detail?: string | null
+  pendingOrder?: {
+    etoro_order_id?: string | null
+    etoro_status?: string | null
+    etoro_units?: number | null
+    etoro_amount?: number | null
+    age_mins?: number | null
+    submitted_at?: string | null
+  } | null
 }) {
   const isBlocked = status.startsWith('blocked') || status === 'gate_blocked'
   const isPending = status === 'order_pending'
@@ -510,15 +523,32 @@ function LastSignalStatus({
 
   return (
     <div
-      className="rounded-[3px] border px-2.5 py-1.5 text-[10px] flex items-center gap-1.5"
+      className="rounded-[3px] border px-2.5 py-2 text-[10px] space-y-1"
       style={{
         borderColor: `color-mix(in oklab, ${color} 25%, var(--border-subtle))`,
         backgroundColor: `color-mix(in oklab, ${color} 5%, var(--bg-1))`,
-        color: 'var(--text-2)',
       }}
     >
-      <span style={{ color }}>{icon}</span>
-      <span>{detail ?? status.replace(/_/g, ' ')}</span>
+      <div className="flex items-center gap-1.5" style={{ color: 'var(--text-2)' }}>
+        <span style={{ color }}>{icon}</span>
+        <span>{detail ?? status.replace(/_/g, ' ')}</span>
+      </div>
+      {isPending && pendingOrder && (
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 pl-4 text-[9px] text-[var(--text-3)] mono">
+          {pendingOrder.etoro_status && (
+            <span>eToro: <span className="text-[var(--text-1)]">{pendingOrder.etoro_status}</span></span>
+          )}
+          {pendingOrder.etoro_amount != null && (
+            <span>Amount: <span className="text-[var(--text-1)]">${pendingOrder.etoro_amount.toFixed(0)}</span></span>
+          )}
+          {pendingOrder.etoro_units != null && (
+            <span>Units: <span className="text-[var(--text-1)]">{pendingOrder.etoro_units.toFixed(4)}</span></span>
+          )}
+          {pendingOrder.etoro_order_id && (
+            <span>ID: <span className="text-[var(--text-1)]">{pendingOrder.etoro_order_id}</span></span>
+          )}
+        </div>
+      )}
     </div>
   )
 }

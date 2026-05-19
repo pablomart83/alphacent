@@ -907,6 +907,16 @@ export interface LiveStrategyRow {
   // Last signal cycle outcome
   last_signal_status?: string | null
   last_signal_detail?: string | null
+  pending_order?: {
+    order_id: string
+    etoro_order_id?: string | null
+    submitted_at?: string | null
+    quantity?: number | null
+    etoro_status?: string | null
+    etoro_units?: number | null
+    etoro_amount?: number | null
+    age_mins?: number | null
+  } | null
 }
 
 export interface LiveStrategiesPayload {

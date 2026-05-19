@@ -940,6 +940,16 @@ def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
             from src.models.orm import OrderORM, SignalDecisionORM
             from src.models.enums import OrderStatus
 
+            # eToro status code labels
+            _ETORO_STATUS = {
+                1: "Pending",
+                2: "Filled",
+                3: "Executed",
+                4: "Failed/Rejected",
+                7: "Active",
+                11: "Pending Execution",
+            }
+
             # Check for pending orders first
             pending = session.query(OrderORM).filter(
                 OrderORM.strategy_id == row.strategy_id,
@@ -948,8 +958,55 @@ def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
             ).order_by(OrderORM.submitted_at.desc()).first()
 
             if pending:
+                submitted_str = pending.submitted_at.strftime('%H:%M UTC') if pending.submitted_at else '—'
+                age_mins = int((datetime.now() - pending.submitted_at).total_seconds() / 60) if pending.submitted_at else 0
+                age_str = f"{age_mins}m" if age_mins < 60 else f"{age_mins // 60}h {age_mins % 60}m"
+
+                # Try to get live eToro status for this order
+                etoro_status_label = None
+                etoro_units = None
+                etoro_amount = None
+                try:
+                    if pending.etoro_order_id:
+                        from src.data.market_data_manager import get_market_data_manager
+                        from src.api.etoro_client import EToroAPIClient
+                        from src.core.config import Configuration
+                        from src.models.enums import TradingMode
+                        cfg = Configuration()
+                        creds = cfg.load_credentials(TradingMode.LIVE)
+                        live_client = EToroAPIClient(
+                            public_key=creds["public_key"],
+                            user_key=creds["user_key"],
+                            mode=TradingMode.LIVE,
+                        )
+                        order_data = live_client.get_order_status(str(pending.etoro_order_id))
+                        status_id = order_data.get("statusID")
+                        etoro_status_label = _ETORO_STATUS.get(status_id, f"Status {status_id}")
+                        etoro_units = order_data.get("units")
+                        etoro_amount = order_data.get("amount")
+                except Exception:
+                    pass  # fail-open — show basic info if eToro call fails
+
                 d["last_signal_status"] = "order_pending"
-                d["last_signal_detail"] = f"Order pending since {pending.submitted_at.strftime('%H:%M UTC') if pending.submitted_at else '—'}"
+                if etoro_status_label and etoro_units and etoro_amount:
+                    d["last_signal_detail"] = (
+                        f"eToro: {etoro_status_label} · "
+                        f"${etoro_amount:.0f} · {etoro_units:.4f} units · "
+                        f"submitted {submitted_str} ({age_str} ago)"
+                    )
+                else:
+                    d["last_signal_detail"] = f"Order pending since {submitted_str} ({age_str} ago)"
+                # Store structured data for richer UI
+                d["pending_order"] = {
+                    "order_id": str(pending.id),
+                    "etoro_order_id": str(pending.etoro_order_id) if pending.etoro_order_id else None,
+                    "submitted_at": pending.submitted_at.isoformat() if pending.submitted_at else None,
+                    "quantity": float(pending.quantity) if pending.quantity else None,
+                    "etoro_status": etoro_status_label,
+                    "etoro_units": etoro_units,
+                    "etoro_amount": etoro_amount,
+                    "age_mins": age_mins,
+                }
             else:
                 # Get last signal_decisions row for this strategy
                 last_sd = session.execute(
