@@ -116,16 +116,16 @@ export function GraduationCard({
     setNotes('')
   }, [row.strategy_id, row.symbol, defaultSize, defaultSl, defaultTp, convictionThreshold])
 
-  const realExposure = positionSize * mirrorRatio
-  const minSize = defaults?.min_order_size ?? 200
-  const maxSize = defaults?.max_order_size ?? 1500
+  const virtualAmount = positionSize / mirrorRatio
+  const minSize = (defaults?.min_order_size ?? 200) * mirrorRatio
+  const maxSize = (defaults?.max_order_size ?? 1500) * mirrorRatio
   const symbolCapPctUi = (defaults?.symbol_cap_pct ?? 0.2) * 100
 
   const sizeWarning =
     positionSize < minSize
-      ? `Below min order size $${minSize}`
+      ? `Below min order size $${minSize.toFixed(0)} real`
       : positionSize > maxSize
-        ? `Above max order size $${maxSize}`
+        ? `Above max order size $${maxSize.toFixed(0)} real`
         : null
   const slTpWarning =
     slPct <= 0 || slPct >= 100
@@ -152,7 +152,7 @@ export function GraduationCard({
         },
       })
       toast.success(`${row.template_name ?? row.strategy_name} × ${row.symbol} graduated to LIVE`, {
-        description: `$${positionSize.toFixed(0)} virtual · $${realExposure.toFixed(0)} real per order · conviction ≥ ${convictionMin}`,
+        description: `$${positionSize.toFixed(0)} real · $${virtualAmount.toFixed(0)} virtual per order · conviction ≥ ${convictionMin}`,
       })
       setConfirmApproveOpen(false)
       onClose()
@@ -236,7 +236,7 @@ export function GraduationCard({
 
         <ImpactPreview
           positionSize={positionSize}
-          realExposure={realExposure}
+          virtualAmount={virtualAmount}
           mirrorRatio={mirrorRatio}
           symbolCapPctUi={symbolCapPctUi}
           convictionMin={convictionMin}
@@ -274,7 +274,7 @@ export function GraduationCard({
         open={confirmApproveOpen}
         onOpenChange={setConfirmApproveOpen}
         title="Approve for live trading"
-        description={`Approving (${row.template_name ?? row.strategy_name}, ${row.symbol}) creates a live_strategies row. Every qualifying signal fires a real $${realExposure.toFixed(0)} eToro order. Reversible via Retire.`}
+        description={`Approving (${row.template_name ?? row.strategy_name}, ${row.symbol}) creates a live_strategies row. Every qualifying signal fires a real $${positionSize.toFixed(0)} eToro order ($${virtualAmount.toFixed(0)} virtual). Reversible via Retire.`}
         confirmLabel="Approve"
         confirmVariant="primary"
         isLoading={graduate.isPending}
@@ -629,7 +629,7 @@ function ConfigForm({
               <span className="mono font-semibold text-[var(--text-0)]">
                 ${pipelineSize.toFixed(0)}
               </span>
-              {' '}virtual — CIO sets the final size below
+              {' '}real — CIO sets the final size below
             </span>
             <button
               type="button"
@@ -644,7 +644,7 @@ function ConfigForm({
         <div>
           <div className="flex items-baseline justify-between">
             <Label className="text-[10px] uppercase tracking-wider">
-              Position size (virtual $) — CIO approved
+              Position size (real $) — CIO approved
             </Label>
             <span className="mono tabular-nums text-[12px] text-[var(--text-0)]">
               ${positionSize.toFixed(0)}
@@ -654,14 +654,14 @@ function ConfigForm({
             type="range"
             min={sizeRange.min}
             max={sizeRange.max}
-            step={50}
+            step={5}
             value={positionSize}
             onChange={(e) => onPositionSizeChange(Number(e.target.value))}
             className="w-full mt-1 accent-[var(--accent-primary)]"
           />
           <div className="flex justify-between text-[9px] text-[var(--text-3)] mono">
-            <span>${sizeRange.min}</span>
-            <span>${sizeRange.max}</span>
+            <span>${sizeRange.min.toFixed(0)}</span>
+            <span>${sizeRange.max.toFixed(0)}</span>
           </div>
           {sizeWarning && (
             <div className="flex items-center gap-1 text-[10px] text-[var(--status-warning)] mt-1">
@@ -670,7 +670,7 @@ function ConfigForm({
             </div>
           )}
           <p className="text-[9px] text-[var(--text-3)] mt-1">
-            This size is used exactly as-is at order time. No pipeline re-run, no ATR scaling.
+            Real dollars invested per order. System converts to virtual (÷ mirror ratio) before sending to eToro.
           </p>
         </div>
 
@@ -775,7 +775,7 @@ function NumberField({
 
 function ImpactPreview({
   positionSize,
-  realExposure,
+  virtualAmount,
   mirrorRatio,
   symbolCapPctUi,
   convictionMin,
@@ -783,15 +783,15 @@ function ImpactPreview({
   tpPct,
 }: {
   positionSize: number
-  realExposure: number
+  virtualAmount: number
   mirrorRatio: number
   symbolCapPctUi: number
   convictionMin: number
   slPct: number
   tpPct: number
 }) {
-  const maxLoss = realExposure * (slPct / 100)
-  const maxGain = realExposure * (tpPct / 100)
+  const maxLoss = positionSize * (slPct / 100)
+  const maxGain = positionSize * (tpPct / 100)
 
   return (
     <section>
@@ -801,14 +801,12 @@ function ImpactPreview({
           label="Per order"
           value={
             <span>
-              <span className="mono">${positionSize.toFixed(0)}</span>{' '}
-              <span className="text-[var(--text-3)]">virtual</span>
+              <span className="mono text-[var(--account-live)]">${positionSize.toFixed(0)}</span>{' '}
+              <span className="text-[var(--text-3)]">real</span>
               <span className="text-[var(--text-3)]"> → </span>
-              <span className="mono text-[var(--account-live)]">
-                ${realExposure.toFixed(0)}
-              </span>{' '}
+              <span className="mono">${virtualAmount.toFixed(0)}</span>{' '}
               <span className="text-[var(--text-3)]">
-                real ({(mirrorRatio * 100).toFixed(0)}% mirror)
+                virtual ({(mirrorRatio * 100).toFixed(0)}% mirror)
               </span>
             </span>
           }
@@ -817,7 +815,7 @@ function ImpactPreview({
           label="Max loss per order"
           value={
             <span className="mono text-[var(--pnl-down)]">
-              -${maxLoss.toFixed(0)}
+              -${maxLoss.toFixed(0)} real
             </span>
           }
         />
@@ -825,7 +823,7 @@ function ImpactPreview({
           label="Target per order"
           value={
             <span className="mono text-[var(--pnl-up)]">
-              +${maxGain.toFixed(0)}
+              +${maxGain.toFixed(0)} real
             </span>
           }
         />
@@ -833,7 +831,7 @@ function ImpactPreview({
           label="Symbol cap"
           value={
             <span className="mono">
-              ${(positionSize * (symbolCapPctUi / 100) * 10).toFixed(0)} virtual (
+              ${(virtualAmount * (symbolCapPctUi / 100) * 10).toFixed(0)} virtual (
               {symbolCapPctUi.toFixed(0)}% of $10K)
             </span>
           }

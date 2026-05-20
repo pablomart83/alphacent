@@ -4306,7 +4306,7 @@ async def get_risk_attribution(
 class GraduateRequest(BaseModel):
     """Approve a (strategy, symbol) pair for live trading."""
     symbol: str
-    position_size: float = Field(..., gt=0, description="Virtual order size in USD (e.g. 500)")
+    position_size: float = Field(..., gt=0, description="Real order size in USD (e.g. 200). The system multiplies by 1/mirror_ratio to get the virtual eToro amount.")
     sl_pct: float = Field(..., gt=0, lt=1, description="Stop-loss as decimal (e.g. 0.06 = 6%)")
     tp_pct: float = Field(..., gt=0, lt=2, description="Take-profit as decimal (e.g. 0.15 = 15%)")
     conviction_min: int = Field(74, ge=60, le=100, description="Minimum conviction score for live fills")
@@ -4412,7 +4412,7 @@ async def get_size_estimate(
         # Run the pipeline
         risk_manager = RiskManager()
         risk_manager._last_sizing_reason = None
-        recommended_size = risk_manager.calculate_position_size(
+        recommended_size_virtual = risk_manager.calculate_position_size(
             signal=signal,
             account=account,
             positions=live_positions,
@@ -4422,10 +4422,24 @@ async def get_size_estimate(
         )
         reason = getattr(risk_manager, '_last_sizing_reason', None)
 
+        # Convert virtual pipeline size → real dollars for the CIO.
+        # The CIO always works in real dollars; the scheduler converts back
+        # to virtual (÷ mirror_ratio) before sending to eToro.
+        try:
+            from src.core.config_loader import Configuration as _Cfg
+            _cfg = _Cfg()
+            _live_cfg = _cfg.get_config().get('live_trading', {})
+            _mirror_ratio = float(_live_cfg.get('mirror_ratio', 0.10))
+        except Exception:
+            _mirror_ratio = 0.10
+        recommended_size_real = recommended_size_virtual * _mirror_ratio
+
         return {
             "strategy_id": strategy_id,
             "symbol": symbol,
-            "recommended_size": round(recommended_size, 0),
+            "recommended_size": round(recommended_size_real, 0),
+            "recommended_size_virtual": round(recommended_size_virtual, 0),
+            "mirror_ratio": _mirror_ratio,
             "account_equity": account.equity,
             "account_balance": account.balance,
             "reason": reason,

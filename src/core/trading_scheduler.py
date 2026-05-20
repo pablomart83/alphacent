@@ -1509,22 +1509,30 @@ class TradingScheduler:
                                                         )
                                                         continue
 
-                                                    _cio_cap = float(_approval.position_size)
+                                                    # CIO position_size is stored in REAL dollars.
+                                                    # Convert to virtual for comparison with the
+                                                    # pipeline output (which runs on virtual equity).
+                                                    _mirror = _live_cfg.get('mirror_ratio', 0.10)
+                                                    _cio_real = float(_approval.position_size)
+                                                    _cio_cap_virtual = _cio_real / _mirror
                                                     _live_size = max(
                                                         _live_min,
-                                                        min(_live_max, min(_live_val.position_size, _cio_cap))
+                                                        min(_live_max, min(_live_val.position_size, _cio_cap_virtual))
                                                     )
                                                     logger.info(
                                                         f"Live fill routing sizing: {_sig_sym} "
-                                                        f"pipeline=${_live_val.position_size:.0f} "
-                                                        f"CIO_cap=${_cio_cap:.0f} "
-                                                        f"→ final=${_live_size:.0f}"
+                                                        f"pipeline=${_live_val.position_size:.0f}v "
+                                                        f"CIO_cap=${_cio_real:.0f}r (${_cio_cap_virtual:.0f}v) "
+                                                        f"→ final=${_live_size:.0f}v (${_live_size * _mirror:.0f}r)"
                                                     )
                                                 else:
                                                     logger.warning(
                                                         f"Live fill routing: risk_manager or account_info unavailable "
                                                         f"for {_sig_sym} — falling back to CIO size"
                                                     )
+                                                    # CIO size is real dollars — convert to virtual
+                                                    _mirror = _live_cfg.get('mirror_ratio', 0.10)
+                                                    _live_size = max(_live_min, min(_live_max, float(_approval.position_size) / _mirror))
 
                                                 # Execute with CIO-approved SL/TP
                                                 _live_order = self._live_order_executor.execute_signal(
@@ -1566,8 +1574,8 @@ class TradingScheduler:
                                                 session.commit()
                                                 logger.info(
                                                     f"LIVE FILL: {_sig_sym} {_sig_dir} "
-                                                    f"${_live_size:.0f} virtual "
-                                                    f"(${_live_size * _live_cfg.get('mirror_ratio', 0.10):.0f} real) "
+                                                    f"${_live_size:.0f}v "
+                                                    f"(${_live_size * _live_cfg.get('mirror_ratio', 0.10):.0f}r) "
                                                     f"conviction={_sig_conv:.1f}>={_live_conv_min} "
                                                     f"order_id={_live_order.id}"
                                                 )
@@ -2349,31 +2357,35 @@ class TradingScheduler:
                                             continue
 
                                         # Pipeline size is the vol-scaled, drawdown-adjusted,
-                                        # cap-checked size. CIO position_size is the ceiling —
-                                        # the pipeline can size lower but never higher.
+                                        # cap-checked size (virtual dollars).
+                                        # CIO position_size is stored in REAL dollars — convert
+                                        # to virtual for comparison with the pipeline output.
+                                        _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
                                         _pipeline_size2 = _live_validation2.position_size
-                                        _cio_cap2 = float(_appr.position_size)
+                                        _cio_real2 = float(_appr.position_size)
+                                        _cio_cap_virtual2 = _cio_real2 / _mirror2
                                         _live_size2 = max(
                                             _live_min2,
-                                            min(_live_max2, min(_pipeline_size2, _cio_cap2))
+                                            min(_live_max2, min(_pipeline_size2, _cio_cap_virtual2))
                                         )
                                         logger.info(
                                             f"Live pass sizing: {_live_sym} "
-                                            f"pipeline=${_pipeline_size2:.0f} "
-                                            f"CIO_cap=${_cio_cap2:.0f} "
-                                            f"→ final=${_live_size2:.0f} "
+                                            f"pipeline=${_pipeline_size2:.0f}v "
+                                            f"CIO_cap=${_cio_real2:.0f}r (${_cio_cap_virtual2:.0f}v) "
+                                            f"→ final=${_live_size2:.0f}v (${_live_size2 * _mirror2:.0f}r) "
                                             f"[min={_live_min2:.0f}, max={_live_max2:.0f}]"
                                         )
                                     else:
                                         # Fallback: no risk_manager or no account info —
-                                        # use CIO size clamped to order bounds (old behaviour).
-                                        # This path should never fire in normal operation.
+                                        # use CIO size (real dollars) converted to virtual,
+                                        # clamped to order bounds.
                                         logger.warning(
                                             f"Live pass: risk_manager or account_info unavailable "
                                             f"for {_live_sym} — falling back to CIO size "
                                             f"(validate_signal bypassed)"
                                         )
-                                        _live_size2 = max(_live_min2, min(_live_max2, float(_appr.position_size)))
+                                        _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
+                                        _live_size2 = max(_live_min2, min(_live_max2, float(_appr.position_size) / _mirror2))
 
                                     try:
                                         _live_order2 = self._live_order_executor.execute_signal(
@@ -2414,8 +2426,8 @@ class TradingScheduler:
                                         session.commit()
                                         logger.info(
                                             f"LIVE FILL (independent pass): {_live_sym} "
-                                            f"{_lsig.action.value} ${_live_size2:.0f} virtual "
-                                            f"(${_live_size2 * _live_cfg2.get('mirror_ratio', 0.10):.0f} real) "
+                                            f"{_lsig.action.value} ${_live_size2:.0f}v "
+                                            f"(${_live_size2 * _live_cfg2.get('mirror_ratio', 0.10):.0f}r) "
                                             f"conviction={_sig_conv2:.1f}>={_live_conv_min2}"
                                         )
                                     except Exception as _live_exec_err:
