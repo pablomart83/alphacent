@@ -1,8 +1,10 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import {
   Tabs,
   TabsList,
   TabsTrigger,
+  Spinner,
 } from '@/components/primitives'
 import { PageTemplate, ResizablePanelLayout } from '@/components/layout'
 import { useTradingMode } from '@/stores'
@@ -11,14 +13,22 @@ import { LimitEditor } from './LimitEditor'
 import { RiskMetricTiles } from './RiskMetricTiles'
 import { RiskScoreHero } from './RiskScoreHero'
 import { LiveTradingHealthCard } from './LiveTradingHealthCard'
-import { GatesTab } from './gates/GatesTab'
-import { RiskTab } from './risk/RiskTab'
-import { SystemTab } from './system/SystemTab'
-import { CircuitBreakersTab } from './breakers/CircuitBreakersTab'
-import { AlertsTab } from './alerts/AlertsTab'
-import { AuditTab } from './audit/AuditTab'
-import { SyncLogTab } from './synclog/SyncLogTab'
 import { useRiskLimits, useRiskMetrics } from './useGuardData'
+
+// Lazy-load each tab so only the active tab's code is parsed on first paint.
+const RiskTab          = lazy(() => import('./risk/RiskTab').then((m) => ({ default: m.RiskTab })))
+const GatesTab         = lazy(() => import('./gates/GatesTab').then((m) => ({ default: m.GatesTab })))
+const SystemTab        = lazy(() => import('./system/SystemTab').then((m) => ({ default: m.SystemTab })))
+const CircuitBreakersTab = lazy(() => import('./breakers/CircuitBreakersTab').then((m) => ({ default: m.CircuitBreakersTab })))
+const AlertsTab        = lazy(() => import('./alerts/AlertsTab').then((m) => ({ default: m.AlertsTab })))
+const AuditTab         = lazy(() => import('./audit/AuditTab').then((m) => ({ default: m.AuditTab })))
+const SyncLogTab       = lazy(() => import('./synclog/SyncLogTab').then((m) => ({ default: m.SyncLogTab })))
+
+const TabFallback = () => (
+  <div className="flex h-full items-center justify-center">
+    <Spinner size="sm" />
+  </div>
+)
 
 /**
  * Guard surface — /guard.
@@ -109,21 +119,23 @@ function GuardShell() {
           ))}
         </TabsList>
         <div className="flex-1 min-h-0">
-          {current === 'risk' ? (
-            <RiskTab />
-          ) : current === 'gates' ? (
-            <GatesTab />
-          ) : current === 'system' ? (
-            <SystemTab />
-          ) : current === 'circuit-breakers' ? (
-            <CircuitBreakersTab />
-          ) : current === 'alerts' ? (
-            <AlertsTab />
-          ) : current === 'sync-log' ? (
-            <SyncLogTab />
-          ) : (
-            <AuditTab />
-          )}
+          <Suspense fallback={<TabFallback />}>
+            {current === 'risk' ? (
+              <RiskTab />
+            ) : current === 'gates' ? (
+              <GatesTab />
+            ) : current === 'system' ? (
+              <SystemTab />
+            ) : current === 'circuit-breakers' ? (
+              <CircuitBreakersTab />
+            ) : current === 'alerts' ? (
+              <AlertsTab />
+            ) : current === 'sync-log' ? (
+              <SyncLogTab />
+            ) : (
+              <AuditTab />
+            )}
+          </Suspense>
         </div>
       </Tabs>
     </div>

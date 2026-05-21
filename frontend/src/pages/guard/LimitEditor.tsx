@@ -99,9 +99,20 @@ export function LimitEditor({ limits, metrics, loading }: LimitEditorProps) {
 
   const [draft, setDraft] = useState<RiskLimitsPayload | null>(null)
 
-  // Reset draft whenever the backend limits change (first load, after save, mode change).
+  // Reset draft only when the backend values actually change — not on every
+  // refetch that returns a new object reference with identical values.
+  // This prevents in-progress edits from being silently discarded every 60s.
   useEffect(() => {
-    if (limits) setDraft(limits)
+    if (!limits) return
+    setDraft((prev) => {
+      if (!prev) return limits
+      // Check whether any field value has changed. If not, keep the existing
+      // draft so the user's in-progress edits are preserved.
+      const changed = (Object.keys(limits) as FieldKey[]).some(
+        (k) => Math.abs((limits[k] as number) - (prev[k] as number)) > 1e-9,
+      )
+      return changed ? limits : prev
+    })
   }, [limits])
 
   const changes = useMemo(() => {

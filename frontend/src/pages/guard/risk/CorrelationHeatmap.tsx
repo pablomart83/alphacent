@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { Group } from '@visx/group'
 import { scaleLinear } from '@visx/scale'
 import { ParentSize } from '@visx/responsive'
@@ -10,6 +10,12 @@ import {
 import { SectionLabel } from '@/components/layout'
 import { Network } from 'lucide-react'
 import type { CorrelatedPair } from '../useGuardData'
+
+// Module-level constant — created once, never recreated on re-render.
+const COLOR_SCALE = scaleLinear<string>({
+  domain: [-1, 0, 1],
+  range: ['rgba(34,197,94,0.9)', 'rgba(120,130,150,0.2)', 'rgba(239,68,68,0.9)'],
+})
 
 interface CorrelationHeatmapProps {
   pairs: CorrelatedPair[] | null | undefined
@@ -117,7 +123,9 @@ export function CorrelationHeatmap({ pairs, loading }: CorrelationHeatmapProps) 
   )
 }
 
-function HeatmapSvg({
+// Memoised so it only repaints when symbols, matrix, threshold, or width
+// actually change — not on every parent re-render from polling.
+const HeatmapSvg = memo(function HeatmapSvg({
   symbols,
   matrix,
   threshold,
@@ -132,11 +140,6 @@ function HeatmapSvg({
   const innerW = Math.max(120, width - axisSize)
   const cellSize = Math.max(14, Math.min(40, innerW / symbols.length))
   const height = axisSize + cellSize * symbols.length
-
-  const colorScale = scaleLinear<string>({
-    domain: [-1, 0, 1],
-    range: ['rgba(34,197,94,0.9)', 'rgba(120,130,150,0.2)', 'rgba(239,68,68,0.9)'],
-  })
 
   return (
     <svg width={width} height={height}>
@@ -187,7 +190,7 @@ function HeatmapSvg({
             }
             const hasValue = value != null
             const belowThreshold = hasValue && Math.abs(value as number) < threshold
-            const fill = hasValue ? colorScale(value as number) : 'var(--bg-2)'
+            const fill = hasValue ? COLOR_SCALE(value as number) : 'var(--bg-2)'
             const opacity = !hasValue ? 0.3 : belowThreshold ? 0.25 : 1
             return (
               <rect
@@ -211,7 +214,7 @@ function HeatmapSvg({
       </Group>
     </svg>
   )
-}
+})
 
 function ScaleLegendChip({ label, color }: { label: string; color: string }) {
   return (

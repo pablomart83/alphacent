@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ColumnDef, SortingState } from '@tanstack/react-table'
 import { Search, Shield } from 'lucide-react'
 import {
   Badge,
+  Button,
   DataTable,
   EmptyState,
   Input,
@@ -35,6 +36,10 @@ export function DataQualityTable({ entries, loading }: DataQualityTableProps) {
   const [assetClass, setAssetClass] = useState<string>('all')
   const [bucket, setBucket] = useState<Bucket>('all')
   const [sorting, setSorting] = useState<SortingState>([{ id: 'score', desc: true }])
+  // Page cap — DataTable virtualises at >100 rows, but keeping the rendered
+  // set bounded avoids building a huge TanStack Table model on every refetch.
+  const PAGE_SIZE = 100
+  const [page, setPage] = useState(1)
 
   const classOptions = useMemo(() => {
     const set = new Set<string>()
@@ -59,6 +64,11 @@ export function DataQualityTable({ entries, loading }: DataQualityTableProps) {
       return true
     })
   }, [entries, search, assetClass, bucket])
+
+  // Reset to page 1 whenever filters change so stale pages don't show.
+  useEffect(() => { setPage(1) }, [search, assetClass, bucket])
+
+  const visible = useMemo(() => filtered.slice(0, page * PAGE_SIZE), [filtered, page])
 
   const columns = useMemo<ColumnDef<DataQualityEntry>[]>(
     () => [
@@ -195,14 +205,29 @@ export function DataQualityTable({ entries, loading }: DataQualityTableProps) {
           description="Clear filters to see the full list of symbols."
         />
       ) : (
-        <DataTable
-          data={filtered}
-          columns={columns}
-          rowKey={(r) => r.symbol}
-          loading={loading}
-          density="compact"
-          sorting={{ state: sorting, onChange: setSorting }}
-        />
+        <>
+          <DataTable
+            data={visible}
+            columns={columns}
+            rowKey={(r) => r.symbol}
+            loading={loading}
+            density="compact"
+            sorting={{ state: sorting, onChange: setSorting }}
+          />
+          {visible.length < filtered.length && (
+            <div className="pt-1 flex items-center justify-between text-[10px] text-[var(--text-3)]">
+              <span>Showing {visible.length} of {filtered.length}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setPage((p) => p + 1)}
+                className="text-[10px]"
+              >
+                Load more
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </section>
   )

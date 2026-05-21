@@ -583,8 +583,8 @@ export function useLiveSummary() {
   return useQuery<LiveSummary>({
     queryKey: ['live-summary'],
     queryFn: () => api.get<LiveSummary>('/live/summary'),
-    refetchInterval: 15_000,
-    staleTime: 10_000,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
   })
 }
 
