@@ -555,8 +555,8 @@ export function useSystemStatus(enabled = true) {
   return useQuery<SystemStatusPayload>({
     queryKey: ['system-status'],
     queryFn: () => api.get<SystemStatusPayload>('/control/system/status'),
-    refetchInterval: 15_000,
-    staleTime: 5_000,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
     enabled,
   })
 }

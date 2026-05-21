@@ -174,8 +174,8 @@ export function useAutonomousStatus() {
   return useQuery<AutonomousStatusShape>({
     queryKey: ['autonomous-status'],
     queryFn: () => api.get<AutonomousStatusShape>('/strategies/autonomous/status'),
-    refetchInterval: 10_000,
-    staleTime: 5_000,
+    refetchInterval: 20_000,
+    staleTime: 10_000,
   })
 }
 

@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/services/api'
 import { useTradingMode, type TradingMode } from '@/stores'
+// useSystemStatus lives in useStrategiesData (authoritative, richer payload).
+// Re-export it here so Guard components can import from a single local file.
+export { useSystemStatus, type SystemStatusPayload as SystemStatus } from '@/pages/strategies/useStrategiesData'
 
 /* ═════════════════════════════════════════════════════════════════════
  *  Guard data hooks — Sprint 8 (Risk + Gates).
@@ -162,12 +165,6 @@ export interface SystemHealthPayload {
   observability: Record<string, unknown>
 }
 
-export interface SystemStatus {
-  state: 'ACTIVE' | 'PAUSED' | 'STOPPED' | 'EMERGENCY_HALT' | string
-  timestamp: string
-  reason?: string | null
-}
-
 export interface KillSwitchResponse {
   success: boolean
   message: string
@@ -238,17 +235,8 @@ export function useSystemHealth() {
   return useQuery<SystemHealthPayload>({
     queryKey: ['system-health'],
     queryFn: () => api.get<SystemHealthPayload>('/control/system-health'),
-    refetchInterval: 15_000,
-    staleTime: 5_000,
-  })
-}
-
-export function useSystemStatus() {
-  return useQuery<SystemStatus>({
-    queryKey: ['system-status'],
-    queryFn: () => api.get<SystemStatus>('/control/system/status'),
-    refetchInterval: 15_000,
-    staleTime: 5_000,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
   })
 }
 
@@ -441,8 +429,8 @@ export function useMonitoringStatus() {
   return useQuery<MonitoringStatusPayload>({
     queryKey: ['monitoring-status'],
     queryFn: () => api.get<MonitoringStatusPayload>('/data/monitoring/status'),
-    refetchInterval: 15_000,
-    staleTime: 5_000,
+    refetchInterval: 30_000,
+    staleTime: 15_000,
   })
 }
 
@@ -761,7 +749,7 @@ export function useServiceLog(enabled = true) {
     queryKey: ['service-log'],
     queryFn: () => api.get<ServiceLogPayload>('/data/service-log?limit=300'),
     enabled,
-    refetchInterval: 5_000,
-    staleTime: 4_000,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
   })
 }

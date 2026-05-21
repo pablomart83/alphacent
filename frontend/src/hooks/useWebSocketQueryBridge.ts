@@ -70,18 +70,6 @@ export function useWebSocketQueryBridge() {
       }),
     )
 
-    // Live account rows are sensitive to position / order pushes.
-    unsubs.push(
-      wsManager.on('position_update', () => {
-        qc.invalidateQueries({ queryKey: ['live-summary'] })
-      }),
-    )
-    unsubs.push(
-      wsManager.on('order_update', () => {
-        qc.invalidateQueries({ queryKey: ['live-summary'] })
-      }),
-    )
-
     // On reconnect, refresh top-level queries and notify the user.
     let wasOpen = false
     let offlineSince: number | null = null

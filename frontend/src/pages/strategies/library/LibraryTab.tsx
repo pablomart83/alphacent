@@ -48,7 +48,7 @@ import {
   type DetailSubTab,
 } from './StrategyDetailPanel'
 import { CompareDialog } from './CompareDialog'
-import { usePipelineCounts } from '@/pages/command/useCommandData'
+import type { PipelineCounts } from '@/pages/command/StrategyPipelineCounts'
 
 /* ─────────────────────────── URL + filter state ─────────────────────────── */
 
@@ -117,7 +117,6 @@ function syncFiltersToUrl(
 export function LibraryTab() {
   const mode = useTradingMode((s) => s.mode)
   const [params, setParams] = useSearchParams()
-  const pipelineQuery = usePipelineCounts()
 
   const [filters, setFilters] = useState<LibraryFilters>(() => filtersFromUrl(params))
   const [sorting, setSorting] = useState<SortingState>([{ id: 'conviction', desc: true }])
@@ -143,6 +142,24 @@ export function LibraryTab() {
   /* ─── Data ─── */
   const strategiesQuery = useStrategies({ slim: true, include_retired: true })
   const allRows: StrategyRow[] = strategiesQuery.data?.strategies ?? []
+
+  // Derive pipeline counts from the same data already fetched by useStrategies.
+  // This avoids a second hook (usePipelineCounts) that would register its own
+  // polling timer against the same query key.
+  const pipelineCounts = useMemo<PipelineCounts>(() => {
+    const counts: PipelineCounts = { proposed: 0, backtested: 0, paper: 0, live: 0, retired: 0 }
+    for (const s of allRows) {
+      switch (s.status) {
+        case 'PROPOSED':   counts.proposed++;   break
+        case 'BACKTESTED': counts.backtested++; break
+        case 'PAPER':
+        case 'DEMO':       counts.paper++;      break
+        case 'LIVE':       counts.live++;       break
+        case 'RETIRED':    counts.retired++;    break
+      }
+    }
+    return counts
+  }, [allRows])
 
   // Count live-authorized strategies from the actual row data (not pipeline counts
   // which use strategies.status — that's never set to LIVE by graduation).
@@ -374,9 +391,9 @@ export function LibraryTab() {
   const tableContent = (
     <div className="flex flex-col h-full min-h-0" ref={tableBodyRef}>
       <LibraryStatusBar
-        counts={pipelineQuery.counts}
+        counts={pipelineCounts}
         liveAuthorizedCount={liveAuthorizedCount}
-        loading={pipelineQuery.isLoading}
+        loading={strategiesQuery.isLoading}
         onStatusFilter={(status) =>
           setFilters((prev) => ({ ...prev, status: status as StrategyStatus | 'all' }))
         }
