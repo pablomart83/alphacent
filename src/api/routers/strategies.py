@@ -711,7 +711,10 @@ async def get_strategies(
                 current_equity = float(eq_row.equity)
             spy_rows = (
                 session.query(HistoricalPriceCacheORM.date, HistoricalPriceCacheORM.close)
-                .filter(HistoricalPriceCacheORM.symbol == "SPY")
+                .filter(
+                    HistoricalPriceCacheORM.symbol == "SPY",
+                    HistoricalPriceCacheORM.interval == "1d",  # daily closes only — exclude 1h/4h bars
+                )
                 .order_by(HistoricalPriceCacheORM.date)
                 .all()
             )
