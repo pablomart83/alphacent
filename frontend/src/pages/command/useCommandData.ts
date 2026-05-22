@@ -134,9 +134,10 @@ export function usePerformanceAnalytics(period: EquityPeriod, interval: EquityIn
 }
 
 export function useSpyBenchmark(period: EquityPeriod, enabled: boolean) {
+  const mode = useTradingMode((s) => s.mode)
   return useQuery<SPYBenchmarkPayload>({
-    queryKey: ['spy-benchmark', period],
-    queryFn: () => api.get<SPYBenchmarkPayload>('/analytics/spy-benchmark', { period }),
+    queryKey: ['spy-benchmark', period, mode],
+    queryFn: () => api.get<SPYBenchmarkPayload>('/analytics/spy-benchmark', { period, mode }),
     enabled,
     staleTime: 5 * 60_000,
   })

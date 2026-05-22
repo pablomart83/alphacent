@@ -919,16 +919,31 @@ async def get_performance_analytics(
             realized_return = round(realized_return_dollars / first_eq * 100, 4)
 
     # ── SPY return over the same period ──────────────────────────────────────
+    # Anchor SPY to the same start date as the equity curve (first snapshot in
+    # the period), not the raw period window start. Without this, SPY accumulates
+    # return from before the account started trading, making alpha look worse.
     spy_return: Optional[float] = None
     alpha_vs_spy: Optional[float] = None
     try:
         from src.models.orm import HistoricalPriceCacheORM
+        # Use the actual first equity snapshot date as the SPY anchor.
+        # snapshot_rows is already filtered to the period and sorted ascending.
+        spy_anchor_date = start_date
+        if snapshot_rows:
+            first_snap_date = snapshot_rows[0].date
+            if isinstance(first_snap_date, str):
+                from datetime import datetime as _dt
+                spy_anchor_date = _dt.strptime(first_snap_date[:10], "%Y-%m-%d")
+            elif hasattr(first_snap_date, 'year'):
+                from datetime import datetime as _dt
+                spy_anchor_date = _dt(first_snap_date.year, first_snap_date.month, first_snap_date.day)
+
         spy_rows = (
             session.query(HistoricalPriceCacheORM.date, HistoricalPriceCacheORM.close)
             .filter(
                 HistoricalPriceCacheORM.symbol == "SPY",
                 HistoricalPriceCacheORM.interval == "1d",
-                HistoricalPriceCacheORM.date >= start_date,
+                HistoricalPriceCacheORM.date >= spy_anchor_date,
             )
             .order_by(HistoricalPriceCacheORM.date.asc())
             .all()
@@ -2964,14 +2979,20 @@ class SPYBenchmarkResponse(BaseModel):
 @router.get("/spy-benchmark", response_model=SPYBenchmarkResponse)
 async def get_spy_benchmark(
     period: str = "ALL",
+    mode: str = "DEMO",
     username: str = Depends(get_current_user),
     session: Session = Depends(get_db_session)
 ):
     """
     Get SPY benchmark daily close prices for the requested period.
 
+    SPY data is clipped to start no earlier than the first equity snapshot for
+    the account — this ensures the SPY series and equity curve always share the
+    same start date so alpha calculations and chart rebasing are meaningful.
+
     Args:
         period: Time period — one of 1W, 1M, 3M, 6M, 1Y, ALL (default ALL)
+        mode: Trading mode — DEMO or LIVE (used to find the first equity snapshot)
         username: Current authenticated user
         session: Database session
 
@@ -2979,7 +3000,7 @@ async def get_spy_benchmark(
         SPYBenchmarkResponse with date-sorted array of {date, close} objects.
         Returns empty array if SPY data is unavailable.
     """
-    logger.info(f"Getting SPY benchmark data for period {period}, user {username}")
+    logger.info(f"Getting SPY benchmark data for period {period}, mode {mode}, user {username}")
 
     period_map = {
         "1W": timedelta(days=7),
@@ -2990,7 +3011,38 @@ async def get_spy_benchmark(
         "ALL": timedelta(days=3650),
     }
     time_delta = period_map.get(period, timedelta(days=3650))
-    start_date = datetime.now() - time_delta
+    period_start = datetime.now() - time_delta
+
+    # Clip SPY start to the first equity snapshot so the benchmark series never
+    # starts before the equity curve. Without this, SPY accumulates return from
+    # weeks before the account started trading, making alpha look worse than it
+    # is (SPY had a head start the portfolio never had).
+    try:
+        from src.models.orm import EquitySnapshotORM
+        account_type_str = "live" if mode.upper() == "LIVE" else "demo"
+        first_snapshot = (
+            session.query(EquitySnapshotORM.date)
+            .filter(
+                EquitySnapshotORM.account_type == account_type_str,
+                EquitySnapshotORM.snapshot_type == "daily",
+                EquitySnapshotORM.date >= period_start.strftime("%Y-%m-%d"),
+            )
+            .order_by(EquitySnapshotORM.date.asc())
+            .first()
+        )
+        if first_snapshot and first_snapshot.date:
+            first_date = first_snapshot.date
+            if isinstance(first_date, str):
+                first_date = datetime.strptime(first_date[:10], "%Y-%m-%d")
+            elif hasattr(first_date, 'strftime'):
+                first_date = datetime(first_date.year, first_date.month, first_date.day)
+            # Use the later of period_start and first equity snapshot
+            start_date = max(period_start, first_date)
+        else:
+            start_date = period_start
+    except Exception as _snap_err:
+        logger.debug(f"Could not determine first equity snapshot for SPY clipping: {_snap_err}")
+        start_date = period_start
 
     try:
         from src.models.orm import HistoricalPriceCacheORM
