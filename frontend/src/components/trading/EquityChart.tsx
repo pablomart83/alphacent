@@ -197,19 +197,33 @@ export function EquityChart({
         : String(param.time)
 
       // Alpha vs SPY.
+      // The SPY series is stored differently depending on display mode:
+      //   percent mode: spyVal = ((close - spyBase) / spyBase) * 100  — already a % return
+      //   dollar mode:  spyVal = eqBase * (close / spyBase)           — rebased to equity dollars
+      //
+      // In both cases we want: alpha = equityReturn% - spyReturn%
+      // where both returns are measured from the same starting point (first bar of the period).
+      //
+      // percent mode: eqVal and spyVal are already % returns → subtract directly.
+      // dollar mode:  eqVal is raw equity $, spyVal is rebased $ (eqBase * close/spyBase).
+      //   eqReturn%  = (eqVal  - eqBase)  / eqBase  * 100
+      //   spyReturn% = (spyVal - eqBase)  / eqBase  * 100  ← spyVal is rebased to eqBase, so
+      //                                                        (spyVal/eqBase - 1) * 100 is correct
       let spyAlpha: number | null = null
       if (spyPoint && eqData) {
         const eqVal = eqData.value as number
         const spyVal = spyPoint.value as number
         if (Number.isFinite(eqVal) && Number.isFinite(spyVal)) {
           if (percentModeRef.current) {
+            // Both series already in % from first point — direct subtraction is correct.
             spyAlpha = eqVal - spyVal
-          } else if (equityDataRef.current.length && spyDataRef.current && spyDataRef.current.length) {
-            const eqBase = equityDataRef.current[0].equity
-            const spyBase = spyDataRef.current[0].close
-            if (eqBase > 0 && spyBase > 0) {
-              const eqRet = ((eqVal - eqBase) / eqBase) * 100
-              const spyRet = ((spyVal - spyBase) / spyBase) * 100
+          } else {
+            const eqBase = equityDataRef.current[0]?.equity
+            if (eqBase && eqBase > 0) {
+              // eqVal is raw equity $; spyVal is rebased to eqBase dollars.
+              // Convert both to % return from eqBase, then subtract.
+              const eqRet  = ((eqVal  - eqBase) / eqBase) * 100
+              const spyRet = ((spyVal - eqBase) / eqBase) * 100  // spyVal already rebased to eqBase
               spyAlpha = eqRet - spyRet
             }
           }
