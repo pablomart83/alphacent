@@ -2017,16 +2017,35 @@ async def get_dashboard_summary(
         month_pnl = equity - month_start_equity
     else:
         month_pnl = get_realized_pnl_since(month_start) + total_unrealized
-    
-    all_time_pnl = etoro_total_pnl if etoro_total_pnl != 0 else (all_time_realized + total_unrealized)
 
-    # Percentages calculated vs equity (total account value).
-    pct_base = equity if equity > 0 else balance
+    # All-Time: equity since the first snapshot (includes all realized + unrealized P&L).
+    # eToro's total_pnl only reflects the current open book — it resets when positions
+    # close and does not accumulate historical realized P&L.
+    first_snapshot_row = db.query(EquitySnapshotORM).filter(
+        EquitySnapshotORM.account_type == account_type_str,
+        EquitySnapshotORM.snapshot_type == 'daily',
+    ).order_by(EquitySnapshotORM.date.asc()).first()
+    if first_snapshot_row and first_snapshot_row.equity and first_snapshot_row.equity > 0:
+        all_time_pnl = equity - first_snapshot_row.equity
+        all_time_start_equity = first_snapshot_row.equity
+    else:
+        # No snapshots yet — fall back to realized + unrealized
+        all_time_pnl = all_time_realized + total_unrealized
+        all_time_start_equity = equity - all_time_pnl if all_time_pnl else equity
+
+    # Percentages: each period uses its own starting equity as the denominator
+    # so the % reflects the actual return over that window, not a fraction of
+    # today's equity (which would understate early-period returns).
+    def _pct(pnl: float, start_eq: float) -> float:
+        if start_eq and start_eq > 0:
+            return round(pnl / start_eq * 100, 2)
+        return 0.0
+
     pnl_periods = [
-        PnLPeriod(label="Today", pnl_absolute=round(today_pnl, 2), pnl_percent=round((today_pnl / pct_base * 100), 2) if pct_base else 0),
-        PnLPeriod(label="This Week", pnl_absolute=round(week_pnl, 2), pnl_percent=round((week_pnl / pct_base * 100), 2) if pct_base else 0),
-        PnLPeriod(label="This Month", pnl_absolute=round(month_pnl, 2), pnl_percent=round((month_pnl / pct_base * 100), 2) if pct_base else 0),
-        PnLPeriod(label="All-Time", pnl_absolute=round(all_time_pnl, 2), pnl_percent=round((all_time_pnl / pct_base * 100), 2) if pct_base else 0),
+        PnLPeriod(label="Today",      pnl_absolute=round(today_pnl, 2),  pnl_percent=_pct(today_pnl,  yesterday_equity  if yesterday_equity  > 0 else equity)),
+        PnLPeriod(label="This Week",  pnl_absolute=round(week_pnl, 2),   pnl_percent=_pct(week_pnl,   week_start_equity  if week_start_equity  > 0 else equity)),
+        PnLPeriod(label="This Month", pnl_absolute=round(month_pnl, 2),  pnl_percent=_pct(month_pnl,  month_start_equity if month_start_equity > 0 else equity)),
+        PnLPeriod(label="All-Time",   pnl_absolute=round(all_time_pnl, 2), pnl_percent=_pct(all_time_pnl, all_time_start_equity)),
     ]
     
     # Save today's equity snapshot (updates on every dashboard load for freshness)
