@@ -2986,10 +2986,33 @@ class TradingScheduler:
                     new_signals = []
                     for strategy_id, signal, strategy_name in tf_signals:
                         if strategy_id in existing_strategy_ids:
-                            # Allow re-entry by the same strategy if the existing position
-                            # is still within its SL range (loss < SL%). The signal fired
-                            # again — the thesis is intact and we can scale in.
-                            # Block only if the position is already at/near the SL boundary.
+                            # ── Re-entry gate — lifecycle-aware ──────────────────────────
+                            # PAPER: one clean trade per strategy, always. No re-entry while
+                            # a position is open. Goal is unambiguous single-entry trade data
+                            # for the graduation gate — pyramiding inflates/deflates Sharpe
+                            # vs the WF backtest (which never pyramids) and corrupts the
+                            # qualification_ratio.
+                            #
+                            # LIVE: allow re-entry if SL consumed < 50% (thesis intact,
+                            # normal noise). Block if ≥ 50% consumed (position failing —
+                            # doubling down into a loser).
+                            _, strategy_orm_for_reentry = strategy_map.get(strategy_id, (None, None))
+                            is_paper = (
+                                strategy_orm_for_reentry is not None
+                                and getattr(strategy_orm_for_reentry, 'status', None) == StrategyStatus.PAPER
+                            )
+
+                            if is_paper:
+                                # PAPER: hard block — one position per strategy
+                                self._log_coordination_rejection(
+                                    signal=signal,
+                                    strategy_name=strategy_name,
+                                    rejection_reason=f"PAPER re-entry blocked: already has {direction} position in {normalized_symbol} (one trade per strategy for clean graduation data)",
+                                )
+                                position_duplicate_count += 1
+                                continue
+
+                            # LIVE: allow re-entry only if SL is not yet half-consumed
                             allow_reentry = False
                             for pos in existing_positions_for_key:
                                 if not (hasattr(pos, 'strategy_id') and pos.strategy_id == strategy_id):
@@ -3028,12 +3051,12 @@ class TradingScheduler:
                                 if sl_consumed < 0.50:
                                     allow_reentry = True
                                     logger.debug(
-                                        f"Re-entry allowed: {strategy_name} on {normalized_symbol} "
+                                        f"LIVE re-entry allowed: {strategy_name} on {normalized_symbol} "
                                         f"(SL consumed {sl_consumed:.0%} < 50% — thesis intact)"
                                     )
                                 else:
                                     logger.info(
-                                        f"Re-entry blocked: {strategy_name} on {normalized_symbol} "
+                                        f"LIVE re-entry blocked: {strategy_name} on {normalized_symbol} "
                                         f"(SL consumed {sl_consumed:.0%} ≥ 50% — position failing, "
                                         f"loss={pos_loss:.1%}, SL={pos_sl_pct:.1%})"
                                     )
@@ -3041,10 +3064,6 @@ class TradingScheduler:
 
                             if allow_reentry:
                                 new_signals.append((strategy_id, signal, strategy_name))
-                                logger.debug(
-                                    f"Re-entry allowed: {strategy_name} on {normalized_symbol} "
-                                    f"(existing position within SL range)"
-                                )
                             else:
                                 self._log_coordination_rejection(
                                     signal=signal,
