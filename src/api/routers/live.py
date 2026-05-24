@@ -205,6 +205,74 @@ async def get_live_divergence(
     return {"divergence": results, "count": len(results)}
 
 
+
+# ── Live strategy parameter update ───────────────────────────────────────────
+
+class UpdateLiveStrategyBody(BaseModel):
+    position_size: Optional[float] = None
+    sl_pct: Optional[float] = None
+    tp_pct: Optional[float] = None
+    conviction_min: Optional[int] = None
+
+
+@router.patch("/strategies/{live_id}")
+async def update_live_strategy(
+    live_id: int,
+    body: UpdateLiveStrategyBody,
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """
+    Update CIO-controlled parameters on an active live authorization.
+    Only non-None fields are updated. Takes effect on the next signal cycle.
+    """
+    ls = db.query(LiveStrategyORM).filter_by(id=live_id).first()
+    if not ls:
+        raise HTTPException(status_code=404, detail=f"Live strategy {live_id} not found")
+    if ls.retired_at is not None:
+        raise HTTPException(status_code=400, detail="Cannot update a retired live strategy")
+
+    changes = []
+    if body.position_size is not None:
+        if body.position_size <= 0:
+            raise HTTPException(status_code=422, detail="position_size must be > 0")
+        ls.position_size = body.position_size
+        changes.append(f"position_size={body.position_size:.0f}")
+    if body.sl_pct is not None:
+        if not (0 < body.sl_pct < 1):
+            raise HTTPException(status_code=422, detail="sl_pct must be between 0 and 1 (e.g. 0.06 = 6%)")
+        ls.sl_pct = body.sl_pct
+        changes.append(f"sl_pct={body.sl_pct:.3f}")
+    if body.tp_pct is not None:
+        if not (0 < body.tp_pct < 2):
+            raise HTTPException(status_code=422, detail="tp_pct must be between 0 and 2 (e.g. 0.15 = 15%)")
+        ls.tp_pct = body.tp_pct
+        changes.append(f"tp_pct={body.tp_pct:.3f}")
+    if body.conviction_min is not None:
+        if not (50 <= body.conviction_min <= 100):
+            raise HTTPException(status_code=422, detail="conviction_min must be 50–100")
+        ls.conviction_min = body.conviction_min
+        changes.append(f"conviction_min={body.conviction_min}")
+
+    if not changes:
+        return {"success": True, "message": "No changes", "live_id": live_id}
+
+    db.commit()
+    logger.info(
+        f"User {username} updated live strategy {live_id} "
+        f"({ls.template_name} / {ls.symbol}): {', '.join(changes)}"
+    )
+    return {
+        "success": True,
+        "message": f"Updated {', '.join(changes)}",
+        "live_id": live_id,
+        "position_size": ls.position_size,
+        "sl_pct": ls.sl_pct,
+        "tp_pct": ls.tp_pct,
+        "conviction_min": ls.conviction_min,
+    }
+
+
 # ── Live strategy management ──────────────────────────────────────────────────
 
 @router.post("/strategies/{live_id}/retire")

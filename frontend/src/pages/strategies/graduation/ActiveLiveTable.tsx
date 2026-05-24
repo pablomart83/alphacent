@@ -4,8 +4,10 @@ import {
   Activity,
   AlertCircle,
   ChevronRight,
+  Edit2,
+  Save,
   TrendingUp,
-  X,
+  XCircle,
   Zap,
 } from 'lucide-react'
 import {
@@ -13,6 +15,8 @@ import {
   Button,
   ConfirmDialog,
   EmptyState,
+  Input,
+  Label,
   Skeleton,
 } from '@/components/primitives'
 import { SectionLabel } from '@/components/layout'
@@ -23,6 +27,7 @@ import {
   useLiveStrategies,
   useRetireLiveStrategy,
   useStrategy,
+  useUpdateLiveStrategy,
   type LiveStrategyRow,
 } from '../useStrategiesData'
 import { useTradeJournal, type TradeJournalEntry } from '../../research/useResearchData'
@@ -65,7 +70,7 @@ export function ActiveLiveTable({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Activity className="h-3.5 w-3.5 text-[var(--pnl-up)]" />
-          <SectionLabel className="mb-0">Active live authorisations</SectionLabel>
+          <SectionLabel className="mb-0">Active live strategies</SectionLabel>
           <Badge variant="live" size="sm">{rows.length}</Badge>
         </div>
         <a
@@ -217,7 +222,7 @@ function LiveStrategyRow({
 
 /**
  * LiveStrategyDetailPanel — renders in the right pane of ResizablePanelLayout.
- * Shows WF → Paper → Live phases with full historical detail.
+ * Shows WF → Paper → Live phases with full historical detail + inline parameter editor.
  */
 export function LiveStrategyDetailPanel({
   row,
@@ -234,6 +239,36 @@ export function LiveStrategyDetailPanel({
     symbol: row.symbol,
     limit: 100,
   })
+  const updateLive = useUpdateLiveStrategy()
+
+  const [editing, setEditing] = useState(false)
+  const [editSize, setEditSize] = useState(row.position_size ?? 900)
+  const [editSl, setEditSl] = useState((row.sl_pct ?? 0.06) * 100)
+  const [editTp, setEditTp] = useState((row.tp_pct ?? 0.15) * 100)
+  const [editConviction, setEditConviction] = useState(row.conviction_min ?? 73)
+
+  const startEdit = () => {
+    setEditSize(row.position_size ?? 900)
+    setEditSl((row.sl_pct ?? 0.06) * 100)
+    setEditTp((row.tp_pct ?? 0.15) * 100)
+    setEditConviction(row.conviction_min ?? 73)
+    setEditing(true)
+  }
+
+  const handleSave = async () => {
+    try {
+      await updateLive.mutateAsync({
+        liveId: row.id,
+        body: { position_size: editSize, sl_pct: editSl / 100, tp_pct: editTp / 100, conviction_min: editConviction },
+      })
+      toast.success(`Parameters updated — ${row.template_name ?? row.strategy_id} × ${row.symbol}`, {
+        description: `$${editSize.toFixed(0)} · SL ${editSl.toFixed(1)}% · TP ${editTp.toFixed(1)}% · C≥${editConviction}`,
+      })
+      setEditing(false)
+    } catch (err) {
+      notifyError(err, 'update live strategy')
+    }
+  }
 
   const strategy = strategyQuery.data
   const wf = strategy?.walk_forward_results ?? null
@@ -242,17 +277,25 @@ export function LiveStrategyDetailPanel({
   const livePnl = row.live_pnl ?? 0
 
   const paperStats = paperTrades.reduce(
-    (acc: { total: number; count: number; wins: number }, t) => {
+    (acc: { total: number; count: number; wins: number; holdHours: number[]; best: number; worst: number }, t) => {
       if (t.pnl != null) {
-        acc.total += t.pnl
-        acc.count++
+        acc.total += t.pnl; acc.count++
         if (t.pnl > 0) acc.wins++
+        if (t.pnl > acc.best) acc.best = t.pnl
+        if (t.pnl < acc.worst) acc.worst = t.pnl
       }
+      if (t.hold_time_hours != null) acc.holdHours.push(t.hold_time_hours)
       return acc
     },
-    { total: 0, count: 0, wins: 0 },
+    { total: 0, count: 0, wins: 0, holdHours: [], best: 0, worst: 0 },
   )
   const paperWinRate = paperStats.count > 0 ? (paperStats.wins / paperStats.count) * 100 : null
+  const avgHoldHours = paperStats.holdHours.length > 0
+    ? paperStats.holdHours.reduce((a, b) => a + b, 0) / paperStats.holdHours.length : null
+  const avgPnlPerTrade = paperStats.count > 0 ? paperStats.total / paperStats.count : null
+  const sortedByEntry = [...paperTrades].sort((a, b) => (b.entry_time ?? '').localeCompare(a.entry_time ?? ''))
+  const lastOpened = sortedByEntry[0]?.entry_time ?? null
+  const lastClosed = sortedByEntry.find(t => t.exit_time)?.exit_time ?? null
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)]">
@@ -271,29 +314,53 @@ export function LiveStrategyDetailPanel({
           </div>
           <div className="text-[10px] text-[var(--text-3)] mono ml-4">
             Authorised {formatTimestamp(row.activated_at, 'short')}
-            {' · '}${row.position_size?.toFixed(0) ?? '—'} virtual
-            {' · '}SL {row.sl_pct != null ? `${(row.sl_pct * 100).toFixed(1)}%` : '—'}
-            {' · '}TP {row.tp_pct != null ? `${(row.tp_pct * 100).toFixed(1)}%` : '—'}
-            {' · '}C≥{row.conviction_min ?? '—'}
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-[var(--pnl-down)] hover:text-[var(--pnl-down)] text-[11px] h-6"
-            onClick={onRetire}
-          >
+          {!editing && (
+            <Button size="sm" variant="secondary" className="text-[11px] h-6 gap-1" onClick={startEdit}>
+              <Edit2 className="h-3 w-3" />Edit
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" className="text-[var(--pnl-down)] hover:text-[var(--pnl-down)] text-[11px] h-6" onClick={onRetire}>
             Retire
           </Button>
           <Button size="icon-sm" variant="ghost" onClick={onClose} aria-label="Close">
-            <X className="h-3.5 w-3.5" />
+            <XCircle className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
 
       {/* Scrollable body */}
       <div className="flex-1 min-h-0 overflow-auto px-3 py-3 space-y-4">
+
+        {/* CIO Parameters — editable */}
+        <PhaseSection label="CIO Parameters" color="var(--account-live)" badge="$">
+          {editing ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <EditField label="Position size ($)" value={editSize} onChange={setEditSize} min={100} max={5000} step={50} suffix="$" hint="Real dollars per order" />
+                <EditField label="Conviction min" value={editConviction} onChange={setEditConviction} min={50} max={100} step={1} suffix="" hint="Min score to fire live order" />
+                <EditField label="Stop-loss %" value={editSl} onChange={setEditSl} min={0.5} max={25} step={0.5} suffix="%" hint="Applied at order time" />
+                <EditField label="Take-profit %" value={editTp} onChange={setEditTp} min={1} max={80} step={0.5} suffix="%" hint="Applied at order time" />
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <Button size="sm" variant="primary" className="gap-1.5 bg-[var(--pnl-up)] hover:brightness-110" onClick={handleSave} loading={updateLive.isPending}>
+                  <Save className="h-3 w-3" />Save changes
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+                <span className="text-[9px] text-[var(--text-3)] ml-auto">Takes effect on next signal cycle</span>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-1.5">
+              <Metric label="Size (real)" value={`$${(row.position_size ?? 0).toFixed(0)}`} tone="neutral" />
+              <Metric label="SL" value={row.sl_pct != null ? `${(row.sl_pct * 100).toFixed(1)}%` : '—'} tone="neutral" />
+              <Metric label="TP" value={row.tp_pct != null ? `${(row.tp_pct * 100).toFixed(1)}%` : '—'} tone="neutral" />
+              <Metric label="Conv. min" value={String(row.conviction_min ?? '—')} tone="neutral" />
+            </div>
+          )}
+        </PhaseSection>
 
         {/* Phase 1: Walk-forward */}
         <PhaseSection label="Phase 1 — Walk-forward" color="var(--accent-primary)" badge="WF">
@@ -328,6 +395,12 @@ export function LiveStrategyDetailPanel({
                 <Metric label="Win %" value={row.current_paper_win_rate != null ? `${(row.current_paper_win_rate * 100).toFixed(0)}%` : paperWinRate != null ? `${paperWinRate.toFixed(0)}%` : '—'} tone={(row.current_paper_win_rate ?? (paperWinRate != null ? paperWinRate / 100 : null)) != null && ((row.current_paper_win_rate ?? 0) >= 0.55 || (paperWinRate ?? 0) >= 55) ? 'up' : 'neutral'} />
                 <Metric label="Total P&L" value={formatCurrency(row.current_paper_pnl ?? paperStats.total, { signed: true, precision: 0 })} tone={(row.current_paper_pnl ?? paperStats.total) >= 0 ? 'up' : 'down'} />
                 <Metric label="Sharpe" value={row.current_paper_sharpe != null ? formatNumber(row.current_paper_sharpe, 2) : '—'} tone={row.current_paper_sharpe != null && row.current_paper_sharpe >= 1 ? 'up' : 'neutral'} />
+                <Metric label="Avg P&L/trade" value={avgPnlPerTrade != null ? formatCurrency(avgPnlPerTrade, { signed: true, precision: 0 }) : '—'} tone={avgPnlPerTrade != null ? (avgPnlPerTrade >= 0 ? 'up' : 'down') : 'neutral'} />
+                <Metric label="Avg hold" value={avgHoldHours != null ? (avgHoldHours < 48 ? `${avgHoldHours.toFixed(0)}h` : `${(avgHoldHours / 24).toFixed(1)}d`) : '—'} />
+                <Metric label="Best trade" value={paperStats.count > 0 ? formatCurrency(paperStats.best, { signed: true, precision: 0 }) : '—'} tone="up" />
+                <Metric label="Worst trade" value={paperStats.count > 0 ? formatCurrency(paperStats.worst, { signed: true, precision: 0 }) : '—'} tone="down" />
+                <Metric label="Last opened" value={lastOpened ? formatTimestamp(lastOpened, 'date') : '—'} />
+                <Metric label="Last closed" value={lastClosed ? formatTimestamp(lastClosed, 'date') : '—'} />
               </div>
               {paperTrades.length > 0 && (
                 <TradeTable trades={paperTrades.slice(0, 30)} label="Paper trades (last 30)" />
@@ -342,28 +415,23 @@ export function LiveStrategyDetailPanel({
             <Metric label="Trades" value={liveTrades > 0 ? String(liveTrades) : livePnl !== 0 || (row.open_position_count ?? 0) > 0 ? '1 open' : '—'} />
             <Metric
               label="P&L"
-              value={
-                liveTrades > 0 || livePnl !== 0
-                  ? formatCurrency(livePnl, { signed: true, precision: 0 })
-                  : (row.open_position_count ?? 0) > 0 && row.unrealized_pnl != null
-                    ? `${formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 })} unrlzd`
-                    : 'Waiting'
-              }
-              tone={
-                liveTrades > 0 || livePnl !== 0
-                  ? (livePnl >= 0 ? 'up' : 'down')
-                  : (row.open_position_count ?? 0) > 0 && row.unrealized_pnl != null
-                    ? (row.unrealized_pnl >= 0 ? 'up' : 'down')
-                    : 'neutral'
-              }
+              value={liveTrades > 0 || livePnl !== 0 ? formatCurrency(livePnl, { signed: true, precision: 0 }) : (row.open_position_count ?? 0) > 0 && row.unrealized_pnl != null ? `${formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 })} unrlzd` : 'Waiting'}
+              tone={liveTrades > 0 || livePnl !== 0 ? (livePnl >= 0 ? 'up' : 'down') : (row.open_position_count ?? 0) > 0 && row.unrealized_pnl != null ? (row.unrealized_pnl >= 0 ? 'up' : 'down') : 'neutral'}
             />
             <Metric label="Sharpe" value={row.live_sharpe != null ? formatNumber(row.live_sharpe, 2) : '—'} tone={row.live_sharpe != null && row.live_sharpe >= 1 ? 'up' : 'neutral'} />
             {row.divergence_pct != null && (
-              <Metric
-                label="Tracking"
-                value={`${row.divergence_pct.toFixed(0)}%`}
-                tone={row.divergence_pct >= 80 ? 'up' : row.divergence_pct >= 50 ? 'neutral' : 'down'}
-              />
+              <Metric label="Tracking" value={`${row.divergence_pct.toFixed(0)}%`} tone={row.divergence_pct >= 80 ? 'up' : row.divergence_pct >= 50 ? 'neutral' : 'down'} />
+            )}
+            {(row.open_position_count ?? 0) > 0 && row.open_position_entry != null && (
+              <>
+                <Metric label="Entry" value={formatCurrency(row.open_position_entry, { precision: 2 })} />
+                {row.open_position_current != null && (
+                  <Metric label="Current" value={formatCurrency(row.open_position_current, { precision: 2 })} tone={row.open_position_current >= row.open_position_entry ? 'up' : 'down'} />
+                )}
+                {row.unrealized_pnl != null && (
+                  <Metric label="Unrealised" value={formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 })} tone={row.unrealized_pnl >= 0 ? 'up' : 'down'} />
+                )}
+              </>
             )}
           </div>
           {liveTrades === 0 && livePnl === 0 && (row.open_position_count ?? 0) === 0 && (
@@ -488,6 +556,34 @@ function TradeTable({ trades, label }: { trades: TradeJournalEntry[]; label: str
           </tbody>
         </table>
       </div>
+    </div>
+  )
+}
+
+function EditField({
+  label, value, onChange, min, max, step, suffix, hint,
+}: {
+  label: string; value: number; onChange: (v: number) => void
+  min: number; max: number; step: number; suffix: string; hint?: string
+}) {
+  return (
+    <div>
+      <Label className="text-[10px] uppercase tracking-wider">{label}</Label>
+      <div className="relative mt-1">
+        <Input
+          type="number"
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          min={min} max={max} step={step}
+          className="h-7 mono tabular-nums pr-6 text-[11px]"
+        />
+        {suffix && (
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--text-3)] pointer-events-none">
+            {suffix}
+          </span>
+        )}
+      </div>
+      {hint && <p className="text-[9px] text-[var(--text-3)] mt-0.5">{hint}</p>}
     </div>
   )
 }

@@ -153,7 +153,13 @@ export function GraduationTab() {
 
   const left = (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto">
-      <section className="px-2 pt-2 pb-1">
+      {/* Active live strategies — top priority for the CIO */}
+      <ActiveLiveTable
+        selectedId={selectedLive?.id ?? null}
+        onSelect={handleLiveSelect}
+      />
+
+      <section className="px-2 pt-2 pb-1 border-t border-[var(--border-subtle)]">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <GraduationCap className="h-3.5 w-3.5 text-[var(--accent-primary)]" />
@@ -179,12 +185,7 @@ export function GraduationTab() {
         />
       </div>
 
-      <ActiveLiveTable
-        selectedId={selectedLive?.id ?? null}
-        onSelect={handleLiveSelect}
-      />
-
-      <div className="px-2 pb-2">
+      <div className="px-2 pb-2 border-t border-[var(--border-subtle)]">
         <ApproachingGraduationPanel />
       </div>
 

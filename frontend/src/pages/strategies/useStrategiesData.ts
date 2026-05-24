@@ -1075,6 +1075,29 @@ export function useLiveStrategies() {
   })
 }
 
+export interface UpdateLiveStrategyBody {
+  position_size?: number
+  sl_pct?: number
+  tp_pct?: number
+  conviction_min?: number
+}
+
+export function useUpdateLiveStrategy() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ liveId, body }: { liveId: number; body: UpdateLiveStrategyBody }) =>
+      api.patch<{ success: boolean; message: string; live_id: number }>(
+        `/live/strategies/${liveId}`,
+        body,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['live-strategies'] })
+      qc.invalidateQueries({ queryKey: ['live-divergence'] })
+      qc.invalidateQueries({ queryKey: ['live-summary'] })
+    },
+  })
+}
+
 /* ──── Mutations ──── */
 
 export function useToggleTemplate() {
