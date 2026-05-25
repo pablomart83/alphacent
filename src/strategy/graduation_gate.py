@@ -1058,6 +1058,83 @@ def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
             d["divergence_pct"] = round(row.live_sharpe / paper["paper_sharpe"] * 100, 1)
         else:
             d["divergence_pct"] = None
+
+        # Live trade history from trade_journal — gives closed trade breakdown,
+        # win rate, avg P&L, last opened/closed, and individual trade rows.
+        try:
+            from sqlalchemy import text as _text
+            live_tj = session.execute(
+                _text("""
+                    SELECT id, entry_price, exit_price, pnl, pnl_percent,
+                           entry_time, exit_time, hold_time_hours, exit_reason
+                    FROM trade_journal
+                    WHERE strategy_id = :sid AND symbol = :sym
+                      AND account_type = 'live'
+                    ORDER BY entry_time DESC
+                    LIMIT 20
+                """),
+                {"sid": row.strategy_id, "sym": row.symbol},
+            ).fetchall()
+
+            closed_trades = [t for t in live_tj if t.exit_time is not None]
+            open_trades   = [t for t in live_tj if t.exit_time is None]
+
+            wins   = [t for t in closed_trades if t.pnl is not None and t.pnl > 0]
+            losses = [t for t in closed_trades if t.pnl is not None and t.pnl < 0]
+            realized_pnl = sum(float(t.pnl) for t in closed_trades if t.pnl is not None)
+            avg_pnl = realized_pnl / len(closed_trades) if closed_trades else None
+            win_rate = len(wins) / len(closed_trades) * 100 if closed_trades else None
+            best  = max((float(t.pnl) for t in closed_trades if t.pnl is not None), default=None)
+            worst = min((float(t.pnl) for t in closed_trades if t.pnl is not None), default=None)
+            avg_hold = (
+                sum(float(t.hold_time_hours) for t in closed_trades if t.hold_time_hours is not None)
+                / len([t for t in closed_trades if t.hold_time_hours is not None])
+                if any(t.hold_time_hours for t in closed_trades) else None
+            )
+            last_opened = live_tj[0].entry_time.isoformat() if live_tj else None
+            last_closed = (
+                max((t.exit_time for t in closed_trades), default=None)
+            )
+
+            d["live_closed_trades"]  = len(closed_trades)
+            d["live_open_trades"]    = len(open_trades)
+            d["live_realized_pnl"]   = round(realized_pnl, 2)
+            d["live_win_rate"]       = round(win_rate, 1) if win_rate is not None else None
+            d["live_avg_pnl"]        = round(avg_pnl, 2) if avg_pnl is not None else None
+            d["live_best_trade"]     = round(best, 2) if best is not None else None
+            d["live_worst_trade"]    = round(worst, 2) if worst is not None else None
+            d["live_avg_hold_hours"] = round(avg_hold, 1) if avg_hold is not None else None
+            d["live_last_opened"]    = last_opened
+            d["live_last_closed"]    = last_closed.isoformat() if last_closed else None
+            d["live_trade_history"]  = [
+                {
+                    "id": str(t.id),
+                    "entry_price": float(t.entry_price) if t.entry_price else None,
+                    "exit_price":  float(t.exit_price)  if t.exit_price  else None,
+                    "pnl":         float(t.pnl)          if t.pnl         else None,
+                    "pnl_percent": float(t.pnl_percent)  if t.pnl_percent else None,
+                    "entry_time":  t.entry_time.isoformat() if t.entry_time else None,
+                    "exit_time":   t.exit_time.isoformat()  if t.exit_time  else None,
+                    "hold_time_hours": float(t.hold_time_hours) if t.hold_time_hours else None,
+                    "exit_reason": t.exit_reason,
+                    "is_open":     t.exit_time is None,
+                }
+                for t in live_tj
+            ]
+        except Exception as _tj_err:
+            logger.debug(f"Could not fetch live trade journal for {row.strategy_id}: {_tj_err}")
+            d["live_closed_trades"]  = None
+            d["live_open_trades"]    = None
+            d["live_realized_pnl"]   = None
+            d["live_win_rate"]       = None
+            d["live_avg_pnl"]        = None
+            d["live_best_trade"]     = None
+            d["live_worst_trade"]    = None
+            d["live_avg_hold_hours"] = None
+            d["live_last_opened"]    = None
+            d["live_last_closed"]    = None
+            d["live_trade_history"]  = []
+
         result.append(d)
 
     return result

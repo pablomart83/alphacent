@@ -917,6 +917,29 @@ export interface LiveStrategyRow {
     etoro_amount?: number | null
     age_mins?: number | null
   } | null
+  // Live trade breakdown (from trade_journal)
+  live_closed_trades?: number | null
+  live_open_trades?: number | null
+  live_realized_pnl?: number | null
+  live_win_rate?: number | null
+  live_avg_pnl?: number | null
+  live_best_trade?: number | null
+  live_worst_trade?: number | null
+  live_avg_hold_hours?: number | null
+  live_last_opened?: string | null
+  live_last_closed?: string | null
+  live_trade_history?: Array<{
+    id: string
+    entry_price?: number | null
+    exit_price?: number | null
+    pnl?: number | null
+    pnl_percent?: number | null
+    entry_time?: string | null
+    exit_time?: string | null
+    hold_time_hours?: number | null
+    exit_reason?: string | null
+    is_open: boolean
+  }> | null
 }
 
 export interface LiveStrategiesPayload {

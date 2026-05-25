@@ -305,8 +305,6 @@ export function LiveStrategyDetailPanel({
   const strategy = strategyQuery.data
   const wf = strategy?.walk_forward_results ?? null
   const paperTrades = paperTradesQuery.data?.trades ?? []
-  const liveTrades = row.live_trades ?? 0
-  const livePnl = row.live_pnl ?? 0
 
   const paperStats = paperTrades.reduce(
     (acc: { total: number; count: number; wins: number; holdHours: number[]; best: number; worst: number }, t) => {
@@ -444,40 +442,50 @@ export function LiveStrategyDetailPanel({
         {/* Phase 3: Live */}
         <PhaseSection label="Phase 3 — Live" color="var(--pnl-up)" badge="L">
           <div className="grid grid-cols-3 gap-1.5 mb-3">
-            <Metric label="Trades" value={liveTrades > 0 ? String(liveTrades) : livePnl !== 0 || (row.open_position_count ?? 0) > 0 ? '1 open' : '—'} />
+            <Metric label="Total trades" value={String(row.live_trades ?? row.live_closed_trades ?? 0)} />
+            <Metric label="Open" value={String(row.live_open_trades ?? row.open_position_count ?? 0)} tone={(row.live_open_trades ?? row.open_position_count ?? 0) > 0 ? 'up' : 'neutral'} />
+            <Metric label="Closed" value={String(row.live_closed_trades ?? 0)} />
             <Metric
-              label="P&L"
-              value={liveTrades > 0 || livePnl !== 0 ? formatCurrency(livePnl, { signed: true, precision: 0 }) : (row.open_position_count ?? 0) > 0 && row.unrealized_pnl != null ? `${formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 })} unrlzd` : 'Waiting'}
-              tone={liveTrades > 0 || livePnl !== 0 ? (livePnl >= 0 ? 'up' : 'down') : (row.open_position_count ?? 0) > 0 && row.unrealized_pnl != null ? (row.unrealized_pnl >= 0 ? 'up' : 'down') : 'neutral'}
+              label="Total P&L"
+              value={(row.live_pnl ?? 0) !== 0 ? formatCurrency(row.live_pnl ?? 0, { signed: true, precision: 0 }) : (row.live_realized_pnl ?? 0) !== 0 ? formatCurrency(row.live_realized_pnl ?? 0, { signed: true, precision: 0 }) : 'Waiting'}
+              tone={(row.live_pnl ?? row.live_realized_pnl ?? 0) >= 0 ? 'up' : 'down'}
             />
-            <Metric label="Sharpe" value={row.live_sharpe != null ? formatNumber(row.live_sharpe, 2) : '—'} tone={row.live_sharpe != null && row.live_sharpe >= 1 ? 'up' : 'neutral'} />
-            {row.divergence_pct != null && (
-              <Metric label="Tracking" value={`${row.divergence_pct.toFixed(0)}%`} tone={row.divergence_pct >= 80 ? 'up' : row.divergence_pct >= 50 ? 'neutral' : 'down'} />
-            )}
+            <Metric label="Realised" value={row.live_realized_pnl != null ? formatCurrency(row.live_realized_pnl, { signed: true, precision: 0 }) : '—'} tone={row.live_realized_pnl != null ? (row.live_realized_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
+            <Metric label="Unrealised" value={row.unrealized_pnl != null && row.unrealized_pnl !== 0 ? formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 }) : '—'} tone={row.unrealized_pnl != null ? (row.unrealized_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
+            <Metric label="Win rate" value={row.live_win_rate != null ? `${row.live_win_rate.toFixed(0)}%` : '—'} tone={row.live_win_rate != null ? (row.live_win_rate >= 55 ? 'up' : row.live_win_rate >= 40 ? 'neutral' : 'down') : 'neutral'} />
+            <Metric label="Avg P&L/trade" value={row.live_avg_pnl != null ? formatCurrency(row.live_avg_pnl, { signed: true, precision: 0 }) : '—'} tone={row.live_avg_pnl != null ? (row.live_avg_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
+            <Metric label="Sharpe" value={row.live_sharpe != null ? formatNumber(row.live_sharpe, 2) : '—'} tone={row.live_sharpe != null && row.live_sharpe >= 1 ? 'up' : row.live_sharpe != null && row.live_sharpe < 0 ? 'down' : 'neutral'} />
+            {row.live_best_trade != null && <Metric label="Best trade" value={formatCurrency(row.live_best_trade, { signed: true, precision: 0 })} tone="up" />}
+            {row.live_worst_trade != null && <Metric label="Worst trade" value={formatCurrency(row.live_worst_trade, { signed: true, precision: 0 })} tone="down" />}
+            {row.live_avg_hold_hours != null && <Metric label="Avg hold" value={row.live_avg_hold_hours < 48 ? `${row.live_avg_hold_hours.toFixed(0)}h` : `${(row.live_avg_hold_hours / 24).toFixed(1)}d`} />}
+            {row.live_last_opened && <Metric label="Last opened" value={formatTimestamp(row.live_last_opened, 'date')} />}
+            {row.live_last_closed && <Metric label="Last closed" value={formatTimestamp(row.live_last_closed, 'date')} />}
+            {row.divergence_pct != null && <Metric label="Tracking" value={`${row.divergence_pct.toFixed(0)}%`} tone={row.divergence_pct >= 80 ? 'up' : row.divergence_pct >= 50 ? 'neutral' : 'down'} />}
             {(row.open_position_count ?? 0) > 0 && row.open_position_entry != null && (
               <>
                 <Metric label="Entry" value={formatCurrency(row.open_position_entry, { precision: 2 })} />
-                {row.open_position_current != null && (
-                  <Metric label="Current" value={formatCurrency(row.open_position_current, { precision: 2 })} tone={row.open_position_current >= row.open_position_entry ? 'up' : 'down'} />
-                )}
-                {row.unrealized_pnl != null && (
-                  <Metric label="Unrealised" value={formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 })} tone={row.unrealized_pnl >= 0 ? 'up' : 'down'} />
-                )}
+                {row.open_position_current != null && <Metric label="Current" value={formatCurrency(row.open_position_current, { precision: 2 })} tone={row.open_position_current >= row.open_position_entry ? 'up' : 'down'} />}
               </>
             )}
           </div>
-          {liveTrades === 0 && livePnl === 0 && (row.open_position_count ?? 0) === 0 && (
-            <div className="rounded-[3px] border border-[color-mix(in_oklab,var(--pnl-up)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--pnl-up)_4%,var(--bg-1))] px-2.5 py-2 text-[11px] text-[var(--text-2)]">
+
+          {(row.live_trades ?? 0) === 0 && (row.live_closed_trades ?? 0) === 0 && (row.open_position_count ?? 0) === 0 && (
+            <div className="rounded-[3px] border border-[color-mix(in_oklab,var(--pnl-up)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--pnl-up)_4%,var(--bg-1))] px-2.5 py-2 text-[11px] text-[var(--text-2)] mb-3">
               <TrendingUp className="h-3.5 w-3.5 inline mr-1.5 text-[var(--pnl-up)]" />
               Gate open — next ENTER signal for{' '}
               <span className="mono font-medium text-[var(--pnl-up)]">{row.symbol}</span>{' '}
-              with conviction ≥ {row.conviction_min ?? 73} fires a real order.
+              with conviction ≥ {committed.conviction_min} fires a real order.
             </div>
           )}
 
-          {/* Last signal cycle status */}
+          {(row.live_trade_history?.length ?? 0) > 0 && (
+            <LiveTradeTable trades={row.live_trade_history!} />
+          )}
+
           {row.last_signal_status && (
-            <LastSignalStatus status={row.last_signal_status} detail={row.last_signal_detail} pendingOrder={row.pending_order} />
+            <div className="mt-3">
+              <LastSignalStatus status={row.last_signal_status} detail={row.last_signal_detail} pendingOrder={row.pending_order} />
+            </div>
           )}
         </PhaseSection>
 
@@ -580,6 +588,49 @@ function TradeTable({ trades, label }: { trades: TradeJournalEntry[]; label: str
                 </td>
                 <td className="px-2 py-1 text-[var(--text-2)] truncate max-w-[90px]">
                   {t.exit_reason?.replace(/_/g, ' ') ?? '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function LiveTradeTable({ trades }: { trades: NonNullable<LiveStrategyRow['live_trade_history']> }) {
+  return (
+    <div>
+      <div className="text-[9px] uppercase tracking-wider text-[var(--text-3)] mb-1">Live trade history</div>
+      <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-2)] max-h-[200px] overflow-auto">
+        <table className="w-full text-[10px]">
+          <thead>
+            <tr className="text-[9px] uppercase tracking-wider text-[var(--text-3)] border-b border-[var(--border-subtle)]">
+              <th className="text-left px-2 py-1">Entry</th>
+              <th className="text-right px-2 py-1">P&L</th>
+              <th className="text-right px-2 py-1">P&L %</th>
+              <th className="text-right px-2 py-1">Hold</th>
+              <th className="text-left px-2 py-1">Exit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trades.map((t) => (
+              <tr key={t.id} className={cn('border-b border-[var(--border-subtle)]', t.is_open ? 'bg-[color-mix(in_oklab,var(--pnl-up)_5%,transparent)]' : 'hover:bg-[var(--bg-hover)]')}>
+                <td className="px-2 py-1 text-[var(--text-2)]">
+                  {t.entry_time ? formatTimestamp(t.entry_time, 'date') : '—'}
+                  {t.is_open && <span className="ml-1 text-[8px] text-[var(--pnl-up)] font-bold">OPEN</span>}
+                </td>
+                <td className={cn('px-2 py-1 text-right mono tabular-nums', (t.pnl ?? 0) > 0 ? 'text-[var(--pnl-up)]' : (t.pnl ?? 0) < 0 ? 'text-[var(--pnl-down)]' : 'text-[var(--text-3)]')}>
+                  {t.pnl != null ? formatCurrency(t.pnl, { signed: true, precision: 0 }) : t.is_open ? 'open' : '—'}
+                </td>
+                <td className={cn('px-2 py-1 text-right mono tabular-nums', (t.pnl_percent ?? 0) > 0 ? 'text-[var(--pnl-up)]' : (t.pnl_percent ?? 0) < 0 ? 'text-[var(--pnl-down)]' : 'text-[var(--text-3)]')}>
+                  {t.pnl_percent != null ? `${t.pnl_percent >= 0 ? '+' : ''}${t.pnl_percent.toFixed(1)}%` : '—'}
+                </td>
+                <td className="px-2 py-1 text-right mono tabular-nums text-[var(--text-2)]">
+                  {t.hold_time_hours != null ? (t.hold_time_hours < 48 ? `${t.hold_time_hours.toFixed(0)}h` : `${(t.hold_time_hours / 24).toFixed(1)}d`) : '—'}
+                </td>
+                <td className="px-2 py-1 text-[var(--text-2)] truncate max-w-[100px]" title={t.exit_reason ?? undefined}>
+                  {t.exit_reason?.replace(/_/g, ' ') ?? (t.is_open ? '—' : '—')}
                 </td>
               </tr>
             ))}
