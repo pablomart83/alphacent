@@ -6,7 +6,38 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Platform is in active iteration — live trading is running (GOOGL + SOXL LIVE), graduation pipeline working. WATCHLIST ELIMINATION COMPLETE (2026-05-18). Every strategy is now a single (template, symbol) pair.**
+**Platform is in active iteration — live trading is running (GOOGL + SOXL + XLK LIVE), graduation pipeline working. WATCHLIST ELIMINATION COMPLETE (2026-05-18). Every strategy is now a single (template, symbol) pair.**
+
+---
+
+## SESSION 2026-05-25 — TRADE JOURNAL INTEGRITY FIX (CRITICAL)
+
+### Root cause: log_exit fallback had no account_type filter
+
+`TradeJournal.log_exit` has three lookup paths to find the entry to close:
+1. Primary: `filter_by(trade_id=trade_id)` — fails when trade_id is position ID but entry was created with order UUID
+2. Fallback 1: `filter_by(entry_order_id=trade_id)` — fails when entry_order_id stores eToro numeric ID
+3. Fallback 2: `filter_by(symbol=symbol).filter(exit_time IS NULL)` — **had no account_type filter**
+
+Fallback 2 matched the most recent open entry for the symbol regardless of account. This caused:
+- Live exits written to DEMO trade_journal rows (corrupting DEMO P&L/win-rate used by graduation gate)
+- Live trade_journal rows left open when positions were actually closed (phantom open positions in UI)
+- DEMO trade_journal rows incorrectly marked closed (hiding real open positions)
+
+**Specific corruptions found and fixed:**
+- Row 1816 (GOOGL live): left open — fixed with correct zombie_exit data from positions table
+- Row 1799 (XLK live): incorrectly closed — reopened (position still open)
+- Row 1929 (GOOGL demo): orphaned duplicate — closed with correct exit data matching row 1960
+- 13 rows with account_type='demo' but linked to live positions — corrected to account_type='live'
+
+**Full integrity audit after fixes: 0 mismatches across all 5 checks.**
+
+**Code fix (commit f79fbec):**
+- `log_exit` now accepts `account_type` parameter
+- All three fallback lookups filter by `account_type` when provided
+- All callers (order_monitor ×2, order_executor ×2) pass `account_type`
+
+**Impact on graduation gate:** The 13 mismatched rows were all from May 11-12 testing (GOOGL live positions during infrastructure setup). They are now correctly tagged as `live` and excluded from DEMO paper stats. Graduation gate paper stats for active strategies are unaffected (those strategies were not live during the contamination period).
 
 ---
 
