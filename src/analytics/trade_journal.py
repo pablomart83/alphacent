@@ -239,7 +239,8 @@ class TradeJournal:
         max_adverse_excursion: Optional[float] = None,
         max_favorable_excursion: Optional[float] = None,
         exit_slippage: Optional[float] = None,
-        symbol: Optional[str] = None
+        symbol: Optional[str] = None,
+        account_type: Optional[str] = None,
     ) -> None:
         """Log trade exit and calculate performance metrics.
         
@@ -253,6 +254,8 @@ class TradeJournal:
             max_favorable_excursion: Best profit during trade
             exit_slippage: Slippage on exit
             symbol: Symbol for fallback lookup when trade_id doesn't match
+            account_type: 'demo' or 'live' — scopes fallback lookups so a live
+                          exit never accidentally closes a demo entry and vice versa.
         """
         logger.info(f"Logging trade exit: {trade_id} @ {exit_price}")
 
@@ -260,26 +263,36 @@ class TradeJournal:
         try:
             entry = session.query(TradeJournalEntryORM).filter_by(trade_id=trade_id).first()
             if not entry:
-                # Fallback: trade_id might be a position ID while entry was logged with order ID.
-                # Try matching by trade_id stored in entry_order_id, or find the most recent
-                # open entry for the same symbol (no exit_time yet).
-                entry = (
+                # Fallback 1: trade_id might be a position ID while entry was logged
+                # with the order UUID as trade_id. Try matching by entry_order_id.
+                q = (
                     session.query(TradeJournalEntryORM)
                     .filter_by(entry_order_id=str(trade_id))
                     .filter(TradeJournalEntryORM.exit_time.is_(None))
-                    .first()
                 )
+                if account_type:
+                    q = q.filter(TradeJournalEntryORM.account_type == account_type)
+                entry = q.first()
+
             if not entry and symbol:
-                # Last resort: find most recent open entry for this symbol
-                entry = (
+                # Fallback 2: find the most recent open entry for this (symbol, account_type).
+                # MUST scope to account_type — without it, a live exit can match a demo
+                # entry for the same symbol and corrupt the demo trade record.
+                q = (
                     session.query(TradeJournalEntryORM)
                     .filter_by(symbol=symbol)
                     .filter(TradeJournalEntryORM.exit_time.is_(None))
                     .order_by(TradeJournalEntryORM.entry_time.desc())
-                    .first()
                 )
+                if account_type:
+                    q = q.filter(TradeJournalEntryORM.account_type == account_type)
+                entry = q.first()
+
             if not entry:
-                logger.warning(f"Trade entry not found for trade_id={trade_id} — exit not logged")
+                logger.warning(
+                    f"Trade entry not found for trade_id={trade_id} "
+                    f"(symbol={symbol}, account_type={account_type}) — exit not logged"
+                )
                 return
 
             # Update exit details

@@ -462,6 +462,7 @@ class OrderMonitor:
                             exit_price=db_pos.current_price,
                             exit_reason=closure_reason,
                             symbol=db_pos.symbol,
+                            account_type=getattr(db_pos, 'account_type', 'demo') or 'demo',
                         )
                     except Exception as journal_err:
                         logger.debug(f"Could not log exit to trade journal for {db_pos.symbol}: {journal_err}")
@@ -2173,6 +2174,7 @@ class OrderMonitor:
                             exit_price=db_pos.current_price,
                             exit_reason=exit_reason,
                             symbol=db_pos.symbol,
+                            account_type=getattr(db_pos, 'account_type', 'demo') or 'demo',
                         )
                     except Exception as journal_err:
                         logger.debug(f"Could not log exit to trade journal for {db_pos.symbol}: {journal_err}")

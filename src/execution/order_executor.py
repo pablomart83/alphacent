@@ -1063,7 +1063,8 @@ class OrderExecutor:
                             exit_price=fill.filled_price,
                             exit_reason="Position closed (buy to cover short)",
                             exit_order_id=order.id,
-                            symbol=existing_position.symbol
+                            symbol=existing_position.symbol,
+                            account_type=getattr(existing_position, 'account_type', 'demo') or 'demo',
                         )
                         logger.debug(f"Logged trade exit to journal: {existing_position.id}")
                     except Exception as e:
@@ -1192,7 +1193,8 @@ class OrderExecutor:
                             exit_price=fill.filled_price,
                             exit_reason="Position closed (sell to close long)",
                             exit_order_id=order.id,
-                            symbol=existing_position.symbol
+                            symbol=existing_position.symbol,
+                            account_type=getattr(existing_position, 'account_type', 'demo') or 'demo',
                         )
                         logger.debug(f"Logged trade exit to journal: {existing_position.id}")
                     except Exception as e:
