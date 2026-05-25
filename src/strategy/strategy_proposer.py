@@ -6155,7 +6155,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         forex_set = set(DEMO_ALLOWED_FOREX)
         crypto_count = sum(1 for _, s in assignments if s in crypto_set)
         forex_count = sum(1 for _, s in assignments if s in forex_set)
-        min_crypto = max(2, int(dsl_count * 0.10))
+        min_crypto = max(6, int(dsl_count * 0.15))  # at least 1 per symbol, 15% of pool
         min_forex = max(1, int(dsl_count * 0.05))
 
         for asset_set, cur, mn, label, dir_filter in [

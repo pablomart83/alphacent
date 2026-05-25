@@ -2059,19 +2059,46 @@ class StrategyEngine:
                     'error': str(e),
                 })
 
-        # Majority vote: count windows that pass (not overfitted AND positive test Sharpe)
+        # Recency-weighted majority vote: the most recent window counts double.
+        # Rationale: crypto strategies that work in the current regime but not
+        # in a 2023 bear/ranging period are exactly what we want for live trading.
+        # A flat 2-of-3 vote kills these because the oldest window (wrong regime)
+        # gets equal weight to the most recent (current regime). Doubling the most
+        # recent window's vote means: pass if (a) most recent passes + any other,
+        # or (b) both older windows pass. A strategy that only works in the oldest
+        # window (stale regime) still fails.
+        #
+        # Effective votes: window[0]=1, window[1]=1, window[2]=2 → total=4, need ≥3
+        # (equivalent to min_pass_windows=2 in a 3-window flat vote but recency-aware)
+        weighted_pass = 0
+        weighted_total = 0
+        for idx, w in enumerate(window_results):
+            weight = 2 if idx == len(window_results) - 1 else 1  # last window = 2x
+            weighted_total += weight
+            if (not w['is_overfitted']
+                    and w['test_sharpe'] is not None
+                    and w['test_sharpe'] > 0):
+                weighted_pass += weight
+
+        # Weighted threshold: need ≥ (total - n_windows + min_pass_windows) weighted votes.
+        # For 3 windows (total=4): need ≥ 3 → most recent must pass + at least one other.
+        weighted_threshold = weighted_total - len(window_results) + min_pass_windows
+        overall_overfitted = weighted_pass < weighted_threshold
+
+        # Also keep the flat pass_count for logging
         pass_count = sum(
             1 for w in window_results
             if not w['is_overfitted']
             and w['test_sharpe'] is not None
             and w['test_sharpe'] > 0
         )
-        overall_overfitted = pass_count < min_pass_windows
 
         logger.info(
             f"Rolling WF result for {strategy.name}: "
-            f"{pass_count}/{len(window_results)} windows passed "
-            f"(need {min_pass_windows}) → {'PASS' if not overall_overfitted else 'FAIL'}"
+            f"{pass_count}/{len(window_results)} windows passed (flat), "
+            f"{weighted_pass}/{weighted_total} weighted votes "
+            f"(need {weighted_threshold}, last window 2x) "
+            f"→ {'PASS' if not overall_overfitted else 'FAIL'}"
         )
 
         # Use the BEST PASSING window as the canonical result.
@@ -5538,6 +5565,53 @@ class StrategyEngine:
                         logger.debug(
                             f"Suppressing entry signal for {symbol} — already has open position"
                         )
+                    elif has_position_in_symbol and signal.action in (
+                        SignalAction.EXIT_LONG, SignalAction.EXIT_SHORT
+                    ):
+                        # Minimum hold guard: don't exit a position that was opened
+                        # within the current bar's time window. This prevents the
+                        # quick-update path (runs every 10 min) from closing a position
+                        # that was just opened at the 4H bar boundary — the exit
+                        # condition (e.g. EMA(8) < EMA(21) state) is already true on
+                        # bar N+1 when the crossover entry fired on bar N.
+                        _suppress_exit = False
+                        try:
+                            _bar_seconds = {'1d': 86400, '4h': 14400, '1h': 3600,
+                                            '2h': 7200, '30m': 1800, '15m': 900}.get(
+                                strategy_interval, 86400)
+                            _now_utc = datetime.utcnow()
+                            _bar_hours = _bar_seconds // 3600
+                            if _bar_hours >= 1:
+                                _bar_open = _now_utc.replace(
+                                    hour=(_now_utc.hour // _bar_hours) * _bar_hours,
+                                    minute=0, second=0, microsecond=0
+                                )
+                            else:
+                                _bar_open = _now_utc  # sub-hour: no guard needed
+                            # Find the open position for this symbol
+                            _open_pos = None
+                            for _p in my_positions:
+                                from src.utils.symbol_normalizer import normalize_symbol as _ns_mg
+                                if _ns_mg(_p.symbol) == normalized_symbol:
+                                    _open_pos = _p
+                                    break
+                            if _open_pos and _open_pos.opened_at:
+                                _opened = _open_pos.opened_at
+                                if hasattr(_opened, 'tzinfo') and _opened.tzinfo:
+                                    _opened = _opened.replace(tzinfo=None)
+                                if _opened >= _bar_open:
+                                    _suppress_exit = True
+                                    logger.info(
+                                        f"Minimum hold guard: suppressing exit for {symbol} "
+                                        f"— position opened {_opened} is within current "
+                                        f"{strategy_interval} bar (bar_open={_bar_open}). "
+                                        f"Exit will re-evaluate at next bar boundary."
+                                    )
+                        except Exception as _mg_err:
+                            logger.debug(f"Minimum hold guard check failed for {symbol}: {_mg_err}")
+
+                        if not _suppress_exit:
+                            signals.append(signal)
                     else:
                         signals.append(signal)
             

@@ -2048,14 +2048,17 @@ class TradingScheduler:
                     
                     if strat_interval == '4h':
                         effective_ttl_cycles = backtested_ttl_cycles * 3
-                        effective_hard_ttl_days = hard_ttl_days * 3  # 9 days instead of 3
+                        effective_hard_ttl_days = hard_ttl_days * 3  # 9 days instead of 7
                     elif strat_interval in ('1h', '2h'):
                         effective_ttl_cycles = backtested_ttl_cycles
                         effective_hard_ttl_days = hard_ttl_days
                     else:
-                        # Daily strategies
+                        # Daily strategies (crypto and non-crypto): 7-day hard TTL.
+                        # A daily strategy fires 3-7 signals/month — in 3 days it may
+                        # see 0 entry conditions and get retired before it can trade.
+                        # 7 days gives a full week of market sessions to find a signal.
                         effective_ttl_cycles = backtested_ttl_cycles
-                        effective_hard_ttl_days = hard_ttl_days
+                        effective_hard_ttl_days = 7
 
                     # Check hard wall-clock backstop
                     # Use demoted_at if available (strategy was previously active and got

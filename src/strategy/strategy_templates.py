@@ -4585,7 +4585,7 @@ class StrategyTemplateLibrary:
                 "EMA(8) CROSSES_ABOVE EMA(13) AND EMA(13) > EMA(21) AND RSI(14) > 40"
             ],
             exit_conditions=[
-                "EMA(8) < EMA(13) OR RSI(14) > 75"
+                "EMA(8) CROSSES_BELOW EMA(13) OR RSI(14) > 75"
             ],
             required_indicators=["EMA:8", "EMA:13", "EMA:21", "RSI"],
             default_parameters={
@@ -4914,7 +4914,7 @@ class StrategyTemplateLibrary:
                 "EMA(8) CROSSES_ABOVE EMA(21) AND RSI(14) > 50"
             ],
             exit_conditions=[
-                "EMA(8) < EMA(21) OR RSI(14) < 40"
+                "EMA(8) CROSSES_BELOW EMA(21) OR RSI(14) < 40"
             ],
             required_indicators=["EMA", "RSI"],
             default_parameters={
@@ -5468,7 +5468,7 @@ class StrategyTemplateLibrary:
                 "CLOSE CROSSES_ABOVE BB_MIDDLE(20, 2) AND (BB_UPPER(20, 2) - BB_LOWER(20, 2)) > ATR(14) * 3 AND RSI(14) > 50"
             ],
             exit_conditions=[
-                "CLOSE < BB_MIDDLE(20, 2) OR RSI(14) < 40"
+                "CLOSE CROSSES_BELOW BB_MIDDLE(20, 2) OR RSI(14) < 40"
             ],
             required_indicators=["Bollinger Bands", "ATR", "RSI"],
             default_parameters={
