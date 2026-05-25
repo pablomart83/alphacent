@@ -362,9 +362,9 @@ export function LiveStrategyDetailPanel({
       </div>
 
       {/* Scrollable body */}
-      <div className="flex-1 min-h-0 overflow-auto px-3 py-3 space-y-4">
+      <div className="flex-1 min-h-0 overflow-auto px-3 py-3 space-y-3">
 
-        {/* CIO Parameters — editable */}
+        {/* CIO Parameters — always visible, editable */}
         <PhaseSection label="CIO Parameters" color="var(--account-live)" badge="$">
           {editing ? (
             <div className="space-y-3">
@@ -392,118 +392,153 @@ export function LiveStrategyDetailPanel({
           )}
         </PhaseSection>
 
-        {/* Phase 1: Walk-forward */}
-        <PhaseSection label="Phase 1 — Walk-forward" color="var(--accent-primary)" badge="WF">
-          {strategyQuery.isLoading ? (
-            <Skeleton className="h-[52px]" />
-          ) : wf ? (
-            <div className="grid grid-cols-3 gap-1.5">
-              <Metric label="Test Sharpe" value={wf.test_sharpe != null ? formatNumber(wf.test_sharpe, 2) : '—'} tone={wf.test_sharpe != null && wf.test_sharpe >= 1 ? 'up' : 'neutral'} />
-              <Metric label="Train Sharpe" value={wf.train_sharpe != null ? formatNumber(wf.train_sharpe, 2) : '—'} />
-              <Metric label="Test Win %" value={wf.test_win_rate != null ? `${(wf.test_win_rate * 100).toFixed(0)}%` : '—'} tone={wf.test_win_rate != null && wf.test_win_rate >= 0.55 ? 'up' : 'neutral'} />
-              <Metric label="Test trades" value={wf.test_trades != null ? String(Math.round(wf.test_trades)) : '—'} />
-              {wf.test_return != null && (
-                <Metric label="Test return" value={`${(wf.test_return * 100).toFixed(1)}%`} tone={wf.test_return >= 0 ? 'up' : 'down'} />
-              )}
-              {wf.test_max_drawdown != null && (
-                <Metric label="Test max DD" value={`${(Math.abs(wf.test_max_drawdown) * 100).toFixed(1)}%`} tone="down" />
-              )}
-            </div>
-          ) : (
-            <p className="text-[11px] text-[var(--text-3)]">Walk-forward data not available.</p>
-          )}
-        </PhaseSection>
-
-        {/* Phase 2: Paper */}
-        <PhaseSection label="Phase 2 — Paper (DEMO)" color="var(--accent-secondary)" badge="P">
-          {paperTradesQuery.isLoading ? (
-            <Skeleton className="h-[52px]" />
-          ) : (
+        {/* Phase tabs */}
+        <PhaseTabs
+          wfContent={
+            strategyQuery.isLoading ? (
+              <Skeleton className="h-[52px]" />
+            ) : wf ? (
+              <div className="grid grid-cols-3 gap-1.5">
+                <Metric label="Test Sharpe" value={wf.test_sharpe != null ? formatNumber(wf.test_sharpe, 2) : '—'} tone={wf.test_sharpe != null && wf.test_sharpe >= 1 ? 'up' : 'neutral'} />
+                <Metric label="Train Sharpe" value={wf.train_sharpe != null ? formatNumber(wf.train_sharpe, 2) : '—'} />
+                <Metric label="Test Win %" value={wf.test_win_rate != null ? `${(wf.test_win_rate * 100).toFixed(0)}%` : '—'} tone={wf.test_win_rate != null && wf.test_win_rate >= 0.55 ? 'up' : 'neutral'} />
+                <Metric label="Test trades" value={wf.test_trades != null ? String(Math.round(wf.test_trades)) : '—'} />
+                {wf.test_return != null && <Metric label="Test return" value={`${(wf.test_return * 100).toFixed(1)}%`} tone={wf.test_return >= 0 ? 'up' : 'down'} />}
+                {wf.test_max_drawdown != null && <Metric label="Test max DD" value={`${(Math.abs(wf.test_max_drawdown) * 100).toFixed(1)}%`} tone="down" />}
+              </div>
+            ) : (
+              <p className="text-[11px] text-[var(--text-3)]">Walk-forward data not available.</p>
+            )
+          }
+          paperContent={
+            paperTradesQuery.isLoading ? (
+              <Skeleton className="h-[52px]" />
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-1.5 mb-3">
+                  <Metric label="Trades" value={String(row.current_paper_trades ?? paperStats.count)} />
+                  <Metric label="Win %" value={row.current_paper_win_rate != null ? `${(row.current_paper_win_rate * 100).toFixed(0)}%` : paperWinRate != null ? `${paperWinRate.toFixed(0)}%` : '—'} tone={(row.current_paper_win_rate ?? (paperWinRate != null ? paperWinRate / 100 : null)) != null && ((row.current_paper_win_rate ?? 0) >= 0.55 || (paperWinRate ?? 0) >= 55) ? 'up' : 'neutral'} />
+                  <Metric label="Total P&L" value={formatCurrency(row.current_paper_pnl ?? paperStats.total, { signed: true, precision: 0 })} tone={(row.current_paper_pnl ?? paperStats.total) >= 0 ? 'up' : 'down'} />
+                  <Metric label="Sharpe" value={row.current_paper_sharpe != null ? formatNumber(row.current_paper_sharpe, 2) : '—'} tone={row.current_paper_sharpe != null && row.current_paper_sharpe >= 1 ? 'up' : 'neutral'} />
+                  <Metric label="Avg P&L/trade" value={avgPnlPerTrade != null ? formatCurrency(avgPnlPerTrade, { signed: true, precision: 0 }) : '—'} tone={avgPnlPerTrade != null ? (avgPnlPerTrade >= 0 ? 'up' : 'down') : 'neutral'} />
+                  <Metric label="Avg hold" value={avgHoldHours != null ? (avgHoldHours < 48 ? `${avgHoldHours.toFixed(0)}h` : `${(avgHoldHours / 24).toFixed(1)}d`) : '—'} />
+                  <Metric label="Best trade" value={paperStats.count > 0 ? formatCurrency(paperStats.best, { signed: true, precision: 0 }) : '—'} tone="up" />
+                  <Metric label="Worst trade" value={paperStats.count > 0 ? formatCurrency(paperStats.worst, { signed: true, precision: 0 }) : '—'} tone="down" />
+                  <Metric label="Last opened" value={lastOpened ? formatTimestamp(lastOpened, 'date') : '—'} />
+                  <Metric label="Last closed" value={lastClosed ? formatTimestamp(lastClosed, 'date') : '—'} />
+                </div>
+                {paperTrades.length > 0 && <TradeTable trades={paperTrades.slice(0, 30)} label="Paper trades (last 30)" />}
+              </>
+            )
+          }
+          liveContent={
             <>
               <div className="grid grid-cols-3 gap-1.5 mb-3">
-                <Metric label="Trades" value={String(row.current_paper_trades ?? paperStats.count)} />
-                <Metric label="Win %" value={row.current_paper_win_rate != null ? `${(row.current_paper_win_rate * 100).toFixed(0)}%` : paperWinRate != null ? `${paperWinRate.toFixed(0)}%` : '—'} tone={(row.current_paper_win_rate ?? (paperWinRate != null ? paperWinRate / 100 : null)) != null && ((row.current_paper_win_rate ?? 0) >= 0.55 || (paperWinRate ?? 0) >= 55) ? 'up' : 'neutral'} />
-                <Metric label="Total P&L" value={formatCurrency(row.current_paper_pnl ?? paperStats.total, { signed: true, precision: 0 })} tone={(row.current_paper_pnl ?? paperStats.total) >= 0 ? 'up' : 'down'} />
-                <Metric label="Sharpe" value={row.current_paper_sharpe != null ? formatNumber(row.current_paper_sharpe, 2) : '—'} tone={row.current_paper_sharpe != null && row.current_paper_sharpe >= 1 ? 'up' : 'neutral'} />
-                <Metric label="Avg P&L/trade" value={avgPnlPerTrade != null ? formatCurrency(avgPnlPerTrade, { signed: true, precision: 0 }) : '—'} tone={avgPnlPerTrade != null ? (avgPnlPerTrade >= 0 ? 'up' : 'down') : 'neutral'} />
-                <Metric label="Avg hold" value={avgHoldHours != null ? (avgHoldHours < 48 ? `${avgHoldHours.toFixed(0)}h` : `${(avgHoldHours / 24).toFixed(1)}d`) : '—'} />
-                <Metric label="Best trade" value={paperStats.count > 0 ? formatCurrency(paperStats.best, { signed: true, precision: 0 }) : '—'} tone="up" />
-                <Metric label="Worst trade" value={paperStats.count > 0 ? formatCurrency(paperStats.worst, { signed: true, precision: 0 }) : '—'} tone="down" />
-                <Metric label="Last opened" value={lastOpened ? formatTimestamp(lastOpened, 'date') : '—'} />
-                <Metric label="Last closed" value={lastClosed ? formatTimestamp(lastClosed, 'date') : '—'} />
+                <Metric label="Total trades" value={String(row.live_trades ?? row.live_closed_trades ?? 0)} />
+                <Metric label="Open" value={String(row.live_open_trades ?? row.open_position_count ?? 0)} tone={(row.live_open_trades ?? row.open_position_count ?? 0) > 0 ? 'up' : 'neutral'} />
+                <Metric label="Closed" value={String(row.live_closed_trades ?? 0)} />
+                <Metric label="Total P&L" value={(row.live_pnl ?? 0) !== 0 ? formatCurrency(row.live_pnl ?? 0, { signed: true, precision: 0 }) : (row.live_realized_pnl ?? 0) !== 0 ? formatCurrency(row.live_realized_pnl ?? 0, { signed: true, precision: 0 }) : 'Waiting'} tone={(row.live_pnl ?? row.live_realized_pnl ?? 0) >= 0 ? 'up' : 'down'} />
+                <Metric label="Realised" value={row.live_realized_pnl != null ? formatCurrency(row.live_realized_pnl, { signed: true, precision: 0 }) : '—'} tone={row.live_realized_pnl != null ? (row.live_realized_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
+                <Metric label="Unrealised" value={row.unrealized_pnl != null && row.unrealized_pnl !== 0 ? formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 }) : '—'} tone={row.unrealized_pnl != null ? (row.unrealized_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
+                <Metric label="Win rate" value={row.live_win_rate != null ? `${row.live_win_rate.toFixed(0)}%` : '—'} tone={row.live_win_rate != null ? (row.live_win_rate >= 55 ? 'up' : row.live_win_rate >= 40 ? 'neutral' : 'down') : 'neutral'} />
+                <Metric label="Avg P&L/trade" value={row.live_avg_pnl != null ? formatCurrency(row.live_avg_pnl, { signed: true, precision: 0 }) : '—'} tone={row.live_avg_pnl != null ? (row.live_avg_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
+                <Metric label="Sharpe" value={row.live_sharpe != null ? formatNumber(row.live_sharpe, 2) : '—'} tone={row.live_sharpe != null && row.live_sharpe >= 1 ? 'up' : row.live_sharpe != null && row.live_sharpe < 0 ? 'down' : 'neutral'} />
+                {row.live_best_trade != null && <Metric label="Best trade" value={formatCurrency(row.live_best_trade, { signed: true, precision: 0 })} tone="up" />}
+                {row.live_worst_trade != null && <Metric label="Worst trade" value={formatCurrency(row.live_worst_trade, { signed: true, precision: 0 })} tone="down" />}
+                {row.live_avg_hold_hours != null && <Metric label="Avg hold" value={row.live_avg_hold_hours < 48 ? `${row.live_avg_hold_hours.toFixed(0)}h` : `${(row.live_avg_hold_hours / 24).toFixed(1)}d`} />}
+                {row.live_last_opened && <Metric label="Last opened" value={formatTimestamp(row.live_last_opened, 'date')} />}
+                {row.live_last_closed && <Metric label="Last closed" value={formatTimestamp(row.live_last_closed, 'date')} />}
+                {row.divergence_pct != null && <Metric label="Tracking" value={`${row.divergence_pct.toFixed(0)}%`} tone={row.divergence_pct >= 80 ? 'up' : row.divergence_pct >= 50 ? 'neutral' : 'down'} />}
+                {(row.open_position_count ?? 0) > 0 && row.open_position_entry != null && (
+                  <>
+                    <Metric label="Entry" value={formatCurrency(row.open_position_entry, { precision: 2 })} />
+                    {row.open_position_current != null && <Metric label="Current" value={formatCurrency(row.open_position_current, { precision: 2 })} tone={row.open_position_current >= row.open_position_entry ? 'up' : 'down'} />}
+                  </>
+                )}
               </div>
-              {paperTrades.length > 0 && (
-                <TradeTable trades={paperTrades.slice(0, 30)} label="Paper trades (last 30)" />
+              {(row.live_trades ?? 0) === 0 && (row.live_closed_trades ?? 0) === 0 && (row.open_position_count ?? 0) === 0 && (
+                <div className="rounded-[3px] border border-[color-mix(in_oklab,var(--pnl-up)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--pnl-up)_4%,var(--bg-1))] px-2.5 py-2 text-[11px] text-[var(--text-2)] mb-3">
+                  <TrendingUp className="h-3.5 w-3.5 inline mr-1.5 text-[var(--pnl-up)]" />
+                  Gate open — next ENTER signal for{' '}
+                  <span className="mono font-medium text-[var(--pnl-up)]">{row.symbol}</span>{' '}
+                  with conviction ≥ {committed.conviction_min} fires a real order.
+                </div>
+              )}
+              {(row.live_trade_history?.length ?? 0) > 0 && <LiveTradeTable trades={row.live_trade_history!} />}
+              {row.last_signal_status && (
+                <div className="mt-3">
+                  <LastSignalStatus status={row.last_signal_status} detail={row.last_signal_detail} pendingOrder={row.pending_order} />
+                </div>
               )}
             </>
-          )}
-        </PhaseSection>
-
-        {/* Phase 3: Live */}
-        <PhaseSection label="Phase 3 — Live" color="var(--pnl-up)" badge="L">
-          <div className="grid grid-cols-3 gap-1.5 mb-3">
-            <Metric label="Total trades" value={String(row.live_trades ?? row.live_closed_trades ?? 0)} />
-            <Metric label="Open" value={String(row.live_open_trades ?? row.open_position_count ?? 0)} tone={(row.live_open_trades ?? row.open_position_count ?? 0) > 0 ? 'up' : 'neutral'} />
-            <Metric label="Closed" value={String(row.live_closed_trades ?? 0)} />
-            <Metric
-              label="Total P&L"
-              value={(row.live_pnl ?? 0) !== 0 ? formatCurrency(row.live_pnl ?? 0, { signed: true, precision: 0 }) : (row.live_realized_pnl ?? 0) !== 0 ? formatCurrency(row.live_realized_pnl ?? 0, { signed: true, precision: 0 }) : 'Waiting'}
-              tone={(row.live_pnl ?? row.live_realized_pnl ?? 0) >= 0 ? 'up' : 'down'}
-            />
-            <Metric label="Realised" value={row.live_realized_pnl != null ? formatCurrency(row.live_realized_pnl, { signed: true, precision: 0 }) : '—'} tone={row.live_realized_pnl != null ? (row.live_realized_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
-            <Metric label="Unrealised" value={row.unrealized_pnl != null && row.unrealized_pnl !== 0 ? formatCurrency(row.unrealized_pnl, { signed: true, precision: 0 }) : '—'} tone={row.unrealized_pnl != null ? (row.unrealized_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
-            <Metric label="Win rate" value={row.live_win_rate != null ? `${row.live_win_rate.toFixed(0)}%` : '—'} tone={row.live_win_rate != null ? (row.live_win_rate >= 55 ? 'up' : row.live_win_rate >= 40 ? 'neutral' : 'down') : 'neutral'} />
-            <Metric label="Avg P&L/trade" value={row.live_avg_pnl != null ? formatCurrency(row.live_avg_pnl, { signed: true, precision: 0 }) : '—'} tone={row.live_avg_pnl != null ? (row.live_avg_pnl >= 0 ? 'up' : 'down') : 'neutral'} />
-            <Metric label="Sharpe" value={row.live_sharpe != null ? formatNumber(row.live_sharpe, 2) : '—'} tone={row.live_sharpe != null && row.live_sharpe >= 1 ? 'up' : row.live_sharpe != null && row.live_sharpe < 0 ? 'down' : 'neutral'} />
-            {row.live_best_trade != null && <Metric label="Best trade" value={formatCurrency(row.live_best_trade, { signed: true, precision: 0 })} tone="up" />}
-            {row.live_worst_trade != null && <Metric label="Worst trade" value={formatCurrency(row.live_worst_trade, { signed: true, precision: 0 })} tone="down" />}
-            {row.live_avg_hold_hours != null && <Metric label="Avg hold" value={row.live_avg_hold_hours < 48 ? `${row.live_avg_hold_hours.toFixed(0)}h` : `${(row.live_avg_hold_hours / 24).toFixed(1)}d`} />}
-            {row.live_last_opened && <Metric label="Last opened" value={formatTimestamp(row.live_last_opened, 'date')} />}
-            {row.live_last_closed && <Metric label="Last closed" value={formatTimestamp(row.live_last_closed, 'date')} />}
-            {row.divergence_pct != null && <Metric label="Tracking" value={`${row.divergence_pct.toFixed(0)}%`} tone={row.divergence_pct >= 80 ? 'up' : row.divergence_pct >= 50 ? 'neutral' : 'down'} />}
-            {(row.open_position_count ?? 0) > 0 && row.open_position_entry != null && (
-              <>
-                <Metric label="Entry" value={formatCurrency(row.open_position_entry, { precision: 2 })} />
-                {row.open_position_current != null && <Metric label="Current" value={formatCurrency(row.open_position_current, { precision: 2 })} tone={row.open_position_current >= row.open_position_entry ? 'up' : 'down'} />}
-              </>
-            )}
-          </div>
-
-          {(row.live_trades ?? 0) === 0 && (row.live_closed_trades ?? 0) === 0 && (row.open_position_count ?? 0) === 0 && (
-            <div className="rounded-[3px] border border-[color-mix(in_oklab,var(--pnl-up)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--pnl-up)_4%,var(--bg-1))] px-2.5 py-2 text-[11px] text-[var(--text-2)] mb-3">
-              <TrendingUp className="h-3.5 w-3.5 inline mr-1.5 text-[var(--pnl-up)]" />
-              Gate open — next ENTER signal for{' '}
-              <span className="mono font-medium text-[var(--pnl-up)]">{row.symbol}</span>{' '}
-              with conviction ≥ {committed.conviction_min} fires a real order.
+          }
+          convictionContent={
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-[var(--text-3)]">
+                Signals must score ≥ {committed.conviction_min} to trigger a live fill.
+              </p>
+              <ConvictionBar score={committed.conviction_min} size="default" showValue />
             </div>
-          )}
-
-          {(row.live_trade_history?.length ?? 0) > 0 && (
-            <LiveTradeTable trades={row.live_trade_history!} />
-          )}
-
-          {row.last_signal_status && (
-            <div className="mt-3">
-              <LastSignalStatus status={row.last_signal_status} detail={row.last_signal_detail} pendingOrder={row.pending_order} />
-            </div>
-          )}
-        </PhaseSection>
-
-        {/* Conviction gate */}
-        <PhaseSection label="Live conviction gate" color="var(--accent-primary)" badge="C">
-          <div className="space-y-1.5">
-            <p className="text-[10px] text-[var(--text-3)]">
-              Signals must score ≥ {committed.conviction_min} to trigger a live fill.
-            </p>
-            <ConvictionBar score={committed.conviction_min} size="default" showValue />
-          </div>
-        </PhaseSection>
+          }
+        />
       </div>
     </div>
   )
 }
 
-/* ─────────────────────────── Shared helpers ─────────────────────────── */
+type PhaseTabId = 'wf' | 'paper' | 'live' | 'conviction'
+
+const PHASE_TABS: Array<{ id: PhaseTabId; label: string; color: string }> = [
+  { id: 'wf',         label: 'Walk-forward', color: 'var(--accent-primary)' },
+  { id: 'paper',      label: 'Paper',        color: 'var(--accent-secondary)' },
+  { id: 'live',       label: 'Live',         color: 'var(--pnl-up)' },
+  { id: 'conviction', label: 'Gate',         color: 'var(--accent-primary)' },
+]
+
+function PhaseTabs({
+  wfContent,
+  paperContent,
+  liveContent,
+  convictionContent,
+}: {
+  wfContent: React.ReactNode
+  paperContent: React.ReactNode
+  liveContent: React.ReactNode
+  convictionContent: React.ReactNode
+}) {
+  const [active, setActive] = useState<PhaseTabId>('live')
+
+  return (
+    <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] overflow-hidden">
+      {/* Tab bar */}
+      <div className="flex border-b border-[var(--border-subtle)] bg-[var(--bg-2)]">
+        {PHASE_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setActive(t.id)}
+            className={cn(
+              'flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide transition-colors',
+              active === t.id
+                ? 'border-b-2'
+                : 'text-[var(--text-3)] hover:text-[var(--text-1)] border-b-2 border-transparent',
+            )}
+            style={active === t.id ? { borderBottomColor: t.color, color: t.color } : undefined}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {/* Tab content */}
+      <div className="p-2.5">
+        {active === 'wf'         && wfContent}
+        {active === 'paper'      && paperContent}
+        {active === 'live'       && liveContent}
+        {active === 'conviction' && convictionContent}
+      </div>
+    </div>
+  )
+}
 
 function PhaseSection({
   label,
