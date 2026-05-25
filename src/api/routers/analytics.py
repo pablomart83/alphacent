@@ -2974,6 +2974,7 @@ class SPYBenchmarkPoint(BaseModel):
 class SPYBenchmarkResponse(BaseModel):
     """Response for SPY benchmark data."""
     data: List[SPYBenchmarkPoint] = Field(default_factory=list)
+    inception_equity_base: Optional[float] = None  # equity at account inception (ALL-period first snapshot)
 
 
 @router.get("/spy-benchmark", response_model=SPYBenchmarkResponse)
@@ -3058,6 +3059,27 @@ async def get_spy_benchmark(
             .all()
         )
 
+        # Inception equity base: the equity value at the very first snapshot for this account.
+        # Used by the frontend hover legend to compute period-independent alpha vs SPY.
+        # Always fetched from the ALL-time first snapshot regardless of the requested period.
+        inception_equity_base: Optional[float] = None
+        try:
+            from src.models.orm import EquitySnapshotORM as _ESO_incep
+            account_type_str_incep = "live" if mode.upper() == "LIVE" else "demo"
+            _first_eq = (
+                session.query(_ESO_incep.equity)
+                .filter(
+                    _ESO_incep.account_type == account_type_str_incep,
+                    _ESO_incep.snapshot_type == "daily",
+                )
+                .order_by(_ESO_incep.date.asc())
+                .first()
+            )
+            if _first_eq and _first_eq.equity:
+                inception_equity_base = float(_first_eq.equity)
+        except Exception as _incep_err:
+            logger.debug(f"Could not fetch inception equity base: {_incep_err}")
+
         if rows:
             data = [
                 SPYBenchmarkPoint(
@@ -3067,7 +3089,7 @@ async def get_spy_benchmark(
                 for row in rows
                 if row.close and row.close > 0
             ]
-            return SPYBenchmarkResponse(data=data)
+            return SPYBenchmarkResponse(data=data, inception_equity_base=inception_equity_base)
 
         # No cached data — try fetching from Yahoo Finance via MarketDataManager
         logger.info("No SPY data in cache, attempting Yahoo Finance fetch")

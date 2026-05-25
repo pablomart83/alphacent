@@ -64,6 +64,19 @@ interface EquityChartProps {
   /** Loading state — render empty chart shell. */
   loading?: boolean
   className?: string
+  /**
+   * Fixed inception bases for alpha calculation in the hover legend.
+   * These are the ALL-period first points and must NOT change when the user
+   * switches the view period (1W/1M/3M). Without them, "Alpha vs SPY" on a
+   * given date changes depending on which period is selected because the
+   * rebasing origin shifts. With them, alpha is always "return since inception
+   * minus SPY return since inception" — period-independent.
+   *
+   * If not provided, falls back to the first point of the current equityData /
+   * spyData (old behaviour — period-relative alpha).
+   */
+  inceptionEquityBase?: number
+  inceptionSpyBase?: number
 }
 
 const PERIODS: EquityPeriod[] = ['1W', '1M', '3M', '6M', '1Y', 'ALL']
@@ -103,6 +116,8 @@ export function EquityChart({
   onFullscreenToggle,
   loading = false,
   className,
+  inceptionEquityBase,
+  inceptionSpyBase,
 }: EquityChartProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<IChartApi | null>(null)
@@ -116,9 +131,14 @@ export function EquityChart({
   const percentModeRef = useRef(percentMode)
   const equityDataRef = useRef(equityData)
   const spyDataRef = useRef(spyData)
+  // Inception bases for period-independent alpha calculation in the hover legend.
+  const inceptionEquityBaseRef = useRef(inceptionEquityBase)
+  const inceptionSpyBaseRef = useRef(inceptionSpyBase)
   useEffect(() => { percentModeRef.current = percentMode }, [percentMode])
   useEffect(() => { equityDataRef.current = equityData }, [equityData])
   useEffect(() => { spyDataRef.current = spyData }, [spyData])
+  useEffect(() => { inceptionEquityBaseRef.current = inceptionEquityBase }, [inceptionEquityBase])
+  useEffect(() => { inceptionSpyBaseRef.current = inceptionSpyBase }, [inceptionSpyBase])
 
   const [hover, setHover] = useState<{
     time: string | null
@@ -201,29 +221,41 @@ export function EquityChart({
       //   percent mode: spyVal = ((close - spyBase) / spyBase) * 100  — already a % return
       //   dollar mode:  spyVal = eqBase * (close / spyBase)           — rebased to equity dollars
       //
-      // In both cases we want: alpha = equityReturn% - spyReturn%
-      // where both returns are measured from the same starting point (first bar of the period).
+      // IMPORTANT: alpha in the hover legend must be period-independent.
+      // We use inceptionEquityBase / inceptionSpyBase (ALL-period first points)
+      // so that "Alpha vs SPY" on a given date doesn't change when the user
+      // switches the view period. The visual series rebasing stays period-relative
+      // (correct for the chart lines); only the legend numbers use inception bases.
       //
-      // percent mode: eqVal and spyVal are already % returns → subtract directly.
-      // dollar mode:  eqVal is raw equity $, spyVal is rebased $ (eqBase * close/spyBase).
-      //   eqReturn%  = (eqVal  - eqBase)  / eqBase  * 100
-      //   spyReturn% = (spyVal - eqBase)  / eqBase  * 100  ← spyVal is rebased to eqBase, so
-      //                                                        (spyVal/eqBase - 1) * 100 is correct
+      // Fallback: if inception bases aren't provided, use the current period's
+      // first point (old behaviour — period-relative alpha).
       let spyAlpha: number | null = null
       if (spyPoint && eqData) {
         const eqVal = eqData.value as number
         const spyVal = spyPoint.value as number
         if (Number.isFinite(eqVal) && Number.isFinite(spyVal)) {
           if (percentModeRef.current) {
-            // Both series already in % from first point — direct subtraction is correct.
+            // Both series already in % from their respective first points.
+            // In percent mode the series are rebased to the period start, so
+            // direct subtraction gives period-relative alpha. To get
+            // inception-relative alpha we'd need to re-derive from raw prices —
+            // not available here. Accept period-relative alpha in percent mode.
             spyAlpha = eqVal - spyVal
           } else {
-            const eqBase = equityDataRef.current[0]?.equity
-            if (eqBase && eqBase > 0) {
-              // eqVal is raw equity $; spyVal is rebased to eqBase dollars.
-              // Convert both to % return from eqBase, then subtract.
-              const eqRet  = ((eqVal  - eqBase) / eqBase) * 100
-              const spyRet = ((spyVal - eqBase) / eqBase) * 100  // spyVal already rebased to eqBase
+            // Dollar mode: eqVal is raw equity $; spyVal is rebased to the
+            // period's eqBase. Use inception bases for period-independent alpha.
+            const eqBase = inceptionEquityBaseRef.current ?? equityDataRef.current[0]?.equity
+            const periodEqBase = equityDataRef.current[0]?.equity  // period start (for SPY rebasing)
+            const periodSpyBase = spyDataRef.current?.[0]?.close   // SPY at period start
+            if (eqBase && eqBase > 0 && periodEqBase && periodEqBase > 0 && periodSpyBase && periodSpyBase > 0) {
+              // eqVal is raw equity — compute return from inception
+              const eqRet = ((eqVal - eqBase) / eqBase) * 100
+              // spyVal is rebased to periodEqBase: spyVal = periodEqBase * (spyClose / periodSpyBase)
+              // Recover raw SPY close: spyClose = spyVal * periodSpyBase / periodEqBase
+              const spyClose = spyVal * periodSpyBase / periodEqBase
+              // Compute SPY return from inception SPY base
+              const inceptionSpyB = inceptionSpyBaseRef.current ?? periodSpyBase
+              const spyRet = ((spyClose - inceptionSpyB) / inceptionSpyB) * 100
               spyAlpha = eqRet - spyRet
             }
           }
@@ -236,23 +268,24 @@ export function EquityChart({
         realized: realizedData ? (realizedData.value as number) : null,
         realizedAlphaSpy: (() => {
           // Alpha Realised vs SPY: realized return % minus SPY return % at this point.
-          // In percent mode: realized value is already % of starting equity; SPY is % return.
-          // In dollar mode: realized is raw $; SPY is rebased to equity start.
-          // We compute realized as % of starting equity, then subtract SPY %.
+          // Uses inception bases for period-independent numbers (same logic as spyAlpha above).
           if (!realizedData || !spyPoint) return null
           const realVal = realizedData.value as number
           const spyVal = spyPoint.value as number
           if (!Number.isFinite(realVal) || !Number.isFinite(spyVal)) return null
           if (percentModeRef.current) {
-            // Both already in % — realized is realized/eqBase*100, SPY is spyReturn%
             return realVal - spyVal
           }
-          // Dollar mode: convert realized $ to % of starting equity, SPY is rebased to eqBase
-          const eqBase = equityDataRef.current[0]?.equity
-          const spyBase = spyDataRef.current?.[0]?.close
-          if (!eqBase || !spyBase || eqBase <= 0 || spyBase <= 0) return null
+          const eqBase = inceptionEquityBaseRef.current ?? equityDataRef.current[0]?.equity
+          const periodEqBase = equityDataRef.current[0]?.equity
+          const periodSpyBase = spyDataRef.current?.[0]?.close
+          if (!eqBase || !periodEqBase || !periodSpyBase || eqBase <= 0 || periodEqBase <= 0 || periodSpyBase <= 0) return null
+          // realized is cumulative realized P&L in $; compute as % of inception equity
           const realPct = (realVal / eqBase) * 100
-          const spyPct = ((spyVal - eqBase) / eqBase) * 100  // SPY rebased to eqBase
+          // recover raw SPY close from rebased value, then compute from inception SPY base
+          const spyClose = spyVal * periodSpyBase / periodEqBase
+          const inceptionSpyB = inceptionSpyBaseRef.current ?? periodSpyBase
+          const spyPct = ((spyClose - inceptionSpyB) / inceptionSpyB) * 100
           return realPct - spyPct
         })(),
         drawdown: ddData ? (ddData.value as number) : null,

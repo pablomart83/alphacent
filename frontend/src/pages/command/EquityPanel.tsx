@@ -41,11 +41,13 @@ interface EquityPanelProps {
 
   fullscreen: boolean
   onFullscreenToggle: () => void
+  /** Inception bases for period-independent alpha in the hover legend. */
+  inceptionEquityBase?: number
+  inceptionSpyBase?: number
 }
 
 export function EquityPanel(props: EquityPanelProps) {
   const { dashboard, analytics, spy, error } = props
-
   // Prefer analytics curve (richer, scoped to selected period) over dashboard's 90d window.
   const equityData = useMemo<EquityPoint[]>(() => {
     if (analytics?.equity_curve?.length) {
@@ -148,6 +150,8 @@ export function EquityPanel(props: EquityPanelProps) {
           fullscreen={props.fullscreen}
           onFullscreenToggle={props.onFullscreenToggle}
           loading={props.isLoadingDashboard || props.isLoadingAnalytics}
+          inceptionEquityBase={props.inceptionEquityBase}
+          inceptionSpyBase={props.inceptionSpyBase}
         />
       </div>
     </div>

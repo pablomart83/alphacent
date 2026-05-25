@@ -92,6 +92,7 @@ export interface PerformanceAnalyticsPayload {
 
 export interface SPYBenchmarkPayload {
   data: Array<{ date: string; close: number }>
+  inception_equity_base?: number | null
 }
 
 interface StrategySlim {

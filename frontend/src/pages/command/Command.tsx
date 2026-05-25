@@ -66,6 +66,10 @@ export function Command() {
   const dashboardQuery = useDashboardSummary(interval)
   const performanceQuery = usePerformanceAnalytics(period, interval)
   const spyQuery = useSpyBenchmark(period, showBenchmark)
+  // ALL-period spy fetch for inception-based alpha calculation in the hover legend.
+  // Always enabled (not gated on showBenchmark) so the inception base is available
+  // even when the benchmark line is hidden. Stale time is long — this rarely changes.
+  const spyAllQuery = useSpyBenchmark('ALL', true)
   const autonomousQuery = useAutonomousStatus()
   const liveSummaryQuery = useLiveSummary()
 
@@ -196,6 +200,8 @@ export function Command() {
       onPercentModeChange={setPercentMode}
       fullscreen={fullscreen}
       onFullscreenToggle={() => setFullscreen((v) => !v)}
+      inceptionSpyBase={spyAllQuery.data?.data?.[0]?.close}
+      inceptionEquityBase={spyAllQuery.data?.inception_equity_base ?? undefined}
     />
   )
 
