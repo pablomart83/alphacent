@@ -143,6 +143,24 @@ class FMPCacheWarmer:
             f"{len(stale_symbols)} stale/missing (fetching from API)"
         )
 
+        # Cap the number of symbols warmed per cycle to protect the FMP rate limit.
+        # Each symbol costs ~5 FMP calls (income-stmt, balance-sheet, key-metrics,
+        # profile, earnings). The cycle also needs FMP calls for signal generation
+        # and conviction scoring. Safe budget: 150 calls = 30 symbols per run.
+        # When there are more stale symbols, prioritise the oldest (None cache_age
+        # first, then sorted by age descending) so the most outdated data gets
+        # refreshed first. Remaining symbols will be picked up in the next cycle.
+        MAX_SYMBOLS_PER_CYCLE = 30
+        if len(stale_symbols) > MAX_SYMBOLS_PER_CYCLE:
+            # Sort: None (never fetched) first, then oldest first
+            stale_symbols.sort(key=lambda x: (x[1] is not None, -(x[1] or 0)))
+            deferred = len(stale_symbols) - MAX_SYMBOLS_PER_CYCLE
+            stale_symbols = stale_symbols[:MAX_SYMBOLS_PER_CYCLE]
+            logger.info(
+                f"Rate limit protection: warming {MAX_SYMBOLS_PER_CYCLE} symbols this cycle "
+                f"({deferred} deferred to next cycle — oldest/missing prioritised)"
+            )
+
         # 3 concurrent workers — keeps FMP call rate well within 300/min budget.
         # Each symbol costs ~5 FMP calls (income-stmt, balance-sheet, key-metrics,
         # profile, earnings-surprise). 3 workers × 5 calls = 15 calls/burst max,
