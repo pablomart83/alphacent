@@ -242,16 +242,25 @@ export function LiveStrategyDetailPanel({
   const updateLive = useUpdateLiveStrategy()
 
   const [editing, setEditing] = useState(false)
-  const [editSize, setEditSize] = useState(row.position_size ?? 900)
-  const [editSl, setEditSl] = useState((row.sl_pct ?? 0.06) * 100)
-  const [editTp, setEditTp] = useState((row.tp_pct ?? 0.15) * 100)
-  const [editConviction, setEditConviction] = useState(row.conviction_min ?? 73)
+  // committed holds the last-saved values so the read-mode display and
+  // startEdit() both reflect what was actually saved, not the stale row prop
+  // (which only updates after the query refetches ~60s later).
+  const [committed, setCommitted] = useState({
+    position_size: row.position_size ?? 900,
+    sl_pct: row.sl_pct ?? 0.06,
+    tp_pct: row.tp_pct ?? 0.15,
+    conviction_min: row.conviction_min ?? 73,
+  })
+  const [editSize, setEditSize] = useState(committed.position_size)
+  const [editSl, setEditSl] = useState(committed.sl_pct * 100)
+  const [editTp, setEditTp] = useState(committed.tp_pct * 100)
+  const [editConviction, setEditConviction] = useState(committed.conviction_min)
 
   const startEdit = () => {
-    setEditSize(row.position_size ?? 900)
-    setEditSl((row.sl_pct ?? 0.06) * 100)
-    setEditTp((row.tp_pct ?? 0.15) * 100)
-    setEditConviction(row.conviction_min ?? 73)
+    setEditSize(committed.position_size)
+    setEditSl(committed.sl_pct * 100)
+    setEditTp(committed.tp_pct * 100)
+    setEditConviction(committed.conviction_min)
     setEditing(true)
   }
 
@@ -261,6 +270,9 @@ export function LiveStrategyDetailPanel({
         liveId: row.id,
         body: { position_size: editSize, sl_pct: editSl / 100, tp_pct: editTp / 100, conviction_min: editConviction },
       })
+      // Update committed immediately so read-mode and next Edit reflect the new values
+      // without waiting for the 60s query refetch.
+      setCommitted({ position_size: editSize, sl_pct: editSl / 100, tp_pct: editTp / 100, conviction_min: editConviction })
       toast.success(`Parameters updated — ${row.template_name ?? row.strategy_id} × ${row.symbol}`, {
         description: `$${editSize.toFixed(0)} · SL ${editSl.toFixed(1)}% · TP ${editTp.toFixed(1)}% · C≥${editConviction}`,
       })
@@ -354,10 +366,10 @@ export function LiveStrategyDetailPanel({
             </div>
           ) : (
             <div className="grid grid-cols-4 gap-1.5">
-              <Metric label="Size (real)" value={`$${(row.position_size ?? 0).toFixed(0)}`} tone="neutral" />
-              <Metric label="SL" value={row.sl_pct != null ? `${(row.sl_pct * 100).toFixed(1)}%` : '—'} tone="neutral" />
-              <Metric label="TP" value={row.tp_pct != null ? `${(row.tp_pct * 100).toFixed(1)}%` : '—'} tone="neutral" />
-              <Metric label="Conv. min" value={String(row.conviction_min ?? '—')} tone="neutral" />
+              <Metric label="Size (real)" value={`$${committed.position_size.toFixed(0)}`} tone="neutral" />
+              <Metric label="SL" value={`${(committed.sl_pct * 100).toFixed(1)}%`} tone="neutral" />
+              <Metric label="TP" value={`${(committed.tp_pct * 100).toFixed(1)}%`} tone="neutral" />
+              <Metric label="Conv. min" value={String(committed.conviction_min)} tone="neutral" />
             </div>
           )}
         </PhaseSection>
@@ -450,16 +462,14 @@ export function LiveStrategyDetailPanel({
         </PhaseSection>
 
         {/* Conviction gate */}
-        {row.conviction_min != null && (
-          <PhaseSection label="Live conviction gate" color="var(--accent-primary)" badge="C">
-            <div className="space-y-1.5">
-              <p className="text-[10px] text-[var(--text-3)]">
-                Signals must score ≥ {row.conviction_min} to trigger a live fill.
-              </p>
-              <ConvictionBar score={row.conviction_min} size="default" showValue />
-            </div>
-          </PhaseSection>
-        )}
+        <PhaseSection label="Live conviction gate" color="var(--accent-primary)" badge="C">
+          <div className="space-y-1.5">
+            <p className="text-[10px] text-[var(--text-3)]">
+              Signals must score ≥ {committed.conviction_min} to trigger a live fill.
+            </p>
+            <ConvictionBar score={committed.conviction_min} size="default" showValue />
+          </div>
+        </PhaseSection>
       </div>
     </div>
   )
