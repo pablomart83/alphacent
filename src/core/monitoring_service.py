@@ -632,11 +632,7 @@ class MonitoringService:
             except Exception as e:
                 logger.error(f"Error processing pending closures: {e}")
 
-            # Demote idle DEMO strategies (runs every 60s alongside pending closures)
-            try:
-                self._demote_idle_strategies()
-            except Exception as e:
-                logger.error(f"Error demoting idle strategies: {e}")
+            # Demote idle DEMO strategies (runs every 6h alongside zombie check — see above)
 
         # Daily sync job (runs once per day after market close)
         if now - self._last_daily_sync >= self._daily_sync_interval:
@@ -5305,11 +5301,14 @@ class MonitoringService:
         Demote DEMO strategies with no open positions or pending orders back to BACKTESTED.
 
         Keeps activation_approved=True so they continue scanning for signals.
-        Runs alongside the time-based exit check (every _fundamental_check_interval).
-        
-        Safety: Uses a fresh session with expire_on_commit=False and a raw SQL
-        double-check to prevent false demotions from stale ORM cache. Also requires
-        24h cooldown since last activation to avoid race conditions with position sync.
+        Runs every 6 hours (zombie check cadence) — NOT every 60s.
+
+        Guards against premature demotion:
+        1. 60-minute recent-fill window: position may not have synced from eToro yet.
+        2. 24-hour trade cooldown: don't demote a strategy that closed a position in
+           the last 24h. A 4H strategy needs up to 4h to reach the next bar boundary;
+           a daily strategy needs up to 24h. Without this, strategies bounce
+           PAPER→BACKTESTED after every trade and never accumulate trade history.
         """
         session = self.db.get_session()
         try:
@@ -5355,6 +5354,27 @@ class MonitoringService:
                     pass
 
                 if not has_positions and not has_pending and not has_recent_fill:
+                    # 24h trade cooldown: don't demote if this strategy closed a
+                    # position in the last 24 hours. After a position closes, the
+                    # next valid entry signal may be up to one bar away (4h for 4H
+                    # strategies, 24h for daily). Demoting immediately means the
+                    # strategy misses its re-entry window and never accumulates trades.
+                    try:
+                        from src.models.orm import TradeJournalORM
+                        _trade_cutoff = datetime.now() - timedelta(hours=24)
+                        _recent_trade = session.query(TradeJournalORM).filter(
+                            TradeJournalORM.strategy_id == s.id,
+                            TradeJournalORM.exit_time >= _trade_cutoff,
+                        ).first()
+                        if _recent_trade:
+                            logger.debug(
+                                f"Skipping demotion of {s.name}: closed a position "
+                                f"within the last 24h (exit_time={_recent_trade.exit_time})"
+                            )
+                            continue
+                    except Exception as _trade_err:
+                        logger.debug(f"24h trade cooldown check failed for {s.name}: {_trade_err}")
+
                     # Handle pending_retirement strategies: retire them immediately.
                     # pending_retirement means the system already decided these strategies
                     # have expired edge. Once all positions close, retire them.
