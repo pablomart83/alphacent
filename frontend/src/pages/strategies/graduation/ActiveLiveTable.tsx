@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   Activity,
@@ -255,6 +255,26 @@ export function LiveStrategyDetailPanel({
   const [editSl, setEditSl] = useState(committed.sl_pct * 100)
   const [editTp, setEditTp] = useState(committed.tp_pct * 100)
   const [editConviction, setEditConviction] = useState(committed.conviction_min)
+
+  // Reset all local state when the selected strategy changes.
+  // The panel is not remounted on row switch — it receives a new row prop —
+  // so without this the previous strategy's committed/edit values bleed through.
+  const prevRowId = useRef(row.id)
+  if (prevRowId.current !== row.id) {
+    prevRowId.current = row.id
+    const next = {
+      position_size: row.position_size ?? 900,
+      sl_pct: row.sl_pct ?? 0.06,
+      tp_pct: row.tp_pct ?? 0.15,
+      conviction_min: row.conviction_min ?? 73,
+    }
+    setCommitted(next)
+    setEditSize(next.position_size)
+    setEditSl(next.sl_pct * 100)
+    setEditTp(next.tp_pct * 100)
+    setEditConviction(next.conviction_min)
+    setEditing(false)
+  }
 
   const startEdit = () => {
     setEditSize(committed.position_size)
