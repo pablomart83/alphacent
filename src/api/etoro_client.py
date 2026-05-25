@@ -1189,6 +1189,21 @@ class EToroAPIClient:
             credit = float(client_portfolio.get("credit", 0))
             positions = client_portfolio.get("positions", [])
 
+            # eToro freezes cash for pending entry orders (ordersForOpen).
+            # The `credit` field is the gross cash balance — it does NOT reflect
+            # frozen amounts. True available cash = credit − sum(frozenAmount).
+            # Without this deduction, the balance check in risk_manager sees
+            # $6,947 when only $1,963 is actually spendable, causing orders to
+            # be sized and submitted that eToro then rejects with error 604.
+            try:
+                frozen_for_orders = sum(
+                    float(o.get("frozenAmount", 0))
+                    for o in client_portfolio.get("ordersForOpen", [])
+                )
+            except Exception:
+                frozen_for_orders = 0.0
+            available_credit = max(0.0, credit - frozen_for_orders)
+
             # eToro doesn't surface an explicit equity field on either account
             # type. Equity = credit (available cash) + sum of position
             # invested amounts; unrealized P&L is added once we've fetched it
@@ -1197,7 +1212,7 @@ class EToroAPIClient:
                 invested = sum(float(p.get("amount", 0)) for p in positions)
             except Exception:
                 invested = 0.0
-            equity = credit + invested
+            equity = credit + invested  # equity uses gross credit (frozen is still ours)
 
             # Calculate metrics
             positions_count = len([p for p in positions if p.get("isBuy") is not None or p.get("IsBuy") is not None])
@@ -1225,14 +1240,16 @@ class EToroAPIClient:
             # is always free-to-trade); LIVE follows the same pattern on the
             # Agent Portfolio (the mirror wrapper handles margin, not the
             # virtual side we see).
+            # Use available_credit (credit minus frozen pending orders) so
+            # balance checks downstream see the true spendable cash.
             used_margin = invested
-            available_margin = max(0.0, credit)
-            buying_power = available_margin
+            available_margin = available_credit
+            buying_power = available_credit
 
             account_info = AccountInfo(
                 account_id=f"{self.account_type}_account_001",
                 mode=self.mode,
-                balance=credit,
+                balance=available_credit,
                 buying_power=buying_power,
                 margin_used=used_margin,
                 margin_available=available_margin,
