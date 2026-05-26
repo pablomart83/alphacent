@@ -5070,6 +5070,17 @@ class MonitoringService:
                                     )
                         
                         if should_retire:
+                            # LIVE strategies are CIO-approved — never retire them via decay.
+                            if strat_orm.status == StrategyStatus.LIVE:
+                                logger.info(
+                                    f"[StrategyDecay] Skipping retirement of LIVE strategy {strat_orm.name} "
+                                    f"(decay=0) — LIVE strategies are CIO-approved, decay score reset to 5"
+                                )
+                                meta['decay_score'] = 5
+                                strat_orm.strategy_metadata = meta
+                                flag_modified(strat_orm, 'strategy_metadata')
+                                continue
+
                             top_penalties = sorted(penalties.items(), key=lambda x: -x[1])[:3]
                             reason_parts = [f"{k}(-{v:.0f})" for k, v in top_penalties]
                             retirement_reason = f"Edge expired (decay=0): {', '.join(reason_parts)}"
@@ -5093,7 +5104,19 @@ class MonitoringService:
                                 strat_orm.strategy_metadata = meta
                                 flag_modified(strat_orm, 'strategy_metadata')
                             else:
-                                # No open positions — demote to BACKTESTED (not permanently retired)
+                                # No open positions — demote to BACKTESTED (not permanently retired).
+                                # LIVE strategies are CIO-approved — never demote them via decay.
+                                # They can only be retired by explicit CIO action.
+                                if strat_orm.status == StrategyStatus.LIVE:
+                                    logger.info(
+                                        f"[StrategyDecay] Skipping demotion of LIVE strategy {strat_orm.name} "
+                                        f"(decay=0, no open positions) — LIVE strategies are CIO-approved, "
+                                        f"decay score reset to 5 to allow re-entry"
+                                    )
+                                    meta['decay_score'] = 5  # Reset so it can re-enter
+                                    strat_orm.strategy_metadata = meta
+                                    flag_modified(strat_orm, 'strategy_metadata')
+                                    continue
                                 logger.info(
                                     f"[StrategyDecay] Demoting {strat_orm.name} to BACKTESTED "
                                     f"(decay=0, no open positions): {retirement_reason}"
@@ -5323,7 +5346,6 @@ class MonitoringService:
             demo_strategies = session.query(StrategyORM).filter(
                 StrategyORM.status == StrategyStatus.PAPER
             ).all()
-
             if not demo_strategies:
                 return
 
