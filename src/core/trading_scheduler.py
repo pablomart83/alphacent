@@ -1510,19 +1510,24 @@ class TradingScheduler:
                                                         continue
 
                                                     # CIO position_size is stored in REAL dollars.
-                                                    # Convert to virtual for comparison with the
-                                                    # pipeline output (which runs on virtual equity).
+                                                    # Convert to virtual — this IS the order size.
+                                                    # The pipeline's validate_signal checks portfolio-
+                                                    # level constraints (heat cap, sector cap, VaR).
+                                                    # If those pass, use the CIO-approved size directly.
+                                                    # The pipeline's per-trade vol/drawdown scaling
+                                                    # must NOT reduce below the CIO's decision — the
+                                                    # CIO approved this size knowing the strategy.
                                                     _mirror = _live_cfg.get('mirror_ratio', 0.10)
                                                     _cio_real = float(_approval.position_size)
                                                     _cio_cap_virtual = _cio_real / _mirror
                                                     _live_size = max(
                                                         _live_min,
-                                                        min(_live_max, min(_live_val.position_size, _cio_cap_virtual))
+                                                        min(_live_max, _cio_cap_virtual)
                                                     )
                                                     logger.info(
                                                         f"Live fill routing sizing: {_sig_sym} "
-                                                        f"pipeline=${_live_val.position_size:.0f}v "
-                                                        f"CIO_cap=${_cio_real:.0f}r (${_cio_cap_virtual:.0f}v) "
+                                                        f"CIO=${_cio_real:.0f}r (${_cio_cap_virtual:.0f}v) "
+                                                        f"pipeline=${_live_val.position_size:.0f}v (advisory only) "
                                                         f"→ final=${_live_size:.0f}v (${_live_size * _mirror:.0f}r)"
                                                     )
                                                 else:
@@ -2359,22 +2364,24 @@ class TradingScheduler:
                                             )
                                             continue
 
-                                        # Pipeline size is the vol-scaled, drawdown-adjusted,
-                                        # cap-checked size (virtual dollars).
                                         # CIO position_size is stored in REAL dollars — convert
-                                        # to virtual for comparison with the pipeline output.
+                                        # to virtual. This IS the order size; the pipeline's
+                                        # per-trade vol/drawdown scaling is advisory only.
+                                        # validate_signal already checked portfolio-level
+                                        # constraints (heat cap, sector cap, VaR) — if those
+                                        # passed, use the CIO-approved size directly.
                                         _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
                                         _pipeline_size2 = _live_validation2.position_size
                                         _cio_real2 = float(_appr.position_size)
                                         _cio_cap_virtual2 = _cio_real2 / _mirror2
                                         _live_size2 = max(
                                             _live_min2,
-                                            min(_live_max2, min(_pipeline_size2, _cio_cap_virtual2))
+                                            min(_live_max2, _cio_cap_virtual2)
                                         )
                                         logger.info(
                                             f"Live pass sizing: {_live_sym} "
-                                            f"pipeline=${_pipeline_size2:.0f}v "
-                                            f"CIO_cap=${_cio_real2:.0f}r (${_cio_cap_virtual2:.0f}v) "
+                                            f"CIO=${_cio_real2:.0f}r (${_cio_cap_virtual2:.0f}v) "
+                                            f"pipeline=${_pipeline_size2:.0f}v (advisory only) "
                                             f"→ final=${_live_size2:.0f}v (${_live_size2 * _mirror2:.0f}r) "
                                             f"[min={_live_min2:.0f}, max={_live_max2:.0f}]"
                                         )
