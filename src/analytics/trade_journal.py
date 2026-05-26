@@ -200,6 +200,32 @@ class TradeJournal:
                 logger.info(f"Trade journal entry already exists for {trade_id}, skipping duplicate insert")
                 return
 
+            # Dedup by (symbol, strategy_id, account_type) for open positions.
+            # Two code paths can call log_entry for the same fill:
+            #   1. check_submitted_orders: trade_id = order UUID
+            #   2. sync_positions (close path): trade_id = eToro position ID
+            # Both use different trade_ids so the trade_id check above doesn't catch it.
+            # If an open entry already exists for this (symbol, strategy_id, account_type),
+            # skip — the position is already tracked.
+            if strategy_id and strategy_id != "unknown":
+                existing_open = (
+                    session.query(TradeJournalEntryORM)
+                    .filter_by(
+                        symbol=symbol,
+                        strategy_id=strategy_id,
+                        account_type=account_type,
+                    )
+                    .filter(TradeJournalEntryORM.exit_time.is_(None))
+                    .first()
+                )
+                if existing_open:
+                    logger.info(
+                        f"Open trade_journal entry already exists for {symbol} "
+                        f"strategy={strategy_id} account={account_type} "
+                        f"(trade_id={existing_open.trade_id}) — skipping duplicate insert for {trade_id}"
+                    )
+                    return
+
             entry = TradeJournalEntryORM(
                 trade_id=trade_id,
                 strategy_id=strategy_id,
