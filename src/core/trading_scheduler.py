@@ -2241,26 +2241,24 @@ class TradingScheduler:
                                         _skip_live_entries = True
 
                                 if not _skip_live_entries:
-                                    # Check for any live order submitted in the last 4 hours.
-                                    # This catches the pre-market window where eToro queues
-                                    # orders and the DEMO monitor marks them CANCELLED (404)
-                                    # before they fill — without this, the guard passes every
-                                    # cycle and fires a new order every 10 minutes overnight.
-                                    from datetime import timedelta as _td_guard
-                                    _recent_cutoff = datetime.now() - _td_guard(hours=4)
-                                    _recent_live_order = session.query(OrderORM).filter(
-                                        OrderORM.account_type == 'live',
-                                        OrderORM.symbol == _live_sym,
-                                        OrderORM.order_action == 'entry',
-                                        OrderORM.submitted_at >= _recent_cutoff,
+                                    # Check for an open live position — the only valid
+                                    # reason to skip a LIVE entry signal is if the
+                                    # strategy already has an open position in this symbol.
+                                    # The old 4h cooldown (checking recent orders regardless
+                                    # of position state) was wrong: it blocked re-entry after
+                                    # a manual close, which is a legitimate signal.
+                                    _live_open_pos = session.query(PositionORM).filter(
+                                        PositionORM.account_type == 'live',
+                                        PositionORM.symbol == _live_sym,
+                                        PositionORM.strategy_id == _live_strat_id,
+                                        PositionORM.closed_at.is_(None),
+                                        PositionORM.pending_closure == False,
                                     ).first()
-                                    if _recent_live_order:
+                                    if _live_open_pos:
                                         logger.info(
-                                            f"Live pass: recent live order exists for {_live_sym} "
-                                            f"(order={_recent_live_order.id[:8]}, "
-                                            f"status={_recent_live_order.status}, "
-                                            f"submitted={_recent_live_order.submitted_at}) "
-                                            f"— skipping entry signals (4h cooldown)"
+                                            f"Live pass: open position exists for {_live_sym} "
+                                            f"(position={str(_live_open_pos.id)[:8]}) "
+                                            f"— skipping entry signals"
                                         )
                                         _skip_live_entries = True
                             except Exception as _dup_check_err:
