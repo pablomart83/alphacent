@@ -1511,24 +1511,18 @@ class TradingScheduler:
 
                                                     # CIO position_size is stored in REAL dollars.
                                                     # Convert to virtual — this IS the order size.
-                                                    # The pipeline's validate_signal checks portfolio-
-                                                    # level constraints (heat cap, sector cap, VaR).
-                                                    # If those pass, use the CIO-approved size directly.
-                                                    # The pipeline's per-trade vol/drawdown scaling
-                                                    # must NOT reduce below the CIO's decision — the
-                                                    # CIO approved this size knowing the strategy.
+                                                    # No YAML cap applies. The CIO set this value
+                                                    # at graduation with full context; it is final.
+                                                    # validate_signal above checked portfolio-level
+                                                    # constraints (heat cap, sector cap, VaR) —
+                                                    # if those passed, execute at exactly the CIO size.
                                                     _mirror = _live_cfg.get('mirror_ratio', 0.10)
                                                     _cio_real = float(_approval.position_size)
-                                                    _cio_cap_virtual = _cio_real / _mirror
-                                                    _live_size = max(
-                                                        _live_min,
-                                                        min(_live_max, _cio_cap_virtual)
-                                                    )
+                                                    _live_size = _cio_real / _mirror
                                                     logger.info(
                                                         f"Live fill routing sizing: {_sig_sym} "
-                                                        f"CIO=${_cio_real:.0f}r (${_cio_cap_virtual:.0f}v) "
-                                                        f"pipeline=${_live_val.position_size:.0f}v (advisory only) "
-                                                        f"→ final=${_live_size:.0f}v (${_live_size * _mirror:.0f}r)"
+                                                        f"CIO=${_cio_real:.0f}r → ${_live_size:.0f}v "
+                                                        f"(pipeline=${_live_val.position_size:.0f}v advisory)"
                                                     )
                                                 else:
                                                     logger.warning(
@@ -1537,7 +1531,7 @@ class TradingScheduler:
                                                     )
                                                     # CIO size is real dollars — convert to virtual
                                                     _mirror = _live_cfg.get('mirror_ratio', 0.10)
-                                                    _live_size = max(_live_min, min(_live_max, float(_approval.position_size) / _mirror))
+                                                    _live_size = float(_approval.position_size) / _mirror
 
                                                 # Execute with CIO-approved SL/TP
                                                 _live_order = self._live_order_executor.execute_signal(
@@ -2364,38 +2358,30 @@ class TradingScheduler:
                                             )
                                             continue
 
-                                        # CIO position_size is stored in REAL dollars — convert
-                                        # to virtual. This IS the order size; the pipeline's
-                                        # per-trade vol/drawdown scaling is advisory only.
-                                        # validate_signal already checked portfolio-level
-                                        # constraints (heat cap, sector cap, VaR) — if those
-                                        # passed, use the CIO-approved size directly.
+                                        # CIO position_size is stored in REAL dollars.
+                                        # Convert to virtual — this IS the order size. Final.
+                                        # No YAML min/max applies. validate_signal above checked
+                                        # portfolio-level constraints; if those passed, execute
+                                        # at exactly the CIO-approved size.
                                         _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
                                         _pipeline_size2 = _live_validation2.position_size
                                         _cio_real2 = float(_appr.position_size)
-                                        _cio_cap_virtual2 = _cio_real2 / _mirror2
-                                        _live_size2 = max(
-                                            _live_min2,
-                                            min(_live_max2, _cio_cap_virtual2)
-                                        )
+                                        _live_size2 = _cio_real2 / _mirror2
                                         logger.info(
                                             f"Live pass sizing: {_live_sym} "
-                                            f"CIO=${_cio_real2:.0f}r (${_cio_cap_virtual2:.0f}v) "
-                                            f"pipeline=${_pipeline_size2:.0f}v (advisory only) "
-                                            f"→ final=${_live_size2:.0f}v (${_live_size2 * _mirror2:.0f}r) "
-                                            f"[min={_live_min2:.0f}, max={_live_max2:.0f}]"
+                                            f"CIO=${_cio_real2:.0f}r → ${_live_size2:.0f}v "
+                                            f"(pipeline=${_pipeline_size2:.0f}v advisory)"
                                         )
                                     else:
                                         # Fallback: no risk_manager or no account info —
-                                        # use CIO size (real dollars) converted to virtual,
-                                        # clamped to order bounds.
+                                        # use CIO size (real dollars) converted to virtual.
                                         logger.warning(
                                             f"Live pass: risk_manager or account_info unavailable "
                                             f"for {_live_sym} — falling back to CIO size "
                                             f"(validate_signal bypassed)"
                                         )
                                         _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
-                                        _live_size2 = max(_live_min2, min(_live_max2, float(_appr.position_size) / _mirror2))
+                                        _live_size2 = float(_appr.position_size) / _mirror2
 
                                     try:
                                         _live_order2 = self._live_order_executor.execute_signal(
