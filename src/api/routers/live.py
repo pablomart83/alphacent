@@ -132,43 +132,44 @@ async def get_live_divergence(
         LiveStrategyORM.retired_at.is_(None)
     ).all()
 
+    if not live_rows:
+        return {"divergence": [], "count": 0}
+
+    strategy_ids = [ls.strategy_id for ls in live_rows]
+
+    # Single bulk query: aggregate stats for all live strategies by account_type.
+    # Replaces 2×N individual queries (one paper + one live per strategy).
+    bulk_stats = db.execute(
+        text("""
+            SELECT
+                strategy_id,
+                symbol,
+                account_type,
+                COUNT(*) AS trades,
+                ROUND(CASE WHEN STDDEV(pnl) > 0
+                     THEN (AVG(pnl) / STDDEV(pnl)) * SQRT(252) ELSE 0
+                END::numeric, 3) AS sharpe,
+                ROUND(100.0 * SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)
+                    / NULLIF(COUNT(*), 0)::numeric, 1) AS win_rate,
+                ROUND(COALESCE(SUM(pnl), 0)::numeric, 2) AS total_pnl
+            FROM trade_journal
+            WHERE strategy_id = ANY(:sids)
+              AND pnl IS NOT NULL
+              AND account_type IN ('demo', 'live')
+            GROUP BY strategy_id, symbol, account_type
+        """),
+        {"sids": strategy_ids},
+    ).fetchall()
+
+    # Index by (strategy_id, account_type) for O(1) lookup
+    stats_map: dict = {}
+    for row in bulk_stats:
+        stats_map[(row.strategy_id, row.account_type)] = row
+
     results = []
     for ls in live_rows:
-        # Paper stats (demo account_type)
-        paper = db.execute(
-            text("""
-                SELECT
-                    COUNT(*) AS trades,
-                    ROUND(CASE WHEN STDDEV(pnl) > 0
-                         THEN (AVG(pnl) / STDDEV(pnl)) * SQRT(252) ELSE 0
-                    END::numeric, 3) AS sharpe,
-                    ROUND(100.0 * SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)
-                        / NULLIF(COUNT(*), 0)::numeric, 1) AS win_rate,
-                    ROUND(COALESCE(SUM(pnl), 0)::numeric, 2) AS total_pnl
-                FROM trade_journal
-                WHERE strategy_id = :sid AND symbol = :sym
-                  AND pnl IS NOT NULL AND account_type = 'demo'
-            """),
-            {"sid": ls.strategy_id, "sym": ls.symbol},
-        ).fetchone()
-
-        # Live stats
-        live_stats = db.execute(
-            text("""
-                SELECT
-                    COUNT(*) AS trades,
-                    ROUND(CASE WHEN STDDEV(pnl) > 0
-                         THEN (AVG(pnl) / STDDEV(pnl)) * SQRT(252) ELSE 0
-                    END::numeric, 3) AS sharpe,
-                    ROUND(100.0 * SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END)
-                        / NULLIF(COUNT(*), 0)::numeric, 1) AS win_rate,
-                    ROUND(COALESCE(SUM(pnl), 0)::numeric, 2) AS total_pnl
-                FROM trade_journal
-                WHERE strategy_id = :sid AND symbol = :sym
-                  AND pnl IS NOT NULL AND account_type = 'live'
-            """),
-            {"sid": ls.strategy_id, "sym": ls.symbol},
-        ).fetchone()
+        paper = stats_map.get((ls.strategy_id, 'demo'))
+        live_stats = stats_map.get((ls.strategy_id, 'live'))
 
         paper_sharpe = float(paper.sharpe) if paper and paper.sharpe is not None else None
         live_sharpe = float(live_stats.sharpe) if live_stats and live_stats.sharpe is not None else None
@@ -186,17 +187,14 @@ async def get_live_divergence(
             "sl_pct": ls.sl_pct,
             "tp_pct": ls.tp_pct,
             "conviction_min": ls.conviction_min,
-            # Paper stats
             "paper_trades": int(paper.trades) if paper else 0,
             "paper_sharpe": paper_sharpe,
             "paper_win_rate": float(paper.win_rate) if paper and paper.win_rate is not None else None,
             "paper_pnl": float(paper.total_pnl) if paper and paper.total_pnl is not None else None,
-            # Live stats
             "live_trades": int(live_stats.trades) if live_stats else 0,
             "live_sharpe": live_sharpe,
             "live_win_rate": float(live_stats.win_rate) if live_stats and live_stats.win_rate is not None else None,
             "live_pnl": float(live_stats.total_pnl) if live_stats and live_stats.total_pnl is not None else None,
-            # Divergence
             "divergence_pct": divergence_pct,
             "divergence_flag": divergence_pct is not None and divergence_pct < 50,
         })

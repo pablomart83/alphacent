@@ -492,7 +492,7 @@ async def get_comprehensive_regime_analysis(
 ):
     """
     Comprehensive regime analysis with per-asset-class detection and market insights.
-    
+
     Returns:
         - current_regimes: per-asset-class regime detection (equity, crypto, forex, commodity)
         - performance_by_regime: strategy performance grouped by regime
@@ -501,76 +501,95 @@ async def get_comprehensive_regime_analysis(
         - market_context: FRED macro data (VIX, rates, yield curve, etc.)
         - crypto_cycle: halving cycle phase and recommendation
         - carry_rates: forex carry differentials
+
+    Performance: the expensive market-data sections (detect_sub_regime ×4,
+    get_market_context, get_crypto_cycle_phase, get_carry_rates,
+    get_market_quality_score) are cached for 10 minutes. The DB sections
+    (performance_by_regime, strategy_regime_performance) run fresh each call
+    since they read from the DB which is always current.
     """
+    import time as _time
     logger.info(f"Getting comprehensive regime analysis for user {username}")
 
     result: Dict[str, Any] = {}
 
-    # --- 1. Per-asset-class regime detection ---
-    try:
-        from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-        from src.data.market_data_manager import MarketDataManager
-        from src.models.database import get_database
+    # --- 1. Per-asset-class regime detection (10-min TTL cache) ---
+    _mda_cache = getattr(get_comprehensive_regime_analysis, '_mda_cache', None)
+    _mda_fresh = _mda_cache and (_time.time() - _mda_cache[0]) < 600
 
-        db = get_database()
-        market_data = MarketDataManager(db)
-        analyzer = MarketStatisticsAnalyzer(market_data)
+    if _mda_fresh:
+        result['current_regimes'] = _mda_cache[1].get('current_regimes', {})
+        result['market_context'] = _mda_cache[1].get('market_context', {})
+        result['crypto_cycle'] = _mda_cache[1].get('crypto_cycle', {})
+        result['carry_rates'] = _mda_cache[1].get('carry_rates', {})
+        result['market_quality'] = _mda_cache[1].get('market_quality', {'score': 50, 'grade': 'normal'})
+    else:
+        _cached_mda: Dict[str, Any] = {}
+        try:
+            from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+            from src.data.market_data_manager import MarketDataManager
+            from src.models.database import get_database
 
-        regimes = {}
-        for label, symbols in [
-            ('equity', ['SPY', 'QQQ', 'DIA']),
-            ('crypto', ['BTC', 'ETH']),
-            ('forex', ['EURUSD', 'GBPUSD', 'USDJPY']),
-            ('commodity', ['GOLD', 'OIL', 'SILVER']),
-        ]:
+            db = get_database()
+            market_data = MarketDataManager(db)
+            analyzer = MarketStatisticsAnalyzer(market_data)
+
+            regimes = {}
+            for label, symbols in [
+                ('equity', ['SPY', 'QQQ', 'DIA']),
+                ('crypto', ['BTC', 'ETH']),
+                ('forex', ['EURUSD', 'GBPUSD', 'USDJPY']),
+                ('commodity', ['GOLD', 'OIL', 'SILVER']),
+            ]:
+                try:
+                    sub_regime, confidence, data_quality, metrics = analyzer.detect_sub_regime(symbols=symbols)
+                    regimes[label] = {
+                        'regime': sub_regime.value if hasattr(sub_regime, 'value') else str(sub_regime),
+                        'confidence': round(confidence, 3),
+                        'data_quality': data_quality,
+                        'change_20d': round(metrics.get('avg_change_20d', 0) * 100, 2),
+                        'change_50d': round(metrics.get('avg_change_50d', 0) * 100, 2),
+                        'atr_ratio': round(metrics.get('avg_atr_ratio', 0) * 100, 2),
+                        'symbols': symbols,
+                    }
+                except Exception as e:
+                    regimes[label] = {'regime': 'unknown', 'error': str(e)}
+
+            _cached_mda['current_regimes'] = regimes
+
             try:
-                sub_regime, confidence, data_quality, metrics = analyzer.detect_sub_regime(symbols=symbols)
-                regimes[label] = {
-                    'regime': sub_regime.value if hasattr(sub_regime, 'value') else str(sub_regime),
-                    'confidence': round(confidence, 3),
-                    'data_quality': data_quality,
-                    'change_20d': round(metrics.get('avg_change_20d', 0) * 100, 2),
-                    'change_50d': round(metrics.get('avg_change_50d', 0) * 100, 2),
-                    'atr_ratio': round(metrics.get('avg_atr_ratio', 0) * 100, 2),
-                    'symbols': symbols,
-                }
-            except Exception as e:
-                regimes[label] = {'regime': 'unknown', 'error': str(e)}
+                _cached_mda['market_context'] = analyzer.get_market_context()
+            except Exception:
+                _cached_mda['market_context'] = {}
 
-        result['current_regimes'] = regimes
-    except Exception as e:
-        logger.error(f"Regime detection failed: {e}")
-        result['current_regimes'] = {}
+            try:
+                _cached_mda['crypto_cycle'] = analyzer.get_crypto_cycle_phase()
+            except Exception:
+                _cached_mda['crypto_cycle'] = {}
 
-    # --- 2. Market context from FRED ---
-    try:
-        market_context = analyzer.get_market_context()
-        result['market_context'] = market_context
-    except Exception as e:
-        result['market_context'] = {}
+            try:
+                _cached_mda['carry_rates'] = analyzer.get_carry_rates()
+            except Exception:
+                _cached_mda['carry_rates'] = {}
 
-    # --- 3. Crypto cycle phase ---
-    try:
-        crypto_cycle = analyzer.get_crypto_cycle_phase()
-        result['crypto_cycle'] = crypto_cycle
-    except Exception as e:
-        result['crypto_cycle'] = {}
+            try:
+                _cached_mda['market_quality'] = analyzer.get_market_quality_score()
+            except Exception:
+                _cached_mda['market_quality'] = {'score': 50, 'grade': 'normal'}
 
-    # --- 4. Forex carry rates ---
-    try:
-        carry_rates = analyzer.get_carry_rates()
-        result['carry_rates'] = carry_rates
-    except Exception as e:
-        result['carry_rates'] = {}
+            get_comprehensive_regime_analysis._mda_cache = (_time.time(), _cached_mda)
 
-    # --- 5. Market Quality Score ---
-    try:
-        market_quality = analyzer.get_market_quality_score()
-        result['market_quality'] = market_quality
-    except Exception as e:
-        result['market_quality'] = {'score': 50, 'grade': 'normal', 'reason': str(e)}
+        except Exception as e:
+            logger.error(f"Regime detection failed: {e}")
+            _cached_mda.setdefault('current_regimes', {})
+            _cached_mda.setdefault('market_context', {})
+            _cached_mda.setdefault('crypto_cycle', {})
+            _cached_mda.setdefault('carry_rates', {})
+            _cached_mda.setdefault('market_quality', {'score': 50, 'grade': 'normal', 'reason': str(e)})
 
-    # --- 5. Performance by regime (from DB) ---
+        result.update(_cached_mda)
+
+    # --- 2. Performance by regime (from DB, always fresh) ---
     try:
         strategies = session.query(StrategyORM).filter(
             StrategyORM.status.in_(['PAPER', 'LIVE', 'RETIRED'])
@@ -627,7 +646,7 @@ async def get_comprehensive_regime_analysis(
         logger.error(f"Regime performance calc failed: {e}")
         result['performance_by_regime'] = []
 
-    # --- 6. Regime transitions (from config history) ---
+    # --- 3. Regime transitions (from YAML, always fresh) ---
     try:
         import yaml
         from pathlib import Path
@@ -647,7 +666,7 @@ async def get_comprehensive_regime_analysis(
     except Exception:
         result['regime_transitions'] = []
 
-    # --- 7. Strategy performance by regime (heatmap data) ---
+    # --- 4. Strategy performance by regime (heatmap data) ---
     try:
         strat_regime_perf = []
         # Group strategies by template name, then by regime
