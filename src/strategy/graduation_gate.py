@@ -105,19 +105,27 @@ def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional
     # Fallback: YAML interval floor when Sharpe is unknown
     iv = (interval or "1d").lower()
     try:
+        import time as _time
         import yaml as _y
         from pathlib import Path as _P
-        _p = _P("config/autonomous_trading.yaml")
-        if _p.exists():
-            with open(_p, "r") as _f:
-                _c = _y.safe_load(_f) or {}
-            pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
-            if iv in ("1h", "2h"):
-                return int(pt_gg.get("min_trades_1h", 12))
-            elif iv == "4h":
-                return int(pt_gg.get("min_trades_4h", 8))
-            else:
-                return int(pt_gg.get("min_trades_1d", 5))
+        # Cache the YAML read for 5 minutes — this function is called 66+ times per request
+        _cache = getattr(_get_min_trades_for_interval, '_yaml_cache', None)
+        if _cache and (_time.time() - _cache[0]) < 300:
+            pt_gg = _cache[1]
+        else:
+            _p = _P("config/autonomous_trading.yaml")
+            pt_gg = {}
+            if _p.exists():
+                with open(_p, "r") as _f:
+                    _c = _y.safe_load(_f) or {}
+                pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
+            _get_min_trades_for_interval._yaml_cache = (_time.time(), pt_gg)
+        if iv in ("1h", "2h"):
+            return int(pt_gg.get("min_trades_1h", 12))
+        elif iv == "4h":
+            return int(pt_gg.get("min_trades_4h", 8))
+        else:
+            return int(pt_gg.get("min_trades_1d", 5))
     except Exception:
         pass
 
@@ -146,6 +154,11 @@ def _get_min_sql_having_trades() -> int:
 
 def _get_min_avg_pnl_per_trade() -> float:
     """Return min avg P&L per trade from paper_trading.graduation_gate.min_avg_pnl_per_trade."""
+    import time as _time
+    _cache = getattr(_get_min_avg_pnl_per_trade, '_cache', None)
+    if _cache and (_time.time() - _cache[0]) < 300:  # 5-min TTL
+        return _cache[1]
+    result = 0.0
     try:
         import yaml as _y
         from pathlib import Path as _P
@@ -153,9 +166,11 @@ def _get_min_avg_pnl_per_trade() -> float:
         if _p.exists():
             with open(_p, "r") as _f:
                 _c = _y.safe_load(_f) or {}
-            return float(_c.get("paper_trading", {}).get("graduation_gate", {}).get("min_avg_pnl_per_trade", 0.0))
+            result = float(_c.get("paper_trading", {}).get("graduation_gate", {}).get("min_avg_pnl_per_trade", 0.0))
     except Exception:
-        return 0.0
+        pass
+    _get_min_avg_pnl_per_trade._cache = (_time.time(), result)
+    return result
 
 
 def _get_regime_adjusted_max_ratio() -> float:
@@ -174,8 +189,9 @@ def _get_regime_adjusted_max_ratio() -> float:
       high_vol:            1.5× (volatile — same)
       unknown / fallback:  2.0×
 
-    Result is cached for 10 minutes to avoid hitting the market data manager
-    on every graduation candidate evaluation.
+    Reads the current regime from config/autonomous_trading.yaml (written by
+    the trading scheduler every cycle) — no market data manager call needed.
+    Result is cached for 10 minutes.
     """
     import time as _time
     _now = _time.time()
@@ -185,13 +201,14 @@ def _get_regime_adjusted_max_ratio() -> float:
 
     result = MAX_QUALIFICATION_RATIO  # fallback
     try:
-        from src.data.market_data_manager import get_market_data_manager
-        from src.strategy.market_analyzer import MarketStatisticsAnalyzer
-        _mdm = get_market_data_manager()
-        if _mdm:
-            _msa = MarketStatisticsAnalyzer(_mdm)
-            _regime, _, _, _ = _msa.detect_sub_regime()
-            _regime_name = _regime.value.lower() if _regime else ""
+        import yaml as _yaml
+        from pathlib import Path as _Path
+        _cfg_path = _Path("config/autonomous_trading.yaml")
+        if _cfg_path.exists():
+            with open(_cfg_path, "r") as _f:
+                _cfg = _yaml.safe_load(_f) or {}
+            _regime_name = (_cfg.get("market_regime", {}) or {}).get("current", "") or ""
+            _regime_name = _regime_name.lower()
             if "trending_up_strong" in _regime_name:
                 result = 3.5
             elif "trending_up" in _regime_name:
@@ -435,6 +452,8 @@ def is_qualified(
     wf_test_trades: Optional[int] = None,
     benchmark_return: Optional[float] = None,
     n_trials: Optional[int] = None,
+    _precomputed_max_ratio: Optional[float] = None,
+    _precomputed_min_avg_pnl: Optional[float] = None,
 ) -> tuple[bool, List[str]]:
     """
     Check whether a (strategy, symbol) pair meets graduation criteria.
@@ -469,7 +488,7 @@ def is_qualified(
 
     # Avg P&L per trade gate — prevents graduating strategies with technically
     # positive total P&L but near-zero per-trade expectancy
-    min_avg_pnl = _get_min_avg_pnl_per_trade()
+    min_avg_pnl = _precomputed_min_avg_pnl if _precomputed_min_avg_pnl is not None else _get_min_avg_pnl_per_trade()
     if trades > 0 and pnl is not None:
         avg_pnl_per_trade = pnl / trades
         if avg_pnl_per_trade <= min_avg_pnl:
@@ -488,7 +507,7 @@ def is_qualified(
     if wf_sharpe and wf_sharpe > 0 and sharpe is not None:
         ratio = sharpe / wf_sharpe
         # Fix 1: regime-adjusted max ratio cap.
-        effective_max_ratio = _get_regime_adjusted_max_ratio()
+        effective_max_ratio = _precomputed_max_ratio if _precomputed_max_ratio is not None else _get_regime_adjusted_max_ratio()
         if ratio < MIN_QUALIFICATION_RATIO:
             reasons.append(
                 f"qualification_ratio={ratio:.2f} < {MIN_QUALIFICATION_RATIO} "
@@ -575,7 +594,18 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
     Excludes:
     - Pairs already active in live_strategies (matched by template_name + symbol)
     - Pairs rejected in the last 14 days (matched by template_name + symbol)
+
+    Performance: all per-candidate data (WF sharpe, SPY benchmark, correlation
+    P&L series) is fetched in bulk SQL queries — no N+1 round-trips.
+    Result is cached for 2 minutes (TTL_SECONDS) since it only changes when a
+    paper trade closes or a graduation approval is recorded.
     """
+    import time as _time
+    _now = _time.time()
+    _cache = getattr(get_graduation_queue, '_cache', None)
+    if _cache and (_now - _cache[0]) < 120:  # 2-minute TTL
+        return _cache[1]
+
     from src.models.orm import StrategyORM, GraduationApprovalORM, LiveStrategyORM
     from sqlalchemy import text
 
@@ -599,14 +629,10 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
         .all()
     )
 
-    # Aggregate trade_journal by (template_name, symbol) across ALL strategy IDs.
-    # COALESCE: prefer strategy_metadata->>'template_name', fall back to name
-    # with version suffix stripped.
-    #
-    # The representative_strategy_id (most recent strategy for this pair) is
-    # resolved in a separate CTE rather than a correlated subquery — PostgreSQL
-    # cannot reference outer-query columns (s.strategy_metadata) inside a
-    # correlated subquery when the outer query uses GROUP BY.
+    # Single query: aggregate stats + representative strategy metadata + WF sharpe.
+    # Pulls everything needed per candidate in one round-trip.
+    # The wf_sharpe columns are extracted directly from strategy_metadata JSON
+    # so we never need a per-candidate ORM fetch.
     candidates_raw = session.execute(
         text("""
             WITH pair_stats AS (
@@ -639,15 +665,6 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 HAVING COUNT(*) >= :min_trades
             ),
             latest_strategy AS (
-                -- For each (template_name, symbol) pair, find the most recently
-                -- created strategy_id whose WF was run on that specific symbol.
-                -- This ensures the WF sharpe used for the qualification ratio
-                -- was calibrated on the same symbol, not on a different primary
-                -- symbol that happened to trade this one via its watchlist.
-                --
-                -- Priority: strategies where symbols[0] = this symbol (WF was
-                -- run on this symbol directly) over watchlist strategies.
-                -- Within each priority tier, most recently created wins.
                 SELECT DISTINCT ON (
                     COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
                     tj.symbol
@@ -666,7 +683,14 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     COALESCE(
                         s.strategy_metadata->>'template_type',
                         s.strategy_metadata->>'strategy_type'
-                    )                                                   AS strategy_type
+                    )                                                   AS strategy_type,
+                    -- WF sharpe pulled directly from JSON — eliminates per-candidate ORM fetch
+                    COALESCE(
+                        (s.strategy_metadata->>'wf_test_sharpe')::float,
+                        (s.strategy_metadata->>'wf_sharpe')::float,
+                        (s.strategy_metadata->>'walk_forward_sharpe')::float
+                    )                                                   AS wf_sharpe,
+                    (s.strategy_metadata->>'wf_test_trades')::int       AS wf_test_trades
                 FROM trade_journal tj
                 JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
@@ -674,10 +698,6 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 ORDER BY
                     COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
                     tj.symbol,
-                    -- Prefer strategies where this symbol appears first in the symbols
-                    -- array (i.e. was the primary symbol for WF validation).
-                    -- JSON array: symbols[0] = primary. We check if the symbol name
-                    -- appears as the first element by looking for it at position 0.
                     CASE WHEN s.symbols::jsonb->0 = to_jsonb(tj.symbol::text)
                          THEN 0 ELSE 1 END ASC,
                     s.created_at DESC
@@ -689,6 +709,8 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 ls.strategy_name,
                 ls.strategy_interval,
                 ls.strategy_type AS sql_strategy_type,
+                ls.wf_sharpe,
+                ls.wf_test_trades,
                 ps.trades,
                 ps.paper_sharpe,
                 ps.win_rate_pct,
@@ -701,19 +723,15 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
               ON ls.template_name = ps.template_name
              AND ls.symbol        = ps.symbol
         """),
-        # G-31: use the minimum per-interval threshold so 1d strategies with
-        # fewer trades than MIN_PAPER_TRADES still appear. is_qualified() applies
-        # the correct per-interval bar after the SQL filter.
         {"min_trades": _get_min_sql_having_trades()},
     ).fetchall()
 
     queue = []
 
-    # Best WF sharpe per template — kept as a secondary fallback from strategies table.
-    # After watchlist elimination (2026-05-18), the representative strategy's WF sharpe
-    # is always the correct one (WF was run on the primary symbol directly).
-    # wf_by_template_symbol from wf_validated_combos.json is no longer needed.
-    best_wf_by_template = {}
+    # ── Bulk query 1: best WF sharpe per template (fallback when SQL CTE returns NULL) ──
+    # The main CTE already pulls wf_sharpe from the representative strategy's JSON.
+    # This is a last-resort fallback for strategies where the JSON key is missing.
+    best_wf_by_template: Dict[str, float] = {}
     try:
         _wf_rows = session.execute(
             text("""
@@ -742,9 +760,6 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     best_wf_by_template[r.template_name] = v
     except Exception:
         pass
-
-    # Improvement 5: count distinct (template_name, symbol) pairs proposed in last 90 days
-    # from signal_decisions — used as n_trials for the DSR gate.
     n_trials_global: Optional[int] = None
     try:
         _n_trials_row = session.execute(
@@ -765,8 +780,46 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
         session.rollback()
         logger.debug(f"n_trials query failed: {_nt_err}")
 
-    # Improvement 6: fetch live strategy P&L series for correlation computation.
-    # Build a dict: {(template_name, symbol): {template_name, symbol, pnl: [...]}}
+    # Bulk query 3: SPY benchmark returns for all distinct first_trade_at dates.
+    # One query instead of one per candidate. Maps date -> spy_return.
+    spy_return_by_date: Dict[str, float] = {}
+    try:
+        _spy_dates = list({
+            row.first_trade_at.date().isoformat()
+            for row in candidates_raw
+            if row.first_trade_at is not None
+        })
+        if _spy_dates:
+            _spy_bulk = session.execute(
+                text("""
+                    SELECT
+                        start_date,
+                        (MAX(close) - MIN(close)) / NULLIF(MIN(close), 0) AS spy_return
+                    FROM (
+                        SELECT
+                            unnest(ARRAY[:dates]::date[]) AS start_date
+                    ) dates
+                    JOIN historical_price_cache hpc
+                      ON hpc.symbol = 'SPY'
+                     AND hpc.interval = '1d'
+                     AND hpc.date >= dates.start_date
+                    GROUP BY start_date
+                """),
+                {"dates": _spy_dates},
+            ).fetchall()
+            for r in _spy_bulk:
+                if r.spy_return is not None:
+                    spy_return_by_date[str(r.start_date)] = float(r.spy_return)
+    except Exception as _spy_bulk_err:
+        session.rollback()
+        logger.debug(f"SPY bulk benchmark fetch failed: {_spy_bulk_err}")
+    # Only fetched for candidates that pass is_qualified() — fetching all 1916
+    # rows upfront to use 1 of them was the main remaining cold-call bottleneck.
+    # We do a two-pass approach: first pass qualifies candidates, second pass
+    # fetches P&L series only for the qualified set.
+    candidate_pnl_by_pair: Dict[tuple, List[float]] = {}  # populated after qualification pass
+
+    # ── Bulk query 5: live strategy P&L series for correlation ──
     live_pnl_series: Dict[tuple, Dict[str, Any]] = {}
     try:
         _live_rows = session.execute(
@@ -792,7 +845,14 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
     except Exception as _live_corr_err:
         session.rollback()
         logger.debug(f"Live P&L series fetch failed: {_live_corr_err}")
+    _effective_max_ratio = _get_regime_adjusted_max_ratio()
 
+    # Pre-read YAML-backed values once — these helpers read the YAML file on
+    # every call. With 66 candidates that's 66 file reads = ~4s of I/O.
+    _min_avg_pnl = _get_min_avg_pnl_per_trade()
+
+    # ── Pass 1: qualify candidates (no P&L series needed yet) ──
+    qualified_candidates = []
     for row in candidates_raw:
         pair = (row.template_name, row.symbol)
         if pair in active_live or pair in recently_rejected:
@@ -805,77 +865,80 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             "paper_total_pnl": float(row.total_pnl) if row.total_pnl is not None else None,
         }
 
-        # Get WF sharpe and metadata from the representative strategy.
-        representative_id = row.representative_strategy_id
-        wf_sharpe = None
-        wf_test_trades: Optional[int] = None
-        strategy_name = row.template_name
-        strategy_interval = None
-        strategy_type = None
-        if representative_id:
-            strategy_interval = row.strategy_interval
-            strategy_type = row.sql_strategy_type
-            strategy = session.query(StrategyORM).filter_by(id=representative_id).first()
-            if strategy:
-                meta = strategy.strategy_metadata or {}
-                wf_sharpe = (
-                    meta.get("wf_test_sharpe")
-                    or meta.get("wf_sharpe")
-                    or meta.get("walk_forward_sharpe")
-                    or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
-                )
-                # Improvement 3: get WF test trades for CI gate
-                _wf_test_trades_raw = (
-                    meta.get("wf_test_trades")
-                    or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_trades")
-                )
-                if _wf_test_trades_raw is not None:
-                    try:
-                        wf_test_trades = int(_wf_test_trades_raw)
-                    except (TypeError, ValueError):
-                        pass
+        wf_sharpe: Optional[float] = float(row.wf_sharpe) if row.wf_sharpe is not None else None
+        wf_test_trades: Optional[int] = int(row.wf_test_trades) if row.wf_test_trades is not None else None
 
-        # best_wf_by_template is a last-resort fallback ONLY when wf_sharpe is None.
-        # Do NOT use it to replace a valid (lower) wf_sharpe — that would inflate
-        # the qualification ratio for strategies whose WF was run on a weaker symbol.
-        # Example: SPY has wf_sharpe=1.16, but best_wf_by_template["4H EMA Ribbon"]=2.92
-        # (from XLK). Using 2.92 for SPY makes ratio=1.72 (passes) instead of 4.32 (fails).
         best_template_wf = best_wf_by_template.get(row.template_name, 0.0)
         if best_template_wf > 0 and not wf_sharpe:
             wf_sharpe = best_template_wf
 
-        # Improvement 4: fetch SPY benchmark return over the paper trading period.
         benchmark_return: Optional[float] = None
         if row.first_trade_at is not None:
-            try:
-                _spy_row = session.execute(
-                    text("""
-                        SELECT
-                            (MAX(close) - MIN(close)) / NULLIF(MIN(close), 0) AS spy_return
-                        FROM historical_price_cache
-                        WHERE symbol = 'SPY'
-                          AND interval = '1d'
-                          AND date >= :start_date
-                    """),
-                    {"start_date": row.first_trade_at},
-                ).fetchone()
-                if _spy_row and _spy_row.spy_return is not None:
-                    benchmark_return = float(_spy_row.spy_return)
-            except Exception as _spy_err:
-                session.rollback()
-                logger.debug(f"SPY benchmark fetch failed for {row.template_name}/{row.symbol}: {_spy_err}")
+            date_key = row.first_trade_at.date().isoformat()
+            benchmark_return = spy_return_by_date.get(date_key)
 
-        qualified, fail_reasons = is_qualified(
+        qualified, _ = is_qualified(
             paper_stats,
             wf_sharpe,
-            interval=strategy_interval,
-            strategy_type=strategy_type,
+            interval=row.strategy_interval,
+            strategy_type=row.sql_strategy_type,
             wf_test_trades=wf_test_trades,
             benchmark_return=benchmark_return,
             n_trials=n_trials_global,
+            _precomputed_max_ratio=_effective_max_ratio,
+            _precomputed_min_avg_pnl=_min_avg_pnl,
         )
-        if not qualified:
-            continue
+        if qualified:
+            qualified_candidates.append((row, paper_stats, wf_sharpe, wf_test_trades, benchmark_return))
+
+    # ── Bulk query 4: P&L series only for qualified candidates ──
+    # Typically 0-10 candidates qualify, so this is a tiny fetch.
+    if qualified_candidates and live_pnl_series:
+        qualified_pairs = [(r.template_name, r.symbol) for r, *_ in qualified_candidates]
+        try:
+            _cand_pnl_rows = session.execute(
+                text("""
+                    SELECT
+                        COALESCE(
+                            s.strategy_metadata->>'template_name',
+                            REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                        )   AS template_name,
+                        tj.symbol,
+                        tj.pnl
+                    FROM trade_journal tj
+                    JOIN strategies s ON s.id = tj.strategy_id
+                    WHERE tj.pnl IS NOT NULL
+                      AND tj.account_type = 'demo'
+                      AND (
+                          COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
+                          tj.symbol
+                      ) = ANY(
+                          SELECT (tname, sym)
+                          FROM unnest(ARRAY[:tnames]::text[], ARRAY[:syms]::text[]) AS t(tname, sym)
+                      )
+                    ORDER BY template_name, tj.symbol, tj.entry_time
+                """),
+                {
+                    "tnames": [p[0] for p in qualified_pairs],
+                    "syms": [p[1] for p in qualified_pairs],
+                },
+            ).fetchall()
+            for r in _cand_pnl_rows:
+                key = (r.template_name, r.symbol)
+                if key not in candidate_pnl_by_pair:
+                    candidate_pnl_by_pair[key] = []
+                candidate_pnl_by_pair[key].append(float(r.pnl))
+        except Exception as _cand_pnl_err:
+            session.rollback()
+            logger.debug(f"Qualified candidate P&L fetch failed: {_cand_pnl_err}")
+
+    # ── Pass 2: build queue entries for qualified candidates ──
+    for row, paper_stats, wf_sharpe, wf_test_trades, benchmark_return in qualified_candidates:
+        pair = (row.template_name, row.symbol)
+        representative_id = row.representative_strategy_id
+        strategy_interval = row.strategy_interval
+        strategy_type = row.sql_strategy_type
+        strategy_name = row.strategy_name or row.template_name
 
         ratio = None
         if wf_sharpe and wf_sharpe > 0 and paper_stats["paper_sharpe"] is not None:
@@ -883,7 +946,6 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
 
         avg_pnl_per_trade = float(row.avg_pnl) if row.avg_pnl is not None else None
 
-        # Compute alpha vs SPY for the queue row (informational)
         alpha_vs_spy: Optional[float] = None
         if benchmark_return is not None and paper_stats["paper_total_pnl"] is not None and paper_stats["paper_trades"] > 0:
             notional = paper_stats["paper_trades"] * 5000.0
@@ -891,63 +953,35 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             if paper_return_pct is not None:
                 alpha_vs_spy = round(paper_return_pct - benchmark_return, 4)
 
-        # Compute DSR for the queue row (informational)
         dsr: Optional[float] = None
         if n_trials_global is not None and paper_stats["paper_sharpe"] is not None and paper_stats["paper_sharpe"] > 0 and paper_stats["paper_trades"] > 0:
             dsr = round(compute_dsr(paper_stats["paper_sharpe"], n_trials_global, paper_stats["paper_trades"]), 4)
 
-        # Improvement 6: compute correlation with each active live strategy.
-        # Fetch the candidate's paper P&L series.
         correlation_with_live: List[Dict[str, Any]] = []
-        try:
-            _candidate_pnl_rows = session.execute(
-                text("""
-                    SELECT tj.pnl
-                    FROM trade_journal tj
-                    JOIN strategies s ON s.id = tj.strategy_id
-                    WHERE tj.pnl IS NOT NULL
-                      AND tj.account_type = 'demo'
-                      AND tj.symbol = :sym
-                      AND COALESCE(
-                            s.strategy_metadata->>'template_name',
-                            REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
-                          ) = :tname
-                    ORDER BY tj.entry_time
-                """),
-                {"sym": row.symbol, "tname": row.template_name},
-            ).fetchall()
-            candidate_pnl = [float(r.pnl) for r in _candidate_pnl_rows]
-
-            for live_key, live_data in live_pnl_series.items():
-                live_pnl = live_data["pnl"]
-                n = min(len(candidate_pnl), len(live_pnl))
-                if n < 5:
-                    corr = None
-                else:
-                    a = candidate_pnl[:n]
-                    b = live_pnl[:n]
-                    mean_a = sum(a) / n
-                    mean_b = sum(b) / n
-                    cov = sum((a[i] - mean_a) * (b[i] - mean_b) for i in range(n))
-                    std_a = math.sqrt(sum((x - mean_a) ** 2 for x in a))
-                    std_b = math.sqrt(sum((x - mean_b) ** 2 for x in b))
-                    if std_a > 0 and std_b > 0:
-                        corr = round(cov / (std_a * std_b), 4)
-                    else:
-                        corr = None
-
-                correlation_with_live.append({
-                    "strategy_name": live_data["template_name"],
-                    "symbol": live_data["symbol"],
-                    "correlation": corr,
-                    "warning": corr is not None and corr > 0.65,
-                })
-        except Exception as _corr_err:
-                session.rollback()
-                logger.debug(f"Could not compute correlation for {row.template_name}/{row.symbol}: {_corr_err}")
+        candidate_pnl = candidate_pnl_by_pair.get(pair, [])
+        for live_key, live_data in live_pnl_series.items():
+            live_pnl = live_data["pnl"]
+            n = min(len(candidate_pnl), len(live_pnl))
+            if n < 5:
+                corr = None
+            else:
+                a = candidate_pnl[:n]
+                b = live_pnl[:n]
+                mean_a = sum(a) / n
+                mean_b = sum(b) / n
+                cov = sum((a[i] - mean_a) * (b[i] - mean_b) for i in range(n))
+                std_a = math.sqrt(sum((x - mean_a) ** 2 for x in a))
+                std_b = math.sqrt(sum((x - mean_b) ** 2 for x in b))
+                corr = round(cov / (std_a * std_b), 4) if std_a > 0 and std_b > 0 else None
+            correlation_with_live.append({
+                "strategy_name": live_data["template_name"],
+                "symbol": live_data["symbol"],
+                "correlation": corr,
+                "warning": corr is not None and corr > 0.65,
+            })
 
         queue.append({
-            "strategy_id": representative_id,  # most recent strategy_id for this pair
+            "strategy_id": representative_id,
             "strategy_name": strategy_name,
             "template_name": row.template_name,
             "symbol": row.symbol,
@@ -961,20 +995,19 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             "strategy_versions": int(row.strategy_versions),
             "strategy_interval": strategy_interval,
             "first_paper_trade": row.first_trade_at.isoformat() if row.first_trade_at else None,
-            # Improvement 3
             "wf_test_trades": wf_test_trades,
-            # Improvement 4
             "benchmark_return": round(benchmark_return, 4) if benchmark_return is not None else None,
             "alpha_vs_spy": alpha_vs_spy,
-            # Improvement 5
             "dsr": dsr,
             "n_trials": n_trials_global,
-            # Improvement 6
             "correlation_with_live": correlation_with_live if correlation_with_live else None,
         })
 
     # Sort by qualification_ratio desc (best candidates first)
     queue.sort(key=lambda x: x.get("qualification_ratio") or 0, reverse=True)
+
+    # Cache result for 2 minutes — invalidated by approve_graduation / reject_graduation
+    get_graduation_queue._cache = (_time.time(), queue)
     return queue
 
 
@@ -1129,6 +1162,8 @@ def approve_graduation(
         f"size=${position_size} sl={sl_pct*100:.1f}% tp={tp_pct*100:.1f}% "
         f"conviction_min={conviction_min}"
     )
+    # Invalidate the graduation queue cache so the next request reflects the approval.
+    get_graduation_queue._cache = None
     return live_row.to_dict()
 
 
@@ -1159,6 +1194,8 @@ def reject_graduation(
     session.commit()
 
     logger.info(f"GRADUATION REJECTED: ({template_name}, {symbol}) — cooldown until {(now + timedelta(days=REJECTION_COOLDOWN_DAYS)).date()}")
+    # Invalidate the graduation queue cache so the next request reflects the rejection.
+    get_graduation_queue._cache = None
     return {
         "strategy_id": strategy_id,
         "symbol": symbol,

@@ -1059,8 +1059,10 @@ export function useGraduationQueue() {
   return useQuery<GraduationQueuePayload>({
     queryKey: ['graduation-queue'],
     queryFn: () => api.get<GraduationQueuePayload>('/strategies/graduation-queue'),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    // Backend caches for 2 min. Poll every 2 min to stay in sync;
+    // staleTime matches so we don't fire a redundant refetch on focus.
+    refetchInterval: 120_000,
+    staleTime: 120_000,
   })
 }
 
