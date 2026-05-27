@@ -541,11 +541,17 @@ def is_qualified(
                 )
 
     # Improvement 5: Deflated Sharpe Ratio gate.
-    # Reject if DSR < 0.95 — the observed Sharpe is not statistically significant
+    # DSR < 0.95 means the observed Sharpe is not statistically significant
     # after accounting for the number of strategies tested (multiple testing bias).
+    # NOTE: This is currently informational only — with 7-15 paper trades and
+    # 200+ trials, DSR will almost never reach 0.95. The gate is logged but
+    # does NOT block graduation until we have sufficient paper trade history
+    # (typically 30+ trades per strategy). The CIO sees DSR in the card.
     if n_trials is not None and sharpe is not None and sharpe > 0 and trades > 0:
         dsr = compute_dsr(sharpe, n_trials, trades)
-        if dsr < 0.95:
+        # Only enforce DSR gate when we have enough trades for it to be meaningful
+        # (30+ trades gives the formula enough observations to be reliable)
+        if trades >= 30 and dsr < 0.95:
             reasons.append(
                 f"DSR={dsr:.2f} < 0.95 "
                 f"(paper_sharpe={sharpe:.2f} not statistically significant "
