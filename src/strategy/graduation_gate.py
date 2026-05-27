@@ -77,24 +77,33 @@ def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional
 
     Improvement 1 — Dynamic Sharpe-based threshold:
       dynamic_min = max(5, ceil((1.96 / paper_sharpe)²)), capped at 30.
-      interval_floor: 5 for 1d, 8 for 4h, 12 for 1h.
-      Final threshold = max(dynamic_min, interval_floor).
+      This is the primary threshold when paper_sharpe is known.
 
-    If paper_sharpe is None or <= 0, fall back to the interval floor only.
+    When paper_sharpe is None or <= 0, fall back to the YAML interval floor
+    (paper_trading.graduation_gate.min_trades_{interval}).
 
-    High-conviction exception (mirrors activation gate):
-      If paper_sharpe ≥ 2.0 AND win_rate ≥ 0.70, reduce min_trades by 40%.
+    The YAML interval floors are NOT combined with the dynamic formula via max()
+    — they are only used as a fallback when Sharpe is unknown. The dynamic
+    formula is self-sufficient: a Sharpe of 0.5 requires 15 trades, a Sharpe
+    of 2.0 requires 4 trades. Applying a YAML floor of 15 on top of the dynamic
+    formula defeats the purpose of the dynamic threshold.
+
+    High-conviction exception:
+      If paper_sharpe ≥ 2.0 AND win_rate ≥ 0.70, reduce by 40% (floor at 5).
     """
-    # Interval floors
-    iv = (interval or "1d").lower()
-    if iv in ("1h", "2h"):
-        interval_floor = 12
-    elif iv == "4h":
-        interval_floor = 8
-    else:
-        interval_floor = 5
+    # Dynamic Sharpe-based threshold — primary when Sharpe is known
+    if paper_sharpe is not None and paper_sharpe > 0:
+        dynamic_min = max(5, math.ceil((1.96 / paper_sharpe) ** 2))
+        dynamic_min = min(dynamic_min, 30)  # cap at 30
 
-    # Try to read YAML overrides for the interval floor
+        # High-conviction exception: strong Sharpe + high win rate → lower bar
+        if win_rate is not None and paper_sharpe >= 2.0 and win_rate >= 0.70:
+            return max(5, int(dynamic_min * 0.60))  # 40% reduction, floor at 5
+
+        return dynamic_min
+
+    # Fallback: YAML interval floor when Sharpe is unknown
+    iv = (interval or "1d").lower()
     try:
         import yaml as _y
         from pathlib import Path as _P
@@ -104,29 +113,20 @@ def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional
                 _c = _y.safe_load(_f) or {}
             pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
             if iv in ("1h", "2h"):
-                interval_floor = int(pt_gg.get("min_trades_1h", interval_floor))
+                return int(pt_gg.get("min_trades_1h", 12))
             elif iv == "4h":
-                interval_floor = int(pt_gg.get("min_trades_4h", interval_floor))
+                return int(pt_gg.get("min_trades_4h", 8))
             else:
-                interval_floor = int(pt_gg.get("min_trades_1d", interval_floor))
+                return int(pt_gg.get("min_trades_1d", 5))
     except Exception:
         pass
 
-    # Dynamic Sharpe-based threshold
-    if paper_sharpe is not None and paper_sharpe > 0:
-        dynamic_min = max(5, math.ceil((1.96 / paper_sharpe) ** 2))
-        dynamic_min = min(dynamic_min, 30)  # cap at 30
-        base = max(dynamic_min, interval_floor)
-    else:
-        base = interval_floor
-
-    # High-conviction exception: strong Sharpe + high win rate → lower bar
-    if paper_sharpe is not None and win_rate is not None:
-        if paper_sharpe >= 2.0 and win_rate >= 0.70:
-            reduced = max(5, int(base * 0.60))  # 40% reduction, floor at 5
-            return reduced
-
-    return base
+    # Hardcoded fallback
+    if iv in ("1h", "2h"):
+        return 12
+    elif iv == "4h":
+        return 8
+    return 5
 
 
 def _get_min_sql_having_trades() -> int:
