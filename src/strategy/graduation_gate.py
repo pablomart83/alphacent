@@ -770,8 +770,9 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
         ).fetchone()
         if _n_trials_row and _n_trials_row.n_trials:
             n_trials_global = int(_n_trials_row.n_trials)
-    except Exception:
-        pass
+    except Exception as _nt_err:
+        session.rollback()
+        logger.debug(f"n_trials query failed: {_nt_err}")
 
     # Improvement 6: fetch live strategy P&L series for correlation computation.
     # Build a dict: {(template_name, symbol): {template_name, symbol, pnl: [...]}}
@@ -797,8 +798,9 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             if key not in live_pnl_series:
                 live_pnl_series[key] = {"template_name": r.template_name, "symbol": r.symbol, "pnl": []}
             live_pnl_series[key]["pnl"].append(float(r.pnl))
-    except Exception:
-        pass
+    except Exception as _live_corr_err:
+        session.rollback()
+        logger.debug(f"Live P&L series fetch failed: {_live_corr_err}")
 
     for row in candidates_raw:
         pair = (row.template_name, row.symbol)
@@ -857,14 +859,16 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                             (MAX(close) - MIN(close)) / NULLIF(MIN(close), 0) AS spy_return
                         FROM historical_price_cache
                         WHERE symbol = 'SPY'
-                          AND timestamp >= :start_date
+                          AND interval = '1d'
+                          AND date >= :start_date
                     """),
                     {"start_date": row.first_trade_at},
                 ).fetchone()
                 if _spy_row and _spy_row.spy_return is not None:
                     benchmark_return = float(_spy_row.spy_return)
-            except Exception:
-                pass
+            except Exception as _spy_err:
+                session.rollback()
+                logger.debug(f"SPY benchmark fetch failed for {row.template_name}/{row.symbol}: {_spy_err}")
 
         qualified, fail_reasons = is_qualified(
             paper_stats,
@@ -944,7 +948,8 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     "warning": corr is not None and corr > 0.65,
                 })
         except Exception as _corr_err:
-            logger.debug(f"Could not compute correlation for {row.template_name}/{row.symbol}: {_corr_err}")
+                session.rollback()
+                logger.debug(f"Could not compute correlation for {row.template_name}/{row.symbol}: {_corr_err}")
 
         queue.append({
             "strategy_id": representative_id,  # most recent strategy_id for this pair
