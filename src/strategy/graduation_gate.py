@@ -829,9 +829,13 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     except (TypeError, ValueError):
                         pass
 
-        # best_wf_by_template is kept as a last-resort fallback only.
+        # best_wf_by_template is a last-resort fallback ONLY when wf_sharpe is None.
+        # Do NOT use it to replace a valid (lower) wf_sharpe — that would inflate
+        # the qualification ratio for strategies whose WF was run on a weaker symbol.
+        # Example: SPY has wf_sharpe=1.16, but best_wf_by_template["4H EMA Ribbon"]=2.92
+        # (from XLK). Using 2.92 for SPY makes ratio=1.72 (passes) instead of 4.32 (fails).
         best_template_wf = best_wf_by_template.get(row.template_name, 0.0)
-        if best_template_wf > 0 and (not wf_sharpe or wf_sharpe < best_template_wf):
+        if best_template_wf > 0 and not wf_sharpe:
             wf_sharpe = best_template_wf
 
         # Improvement 4: fetch SPY benchmark return over the paper trading period.
