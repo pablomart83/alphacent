@@ -133,30 +133,15 @@ def _get_min_sql_having_trades() -> int:
     """
     Return the minimum trades threshold for the graduation SQL HAVING clause.
 
-    G-31: The SQL HAVING must use the LOWEST per-interval threshold so that
-    1d strategies with fewer trades than MIN_PAPER_TRADES still appear in the
-    query result. The per-interval bar is then enforced by is_qualified().
+    G-31: The SQL HAVING must use the LOWEST possible threshold so that all
+    candidates reach is_qualified(), which applies the correct per-interval
+    and Sharpe-based dynamic threshold.
 
-    Without this, a 1d strategy with 10 trades (which passes min_trades_1d=8)
-    is filtered out by HAVING COUNT(*) >= 15 and never reaches is_qualified.
+    With improvement 1 (dynamic Sharpe-based threshold), the minimum is 5
+    (the floor of the dynamic formula). Using a higher value here would filter
+    out high-Sharpe strategies that legitimately need fewer trades.
     """
-    try:
-        import yaml as _y
-        from pathlib import Path as _P
-        _p = _P("config/autonomous_trading.yaml")
-        if _p.exists():
-            with open(_p, "r") as _f:
-                _c = _y.safe_load(_f) or {}
-            pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
-            candidates = [
-                int(pt_gg.get("min_trades_1d", MIN_PAPER_TRADES)),
-                int(pt_gg.get("min_trades_4h", MIN_PAPER_TRADES)),
-                int(pt_gg.get("min_trades_1h", MIN_PAPER_TRADES)),
-            ]
-            return min(candidates)
-    except Exception:
-        pass
-    return MIN_PAPER_TRADES
+    return 5
 
 
 def _get_min_avg_pnl_per_trade() -> float:
