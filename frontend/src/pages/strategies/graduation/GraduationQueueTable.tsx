@@ -176,6 +176,39 @@ export function GraduationQueueTable({
           </span>
         ),
       },
+      {
+        id: 'correlation',
+        header: () => 'Corr.',
+        accessorFn: (r) => {
+          if (!r.correlation_with_live?.length) return null
+          const maxCorr = Math.max(
+            ...r.correlation_with_live
+              .map((c) => c.correlation)
+              .filter((c): c is number => c !== null),
+          )
+          return isFinite(maxCorr) ? maxCorr : null
+        },
+        size: 72,
+        cell: ({ row }) => {
+          const items = row.original.correlation_with_live
+          if (!items?.length) return <span className="text-[var(--text-3)] text-[10px]">—</span>
+          const maxCorr = Math.max(
+            ...items.map((c) => c.correlation).filter((c): c is number => c !== null),
+          )
+          if (!isFinite(maxCorr)) return <span className="text-[var(--text-3)] text-[10px]">—</span>
+          const color =
+            maxCorr > 0.8
+              ? 'var(--pnl-down)'
+              : maxCorr > 0.65
+                ? 'var(--status-warning)'
+                : 'var(--pnl-up)'
+          return (
+            <span className="mono tabular-nums text-[11px]" style={{ color }}>
+              {maxCorr.toFixed(2)}
+            </span>
+          )
+        },
+      },
     ],
     [],
   )

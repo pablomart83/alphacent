@@ -2399,7 +2399,9 @@ class StrategyProposer:
                 # Test-dominant path: test Sharpe is strong, train is non-negative.
                 # The test period is more recent — if it shows edge, the strategy works NOW.
                 # SHORTs must also clear a minimum test_trades floor to avoid n=2-3 flukes.
-                elif ts >= -0.1 and tes >= min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate and (not is_short or test_trades >= short_min_trades):
+                # Consistency gate (improvement 2): (tes - ts) <= 1.5 — if the jump is larger
+                # than that, the test period was regime-lucky, not a genuine edge confirmation.
+                elif ts >= -0.1 and tes >= min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate and (not is_short or test_trades >= short_min_trades) and (tes - ts) <= 1.5:
                     validated_strategies.append((s, wf))
                     _decision_rows.append({**_row_base, "stage": "wf_validated", "decision": "accepted",
                                            "score": tes, "reason": "test_dominant"})

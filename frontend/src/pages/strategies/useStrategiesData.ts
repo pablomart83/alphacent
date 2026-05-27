@@ -871,6 +871,23 @@ export interface GraduationQueueRow {
   strategy_interval?: string | null
   strategy_versions?: number | null
   first_paper_trade?: string | null
+  /** Improvement 3: WF test-period trade count — used for Sharpe CI gate */
+  wf_test_trades?: number | null
+  /** Improvement 4: SPY return over the paper period */
+  benchmark_return?: number | null
+  /** Improvement 4: paper return minus SPY return */
+  alpha_vs_spy?: number | null
+  /** Improvement 5: Deflated Sharpe Ratio (probability true SR > 0 after multiple testing) */
+  dsr?: number | null
+  /** Improvement 5: number of distinct (template, symbol) pairs proposed in last 90d */
+  n_trials?: number | null
+  /** Improvement 6: correlation with each active live strategy (advisory, not a gate) */
+  correlation_with_live?: Array<{
+    strategy_name: string
+    symbol: string
+    correlation: number | null
+    warning: boolean
+  }> | null
 }
 
 export interface GraduationQueuePayload {

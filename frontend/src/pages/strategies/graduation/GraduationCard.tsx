@@ -213,6 +213,8 @@ export function GraduationCard({
       <div className="flex-1 min-h-0 overflow-auto px-3 py-2 space-y-4">
         <EvidenceKpis row={row} />
 
+        <CorrelationWithLive row={row} />
+
         <ConvictionDistribution meta={meta} threshold={convictionThreshold} />
 
         <Separator />
@@ -428,8 +430,71 @@ function EvidenceKpis({ row }: { row: GraduationQueueRow }) {
   )
 }
 
-function Kpi({
-  label,
+/* ──────────────────────────── CorrelationWithLive ──────────────────────── */
+
+/**
+ * Improvement 6 — Correlation with live strategies.
+ * Advisory only — does NOT block graduation. The CIO sees it and decides.
+ */
+function CorrelationWithLive({ row }: { row: GraduationQueueRow }) {
+  const items = row.correlation_with_live
+  if (!items?.length) return null
+
+  return (
+    <section>
+      <SectionLabel>Correlation with live strategies</SectionLabel>
+      <div className="rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] p-2 space-y-2">
+        <table className="w-full text-[10px]">
+          <thead>
+            <tr className="text-[var(--text-3)] uppercase tracking-wider">
+              <th className="text-left pb-1 font-normal">Strategy</th>
+              <th className="text-left pb-1 font-normal">Symbol</th>
+              <th className="text-right pb-1 font-normal">Corr.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item, i) => {
+              const corr = item.correlation
+              const color =
+                corr == null
+                  ? 'var(--text-3)'
+                  : corr > 0.8
+                    ? 'var(--pnl-down)'
+                    : corr > 0.65
+                      ? 'var(--status-warning)'
+                      : 'var(--pnl-up)'
+              return (
+                <tr key={i} className="border-t border-[var(--border-subtle)]">
+                  <td
+                    className="py-0.5 text-[var(--text-2)] truncate max-w-[120px]"
+                    title={item.strategy_name}
+                  >
+                    {item.strategy_name}
+                  </td>
+                  <td className="py-0.5 mono text-[var(--text-1)]">{item.symbol}</td>
+                  <td className="py-0.5 mono tabular-nums text-right" style={{ color }}>
+                    {corr != null ? corr.toFixed(2) : '—'}
+                    {item.warning && (
+                      <span className="ml-1 text-[8px] uppercase tracking-wider" style={{ color }}>
+                        ⚠
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        <p className="text-[9px] text-[var(--text-3)]">
+          High correlation means similar risk exposure — consider whether this adds diversification.
+          This is advisory only and does not block graduation.
+        </p>
+      </div>
+    </section>
+  )
+}
+
+function Kpi({  label,
   value,
   emphasis,
 }: {

@@ -2,10 +2,13 @@
 Graduation Gate — backend logic for promoting (template, symbol) pairs to live trading.
 
 Qualification criteria (all must pass):
-  - paper_trades >= 20
+  - paper_trades >= dynamic Sharpe-based threshold (improvement 1)
   - paper_sharpe >= 0.6 × wf_sharpe  (live performance tracks walk-forward)
   - paper_win_rate >= 0.45
   - paper_pnl > 0
+  - wf_sharpe lower CI > 0 (improvement 3)
+  - alpha vs SPY >= -5% (improvement 4, if benchmark_return provided)
+  - DSR >= 0.95 (improvement 5, if n_trials provided)
   - Not already active in live_strategies
   - Not rejected in the last 14 days
 
@@ -21,6 +24,7 @@ Rejection flow:
 """
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -71,21 +75,26 @@ def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional
     """
     Return interval-aware min_trades for graduation.
 
-    Reads paper_trading.graduation_gate.min_trades_{interval} from YAML.
-    Falls back to graduation_gate.min_trades (MIN_PAPER_TRADES) if not set.
+    Improvement 1 — Dynamic Sharpe-based threshold:
+      dynamic_min = max(5, ceil((1.96 / paper_sharpe)²)), capped at 30.
+      interval_floor: 5 for 1d, 8 for 4h, 12 for 1h.
+      Final threshold = max(dynamic_min, interval_floor).
 
-    Rationale:
-      1D strategies fire ~1 trade/month → 10 trades ≈ 10 months of data
-      4H strategies fire ~2 trades/month → 15 trades ≈ 7 months of data
-      1H strategies fire ~5 trades/month → 25 trades ≈ 5 months of data
+    If paper_sharpe is None or <= 0, fall back to the interval floor only.
 
     High-conviction exception (mirrors activation gate):
       If paper_sharpe ≥ 2.0 AND win_rate ≥ 0.70, reduce min_trades by 40%.
-      A strategy with Sharpe 8.96 and 92% win rate across 13 trades is a
-      stronger signal than a strategy with Sharpe 1.2 and 55% win rate across
-      15 trades. The exception prevents the threshold from blocking obvious
-      graduation candidates.
     """
+    # Interval floors
+    iv = (interval or "1d").lower()
+    if iv in ("1h", "2h"):
+        interval_floor = 12
+    elif iv == "4h":
+        interval_floor = 8
+    else:
+        interval_floor = 5
+
+    # Try to read YAML overrides for the interval floor
     try:
         import yaml as _y
         from pathlib import Path as _P
@@ -94,24 +103,30 @@ def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional
             with open(_p, "r") as _f:
                 _c = _y.safe_load(_f) or {}
             pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
-            iv = (interval or "1d").lower()
             if iv in ("1h", "2h"):
-                base = int(pt_gg.get("min_trades_1h", MIN_PAPER_TRADES))
+                interval_floor = int(pt_gg.get("min_trades_1h", interval_floor))
             elif iv == "4h":
-                base = int(pt_gg.get("min_trades_4h", MIN_PAPER_TRADES))
+                interval_floor = int(pt_gg.get("min_trades_4h", interval_floor))
             else:
-                base = int(pt_gg.get("min_trades_1d", MIN_PAPER_TRADES))
-
-            # High-conviction exception: strong Sharpe + high win rate → lower bar
-            if paper_sharpe is not None and win_rate is not None:
-                if paper_sharpe >= 2.0 and win_rate >= 0.70:
-                    reduced = max(5, int(base * 0.60))  # 40% reduction, floor at 5
-                    return reduced
-
-            return base
+                interval_floor = int(pt_gg.get("min_trades_1d", interval_floor))
     except Exception:
         pass
-    return MIN_PAPER_TRADES
+
+    # Dynamic Sharpe-based threshold
+    if paper_sharpe is not None and paper_sharpe > 0:
+        dynamic_min = max(5, math.ceil((1.96 / paper_sharpe) ** 2))
+        dynamic_min = min(dynamic_min, 30)  # cap at 30
+        base = max(dynamic_min, interval_floor)
+    else:
+        base = interval_floor
+
+    # High-conviction exception: strong Sharpe + high win rate → lower bar
+    if paper_sharpe is not None and win_rate is not None:
+        if paper_sharpe >= 2.0 and win_rate >= 0.70:
+            reduced = max(5, int(base * 0.60))  # 40% reduction, floor at 5
+            return reduced
+
+    return base
 
 
 def _get_min_sql_having_trades() -> int:
@@ -239,17 +254,83 @@ def _get_strategy_type_win_rate_floor(strategy_type: Optional[str]) -> float:
     if any(t in st for t in reversion_types):
         return 0.55
     return 0.50
-    """Return min avg P&L per trade from paper_trading.graduation_gate.min_avg_pnl_per_trade."""
+
+
+# ── Improvement 5: Deflated Sharpe Ratio (Bailey & López de Prado 2014) ──────
+
+def _inv_normal(p: float) -> float:
+    """Inverse normal CDF — uses scipy if available, else rational approximation."""
     try:
-        import yaml as _y
-        from pathlib import Path as _P
-        _p = _P("config/autonomous_trading.yaml")
-        if _p.exists():
-            with open(_p, "r") as _f:
-                _c = _y.safe_load(_f) or {}
-            return float(_c.get("paper_trading", {}).get("graduation_gate", {}).get("min_avg_pnl_per_trade", 0.0))
-    except Exception:
+        from scipy.stats import norm
+        return float(norm.ppf(p))
+    except ImportError:
+        # Rational approximation (Abramowitz & Stegun)
+        if p <= 0:
+            return -8.0
+        if p >= 1:
+            return 8.0
+        if p < 0.5:
+            t = math.sqrt(-2 * math.log(p))
+        else:
+            t = math.sqrt(-2 * math.log(1 - p))
+        c = [2.515517, 0.802853, 0.010328]
+        d = [1.432788, 0.189269, 0.001308]
+        num = c[0] + c[1] * t + c[2] * t * t
+        den = 1 + d[0] * t + d[1] * t * t + d[2] * t * t * t
+        result = t - num / den
+        return -result if p < 0.5 else result
+
+
+def _normal_cdf(x: float) -> float:
+    """Standard normal CDF — uses scipy if available, else math.erf."""
+    try:
+        from scipy.stats import norm
+        return float(norm.cdf(x))
+    except ImportError:
+        return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def compute_dsr(
+    observed_sharpe: float,
+    n_trials: int,
+    n_observations: int,
+    skewness: float = 0.0,
+    kurtosis: float = 3.0,
+) -> float:
+    """
+    Deflated Sharpe Ratio — adjusts observed Sharpe for multiple testing,
+    sample length, skewness and kurtosis.
+
+    Returns the probability that the true Sharpe > 0 after deflation.
+    A DSR < 0.95 means the observed Sharpe is not statistically significant
+    after accounting for the number of strategies tested.
+
+    Reference: Bailey & López de Prado (2014), "The Deflated Sharpe Ratio:
+    Correcting for Selection Bias, Backtest Overfitting and Non-Normality".
+    """
+    if n_observations <= 1 or n_trials <= 0 or observed_sharpe <= 0:
         return 0.0
+
+    # Expected maximum Sharpe from n_trials IID tests
+    # Approximation: E[max SR] ≈ (1 - γ) * Φ⁻¹(1 - 1/n) + γ * Φ⁻¹(1 - 1/(n·e))
+    euler_gamma = 0.5772156649
+    p1 = max(1e-10, 1.0 - 1.0 / n_trials)
+    p2 = max(1e-10, 1.0 - 1.0 / (n_trials * math.e))
+    expected_max = (
+        (1 - euler_gamma) * _inv_normal(p1)
+        + euler_gamma * _inv_normal(p2)
+    )
+
+    # Sharpe ratio standard error with skewness/kurtosis correction
+    sr_std = math.sqrt(
+        (1 + (0.5 * observed_sharpe ** 2) - skewness * observed_sharpe
+         + ((kurtosis - 3) / 4) * observed_sharpe ** 2)
+        / (n_observations - 1)
+    )
+
+    # DSR: probability that true SR > 0 after accounting for selection bias
+    z = (observed_sharpe - expected_max * sr_std) / sr_std
+    return _normal_cdf(z)
 
 
 def get_paper_stats_for_strategy(
@@ -366,6 +447,9 @@ def is_qualified(
     wf_sharpe: Optional[float],
     interval: Optional[str] = None,
     strategy_type: Optional[str] = None,
+    wf_test_trades: Optional[int] = None,
+    benchmark_return: Optional[float] = None,
+    n_trials: Optional[int] = None,
 ) -> tuple[bool, List[str]]:
     """
     Check whether a (strategy, symbol) pair meets graduation criteria.
@@ -378,6 +462,9 @@ def is_qualified(
         wf_sharpe: Walk-forward Sharpe from the representative strategy
         interval: Strategy interval ('1d', '4h', '1h') for interval-aware min_trades
         strategy_type: Strategy type string for type-aware win rate floor (Fix 2)
+        wf_test_trades: Number of WF test-period trades — used for Sharpe CI gate (improvement 3)
+        benchmark_return: SPY return over the paper period — used for alpha gate (improvement 4)
+        n_trials: Number of distinct (template, symbol) pairs proposed in last 90d — used for DSR (improvement 5)
     """
     reasons = []
 
@@ -386,7 +473,7 @@ def is_qualified(
     win_rate = paper_stats.get("paper_win_rate")
     pnl = paper_stats.get("paper_total_pnl")
 
-    # Interval-aware min_trades — 1D strategies fire less often than 1H
+    # Interval-aware min_trades — improvement 1: Sharpe-based dynamic threshold
     # High-conviction exception: strong Sharpe + high win rate → lower bar
     min_trades = _get_min_trades_for_interval(interval, paper_sharpe=sharpe, win_rate=win_rate)
     if trades < min_trades:
@@ -406,10 +493,6 @@ def is_qualified(
             )
 
     # Fix 2: strategy-type-aware win rate floor.
-    # Trend-following strategies make money on large winners with many small
-    # losses — a 45% win rate with positive P&L is fine. Mean-reversion relies
-    # on high hit rate — 55% is appropriate. Flat 55% was blocking valid
-    # trend-following strategies (e.g. GOOGL 4H EMA Ribbon at 44% WR, +$91 P&L).
     effective_win_rate_floor = _get_strategy_type_win_rate_floor(strategy_type)
     if win_rate is None or win_rate < effective_win_rate_floor:
         reasons.append(
@@ -420,10 +503,6 @@ def is_qualified(
     if wf_sharpe and wf_sharpe > 0 and sharpe is not None:
         ratio = sharpe / wf_sharpe
         # Fix 1: regime-adjusted max ratio cap.
-        # A flat 2.0× cap blocks everything in a bull run because paper Sharpe
-        # is inflated for all LONG strategies simultaneously. The cap scales
-        # with the current regime — outperformance vs WF is expected in
-        # trending_up_strong, suspicious in trending_down.
         effective_max_ratio = _get_regime_adjusted_max_ratio()
         if ratio < MIN_QUALIFICATION_RATIO:
             reasons.append(
@@ -437,8 +516,56 @@ def is_qualified(
                 f"— paper period was regime-lucky, not a genuine edge confirmation; "
                 f"regime-adjusted cap={effective_max_ratio:.1f}×)"
             )
+
+        # Improvement 7: log structural bias warning when comparing flat-$5K paper
+        # Sharpe vs vol-scaled WF Sharpe. Informational only — no gate change.
+        logger.debug(
+            f"Note: paper_sharpe={sharpe:.2f} computed on flat $5K positions; "
+            f"wf_sharpe={wf_sharpe:.2f} computed on vol-scaled positions — "
+            f"qualification ratio {ratio:.2f} has structural bias"
+        )
     elif sharpe is None:
         reasons.append("paper_sharpe not computable (no trades with variance)")
+
+    # Improvement 3: WF Sharpe confidence interval gate.
+    # Reject if the lower 95% CI of the WF Sharpe is <= 0 — the WF test period
+    # may not have enough trades to establish statistical significance.
+    if wf_sharpe is not None and wf_sharpe > 0 and wf_test_trades is not None and wf_test_trades > 1:
+        wf_sharpe_lower_ci = wf_sharpe - 1.96 * math.sqrt(
+            (1 + 0.5 * wf_sharpe ** 2) / wf_test_trades
+        )
+        if wf_sharpe_lower_ci <= 0:
+            reasons.append(
+                f"wf_sharpe_lower_ci={wf_sharpe_lower_ci:.3f} <= 0 "
+                f"(wf_sharpe={wf_sharpe:.2f} not statistically significant "
+                f"with only {wf_test_trades} WF test trades)"
+            )
+
+    # Improvement 4: Alpha vs benchmark gate.
+    # Reject if strategy underperformed SPY by more than 5% — clearly no alpha.
+    if benchmark_return is not None and pnl is not None and trades > 0:
+        # paper_return_pct: total P&L as a fraction of notional ($5K per trade)
+        notional = trades * 5000.0
+        paper_return_pct = pnl / notional if notional > 0 else None
+        if paper_return_pct is not None:
+            alpha = paper_return_pct - benchmark_return
+            if alpha < -0.05:
+                reasons.append(
+                    f"alpha_vs_spy={alpha:.2%} < -5% "
+                    f"(paper_return={paper_return_pct:.2%}, spy_return={benchmark_return:.2%})"
+                )
+
+    # Improvement 5: Deflated Sharpe Ratio gate.
+    # Reject if DSR < 0.95 — the observed Sharpe is not statistically significant
+    # after accounting for the number of strategies tested (multiple testing bias).
+    if n_trials is not None and sharpe is not None and sharpe > 0 and trades > 0:
+        dsr = compute_dsr(sharpe, n_trials, trades)
+        if dsr < 0.95:
+            reasons.append(
+                f"DSR={dsr:.2f} < 0.95 "
+                f"(paper_sharpe={sharpe:.2f} not statistically significant "
+                f"after {n_trials} trials)"
+            )
 
     return len(reasons) == 0, reasons
 
@@ -625,6 +752,54 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
     except Exception:
         pass
 
+    # Improvement 5: count distinct (template_name, symbol) pairs proposed in last 90 days
+    # from signal_decisions — used as n_trials for the DSR gate.
+    n_trials_global: Optional[int] = None
+    try:
+        _n_trials_row = session.execute(
+            text("""
+                SELECT COUNT(DISTINCT (
+                    COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
+                    sd.symbol
+                )) AS n_trials
+                FROM signal_decisions sd
+                JOIN strategies s ON s.id = sd.strategy_id
+                WHERE sd.stage = 'proposed'
+                  AND sd.timestamp >= NOW() - INTERVAL '90 days'
+            """),
+        ).fetchone()
+        if _n_trials_row and _n_trials_row.n_trials:
+            n_trials_global = int(_n_trials_row.n_trials)
+    except Exception:
+        pass
+
+    # Improvement 6: fetch live strategy P&L series for correlation computation.
+    # Build a dict: {(template_name, symbol): {template_name, symbol, pnl: [...]}}
+    live_pnl_series: Dict[tuple, Dict[str, Any]] = {}
+    try:
+        _live_rows = session.execute(
+            text("""
+                SELECT
+                    ls.template_name,
+                    ls.symbol,
+                    tj.pnl
+                FROM live_strategies ls
+                JOIN trade_journal tj ON tj.strategy_id = ls.strategy_id
+                WHERE ls.retired_at IS NULL
+                  AND tj.pnl IS NOT NULL
+                  AND tj.account_type = 'demo'
+                  AND tj.symbol = ls.symbol
+                ORDER BY ls.template_name, ls.symbol, tj.entry_time
+            """),
+        ).fetchall()
+        for r in _live_rows:
+            key = (r.template_name, r.symbol)
+            if key not in live_pnl_series:
+                live_pnl_series[key] = {"template_name": r.template_name, "symbol": r.symbol, "pnl": []}
+            live_pnl_series[key]["pnl"].append(float(r.pnl))
+    except Exception:
+        pass
+
     for row in candidates_raw:
         pair = (row.template_name, row.symbol)
         if pair in active_live or pair in recently_rejected:
@@ -637,18 +812,16 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             "paper_total_pnl": float(row.total_pnl) if row.total_pnl is not None else None,
         }
 
-        # Get WF sharpe from the most recent strategy version for this template.
-        # Use the representative_strategy_id from the subquery.
+        # Get WF sharpe and metadata from the representative strategy.
         representative_id = row.representative_strategy_id
         wf_sharpe = None
+        wf_test_trades: Optional[int] = None
         strategy_name = row.template_name
         strategy_interval = None
         strategy_type = None
         if representative_id:
-            # Use interval and strategy_type from SQL CTE (reads both metadata and rules)
             strategy_interval = row.strategy_interval
             strategy_type = row.sql_strategy_type
-            # Load the ORM row for WF sharpe
             strategy = session.query(StrategyORM).filter_by(id=representative_id).first()
             if strategy:
                 meta = strategy.strategy_metadata or {}
@@ -658,16 +831,50 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     or meta.get("walk_forward_sharpe")
                     or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
                 )
+                # Improvement 3: get WF test trades for CI gate
+                _wf_test_trades_raw = (
+                    meta.get("wf_test_trades")
+                    or (strategy.backtest_results or {}).get("walk_forward_results", {}).get("test_trades")
+                )
+                if _wf_test_trades_raw is not None:
+                    try:
+                        wf_test_trades = int(_wf_test_trades_raw)
+                    except (TypeError, ValueError):
+                        pass
 
-        # Use symbol-specific WF sharpe from the representative strategy directly.
-        # After watchlist elimination (2026-05-18), the representative strategy's WF
-        # was always run on this exact symbol — no proxy fallback needed.
         # best_wf_by_template is kept as a last-resort fallback only.
         best_template_wf = best_wf_by_template.get(row.template_name, 0.0)
         if best_template_wf > 0 and (not wf_sharpe or wf_sharpe < best_template_wf):
             wf_sharpe = best_template_wf
 
-        qualified, fail_reasons = is_qualified(paper_stats, wf_sharpe, interval=strategy_interval, strategy_type=strategy_type)
+        # Improvement 4: fetch SPY benchmark return over the paper trading period.
+        benchmark_return: Optional[float] = None
+        if row.first_trade_at is not None:
+            try:
+                _spy_row = session.execute(
+                    text("""
+                        SELECT
+                            (MAX(close) - MIN(close)) / NULLIF(MIN(close), 0) AS spy_return
+                        FROM historical_price_cache
+                        WHERE symbol = 'SPY'
+                          AND timestamp >= :start_date
+                    """),
+                    {"start_date": row.first_trade_at},
+                ).fetchone()
+                if _spy_row and _spy_row.spy_return is not None:
+                    benchmark_return = float(_spy_row.spy_return)
+            except Exception:
+                pass
+
+        qualified, fail_reasons = is_qualified(
+            paper_stats,
+            wf_sharpe,
+            interval=strategy_interval,
+            strategy_type=strategy_type,
+            wf_test_trades=wf_test_trades,
+            benchmark_return=benchmark_return,
+            n_trials=n_trials_global,
+        )
         if not qualified:
             continue
 
@@ -676,6 +883,68 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             ratio = round(paper_stats["paper_sharpe"] / wf_sharpe, 3)
 
         avg_pnl_per_trade = float(row.avg_pnl) if row.avg_pnl is not None else None
+
+        # Compute alpha vs SPY for the queue row (informational)
+        alpha_vs_spy: Optional[float] = None
+        if benchmark_return is not None and paper_stats["paper_total_pnl"] is not None and paper_stats["paper_trades"] > 0:
+            notional = paper_stats["paper_trades"] * 5000.0
+            paper_return_pct = paper_stats["paper_total_pnl"] / notional if notional > 0 else None
+            if paper_return_pct is not None:
+                alpha_vs_spy = round(paper_return_pct - benchmark_return, 4)
+
+        # Compute DSR for the queue row (informational)
+        dsr: Optional[float] = None
+        if n_trials_global is not None and paper_stats["paper_sharpe"] is not None and paper_stats["paper_sharpe"] > 0 and paper_stats["paper_trades"] > 0:
+            dsr = round(compute_dsr(paper_stats["paper_sharpe"], n_trials_global, paper_stats["paper_trades"]), 4)
+
+        # Improvement 6: compute correlation with each active live strategy.
+        # Fetch the candidate's paper P&L series.
+        correlation_with_live: List[Dict[str, Any]] = []
+        try:
+            _candidate_pnl_rows = session.execute(
+                text("""
+                    SELECT tj.pnl
+                    FROM trade_journal tj
+                    JOIN strategies s ON s.id = tj.strategy_id
+                    WHERE tj.pnl IS NOT NULL
+                      AND tj.account_type = 'demo'
+                      AND tj.symbol = :sym
+                      AND COALESCE(
+                            s.strategy_metadata->>'template_name',
+                            REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                          ) = :tname
+                    ORDER BY tj.entry_time
+                """),
+                {"sym": row.symbol, "tname": row.template_name},
+            ).fetchall()
+            candidate_pnl = [float(r.pnl) for r in _candidate_pnl_rows]
+
+            for live_key, live_data in live_pnl_series.items():
+                live_pnl = live_data["pnl"]
+                n = min(len(candidate_pnl), len(live_pnl))
+                if n < 5:
+                    corr = None
+                else:
+                    a = candidate_pnl[:n]
+                    b = live_pnl[:n]
+                    mean_a = sum(a) / n
+                    mean_b = sum(b) / n
+                    cov = sum((a[i] - mean_a) * (b[i] - mean_b) for i in range(n))
+                    std_a = math.sqrt(sum((x - mean_a) ** 2 for x in a))
+                    std_b = math.sqrt(sum((x - mean_b) ** 2 for x in b))
+                    if std_a > 0 and std_b > 0:
+                        corr = round(cov / (std_a * std_b), 4)
+                    else:
+                        corr = None
+
+                correlation_with_live.append({
+                    "strategy_name": live_data["template_name"],
+                    "symbol": live_data["symbol"],
+                    "correlation": corr,
+                    "warning": corr is not None and corr > 0.65,
+                })
+        except Exception as _corr_err:
+            logger.debug(f"Could not compute correlation for {row.template_name}/{row.symbol}: {_corr_err}")
 
         queue.append({
             "strategy_id": representative_id,  # most recent strategy_id for this pair
@@ -692,6 +961,16 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             "strategy_versions": int(row.strategy_versions),
             "strategy_interval": strategy_interval,
             "first_paper_trade": row.first_trade_at.isoformat() if row.first_trade_at else None,
+            # Improvement 3
+            "wf_test_trades": wf_test_trades,
+            # Improvement 4
+            "benchmark_return": round(benchmark_return, 4) if benchmark_return is not None else None,
+            "alpha_vs_spy": alpha_vs_spy,
+            # Improvement 5
+            "dsr": dsr,
+            "n_trials": n_trials_global,
+            # Improvement 6
+            "correlation_with_live": correlation_with_live if correlation_with_live else None,
         })
 
     # Sort by qualification_ratio desc (best candidates first)
