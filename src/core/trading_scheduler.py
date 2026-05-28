@@ -522,7 +522,9 @@ class TradingScheduler:
                 from src.models.orm import AccountInfoORM
                 _db_bal_sess = db.get_session()
                 try:
-                    _acct_row = _db_bal_sess.query(AccountInfoORM).order_by(
+                    _acct_row = _db_bal_sess.query(AccountInfoORM).filter(
+                        AccountInfoORM.mode == 'DEMO'
+                    ).order_by(
                         AccountInfoORM.updated_at.desc()
                     ).first()
                     if _acct_row and _acct_row.balance is not None:
