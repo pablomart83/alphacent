@@ -1968,6 +1968,13 @@ async def get_approaching_graduation(
             trades_ok = trades >= _effective_min_trades
             pnl_ok = total_pnl > MIN_PAPER_PNL
 
+            # Skip strategies with negative Sharpe — they are losing money on average
+            # and have no realistic path to graduation. Show only strategies with a
+            # positive edge (Sharpe > 0) that are blocked by insufficient data or
+            # a specific threshold they haven't yet crossed.
+            if sharpe <= 0:
+                continue
+
             # Fix 2: strategy-type-aware win rate floor.
             # Look up from the pre-fetched bulk dict (one query for all pairs).
             _strat_type = _strat_type_by_pair.get((tname, sym))
@@ -1983,11 +1990,21 @@ async def get_approaching_graduation(
                 continue  # fully qualified — graduation gate should have it
 
             # Composite graduation score (0-100): weighted progress toward each gate.
-            # Weights: trades 30%, sharpe/ratio 35%, win_rate 20%, pnl 15%.
+            # Weights: trades 30%, qual_ratio 35%, win_rate 20%, pnl 15%.
+            # sharpe_pct measures progress toward the qualification ratio target
+            # (paper_sharpe / wf_sharpe >= MIN_QUALIFICATION_RATIO = 0.60).
+            # Using the ratio directly is more meaningful than raw Sharpe vs 1.0.
             trades_pct = min(1.0, trades / _effective_min_trades)
-            sharpe_pct = min(1.0, max(0.0, sharpe) / 1.0)  # target Sharpe 1.0
-            wr_pct = min(1.0, win_rate / MIN_PAPER_WIN_RATE)
-            pnl_pct = 1.0 if total_pnl > 0 else max(0.0, 1.0 + total_pnl / max(abs(total_pnl), 1))
+            if ratio is not None:
+                # Progress toward MIN_QUALIFICATION_RATIO (0.60 = 100% of the way there)
+                sharpe_pct = min(1.0, max(0.0, ratio / MIN_QUALIFICATION_RATIO))
+            elif wf_sharpe > 0:
+                # No ratio yet (sharpe > 0 but wf_sharpe unknown) — use raw Sharpe vs target
+                sharpe_pct = min(1.0, sharpe / 1.0)
+            else:
+                sharpe_pct = min(1.0, sharpe / 1.0)
+            wr_pct = min(1.0, win_rate / max(effective_wr_floor, 0.01))
+            pnl_pct = 1.0 if total_pnl > 0 else 0.0
             score = (trades_pct * 30 + sharpe_pct * 35 + wr_pct * 20 + pnl_pct * 15)
 
             # Missing criteria — what's blocking graduation
