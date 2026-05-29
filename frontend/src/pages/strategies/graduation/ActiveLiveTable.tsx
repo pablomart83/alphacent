@@ -8,7 +8,6 @@ import {
   Save,
   TrendingUp,
   XCircle,
-  Zap,
 } from 'lucide-react'
 import {
   Badge,
@@ -92,7 +91,22 @@ export function ActiveLiveTable({
           className="py-3"
         />
       ) : (
-        <div className="space-y-1">
+        <div className="rounded-[3px] border border-[var(--border-subtle)] overflow-hidden">
+          {/* Column headers */}
+          <div className="grid items-center px-2 py-1 bg-[var(--bg-2)] border-b border-[var(--border-subtle)]"
+            style={{ gridTemplateColumns: '1fr 52px 56px 52px 52px 52px 52px 44px 36px 28px' }}>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)]">Template</span>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)] text-right">P&L</span>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)] text-right">Live Sh.</span>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)] text-right">Win%</span>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)] text-right">Ppr Sh.</span>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)] text-right">SL/TP</span>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)] text-right">Conv.</span>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)] text-right">Since</span>
+            <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)] text-right">Div%</span>
+            <span />
+          </div>
+          {/* Strategy rows */}
           {rows.map((row) => (
             <LiveStrategyRow
               key={row.id}
@@ -123,7 +137,7 @@ export function ActiveLiveTable({
   )
 }
 
-/* ─────────────────────────── Compact row ─────────────────────────── */
+/* ─────────────────────────── Table row ─────────────────────────── */
 
 function LiveStrategyRow({
   row,
@@ -136,25 +150,10 @@ function LiveStrategyRow({
   onClick: () => void
   onRetire: () => void
 }) {
-  const livePnl = row.live_pnl ?? row.live_realized_pnl ?? 0
-  const unrealized = row.unrealized_pnl ?? 0
-  const totalPnl = livePnl + unrealized
+  const livePnl = (row.live_pnl ?? row.live_realized_pnl ?? 0) + (row.unrealized_pnl ?? 0)
   const hasPosition = (row.open_position_count ?? 0) > 0
   const liveTrades = row.live_trades ?? row.live_closed_trades ?? 0
 
-  // Signal status pill
-  const signalStatus = row.last_signal_status
-  const signalPill = (() => {
-    if (signalStatus === 'order_pending') return { label: '⏳ pending', color: 'var(--status-warning)' }
-    if (signalStatus === 'order_submitted') return { label: '✓ submitted', color: 'var(--pnl-up)' }
-    if (signalStatus === 'blocked_conviction') return { label: '⊘ conviction', color: 'var(--text-3)' }
-    if (signalStatus === 'gate_blocked') return { label: '⊘ gate', color: 'var(--text-3)' }
-    if (signalStatus === 'signal_emitted') return { label: '◉ signal', color: 'var(--accent-primary)' }
-    if (signalStatus === 'no_signal_yet') return { label: 'waiting', color: 'var(--text-3)' }
-    return null
-  })()
-
-  // Divergence colour
   const div = row.divergence_pct
   const divColor =
     div == null ? 'var(--text-3)'
@@ -162,71 +161,117 @@ function LiveStrategyRow({
     : div < 80 ? 'var(--status-warning)'
     : 'var(--pnl-up)'
 
-  // Since date — days since activation
   const daysSince = row.activated_at
     ? Math.floor((Date.now() - new Date(row.activated_at).getTime()) / 86_400_000)
     : null
+
+  // Signal status indicator (compact)
+  const signalDot = (() => {
+    const s = row.last_signal_status
+    if (s === 'order_pending') return { color: 'var(--status-warning)', title: 'Order pending' }
+    if (s === 'order_submitted') return { color: 'var(--pnl-up)', title: 'Order submitted' }
+    if (s === 'blocked_conviction' || s === 'gate_blocked') return { color: 'var(--text-3)', title: row.last_signal_detail ?? 'Blocked' }
+    if (s === 'signal_emitted') return { color: 'var(--accent-primary)', title: 'Signal emitted' }
+    return null
+  })()
 
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        'w-full text-left rounded-[3px] border px-2.5 py-2 transition-colors group',
+        'w-full text-left grid items-center px-2 py-1.5 transition-colors group border-b border-[var(--border-subtle)] last:border-b-0',
         isSelected
-          ? 'border-[color-mix(in_oklab,var(--pnl-up)_50%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--pnl-up)_8%,var(--bg-1))]'
-          : 'border-[color-mix(in_oklab,var(--pnl-up)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--pnl-up)_3%,var(--bg-1))] hover:bg-[color-mix(in_oklab,var(--pnl-up)_6%,var(--bg-1))]',
+          ? 'bg-[color-mix(in_oklab,var(--pnl-up)_8%,var(--bg-1))]'
+          : 'bg-[color-mix(in_oklab,var(--pnl-up)_2%,var(--bg-1))] hover:bg-[color-mix(in_oklab,var(--pnl-up)_5%,var(--bg-1))]',
       )}
+      style={{ gridTemplateColumns: '1fr 52px 56px 52px 52px 52px 52px 44px 36px 28px' }}
     >
-      {/* ── Row 1: name · symbol · badge · P&L · divergence · retire · chevron ── */}
-      <div className="flex items-center gap-2">
+      {/* Template + symbol + signal dot */}
+      <div className="flex items-center gap-1.5 min-w-0">
         <span className="h-1.5 w-1.5 rounded-full bg-[var(--pnl-up)] animate-pulse shrink-0" />
-
-        <span className="font-medium text-[11px] text-[var(--text-0)] truncate flex-1 min-w-0">
+        {signalDot && (
+          <span
+            className="h-1.5 w-1.5 rounded-full shrink-0"
+            style={{ backgroundColor: signalDot.color }}
+            title={signalDot.title}
+          />
+        )}
+        <span className="text-[11px] font-medium text-[var(--text-0)] truncate">
           {row.template_name ?? row.strategy_id}
         </span>
-
-        <span className="mono text-[11px] font-bold text-[var(--pnl-up)] shrink-0">
+        <span className="mono text-[10px] font-bold text-[var(--pnl-up)] shrink-0">
           {row.symbol}
         </span>
-
-        <Badge variant="live" size="sm" className="gap-0.5 shrink-0">
-          <Zap className="h-2.5 w-2.5" />LIVE
-        </Badge>
-
-        {/* Total P&L (realized + unrealized) */}
-        <span
-          className={cn('mono text-[11px] shrink-0', totalPnl >= 0 ? 'text-[var(--pnl-up)]' : 'text-[var(--pnl-down)]')}
-        >
-          {totalPnl >= 0 ? '+' : ''}{formatCurrency(totalPnl, { precision: 0 })}
-          {hasPosition && unrealized !== 0 && (
-            <span className="text-[9px] text-[var(--text-3)] ml-0.5">
-              ({unrealized >= 0 ? '+' : ''}{formatCurrency(unrealized, { precision: 0 })} open)
-            </span>
-          )}
-        </span>
-
-        {/* Divergence */}
-        {div != null && (
-          <span className="flex items-center gap-0.5 text-[10px] mono shrink-0" style={{ color: divColor }}>
-            {div < 50 && <AlertCircle className="h-2.5 w-2.5" />}
-            {div.toFixed(0)}%
-          </span>
+        {hasPosition && (
+          <span className="text-[9px] text-[var(--text-3)] shrink-0" title="Open position">●</span>
         )}
+      </div>
 
-        {/* Signal status */}
-        {signalPill && (
-          <span className="text-[9px] shrink-0" style={{ color: signalPill.color }}>
-            {signalPill.label}
-          </span>
-        )}
+      {/* P&L */}
+      <span className={cn('mono text-[11px] text-right tabular-nums', livePnl >= 0 ? 'text-[var(--pnl-up)]' : 'text-[var(--pnl-down)]')}>
+        {livePnl >= 0 ? '+' : ''}{formatCurrency(livePnl, { precision: 0 })}
+      </span>
 
+      {/* Live Sharpe */}
+      <span className={cn('mono text-[11px] text-right tabular-nums',
+        row.live_sharpe == null ? 'text-[var(--text-3)]'
+        : row.live_sharpe >= 1 ? 'text-[var(--pnl-up)]'
+        : row.live_sharpe < 0 ? 'text-[var(--pnl-down)]'
+        : 'text-[var(--text-1)]'
+      )}>
+        {row.live_sharpe != null ? formatNumber(row.live_sharpe, 2) : `${liveTrades}t`}
+      </span>
+
+      {/* Win % */}
+      <span className={cn('mono text-[11px] text-right tabular-nums',
+        row.live_win_rate == null ? 'text-[var(--text-3)]'
+        : row.live_win_rate >= 55 ? 'text-[var(--pnl-up)]'
+        : row.live_win_rate >= 40 ? 'text-[var(--text-1)]'
+        : 'text-[var(--pnl-down)]'
+      )}>
+        {row.live_win_rate != null ? `${row.live_win_rate.toFixed(0)}%` : '—'}
+      </span>
+
+      {/* Paper Sharpe */}
+      <span className={cn('mono text-[11px] text-right tabular-nums',
+        row.current_paper_sharpe == null ? 'text-[var(--text-3)]'
+        : row.current_paper_sharpe >= 1 ? 'text-[var(--pnl-up)]'
+        : 'text-[var(--text-1)]'
+      )}>
+        {row.current_paper_sharpe != null ? formatNumber(row.current_paper_sharpe, 2) : '—'}
+      </span>
+
+      {/* SL/TP */}
+      <span className="mono text-[10px] text-right text-[var(--text-2)] tabular-nums">
+        {((row.sl_pct ?? 0.06) * 100).toFixed(0)}/{((row.tp_pct ?? 0.15) * 100).toFixed(0)}%
+      </span>
+
+      {/* Conviction min */}
+      <span className="mono text-[11px] text-right text-[var(--text-2)] tabular-nums">
+        {row.conviction_min ?? '—'}
+      </span>
+
+      {/* Since */}
+      <span className="mono text-[10px] text-right text-[var(--text-3)] tabular-nums">
+        {daysSince === 0 ? 'today' : daysSince != null ? `${daysSince}d` : '—'}
+      </span>
+
+      {/* Divergence */}
+      <span className="mono text-[10px] text-right tabular-nums flex items-center justify-end gap-0.5" style={{ color: divColor }}>
+        {div != null && div < 50 && <AlertCircle className="h-2.5 w-2.5 shrink-0" />}
+        {div != null ? `${div.toFixed(0)}%` : '—'}
+      </span>
+
+      {/* Chevron */}
+      <div className="flex items-center justify-end gap-1">
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onRetire() }}
-          className="text-[10px] text-[var(--text-3)] hover:text-[var(--pnl-down)] transition-colors shrink-0 px-1"
+          className="text-[9px] text-[var(--text-3)] hover:text-[var(--pnl-down)] transition-colors px-0.5 opacity-0 group-hover:opacity-100"
+          title="Retire"
         >
-          Retire
+          ✕
         </button>
         <ChevronRight
           className={cn(
@@ -235,94 +280,7 @@ function LiveStrategyRow({
           )}
         />
       </div>
-
-      {/* ── Row 2: stats grid ── */}
-      <div className="flex items-center gap-3 mt-1.5 ml-3.5 text-[10px]">
-        <LiveStat
-          label="Trades"
-          value={liveTrades > 0 ? String(liveTrades) : '—'}
-          tone="neutral"
-        />
-        {row.live_sharpe != null && (
-          <LiveStat
-            label="Live Sharpe"
-            value={formatNumber(row.live_sharpe, 2)}
-            tone={row.live_sharpe >= 1 ? 'up' : row.live_sharpe < 0 ? 'down' : 'neutral'}
-          />
-        )}
-        {row.live_win_rate != null && (
-          <LiveStat
-            label="Win %"
-            value={`${row.live_win_rate.toFixed(0)}%`}
-            tone={row.live_win_rate >= 55 ? 'up' : row.live_win_rate >= 40 ? 'neutral' : 'down'}
-          />
-        )}
-        {row.current_paper_sharpe != null && (
-          <LiveStat
-            label="Paper Sharpe"
-            value={formatNumber(row.current_paper_sharpe, 2)}
-            tone={row.current_paper_sharpe >= 1 ? 'up' : 'neutral'}
-          />
-        )}
-        {row.current_paper_win_rate != null && (
-          <LiveStat
-            label="Paper WR"
-            value={`${(row.current_paper_win_rate * 100).toFixed(0)}%`}
-            tone={row.current_paper_win_rate >= 0.55 ? 'up' : 'neutral'}
-          />
-        )}
-        <LiveStat
-          label="SL/TP"
-          value={`${((row.sl_pct ?? 0.06) * 100).toFixed(0)}/${((row.tp_pct ?? 0.15) * 100).toFixed(0)}%`}
-          tone="neutral"
-        />
-        <LiveStat
-          label="Conv."
-          value={String(row.conviction_min ?? '—')}
-          tone="neutral"
-        />
-        {daysSince != null && (
-          <LiveStat
-            label="Since"
-            value={daysSince === 0 ? 'today' : `${daysSince}d`}
-            tone="neutral"
-          />
-        )}
-        {hasPosition && row.open_position_entry != null && row.open_position_current != null && (
-          <LiveStat
-            label="Entry→Now"
-            value={`${formatCurrency(row.open_position_entry, { precision: 2 })} → ${formatCurrency(row.open_position_current, { precision: 2 })}`}
-            tone={row.open_position_current >= row.open_position_entry ? 'up' : 'down'}
-          />
-        )}
-      </div>
     </button>
-  )
-}
-
-function LiveStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string
-  value: string
-  tone: 'up' | 'down' | 'neutral'
-}) {
-  return (
-    <div className="flex flex-col items-start">
-      <span className="text-[8px] uppercase tracking-wider text-[var(--text-3)] leading-none mb-0.5">{label}</span>
-      <span
-        className={cn(
-          'mono tabular-nums text-[10px] leading-none',
-          tone === 'up' ? 'text-[var(--pnl-up)]'
-          : tone === 'down' ? 'text-[var(--pnl-down)]'
-          : 'text-[var(--text-1)]',
-        )}
-      >
-        {value}
-      </span>
-    </div>
   )
 }
 
