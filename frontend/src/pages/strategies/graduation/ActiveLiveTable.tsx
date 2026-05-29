@@ -136,18 +136,36 @@ function LiveStrategyRow({
   onClick: () => void
   onRetire: () => void
 }) {
-  const divergence = row.divergence_pct
-  const divergenceColor =
-    divergence == null
-      ? 'var(--text-3)'
-      : divergence < 50
-        ? 'var(--pnl-down)'
-        : divergence < 80
-          ? 'var(--status-warning)'
-          : 'var(--pnl-up)'
+  const livePnl = row.live_pnl ?? row.live_realized_pnl ?? 0
+  const unrealized = row.unrealized_pnl ?? 0
+  const totalPnl = livePnl + unrealized
+  const hasPosition = (row.open_position_count ?? 0) > 0
+  const liveTrades = row.live_trades ?? row.live_closed_trades ?? 0
 
-  const livePnl = row.live_pnl ?? 0
-  const liveTrades = row.live_trades ?? 0
+  // Signal status pill
+  const signalStatus = row.last_signal_status
+  const signalPill = (() => {
+    if (signalStatus === 'order_pending') return { label: '⏳ pending', color: 'var(--status-warning)' }
+    if (signalStatus === 'order_submitted') return { label: '✓ submitted', color: 'var(--pnl-up)' }
+    if (signalStatus === 'blocked_conviction') return { label: '⊘ conviction', color: 'var(--text-3)' }
+    if (signalStatus === 'gate_blocked') return { label: '⊘ gate', color: 'var(--text-3)' }
+    if (signalStatus === 'signal_emitted') return { label: '◉ signal', color: 'var(--accent-primary)' }
+    if (signalStatus === 'no_signal_yet') return { label: 'waiting', color: 'var(--text-3)' }
+    return null
+  })()
+
+  // Divergence colour
+  const div = row.divergence_pct
+  const divColor =
+    div == null ? 'var(--text-3)'
+    : div < 50 ? 'var(--pnl-down)'
+    : div < 80 ? 'var(--status-warning)'
+    : 'var(--pnl-up)'
+
+  // Since date — days since activation
+  const daysSince = row.activated_at
+    ? Math.floor((Date.now() - new Date(row.activated_at).getTime()) / 86_400_000)
+    : null
 
   return (
     <button
@@ -160,46 +178,49 @@ function LiveStrategyRow({
           : 'border-[color-mix(in_oklab,var(--pnl-up)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--pnl-up)_3%,var(--bg-1))] hover:bg-[color-mix(in_oklab,var(--pnl-up)_6%,var(--bg-1))]',
       )}
     >
+      {/* ── Row 1: name · symbol · badge · P&L · divergence · retire · chevron ── */}
       <div className="flex items-center gap-2">
-        {/* Pulse dot */}
         <span className="h-1.5 w-1.5 rounded-full bg-[var(--pnl-up)] animate-pulse shrink-0" />
 
-        {/* Name + symbol */}
         <span className="font-medium text-[11px] text-[var(--text-0)] truncate flex-1 min-w-0">
           {row.template_name ?? row.strategy_id}
         </span>
+
         <span className="mono text-[11px] font-bold text-[var(--pnl-up)] shrink-0">
           {row.symbol}
         </span>
 
-        {/* Live badge */}
         <Badge variant="live" size="sm" className="gap-0.5 shrink-0">
-          <Zap className="h-2.5 w-2.5" />
-          LIVE
+          <Zap className="h-2.5 w-2.5" />LIVE
         </Badge>
 
-        {/* Stats */}
-        <div className="flex items-center gap-2 shrink-0 text-[10px] mono">
-          {liveTrades > 0 || livePnl !== 0 ? (
-            <span className={livePnl >= 0 ? 'text-[var(--pnl-up)]' : 'text-[var(--pnl-down)]'}>
-              {livePnl >= 0 ? '+' : ''}{formatCurrency(livePnl, { precision: 0 })}
-            </span>
-          ) : row.last_signal_status === 'order_pending' ? (
-            <span className="text-[var(--pnl-up)]">
-              ⏳ {row.pending_order?.etoro_status ?? 'pending'}
-            </span>
-          ) : (
-            <span className="text-[var(--text-3)]">waiting</span>
-          )}
-          {divergence != null && (
-            <span className="flex items-center gap-0.5" style={{ color: divergenceColor }}>
-              {divergence < 50 && <AlertCircle className="h-2.5 w-2.5" />}
-              {divergence.toFixed(0)}%
+        {/* Total P&L (realized + unrealized) */}
+        <span
+          className={cn('mono text-[11px] shrink-0', totalPnl >= 0 ? 'text-[var(--pnl-up)]' : 'text-[var(--pnl-down)]')}
+        >
+          {totalPnl >= 0 ? '+' : ''}{formatCurrency(totalPnl, { precision: 0 })}
+          {hasPosition && unrealized !== 0 && (
+            <span className="text-[9px] text-[var(--text-3)] ml-0.5">
+              ({unrealized >= 0 ? '+' : ''}{formatCurrency(unrealized, { precision: 0 })} open)
             </span>
           )}
-        </div>
+        </span>
 
-        {/* Retire + chevron */}
+        {/* Divergence */}
+        {div != null && (
+          <span className="flex items-center gap-0.5 text-[10px] mono shrink-0" style={{ color: divColor }}>
+            {div < 50 && <AlertCircle className="h-2.5 w-2.5" />}
+            {div.toFixed(0)}%
+          </span>
+        )}
+
+        {/* Signal status */}
+        {signalPill && (
+          <span className="text-[9px] shrink-0" style={{ color: signalPill.color }}>
+            {signalPill.label}
+          </span>
+        )}
+
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onRetire() }}
@@ -214,7 +235,94 @@ function LiveStrategyRow({
           )}
         />
       </div>
+
+      {/* ── Row 2: stats grid ── */}
+      <div className="flex items-center gap-3 mt-1.5 ml-3.5 text-[10px]">
+        <LiveStat
+          label="Trades"
+          value={liveTrades > 0 ? String(liveTrades) : '—'}
+          tone="neutral"
+        />
+        {row.live_sharpe != null && (
+          <LiveStat
+            label="Live Sharpe"
+            value={formatNumber(row.live_sharpe, 2)}
+            tone={row.live_sharpe >= 1 ? 'up' : row.live_sharpe < 0 ? 'down' : 'neutral'}
+          />
+        )}
+        {row.live_win_rate != null && (
+          <LiveStat
+            label="Win %"
+            value={`${row.live_win_rate.toFixed(0)}%`}
+            tone={row.live_win_rate >= 55 ? 'up' : row.live_win_rate >= 40 ? 'neutral' : 'down'}
+          />
+        )}
+        {row.current_paper_sharpe != null && (
+          <LiveStat
+            label="Paper Sharpe"
+            value={formatNumber(row.current_paper_sharpe, 2)}
+            tone={row.current_paper_sharpe >= 1 ? 'up' : 'neutral'}
+          />
+        )}
+        {row.current_paper_win_rate != null && (
+          <LiveStat
+            label="Paper WR"
+            value={`${(row.current_paper_win_rate * 100).toFixed(0)}%`}
+            tone={row.current_paper_win_rate >= 0.55 ? 'up' : 'neutral'}
+          />
+        )}
+        <LiveStat
+          label="SL/TP"
+          value={`${((row.sl_pct ?? 0.06) * 100).toFixed(0)}/${((row.tp_pct ?? 0.15) * 100).toFixed(0)}%`}
+          tone="neutral"
+        />
+        <LiveStat
+          label="Conv."
+          value={String(row.conviction_min ?? '—')}
+          tone="neutral"
+        />
+        {daysSince != null && (
+          <LiveStat
+            label="Since"
+            value={daysSince === 0 ? 'today' : `${daysSince}d`}
+            tone="neutral"
+          />
+        )}
+        {hasPosition && row.open_position_entry != null && row.open_position_current != null && (
+          <LiveStat
+            label="Entry→Now"
+            value={`${formatCurrency(row.open_position_entry, { precision: 2 })} → ${formatCurrency(row.open_position_current, { precision: 2 })}`}
+            tone={row.open_position_current >= row.open_position_entry ? 'up' : 'down'}
+          />
+        )}
+      </div>
     </button>
+  )
+}
+
+function LiveStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone: 'up' | 'down' | 'neutral'
+}) {
+  return (
+    <div className="flex flex-col items-start">
+      <span className="text-[8px] uppercase tracking-wider text-[var(--text-3)] leading-none mb-0.5">{label}</span>
+      <span
+        className={cn(
+          'mono tabular-nums text-[10px] leading-none',
+          tone === 'up' ? 'text-[var(--pnl-up)]'
+          : tone === 'down' ? 'text-[var(--pnl-down)]'
+          : 'text-[var(--text-1)]',
+        )}
+      >
+        {value}
+      </span>
+    </div>
   )
 }
 
