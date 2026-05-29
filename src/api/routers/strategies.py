@@ -1799,28 +1799,16 @@ async def get_approaching_graduation(
             .all()
         )
 
-        # 2. Already in the graduation queue (fully qualified) — build the exclusion
-        #    set directly from trade_journal aggregates without running the full
-        #    get_graduation_queue pipeline (which is expensive and would double the work).
-        #    We just need the (template, symbol) keys that pass the minimum trade count
-        #    and have a positive P&L — a cheap proxy that avoids the full is_qualified() check.
-        #    The approaching panel is informational; a small number of false-negatives
-        #    (pairs that appear here AND in the queue) are acceptable and harmless.
+        # 2. Already in the graduation queue (fully qualified) — use the cached
+        #    get_graduation_queue result. It's fast (18ms warm, 400ms cold) and
+        #    gives the exact set of qualified pairs so we don't accidentally exclude
+        #    pairs that are profitable but haven't passed all gates yet.
+        from src.strategy.graduation_gate import get_graduation_queue as _get_queue
         try:
-            _qualified_rows = session.execute(
-                text("""
-                    SELECT
-                        COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')) AS template_name,
-                        tj.symbol
-                    FROM trade_journal tj
-                    JOIN strategies s ON s.id = tj.strategy_id
-                    WHERE tj.pnl IS NOT NULL AND tj.account_type = 'demo'
-                    GROUP BY template_name, tj.symbol
-                    HAVING COUNT(*) >= :min_trades AND SUM(tj.pnl) > 0
-                """),
-                {"min_trades": 5},
-            ).fetchall()
-            already_qualified = set((r.template_name, r.symbol) for r in _qualified_rows)
+            already_qualified = set(
+                (row.get("template_name"), row["symbol"])
+                for row in _get_queue(session)
+            )
         except Exception:
             already_qualified = set()
 
