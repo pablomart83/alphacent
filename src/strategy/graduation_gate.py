@@ -367,6 +367,7 @@ def get_paper_stats_for_strategy(
               AND symbol       = :sym
               AND pnl IS NOT NULL
               AND account_type = 'demo'
+              AND (exit_reason IS NULL OR exit_reason != 'etoro_closed')
         """),
         {"sid": strategy_id, "sym": symbol},
     ).fetchone()
@@ -419,6 +420,7 @@ def get_aggregated_paper_stats(
             JOIN strategies s ON s.id = tj.strategy_id
             WHERE tj.pnl IS NOT NULL
               AND tj.account_type = 'demo'
+                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
               AND tj.symbol = :sym
               AND COALESCE(
                     s.strategy_metadata->>'template_name',
@@ -661,6 +663,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
                   AND tj.account_type = 'demo'
+                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
                 GROUP BY template_name, tj.symbol
                 HAVING COUNT(*) >= :min_trades
             ),
@@ -695,6 +698,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
                   AND tj.account_type = 'demo'
+                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
                 ORDER BY
                     COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
                     tj.symbol,
@@ -833,6 +837,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 WHERE ls.retired_at IS NULL
                   AND tj.pnl IS NOT NULL
                   AND tj.account_type = 'demo'
+                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
                   AND tj.symbol = ls.symbol
                 ORDER BY ls.template_name, ls.symbol, tj.entry_time
             """),
@@ -909,6 +914,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     JOIN strategies s ON s.id = tj.strategy_id
                     WHERE tj.pnl IS NOT NULL
                       AND tj.account_type = 'demo'
+                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
                       AND (
                           COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
                           tj.symbol

@@ -1855,6 +1855,7 @@ async def get_approaching_graduation(
                 JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
                   AND tj.account_type = 'demo'
+                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
                 GROUP BY template_name, tj.symbol
                 HAVING COUNT(*) >= :min_trades
                 ORDER BY trades DESC
@@ -1916,6 +1917,7 @@ async def get_approaching_graduation(
                 FROM strategies s
                 JOIN trade_journal tj ON tj.strategy_id = s.id
                 WHERE tj.account_type = 'demo'
+                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
                 ORDER BY
                     COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
                     tj.symbol,
