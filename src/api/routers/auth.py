@@ -84,8 +84,8 @@ async def login(
     response.set_cookie(
         key="session_id",
         value=session_id,
-        httponly=False,
-        secure=False,
+        httponly=False,   # Must be readable by JS — WebSocket reads it via document.cookie
+        secure=True,
         samesite="lax",
         max_age=8 * 60 * 60,  # 8 hours
     )
