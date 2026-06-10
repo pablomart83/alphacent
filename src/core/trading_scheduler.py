@@ -2344,68 +2344,46 @@ class TradingScheduler:
                             # ── P0 DUPLICATE GUARD ────────────────────────────────────────
                             # Before generating any entry signals, check whether a live
                             # position or pending order already exists for this symbol.
-                            # Also check for recently submitted orders (within 4 hours) —
-                            # the DEMO monitor marks live orders as CANCELLED (404) before
-                            # eToro fills them pre-market. Without this check, the guard
-                            # passes every cycle and fires a new order every 10 minutes
-                            # overnight, resulting in dozens of positions at market open.
                             #
-                            # (a) Open live position — skip entry signals.
-                            # (b) Pending live order — skip entry signals.
-                            # (c) Any live order submitted in the last 4 hours — skip.
-                            #     4H covers the longest pre-market window (US market opens
-                            #     at 14:30 UTC; orders placed from 10:30 UTC are covered).
-                            # Exit signals are NOT blocked.
+                            # IMPORTANT: Use a fresh session for these checks. The main
+                            # `session` may be in a stale/rolled-back state from earlier
+                            # errors (InFailedSqlTransaction cascade), causing it to return
+                            # no rows even when positions exist — exactly what caused the
+                            # PANW triple-position bug on Jun 10: session was poisoned,
+                            # duplicate guard returned empty, 3 entries were placed.
                             _skip_live_entries = False
                             try:
-                                _live_open_pos = session.query(PositionORM).filter(
-                                    PositionORM.account_type == 'live',
-                                    PositionORM.symbol == _live_sym,
-                                    PositionORM.closed_at.is_(None),
-                                ).first()
-                                if _live_open_pos:
-                                    logger.debug(
-                                        f"Live pass: open position exists for {_live_sym} "
-                                        f"(id={_live_open_pos.id[:8]}) — skipping entry signals"
-                                    )
-                                    _skip_live_entries = True
-
-                                if not _skip_live_entries:
-                                    _live_pending_order = session.query(OrderORM).filter(
-                                        OrderORM.account_type == 'live',
-                                        OrderORM.symbol == _live_sym,
-                                        OrderORM.status == OrderStatus.PENDING,
-                                    ).first()
-                                    if _live_pending_order:
-                                        logger.info(
-                                            f"Live pass: pending order exists for {_live_sym} "
-                                            f"(order={_live_pending_order.id[:8]}, "
-                                            f"etoro_order_id={_live_pending_order.etoro_order_id}) "
-                                            f"— skipping entry signals"
-                                        )
-                                        _skip_live_entries = True
-
-                                if not _skip_live_entries:
-                                    # Check for an open live position — the only valid
-                                    # reason to skip a LIVE entry signal is if the
-                                    # strategy already has an open position in this symbol.
-                                    # The old 4h cooldown (checking recent orders regardless
-                                    # of position state) was wrong: it blocked re-entry after
-                                    # a manual close, which is a legitimate signal.
-                                    _live_open_pos = session.query(PositionORM).filter(
+                                from src.models.database import get_database as _gdb_dup
+                                _dup_sess = _gdb_dup().get_session()
+                                try:
+                                    # (a) Any open live position for this symbol → skip all entries
+                                    _live_open_pos = _dup_sess.query(PositionORM).filter(
                                         PositionORM.account_type == 'live',
                                         PositionORM.symbol == _live_sym,
-                                        PositionORM.strategy_id == _live_strat_id,
                                         PositionORM.closed_at.is_(None),
-                                        PositionORM.pending_closure == False,
                                     ).first()
                                     if _live_open_pos:
                                         logger.info(
                                             f"Live pass: open position exists for {_live_sym} "
-                                            f"(position={str(_live_open_pos.id)[:8]}) "
-                                            f"— skipping entry signals"
+                                            f"(id={str(_live_open_pos.id)[:8]}) — skipping entry signals"
                                         )
                                         _skip_live_entries = True
+
+                                    # (b) Any pending live order for this symbol → skip entries
+                                    if not _skip_live_entries:
+                                        _live_pending_order = _dup_sess.query(OrderORM).filter(
+                                            OrderORM.account_type == 'live',
+                                            OrderORM.symbol == _live_sym,
+                                            OrderORM.status == OrderStatus.PENDING,
+                                        ).first()
+                                        if _live_pending_order:
+                                            logger.info(
+                                                f"Live pass: pending order exists for {_live_sym} "
+                                                f"(order={_live_pending_order.id[:8]}) — skipping entry signals"
+                                            )
+                                            _skip_live_entries = True
+                                finally:
+                                    _dup_sess.close()
                             except Exception as _dup_check_err:
                                 logger.warning(
                                     f"Live pass: duplicate guard check failed for {_live_sym}: "
