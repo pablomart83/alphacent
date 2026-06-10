@@ -2644,14 +2644,51 @@ class TradingScheduler:
                                                 else None
                                             ),
                                         )
-                                        session.add(_live_order_orm2)
-                                        session.commit()
-                                        logger.info(
-                                            f"LIVE FILL (independent pass): {_live_sym} "
-                                            f"{_lsig.action.value} ${_live_size2:.0f}v "
-                                            f"(${_live_size2 * _live_cfg2.get('mirror_ratio', 0.10):.0f}r) "
-                                            f"conviction={_sig_conv2:.1f}>={_live_conv_min2}"
-                                        )
+                                        # Use a fresh session for live order DB write.
+                                        # The main `session` may be in a rolled-back state
+                                        # from earlier errors (InFailedSqlTransaction cascade).
+                                        # If the DB write fails, the eToro fill already happened —
+                                        # the position sync will create an orphan. Using a fresh
+                                        # session isolates this write from the main cycle state.
+                                        # This is the fix for the Jun 10 DELL orphan: the live
+                                        # pass executed on eToro at 10:43:57, session.commit()
+                                        # failed due to a rolled-back transaction, the order row
+                                        # was lost, and the position sync created an orphan.
+                                        _live_ord_written = False
+                                        try:
+                                            from src.models.database import get_database as _gdb_live_ord
+                                            _live_ord_sess = _gdb_live_ord().get_session()
+                                            try:
+                                                _live_ord_sess.add(_live_order_orm2)
+                                                _live_ord_sess.commit()
+                                                _live_ord_written = True
+                                            except Exception as _ord_db_err:
+                                                logger.error(
+                                                    f"Live pass: CRITICAL — order DB write failed for {_live_sym} "
+                                                    f"(eToro fill already submitted, order_id={_live_order2.id}): "
+                                                    f"{_ord_db_err}. The fill will be recovered by position sync."
+                                                )
+                                                try:
+                                                    _live_ord_sess.rollback()
+                                                except Exception:
+                                                    pass
+                                            finally:
+                                                _live_ord_sess.close()
+                                        except Exception as _gdb_err:
+                                            logger.error(f"Live pass: could not get fresh session for order write: {_gdb_err}")
+
+                                        if _live_ord_written:
+                                            logger.info(
+                                                f"LIVE FILL (independent pass): {_live_sym} "
+                                                f"{_lsig.action.value} ${_live_size2:.0f}v "
+                                                f"(${_live_size2 * _live_cfg2.get('mirror_ratio', 0.10):.0f}r) "
+                                                f"conviction={_sig_conv2:.1f}>={_live_conv_min2}"
+                                            )
+                                        else:
+                                            logger.warning(
+                                                f"LIVE FILL recorded on eToro but NOT in DB: {_live_sym} "
+                                                f"order_id={_live_order2.id} — position sync will recover"
+                                            )
                                     except Exception as _live_exec_err:
                                         logger.error(
                                             f"Live pass execution failed for {_live_sym}: "
