@@ -1062,19 +1062,47 @@ class TradingScheduler:
                             signals_rejected += 1
                             continue
 
-                    # Pullback gate: block trend/momentum LONGs during short-term pullbacks
+                    # Pullback gate: block/restrict trend/momentum LONGs during short-term pullbacks.
+                    #
+                    # Severity calibration:
+                    # - Mild (-1% to -2%, RSI 36-50): normal weekly oscillation in an uptrend.
+                    #   These are actually ENTRY opportunities for daily trend strategies (buy the dip).
+                    #   Only block pure intraday momentum/breakout entries — daily trend strategies pass.
+                    #   Require conviction >= 65 (vs normal 60) as a soft filter.
+                    # - Moderate (-2% to -3.5%, RSI 30-45): real short-term correction.
+                    #   Block all intraday momentum + breakout + short-timeframe trend entries.
+                    # - Severe (>-3.5%, RSI < 35): crash/panic. Block all trend LONG entries.
                     if _pullback_state.get("in_pullback") and _sig_dir == "LONG":
                         _strat_type = (strategy.metadata or {}).get('strategy_type', '') if strategy.metadata else ''
                         _strat_type_lower = str(_strat_type).lower().replace(' ', '_').replace('-', '_')
-                        _is_trend_momentum = any(t in _strat_type_lower for t in _TREND_MOMENTUM_TYPES)
                         _tmpl_name = (strategy.metadata or {}).get('template_name', '') if strategy.metadata else ''
                         _tmpl_lower = str(_tmpl_name).lower()
-                        _is_trend_momentum = _is_trend_momentum or any(
-                            kw in _tmpl_lower for kw in ['trend', 'momentum', 'breakout', 'ema ribbon', 'adx', 'vwap trend', 'atr dynamic']
-                        )
-                        # Severe pullbacks block all LONGs; mild/moderate only block trend/momentum
                         _severity = _pullback_state.get("severity", "none")
-                        _block = _is_trend_momentum or _severity == "severe"
+
+                        # Intraday/aggressive templates: blocked on mild+
+                        _INTRADAY_AGGRESSIVE_KW = ['breakout', 'momentum', 'vwap trend', 'atr dynamic', 'opening range']
+                        _is_intraday_aggressive = any(kw in _tmpl_lower for kw in _INTRADAY_AGGRESSIVE_KW)
+
+                        # Broader trend templates: blocked on moderate+ only
+                        _BROAD_TREND_KW = ['ema ribbon', 'adx', 'trend following', 'trend_following']
+                        _is_broad_trend = (
+                            any(kw in _tmpl_lower for kw in _BROAD_TREND_KW)
+                            or 'trend_following' in _strat_type_lower
+                            or 'momentum' in _strat_type_lower
+                        )
+
+                        _block = False
+                        if _severity == "severe":
+                            # Severe: block all trend LONG entries
+                            _block = _is_intraday_aggressive or _is_broad_trend
+                        elif _severity == "moderate":
+                            # Moderate: block intraday aggressive + broad trend
+                            _block = _is_intraday_aggressive or _is_broad_trend
+                        elif _severity == "mild":
+                            # Mild: only block pure intraday/aggressive momentum and breakouts.
+                            # Daily trend strategies are allowed — mild pullbacks are entry opportunities.
+                            _block = _is_intraday_aggressive
+
                         if _block:
                             self._log_signal_decision(
                                 session=session, signal=signal, strategy_name=strategy.name,
@@ -1082,7 +1110,7 @@ class TradingScheduler:
                                 rejection_reason=(
                                     f"Pullback gate ({_severity}): 5d={_pullback_state.get('change_5d', 0):.1%}, "
                                     f"RSI(5)={_pullback_state.get('rsi_5', 50):.0f} — "
-                                    f"trend/momentum LONG blocked"
+                                    f"{'intraday momentum/breakout' if _severity == 'mild' else 'trend/momentum'} LONG blocked"
                                 ),
                             )
                             signals_rejected += 1
