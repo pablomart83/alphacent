@@ -1490,11 +1490,16 @@ class IntelAnalyst:
         from sqlalchemy import text
         session = self.db.get_session()
         try:
+            # Fetch all distinct blocking reasons for each strategy so we can
+            # inspect the FULL set, not just the lexicographically-largest one.
+            # MAX(reason) is wrong here — "Insufficient balance: $0" beats
+            # "Pullback gate..." alphabetically, so the old single-reason check
+            # silently mis-classified pullback-blocked strategies as structural loops.
             rows = session.execute(text(f"""
                 SELECT sd.strategy_id, s.name,
                        SUM(CASE WHEN sd.stage = 'gate_blocked' THEN 1 ELSE 0 END) as blocked,
                        SUM(CASE WHEN sd.stage = 'order_submitted' THEN 1 ELSE 0 END) as submitted,
-                       MAX(CASE WHEN sd.stage = 'gate_blocked' THEN sd.reason ELSE NULL END) as last_reason,
+                       ARRAY_AGG(DISTINCT sd.reason) FILTER (WHERE sd.stage = 'gate_blocked') as all_reasons,
                        COALESCE(s.strategy_metadata->>'interval', '1d') as interval
                 FROM signal_decisions sd
                 LEFT JOIN strategies s ON s.id = sd.strategy_id
@@ -1509,24 +1514,47 @@ class IntelAnalyst:
         if not rows:
             return None
 
-        # FIX: Exclude strategies blocked by TEMPORARY market-condition gates.
-        # Pullback gate, drawdown pause gate, and MQS gate are intentional — they
-        # block trend-following LONGs during pullbacks/choppy markets. These are
-        # NOT structural loops; they will unblock when market conditions improve.
-        # Only flag strategies blocked by STRUCTURAL gates: balance insufficient,
-        # symbol cap, etc. that will never self-resolve.
-        MARKET_CONDITION_GATE_PREFIXES = (
+        # A "permanent loop" means blocked by gates that will NEVER self-resolve.
+        # Exclude strategies where ALL blocking reasons are temporary (market-condition
+        # gates or transient balance/rate-limiting issues that clear on their own):
+        #
+        # Temporary (skip if ALL reasons are in this set):
+        #   - Pullback gate / Drawdown pause / Market quality gate / Bull market regime gate
+        #     → unblock when market recovers
+        #   - Insufficient balance: $0 < N
+        #     → transient: eToro settlement window depletes reported balance briefly
+        #   - Symbol limit: N existing LONG ... (max: N)
+        #     → rate-limiting by design — clears when existing positions close
+        #   - Low-confidence exit ...
+        #     → exit filter, not an entry permanent loop
+        #
+        # Structural (flag if ANY reason survives after excluding the above):
+        #   - Any gate not in the temporary list that blocks every signal
+        TEMPORARY_GATE_PREFIXES = (
             "Pullback gate",
             "Drawdown pause",
             "Market quality gate",
             "Bull market regime gate",
+            "Insufficient balance: $0",   # transient settlement window
+            "insufficient_balance ($0",    # alternate format
+            "Symbol limit:",               # rate-limiting by design
+            "Low-confidence exit",         # exit filter, not entry loop
         )
 
         findings = []
         for row in rows:
-            last_reason = row[4] or ""
-            # Skip if blocked by a market-condition gate (temporary, correct behavior)
-            if any(last_reason.startswith(prefix) for prefix in MARKET_CONDITION_GATE_PREFIXES):
+            all_reasons = row[4] or []
+            if not isinstance(all_reasons, list):
+                all_reasons = [all_reasons] if all_reasons else []
+
+            # Check whether every blocking reason is temporary/expected
+            structural_reasons = [
+                r for r in all_reasons
+                if r and not any(r.startswith(prefix) for prefix in TEMPORARY_GATE_PREFIXES)
+            ]
+
+            # If every reason is temporary, skip — this is not a permanent loop
+            if not structural_reasons:
                 continue
 
             # Fallback name lookup for strategies not found via LEFT JOIN
@@ -1542,10 +1570,12 @@ class IntelAnalyst:
                         sess2.close()
                 except Exception:
                     name = row[0]
+
+            representative_reason = structural_reasons[0]
             evidence = (f"Strategy: {name}\nInterval: {row[5]}\n"
                        f"Gate blocks ({lookback_days}d): {row[2]}\n"
                        f"Orders submitted ({lookback_days}d): {row[3]}\n"
-                       f"Last gate reason: {last_reason}")
+                       f"Structural blocking reason(s): {'; '.join(structural_reasons[:3])}")
             findings.append(Finding(
                 check_id="E5",
                 key=f"gate_loop:{row[0]}",

@@ -811,12 +811,23 @@ class MarketDataManager:
         # EXCEPTION: Forex pairs use FMP first because Yahoo Finance returns inverted
         # high/low values and "possibly delisted" errors for some date ranges.
 
-        # Forex: try FMP first (Yahoo has known issues with forex data)
+        # Forex and LME metals: try FMP first.
+        # - Forex: Yahoo Finance returns inverted high/low for some date ranges.
+        # - LME metals (ALUMINUM, ZINC): Yahoo's ALI=F/ZNC=F tickers are CME
+        #   futures with thin volume and frequent data gaps. FMP's ALIUSD/ZNUSD
+        #   are the correct EOD tickers and are reliable on Starter for 1d.
+        #
+        # FIX-D: Pass db_symbol (display form: "ALUMINUM", "EURUSD") to
+        # _fetch_historical_from_fmp, NOT normalized_symbol (eToro/Yahoo wire
+        # form: "ALI=F", "EURUSD=X"). fmp_ohlc._resolve_fmp_symbol looks up
+        # db_symbol in SYMBOL_MAP to find the FMP ticker (ALIUSD, ZNUSD).
+        # Passing "ALI=F" bypassed SYMBOL_MAP entirely — FMP got an unknown
+        # ticker, returned empty, and the code fell through to Yahoo silently.
         is_forex = self._is_forex_symbol(normalized_symbol)
         if (is_forex or is_lme_metal) and self._fmp_api_key and interval == '1d':
             try:
-                logger.info(f"Fetching historical data for {normalized_symbol} from FMP (forex primary)")
-                data_list = self._fetch_historical_from_fmp(normalized_symbol, start, end, interval)
+                logger.info(f"Fetching historical data for {db_symbol} from FMP (forex/LME primary)")
+                data_list = self._fetch_historical_from_fmp(db_symbol, start, end, interval)
                 valid_data = [d for d in data_list if self.validate_data(d)]
                 if len(valid_data) > 0:
                     valid_data.sort(key=lambda d: d.timestamp)
@@ -825,16 +836,16 @@ class MarketDataManager:
                     # Keyed on db_symbol (display form) to match the lookup above.
                     # S4.0.6 (2026-05-02).
                     self._raw_fetch_cache[f"{db_symbol}:{interval}"] = (valid_data, datetime.now())
-                    logger.info(f"Retrieved {len(valid_data)} valid historical data points from FMP (forex)")
+                    logger.info(f"Retrieved {len(valid_data)} valid historical data points from FMP (forex/LME)")
                     result = self._validate_and_return_historical_data(valid_data, db_symbol)
                     if _cacheable:
                         cache_key = f"{db_symbol}_{interval}_{start.date()}_{end.date()}"
                         self._historical_memory_cache[cache_key] = (result, datetime.now())
                     return result
                 else:
-                    logger.warning(f"FMP returned no data for forex {normalized_symbol}, falling back to Yahoo")
+                    logger.warning(f"FMP returned no data for {db_symbol}, falling back to Yahoo")
             except Exception as e:
-                logger.warning(f"FMP failed for forex {normalized_symbol}: {e}, falling back to Yahoo")
+                logger.warning(f"FMP failed for {db_symbol}: {e}, falling back to Yahoo")
 
         # Yahoo Finance: primary for all price data
         try:

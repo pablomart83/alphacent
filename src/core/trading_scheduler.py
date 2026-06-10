@@ -577,12 +577,24 @@ class TradingScheduler:
                             _PosORM_bal.closed_at.is_(None),
                         ).all()
                         _invested = sum(r[0] or 0 for r in _invested_rows)
-                        # Subtract pending order amounts
-                        _pending_rows = _db_bal_sess.query(_OrdORM_bal.quantity).filter(
+                        # Subtract pending order dollar amounts.
+                        # FIX-B: Previously queried quantity (shares), not dollars.
+                        # A pending order for 50 shares of DELL at $396 was deducted
+                        # as $50 instead of $19,800 — wildly wrong during settlement.
+                        # Use quantity × expected_price (the submitted price); fall
+                        # back to price if expected_price is NULL.
+                        _pending_rows = _db_bal_sess.query(
+                            _OrdORM_bal.quantity,
+                            _OrdORM_bal.expected_price,
+                            _OrdORM_bal.price,
+                        ).filter(
                             _OrdORM_bal.account_type == 'demo',
                             _OrdORM_bal.status == OrderStatus.PENDING,
                         ).all()
-                        _pending = sum(r[0] or 0 for r in _pending_rows)
+                        _pending = sum(
+                            (r[0] or 0) * (r[1] or r[2] or 0)
+                            for r in _pending_rows
+                        )
                         _db_computed_balance = max(0.0, float(_db_equity) - float(_invested) - float(_pending))
                         # Use DB-computed if it looks reasonable (> 0 and less than 2× equity)
                         if _db_computed_balance > 0:

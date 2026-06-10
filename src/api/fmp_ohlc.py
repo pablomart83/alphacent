@@ -118,6 +118,10 @@ EXPLICIT_BLOCKED: set = {
     # Non-US / non-majors stocks in our universe known to be sparse or
     # premium (foreign listings that FMP only serves at EOD).
     # Add as they surface in logs (runtime-observed block-set below).
+    # LME metals — FMP only carries 1d EOD data on Starter. Block intraday
+    # explicitly to avoid 402 roundtrips on every WF cycle.
+    ("ALIUSD", "1hour"), ("ALIUSD", "4hour"),
+    ("ZNUSD",  "1hour"), ("ZNUSD",  "4hour"),
 }
 
 
@@ -148,13 +152,15 @@ SYMBOL_MAP: Dict[str, str] = {
     "COPPER":   "HGUSD",
     "NATGAS":   "NGUSD",      # natgas — FMP support unknown, test at runtime
     "PLATINUM": "PLUSD",
+    # LME metals — FMP carries EOD data under these tickers on Starter.
+    # Only 1d is available (LME settles once daily); intraday is blocked
+    # and listed in EXPLICIT_BLOCKED below.
+    "ALUMINUM": "ALIUSD",
+    "ZINC":     "ZNUSD",
     # Crypto display → FMP pair (only used on the FMP-fallback path for crypto)
     "BTC": "BTCUSD", "ETH": "ETHUSD", "SOL": "SOLUSD",
     "AVAX": "AVAXUSD", "LINK": "LINKUSD", "DOT": "DOTUSD",
     # Forex — display form matches FMP form (EURUSD, GBPUSD, EURGBP, etc.)
-    # Commodities without a 2-letter FMP continuous code (ALUMINUM, ZINC) are
-    # left unmapped — they'll fail at runtime and the runtime block-set catches
-    # the 402. Those are LME metals and probably EOD-only on FMP anyway.
 }
 
 
