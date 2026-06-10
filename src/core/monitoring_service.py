@@ -3552,6 +3552,33 @@ class MonitoringService:
                         f"{_id_refresh_err} — using DB value {pos.etoro_position_id}"
                     )
 
+            # Pre-close verification: confirm the position still exists on eToro before calling close_position.
+            # If we call close_position on a stale/already-closed eToro ID:
+            # - eToro LIVE: returns 404 → handled below as "already closed"
+            # - eToro DEMO: may create a NEW position instead of returning an error (observed Jun 10 2026 with XHB SHORT)
+            # Verifying first prevents the demo phantom-position bug.
+            # Only do this for DEMO — LIVE positions are verified via the ID refresh above.
+            if _pos_account_type == 'demo' and not str(etoro_position_id_to_close or '').startswith('pending_'):
+                try:
+                    _demo_positions = _close_client.get_positions()
+                    _demo_pos_ids = {str(p.etoro_position_id) for p in _demo_positions}
+                    if str(etoro_position_id_to_close) not in _demo_pos_ids:
+                        # Position no longer exists on eToro — mark closed in DB and skip API call
+                        logger.info(
+                            f"[PreCloseVerify] Position {pos.id} ({pos.symbol}) etoro_id={etoro_position_id_to_close} "
+                            f"no longer on eToro — marking closed without API call (prevents phantom position creation)"
+                        )
+                        pos.closed_at = datetime.now()
+                        pos.pending_closure = False
+                        pos.realized_pnl = (pos.realized_pnl or 0) + (pos.unrealized_pnl or 0)
+                        pos.unrealized_pnl = 0.0
+                        order_orm.status = OrderStatus.FILLED
+                        order_orm.submitted_at = datetime.now()
+                        order_orm.filled_at = datetime.now()
+                        return order_id
+                except Exception as _pcv_err:
+                    logger.debug(f"[PreCloseVerify] Position existence check failed for {pos.symbol}: {_pcv_err} — proceeding with close_position call")
+
             _close_client.close_position(
                 etoro_position_id_to_close,
                 instrument_id=instrument_id,
