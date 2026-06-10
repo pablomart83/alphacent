@@ -102,6 +102,12 @@ class MonitoringService:
         # at most one forced resync per 5 minutes regardless of snapshot lag.
         self._last_fix09_resync: float = 0
         self._FIX09_COOLDOWN_S: float = 300.0  # 5 minutes
+        # Staleness threshold MUST be greater than the hourly snapshot cadence
+        # (_hourly_snapshot_interval = 3600s). When threshold == cadence the
+        # watchdog fires right before every scheduled write (aliasing), which
+        # produced the once-per-hour CRITICAL noise. 90 min leaves headroom for
+        # a delayed-but-healthy hourly write before we treat the snapshot as stale.
+        self._FIX09_STALE_THRESHOLD_S: float = 5400.0  # 90 minutes
         # One-time live reconcile: run once before the first position sync to
         # verify recently-filled live orders have open positions (Step 2b).
         # Mirrors the DEMO reconcile_on_startup in trading_scheduler.
@@ -490,22 +496,28 @@ class MonitoringService:
                 logger.error(f"Error checking trailing stops: {e}")
 
         # FIX-09: Live equity staleness watchdog.
-        # If the LIVE equity snapshot hasn't been updated in > 60 minutes, force a live
-        # position resync. Catches the Jun 5–7 2026 scenario where LIVE equity was frozen
-        # for 48h with no alert raised. Only runs when a live client is configured.
+        # If the LIVE equity snapshot hasn't been updated in > threshold, the snapshot
+        # writer has stalled. Catches the Jun 5–7 2026 scenario where LIVE equity was
+        # frozen for 48h with no alert. Only runs when a live client is configured.
         #
-        # COOLDOWN: This watchdog runs inside _check_trailing_stops (every 60s). If a
-        # forced sync doesn't write a new snapshot immediately (e.g. equity snapshot
-        # writer is on its own hourly schedule), the stale check fires again every 60s
-        # in a tight loop — each sync_positions call temporarily marks positions as
-        # pending_closure, which can make the trading cycle's duplicate guard see "no
-        # open positions" and fire duplicate live entries. 5-minute cooldown prevents
-        # more than one forced resync per 5 minutes regardless of snapshot lag.
+        # Three root causes fixed (Jun 10 audit):
+        #  1. Cooldown stamp is now set BEFORE remediation. Previously it was set
+        #     after sync_positions(force=True); if that raised, the bare except
+        #     swallowed it and the stamp never applied — so the watchdog re-fired
+        #     every ~5s loop tick (the 14:14–14:28 storm), each forced sync raising
+        #     duplicate-order risk on the live book.
+        #  2. Remediation now WRITES a fresh live equity snapshot — the thing the
+        #     check actually reads. The old code only synced positions, which never
+        #     refreshes the snapshot (it is on its own hourly schedule), so the
+        #     watchdog was structurally incapable of clearing the condition it detected.
+        #  3. Threshold (90m) > snapshot cadence (60m) eliminates boundary aliasing.
         if self.live_etoro_client is not None and self.live_order_monitor is not None:
-            try:
-                _fix09_elapsed = now - self._last_fix09_resync
-                if _fix09_elapsed >= self._FIX09_COOLDOWN_S:
-                    _live_staleness_threshold = 3600  # 60 minutes
+            _fix09_elapsed = now - self._last_fix09_resync
+            if _fix09_elapsed >= self._FIX09_COOLDOWN_S:
+                # Stamp the cooldown FIRST — a raise during remediation must never
+                # cause a tight re-fire loop.
+                self._last_fix09_resync = now
+                try:
                     from src.models.orm import EquitySnapshotORM as _EqSnap
                     _snap_sess = self.db.get_session()
                     try:
@@ -515,20 +527,39 @@ class MonitoringService:
                             .order_by(_EqSnap.created_at.desc())
                             .first()
                         )
-                        if _last_live_snap is not None:
-                            _snap_age = (datetime.utcnow() - _last_live_snap.created_at).total_seconds()
-                            if _snap_age > _live_staleness_threshold:
-                                logger.critical(
-                                    f"[FIX-09] LIVE equity snapshot stale for {_snap_age/3600:.1f}h "
-                                    f"(last: {_last_live_snap.created_at.isoformat()}) — "
-                                    f"forcing live position resync"
-                                )
-                                self.live_order_monitor.sync_positions(account_type='live', force=True)
-                                self._last_fix09_resync = now  # Rate-limit: no more than 1 forced resync per 5m
                     finally:
                         _snap_sess.close()
-            except Exception as _stale_err:
-                logger.debug(f"Live staleness watchdog check failed (non-fatal): {_stale_err}")
+                    if _last_live_snap is not None:
+                        _snap_age = (datetime.utcnow() - _last_live_snap.created_at).total_seconds()
+                        if _snap_age > self._FIX09_STALE_THRESHOLD_S:
+                            logger.warning(
+                                f"[FIX-09] LIVE equity snapshot stale for {_snap_age/3600:.1f}h "
+                                f"(last: {_last_live_snap.created_at.isoformat()}) — "
+                                f"writing fresh snapshot + forcing live position resync"
+                            )
+                            # Primary remediation: write the snapshot the check reads.
+                            try:
+                                self._write_equity_snapshot_for_account(
+                                    snapshot_type='hourly', account_type='live'
+                                )
+                            except Exception as _snap_write_err:
+                                logger.error(f"[FIX-09] live snapshot write failed: {_snap_write_err}")
+                            # Secondary: refresh live positions (original intent).
+                            try:
+                                self.live_order_monitor.sync_positions(account_type='live', force=True)
+                            except Exception as _resync_err:
+                                logger.warning(f"[FIX-09] forced live resync failed: {_resync_err}")
+                            # Escalate to CRITICAL only if it has stayed stale well
+                            # beyond the threshold despite remediation — that is a real
+                            # incident, not the routine hourly write gap.
+                            if _snap_age > 2 * self._FIX09_STALE_THRESHOLD_S:
+                                logger.critical(
+                                    f"[FIX-09] LIVE equity snapshot STILL stale at "
+                                    f"{_snap_age/3600:.1f}h after remediation — snapshot "
+                                    f"writer may be wedged; investigate _save_hourly_equity_snapshot"
+                                )
+                except Exception as _stale_err:
+                    logger.warning(f"Live staleness watchdog check failed (non-fatal): {_stale_err}")
 
         # Update MAE/MFE on open trade_journal entries.
         # Piggybacks on trailing-stop cadence (60s) — prices are already fresh
@@ -2267,7 +2298,19 @@ class MonitoringService:
                     logger.info("  Data cleanup: no stale records found")
         except Exception as e:
             logger.warning(f"  Data cleanup failed (non-critical): {e}")
-        
+
+        # 1b. Prune signal_decisions (NEW-06 retention was never scheduled).
+        # prune_old already implements stage-aware retention (14d high-volume
+        # diagnostic stages, 30d audit stages). Without this call the table only
+        # ever grows — audit-stage rows were found back to 44 days. Runs daily.
+        try:
+            from src.analytics.decision_log import prune_old as _prune_decisions
+            _pruned = _prune_decisions(30)
+            if _pruned:
+                logger.info(f"  signal_decisions prune: {_pruned} stale rows removed")
+        except Exception as e:
+            logger.warning(f"  signal_decisions prune failed (non-critical): {e}")
+
         # 2. Update performance feedback from trade journal
         try:
             from src.analytics.trade_journal import TradeJournal
@@ -4445,10 +4488,22 @@ class MonitoringService:
                         )
 
                 if reason:
-                    pos.pending_closure = True
-                    pos.closure_reason = reason
-                    flagged += 1
-                    logger.info(f"[ZombieExit] {pos.symbol}: {reason}")
+                    # P1-4: never auto-close LIVE positions on demo-tuned zombie
+                    # thresholds. Real-money exits are a CIO decision. For LIVE we
+                    # surface the candidate as a WARNING for review but do NOT set
+                    # pending_closure (which would fire a real close order). DEMO
+                    # keeps the existing auto-flag behaviour (data-collection sandbox).
+                    _zpos_acct = getattr(pos, 'account_type', 'demo') or 'demo'
+                    if _zpos_acct == 'live':
+                        logger.warning(
+                            f"[ZombieExit][LIVE-REVIEW] {pos.symbol} ({pos.strategy_id[:8] if pos.strategy_id else '?'}): "
+                            f"{reason} — NOT auto-closed (live capital; CIO review required)"
+                        )
+                    else:
+                        pos.pending_closure = True
+                        pos.closure_reason = reason
+                        flagged += 1
+                        logger.info(f"[ZombieExit] {pos.symbol}: {reason}")
 
             session.commit()
             return {"checked": checked, "flagged": flagged}

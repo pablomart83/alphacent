@@ -6,7 +6,54 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**Sprint 14 complete (Jun 10 2026). Forensic audit P0+P1 fixes deployed & verified live. Service healthy, trading cycle + live pass running clean, position sync clean, fresh live snapshot, zero post-deploy errors. See "SESSION 2026-06-10 — SPRINT 14" below.**
+
 **Sprint 13 complete (Jun 10 2026). 14 crash-audit fixes + 6 Intel fixes + 6 P1 improvements + 3 session-corruption fixes deployed. Live account updated to $1,300 real / 0.127 mirror ratio. Pullback gate recalibrated. System actively trading again.**
+
+---
+
+## SESSION 2026-06-10 — SPRINT 14: FORENSIC AUDIT P0 + P1 EXECUTION
+
+Full forensic audit (Opus 4.8) + execution of every P0 and P1 finding. All deployed to EC2 and verified.
+
+### Research outcomes (root causes confirmed)
+- **`quantity` unit ambiguity**: `etoro_client.get_positions` writes `quantity=units` (shares) and `invested_amount=amount` (dollars). Entry orders store dollars (`position_size`); close/SL/TP orders inherit share-valued `position.quantity`. `invested_amount` is the only reliable dollar field. FIX-B's `quantity × price` premise was a misdiagnosis (entry orders are already dollars).
+- **Intel never auto-resolves**: `_upsert_finding` only INSERT/UPDATEs — findings stay `open` forever. Root cause of the 244-open-P1 pileup and stale E5/A1/D2 noise.
+- **E5 false positives**: balance-exclusion only matched the `$0` variant, so `$409/$1059/$1432` balance blocks survived as "structural". D1/D2 measured raw wall-clock staleness (no market-hours awareness) → fired for every open position every overnight/Monday.
+
+### P0 — live capital (all deployed + verified)
+| Fix | What |
+|---|---|
+| P0-1 | FIX-09 watchdog rewrite. Cooldown stamp now set BEFORE remediation (the 5s storm was caused by the stamp being after a raising sync). Remediation now WRITES a fresh live snapshot (the thing the check reads) — a position resync never refreshed it. Threshold 60m→90m (> 60m snapshot cadence) kills boundary aliasing. CRITICAL only after 2× threshold. Verified: fresh snapshot at startup, no storms. |
+| P0-2 | Live pass in-memory per-cycle symbol guard (`_live_symbols_submitted_this_cycle`). Added the instant `execute_signal` returns, BEFORE the DB write — closes the MU×4 duplicate window where a failed order-row write (DELL-orphan path) let strategies 2..N re-fire. |
+| P0-3 | Partial unique index `uq_open_pos_strategy_symbol_acct (strategy_id, symbol, account_type) WHERE closed_at IS NULL`. DB-level enforcement of one-open-position-per-pair (was code-only; had already failed → PLATINUM demo ×2). Resolved the existing demo dup via pending_closure first. `migrations/migrate_open_position_unique.sql`. |
+| P0-4 | Leveraged-ETF SL: removed the dead FIX-03 4% cap (it was silently overwritten by the ATR floor → TQQQ/SOXL actually got up to 20% stops; forcing 4% guarantees noise-stopouts on a 3× ETF). Risk is bounded by the 0.5× sizing (kept) + small CIO size + ATR-realistic stop clamped at the leveraged cap. Canonical leveraged set now in `sl_caps.is_leveraged_etf` (was duplicated 4× with drift). **NEW-07 escalated**: 3× ETFs are still the wrong instrument for a medium-term live book — CIO decision to retire TQQQ/SOXL from live. |
+
+### P1 (all deployed)
+| Fix | What |
+|---|---|
+| P1-1 | Balance gate (FIX-B) corrected: pending = sum of ENTRY-order `quantity` (already dollars), no `× price`. Old formula computed $21.8M pending for a $3K index order → `max(0,…)`=0 → `>0` guard → silent no-op. |
+| P1-2 | `_fetch_historical_from_fmp` now delegates to `fmp_ohlc.fetch_klines` (correct `/stable/historical-price-eod/full` + SYMBOL_MAP) instead of the legacy `/api/v3/historical-price-full` (empty on Starter). Fixes the dead LME/forex FMP primary path (FIX-D part 2). |
+| P1-3 | `live_trade_count` now atomic `UPDATE … SET col = col + 1` in both order_executor + order_monitor (was read-modify-write → lost updates; needed the Sprint-13 backfill). |
+| P1-4 | Zombie exits no longer auto-close LIVE positions — LIVE candidates logged `[ZombieExit][LIVE-REVIEW]` WARNING for CIO; demo keeps auto-flag. (Real-money exits are a CIO decision, not a demo-tuned gate.) |
+| P1-5 | D1/D2 freshness now measured in BUSINESS days (`_business_days_stale`) — kills the weekend/overnight false-positive storm; still catches genuine multi-day gaps. |
+| P1-6 | `signal_decisions` stage-aware prune (`prune_old(30)`) now CALLED in `_run_daily_sync` (was "manual schedule TBD" — audit rows had grown to 44d). |
+| P1-7 | A1 (BACKTESTED-0-signals) downgraded P1→P2 — it was 213 of 244 P1s, burying real P1s. RESEARCH-stage, not a capital risk. |
+| P1-8 | Intel auto-resolution: findings not re-seen in a clean run are auto-resolved (guarded — skipped if any check raised). Fixes the write-only-log accumulation. Plus E5 balance-exclusion broadened to any amount. |
+
+Intel changes (P1-5/7/8) take effect on the next `/intel/run`; P1-6 prune runs on the next daily sync.
+
+### Verified resolved during audit (no action needed)
+- No dual `risk_manager` / `monitoring_service` files (only `src/risk/risk_manager.py`, `src/core/monitoring_service.py`).
+- WF `(test−train) ≤ 1.5` consistency gate wired on all 3 paths (primary/test-dominant/relaxed-OOS).
+- MQS null snapshot fixed (showing 52.8/normal).
+- historical_price_cache duplicate-bar constraint working.
+- Startup demotion properly guarded (60-min fill + 24h trade cooldown).
+
+### Still open (deferred — trading/CIO decisions, not code)
+- **NEW-07**: retire TQQQ/SOXL from live book (3× ETF instrument fit).
+- **P1-9 / G5**: COPPER live strategies diverging hard from WF (RSI Midrange COPPER live −2.37 vs WF 1.72; Dual MA COPPER −3.58 vs 1.37) — review for retirement.
+- 423 silent `except: pass`/`logger.debug` handlers (28% of all) — systemic; lint rule + targeted audit recommended.
 
 ---
 
@@ -115,6 +162,23 @@ Three layers of defense deployed:
 
 ---
 
+## SESSION 2026-06-10 — POST-SPRINT-13 VERIFICATION FIXES (commit `8f733c2`)
+
+Full post-deploy verification run confirmed all 10 Sprint 13 checks. Five
+remaining issues identified and fixed:
+
+| Fix | What |
+|---|---|
+| FIX-A | E5 gate-loop check: `MAX(reason)` → `ARRAY_AGG(DISTINCT reason)`. Old code picked lexicographically largest reason, so "Insufficient balance: $0" masked "Pullback gate" and skipped the filter. Now checks ALL reasons; strategy only flagged if ≥1 is structural. Added transient-balance ($0 settlement window) and symbol-cap to the temporary-exclusion list. |
+| FIX-B | DB balance formula: pending order deduction used `quantity` (shares) not `quantity × price` (dollars). 50 shares at $396 was deducted as $50. Now uses `expected_price` with fallback to `price`. |
+| FIX-C | EEM ADX retired in DB (`ADX Trend Following EEM LONG` → INVALID). G9 finding: -57838% degradation. Slipped Sprint 13 batch because A4 and G9 use different degradation metrics. |
+| FIX-D | ALUMINUM/ZINC FMP routing: (1) `fmp_ohlc.SYMBOL_MAP` now maps ALUMINUM→ALIUSD, ZINC→ZNUSD. Added ALIUSD/ZNUSD intraday to `EXPLICIT_BLOCKED` (LME metals are EOD-only on FMP Starter). (2) `market_data_manager` LME/forex primary path was passing `normalized_symbol` (Yahoo wire form `ALI=F`) instead of `db_symbol` (display form `ALUMINUM`) to `_fetch_historical_from_fmp` — bypassed SYMBOL_MAP entirely, fell through to thin Yahoo data silently. Root cause of ALUMINUM 1d bars being 162h stale. |
+| FIX-E | `VACUUM ANALYZE signal_decisions` + `strategies`. Reclaimed dead tuple bloat from Sprint 13's 294K row deletion. |
+
+**Note on signal_decisions disk size:** VACUUM ran successfully. `pg_relation_size` (live data) = 262 MB, `pg_total_relation_size` (including indexes/toast) = 398 MB. Size has not shrunk because VACUUM marks pages as reusable but does not return them to the OS — that requires `VACUUM FULL` which locks the table. The live data is 262 MB which is correct for 130K rows. No further action needed; new rows will use reclaimed pages.
+
+---
+
 ## OPEN ITEMS (P1/P2)
 
 ### P2 — This Month
@@ -133,14 +197,11 @@ Three layers of defense deployed:
 ## KEY NUMBERS TO TRACK NEXT SESSION
 
 When checking logs/DB next session, verify:
-1. **No new `InFailedSqlTransaction` errors** in errors.log (root fix deployed)
-2. **PANW has exactly 1 open live position** (3476115401)
-3. **DEMO book actively opening new positions** (pullback gate fix — daily trend entries should be flowing)
-4. **Intel findings count** — should be significantly lower after all Intel fixes; run a new Intel scan
-5. **live_trade_count** — should be incrementing correctly for new fills
-6. **signal_decisions table size** — should stay manageable with new retention policy
-7. **TSL summary log line** — check for `min_buffer_pct` appearing in trail logs (FIX-07 active)
-8. **Live order writes** — check errors.log for any "CRITICAL — order DB write failed" (new isolation fix)
+1. **ALUMINUM 1d data fresh** — after next price sync, confirm `historical_price_cache` has recent ALUMINUM 1d bars from FMP (ALIUSD). Check errors.log for "FMP (forex/LME primary)" log line.
+2. **E5 Intel count near zero** — run fresh Intel scan; E5 should show 0 after ARRAY_AGG fix.
+3. **Demo orders executing** — moderate pullback should resolve; once SPY 5d return moves above -2%, daily trend strategies should start submitting orders again.
+4. **signal_decisions size stable** — 130K rows / 262 MB live. New retention policy should keep it from growing back.
+5. **FIX-B in effect** — if any PENDING orders exist during settlement, confirm balance log shows `invested + pending_dollars` not `invested + pending_shares`.
 
 ---
 

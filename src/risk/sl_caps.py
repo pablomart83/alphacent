@@ -17,13 +17,24 @@ from __future__ import annotations
 from src.core.symbol_registry import get_registry
 
 
-# Keep in sync with `src/execution/order_executor.py` — both call
-# `sl_cap_pct(symbol)` so the values live here only.
+# Canonical leveraged-ETF set — single source of truth for the whole system.
+# order_executor (SL cap + FIX-03 sizing), position_manager (TSL class), and
+# market_data_manager all import `is_leveraged_etf` from here. Previously this
+# membership list was duplicated in 4 places with drift (position_manager had
+# ROM/UWM/USD; the others didn't), so a leveraged ETF could get the wide TSL
+# but not the FIX-03 sizing. One list, one truth.
 _LEVERAGED_ETF_SET = frozenset({
+    # 3x / 2x Long
     "SOXL", "TQQQ", "UPRO", "SPXL", "UDOW", "LABU", "TECL", "FAS", "TNA",
+    "SSO", "QLD", "DDM", "ROM", "UWM", "USD",
+    # 3x / 2x Inverse
     "SQQQ", "SPXU", "SDOW", "SOXS", "LABD", "TECS", "FAZ", "TZA",
-    "SSO", "QLD", "DDM",
 })
+
+
+def is_leveraged_etf(symbol: str) -> bool:
+    """True if `symbol` is a known leveraged (2x/3x) ETF. Canonical check."""
+    return symbol.upper() in _LEVERAGED_ETF_SET
 
 # SL cap fractions (max distance from entry). These are *cap* values — the
 # signal path may pick a lower value based on ATR. Manual writes may go up

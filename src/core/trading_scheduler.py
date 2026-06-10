@@ -577,24 +577,27 @@ class TradingScheduler:
                             _PosORM_bal.closed_at.is_(None),
                         ).all()
                         _invested = sum(r[0] or 0 for r in _invested_rows)
-                        # Subtract pending order dollar amounts.
-                        # FIX-B: Previously queried quantity (shares), not dollars.
-                        # A pending order for 50 shares of DELL at $396 was deducted
-                        # as $50 instead of $19,800 — wildly wrong during settlement.
-                        # Use quantity × expected_price (the submitted price); fall
-                        # back to price if expected_price is NULL.
+                        # Subtract pending ENTRY order dollar amounts.
+                        # P1-1: orders.quantity is the DOLLAR position size for entry
+                        # orders (set from position_size at creation). It is NOT shares.
+                        # The previous FIX-B multiplied quantity × expected_price on a
+                        # misdiagnosis ("50 shares × $396"); for the common dollar-valued
+                        # entry orders that produced absurd values (e.g. $3000 × $7281 =
+                        # $21.8M), which drove _db_computed_balance to 0 and made the
+                        # whole gate silently no-op via the `> 0` guard below.
+                        # Correct: pending dollars = sum(quantity) over ENTRY orders only.
+                        # Close/SL/TP orders carry share-valued quantity (inherited from
+                        # position.quantity) and do not consume buying power, so they are
+                        # excluded by order_action. NULL order_action is treated as entry
+                        # (legacy rows) — conservative, can only tighten the balance.
                         _pending_rows = _db_bal_sess.query(
                             _OrdORM_bal.quantity,
-                            _OrdORM_bal.expected_price,
-                            _OrdORM_bal.price,
                         ).filter(
                             _OrdORM_bal.account_type == 'demo',
                             _OrdORM_bal.status == OrderStatus.PENDING,
+                            (_OrdORM_bal.order_action == 'entry') | (_OrdORM_bal.order_action.is_(None)),
                         ).all()
-                        _pending = sum(
-                            (r[0] or 0) * (r[1] or r[2] or 0)
-                            for r in _pending_rows
-                        )
+                        _pending = sum((r[0] or 0) for r in _pending_rows)
                         _db_computed_balance = max(0.0, float(_db_equity) - float(_invested) - float(_pending))
                         # Use DB-computed if it looks reasonable (> 0 and less than 2× equity)
                         if _db_computed_balance > 0:
@@ -2333,6 +2336,16 @@ class TradingScheduler:
                             f"loaded for risk validation"
                         )
 
+                        # P0-2: per-cycle in-memory guard against duplicate live
+                        # entries for the same symbol across multiple strategies
+                        # (e.g. MU×4). The DB pending-order check below can miss a
+                        # just-submitted order if its DB write failed (the DELL-orphan
+                        # path: eToro filled but the order row was lost). This set is
+                        # populated the instant execute_signal returns — BEFORE and
+                        # independent of the DB write — so strategies 2..N for the same
+                        # symbol in this cycle are blocked even when the row write fails.
+                        _live_symbols_submitted_this_cycle: set = set()
+
                         for _appr in _all_approvals:
                             _live_strat_id = _appr.strategy_id
                             _live_sym = _appr.symbol
@@ -2379,18 +2392,29 @@ class TradingScheduler:
                                 from src.models.database import get_database as _gdb_dup
                                 _dup_sess = _gdb_dup().get_session()
                                 try:
-                                    # (a) Any open live position for this symbol → skip all entries
-                                    _live_open_pos = _dup_sess.query(PositionORM).filter(
-                                        PositionORM.account_type == 'live',
-                                        PositionORM.symbol == _live_sym,
-                                        PositionORM.closed_at.is_(None),
-                                    ).first()
-                                    if _live_open_pos:
+                                    # (0) Already submitted this cycle for this symbol (in-memory
+                                    # guard) — covers the window where a prior strategy's order
+                                    # DB write failed but the eToro submit succeeded (P0-2).
+                                    if _live_sym in _live_symbols_submitted_this_cycle:
                                         logger.info(
-                                            f"Live pass: open position exists for {_live_sym} "
-                                            f"(id={str(_live_open_pos.id)[:8]}) — skipping entry signals"
+                                            f"Live pass: {_live_sym} already submitted this cycle "
+                                            f"(in-memory guard) — skipping entry signals"
                                         )
                                         _skip_live_entries = True
+
+                                    # (a) Any open live position for this symbol → skip all entries
+                                    if not _skip_live_entries:
+                                        _live_open_pos = _dup_sess.query(PositionORM).filter(
+                                            PositionORM.account_type == 'live',
+                                            PositionORM.symbol == _live_sym,
+                                            PositionORM.closed_at.is_(None),
+                                        ).first()
+                                        if _live_open_pos:
+                                            logger.info(
+                                                f"Live pass: open position exists for {_live_sym} "
+                                                f"(id={str(_live_open_pos.id)[:8]}) — skipping entry signals"
+                                            )
+                                            _skip_live_entries = True
 
                                     # (b) Any pending live order for this symbol → skip entries
                                     if not _skip_live_entries:
@@ -2618,6 +2642,11 @@ class TradingScheduler:
                                             take_profit_pct=_live_tp_pct_adj,
                                             account_type='live',
                                         )
+                                        # P0-2: record the eToro submit in-memory IMMEDIATELY,
+                                        # before the DB write. If the order row write below
+                                        # fails, this still blocks duplicate entries for the
+                                        # same symbol from later strategies in this cycle.
+                                        _live_symbols_submitted_this_cycle.add(_live_sym)
                                         _live_order_orm2 = OrderORM(
                                             id=_live_order2.id,
                                             strategy_id=_live_order2.strategy_id,

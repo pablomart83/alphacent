@@ -192,26 +192,33 @@ class OrderExecutor:
         # FIX-03: Leveraged ETF risk rules (LIVE only).
         # SOXL/TQQQ/UPRO entered with the same 6% SL and full position size as regular
         # stocks, hitting "Max loss exceeded -12.3%" on 5 simultaneous positions on Jun 5.
-        # For LIVE accounts, apply: 4% max SL and 0.5× position size multiplier.
-        # Paper path is unchanged — paper data from leveraged ETFs is valid training data.
-        _LEVERAGED_ETF_NAMES = {
-            "SOXL", "TQQQ", "UPRO", "SPXL", "UDOW", "LABU", "TECL", "FAS", "TNA",
-            "SQQQ", "SPXU", "SDOW", "SOXS", "LABD", "TECS", "FAZ", "TZA", "SSO", "QLD", "DDM"
-        }
-        _is_leveraged_etf_order = normalized_symbol.upper() in _LEVERAGED_ETF_NAMES
+        #
+        # Risk on leveraged ETFs is controlled by SIZE, not by a fixed-% stop.
+        # The original FIX-03 also forced a 4% SL, but a 4% stop on a 3x ETF (daily
+        # ATR ~6-10%) sits below 1x ATR — it is a guaranteed noise-stopout, and it
+        # was in any case silently overwritten by the ATR floor below (which widens
+        # the stop back to the leveraged-ETF cap). Forcing it created a dead, dishonest
+        # cap. The correct control is the 0.5x size multiplier kept here PLUS the
+        # ATR-driven stop (clamped at the leveraged-ETF cap in sl_caps). With the CIO
+        # size already small, halved size bounds dollar risk to an acceptable level
+        # even at the wider ATR stop.
+        #
+        # NEW-07 (escalated): a 3x leveraged ETF is still the wrong instrument for a
+        # medium-term live strategy regardless of stop. The proper resolution is to
+        # retire TQQQ/SOXL from the live book or re-graduate with explicit leveraged
+        # risk params — a CIO decision, not an order-time clamp.
+        from src.risk.sl_caps import is_leveraged_etf as _is_lev_etf
+        _is_leveraged_etf_order = _is_lev_etf(normalized_symbol)
         if _is_leveraged_etf_order and account_type == 'live':
-            if stop_loss_pct is not None and stop_loss_pct > 0.04:
-                logger.info(
-                    f"[FIX-03] Leveraged ETF {normalized_symbol}: capping SL "
-                    f"{stop_loss_pct:.1%} → 4.0% (LIVE only)"
-                )
-                stop_loss_pct = 0.04
-            # Halve position size for leveraged ETFs on LIVE
+            # Halve position size for leveraged ETFs on LIVE — this is the real
+            # dollar-risk control. SL is left to the ATR floor (clamped at the
+            # leveraged-ETF cap), which produces a realistic, non-noise stop.
             _original_lev_size = position_size
             position_size = position_size * 0.5
             logger.info(
                 f"[FIX-03] Leveraged ETF {normalized_symbol}: halving LIVE position size "
-                f"${_original_lev_size:.0f} → ${position_size:.0f}"
+                f"${_original_lev_size:.0f} → ${position_size:.0f} "
+                f"(SL left ATR-driven, capped at leveraged-ETF max — see NEW-07)"
             )
 
         try:
@@ -358,8 +365,8 @@ class OrderExecutor:
                                             # Crypto: 15% max. Forex: 4% max.
                                             _is_crypto = any(c in normalized_symbol.upper() for c in ["BTC","ETH","XRP","ADA","SOL"])
                                             _is_forex = len(normalized_symbol) == 6 and normalized_symbol[:3].isalpha() and normalized_symbol[3:].isalpha()
-                                            _LEVERAGED_ETF_SET = {"SOXL","TQQQ","UPRO","SPXL","UDOW","LABU","TECL","FAS","TNA","SQQQ","SPXU","SDOW","SOXS","LABD","TECS","FAZ","TZA","SSO","QLD","DDM"}
-                                            _is_leveraged_etf = normalized_symbol.upper() in _LEVERAGED_ETF_SET
+                                            from src.risk.sl_caps import is_leveraged_etf as _is_lev_etf2
+                                            _is_leveraged_etf = _is_lev_etf2(normalized_symbol)
                                             _sl_max = 0.15 if _is_crypto else (0.04 if _is_forex else (0.20 if _is_leveraged_etf else 0.09))
                                             if stop_loss_pct > _sl_max:
                                                 stop_loss_pct = _sl_max
@@ -1548,17 +1555,27 @@ class OrderExecutor:
         try:
             from src.models.database import get_database
             from src.models.orm import StrategyORM
-            
+            from sqlalchemy import update as _sql_update
+
             db = get_database()
             session = db.get_session()
             try:
-                strategy_orm = session.query(StrategyORM).filter_by(id=strategy_id).first()
-                if strategy_orm:
-                    strategy_orm.live_trade_count += 1
-                    session.commit()
-                    logger.debug(f"Incremented live_trade_count for strategy {strategy_id} to {strategy_orm.live_trade_count}")
-                else:
+                # Atomic increment — `UPDATE ... SET col = col + 1` is evaluated
+                # in the DB, so concurrent fills (immediate-fill path here + async
+                # order_monitor path) cannot lose an update via read-modify-write.
+                # The two call sites are mutually exclusive by order status
+                # (this fires on immediate FILLED; order_monitor only processes
+                # still-PENDING orders), so this never double-counts.
+                result = session.execute(
+                    _sql_update(StrategyORM)
+                    .where(StrategyORM.id == strategy_id)
+                    .values(live_trade_count=StrategyORM.live_trade_count + 1)
+                )
+                session.commit()
+                if result.rowcount == 0:
                     logger.warning(f"Strategy {strategy_id} not found, cannot increment live_trade_count")
+                else:
+                    logger.debug(f"Incremented live_trade_count for strategy {strategy_id} (atomic)")
             except Exception as e:
                 logger.error(f"Failed to increment live_trade_count for strategy {strategy_id}: {e}")
                 session.rollback()

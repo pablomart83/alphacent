@@ -1322,15 +1322,22 @@ class OrderMonitor:
                             if getattr(order, 'order_action', None) == 'entry' and order.strategy_id:
                                 from src.models.database import get_database as _gdb_ltc
                                 from src.models.orm import StrategyORM as _StratORM
+                                from sqlalchemy import update as _sql_update_ltc
                                 _ltc_sess = _gdb_ltc().get_session()
                                 try:
-                                    _strat = _ltc_sess.query(_StratORM).filter_by(id=order.strategy_id).first()
-                                    if _strat:
-                                        _strat.live_trade_count = (_strat.live_trade_count or 0) + 1
-                                        _ltc_sess.commit()
+                                    # Atomic DB-side increment — immune to lost updates
+                                    # from concurrent fills (read-modify-write previously
+                                    # could drop increments when two fills committed close
+                                    # together).
+                                    _ltc_res = _ltc_sess.execute(
+                                        _sql_update_ltc(_StratORM)
+                                        .where(_StratORM.id == order.strategy_id)
+                                        .values(live_trade_count=_StratORM.live_trade_count + 1)
+                                    )
+                                    _ltc_sess.commit()
+                                    if _ltc_res.rowcount:
                                         logger.debug(
-                                            f"live_trade_count incremented for {order.strategy_id[:8]} "
-                                            f"→ {_strat.live_trade_count}"
+                                            f"live_trade_count incremented for {order.strategy_id[:8]} (atomic)"
                                         )
                                 except Exception as _ltc_inner:
                                     logger.debug(f"live_trade_count commit failed for {order.id}: {_ltc_inner}")

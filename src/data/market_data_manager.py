@@ -1634,48 +1634,34 @@ class MarketDataManager:
         """
         if not self._fmp_api_key:
             raise ValueError("FMP API key not configured")
-        
-        url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}"
-        params = {
-            "apikey": self._fmp_api_key,
-            "from": start.strftime("%Y-%m-%d"),
-            "to": end.strftime("%Y-%m-%d"),
-        }
-        
+
+        # Delegate to the canonical FMP adapter (src.api.fmp_ohlc), which uses the
+        # correct /stable/ endpoints — /historical-price-eod/full for 1d and
+        # /historical-chart/{1hour,4hour} for intraday — plus SYMBOL_MAP resolution
+        # (ALUMINUM→ALIUSD, ZINC→ZNUSD) and the Starter-plan coverage block-set.
+        #
+        # P1-2 / FIX-D part 2: the previous implementation called the legacy
+        # /api/v3/historical-price-full endpoint, which returns empty/limited data
+        # on the FMP Starter plan. The LME/forex FMP "primary" path therefore got
+        # nothing and silently fell through to thin Yahoo data — the real reason
+        # ALUMINUM 1d bars showed source=YAHOO despite the FIX-D symbol mapping.
+        from src.api import fmp_ohlc as _fmp_ohlc
         try:
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-        except requests.RequestException as e:
-            raise ValueError(f"FMP API request failed for {symbol}: {e}")
-        
-        historical = data.get("historical", [])
-        if not historical:
-            raise ValueError(f"No historical data from FMP for {symbol}")
-        
-        data_list = []
-        for bar in historical:
-            try:
-                bar_date = datetime.strptime(bar["date"], "%Y-%m-%d")
-                market_data = MarketData(
-                    symbol=symbol,
-                    timestamp=bar_date,
-                    open=float(bar["open"]),
-                    high=float(bar["high"]),
-                    low=float(bar["low"]),
-                    close=float(bar["close"]),
-                    volume=float(bar.get("volume", 0)),
-                    source=DataSource.FMP
-                )
-                data_list.append(market_data)
-            except (KeyError, ValueError) as e:
-                logger.debug(f"Skipping malformed FMP bar for {symbol}: {e}")
-                continue
-        
-        # FMP returns newest first, reverse to chronological order
+            data_list = _fmp_ohlc.fetch_klines(
+                symbol, start, end, interval, api_key=self._fmp_api_key
+            )
+        except _fmp_ohlc.FMPAPIError as e:
+            raise ValueError(f"FMP fetch failed for {symbol} @ {interval}: {e}")
+
+        if not data_list:
+            raise ValueError(f"No historical data from FMP for {symbol} @ {interval}")
+
+        # fetch_klines already returns ascending MarketData with source=FMP.
         data_list.sort(key=lambda d: d.timestamp)
-        
-        logger.info(f"Fetched {len(data_list)} historical data points from FMP for {symbol}")
+        logger.info(
+            f"Fetched {len(data_list)} historical data points from FMP for "
+            f"{symbol} ({interval}) via /stable endpoint"
+        )
         return data_list
 
     def clear_cache(self) -> None:

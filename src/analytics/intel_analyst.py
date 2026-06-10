@@ -128,7 +128,20 @@ class IntelAnalyst:
             self._check_h4_paper_conviction_threshold,
         ]
 
+        # Capture a DB-side cutoff BEFORE running checks. Any finding re-seen
+        # this run gets last_seen = NOW() (strictly after this cutoff); anything
+        # with last_seen < cutoff was NOT reproduced this run and is stale.
+        _resolve_cutoff = None
+        _cut_sess = self.db.get_session()
+        try:
+            _resolve_cutoff = _cut_sess.execute(text("SELECT NOW()")).scalar()
+        except Exception:
+            _resolve_cutoff = None
+        finally:
+            _cut_sess.close()
+
         findings: List[Finding] = []
+        checks_failed = 0
         for check_fn in checks:
             try:
                 result = check_fn(lookback_days)
@@ -139,6 +152,7 @@ class IntelAnalyst:
                 else:
                     findings.append(result)
             except Exception as exc:
+                checks_failed += 1
                 logger.warning(f"Intel check {check_fn.__name__} failed: {exc}")
 
         # Upsert findings
@@ -151,6 +165,48 @@ class IntelAnalyst:
                 updated += u
             except Exception as exc:
                 logger.warning(f"Intel upsert failed for {f.check_id}/{f.key}: {exc}")
+
+        # Auto-resolve findings that no longer reproduce.
+        #
+        # Without this the findings table only ever grows — a finding created
+        # once stays status='open' forever even after the condition clears. That
+        # was the root cause of the 244-open-P1 pileup and the stale E5/A1 noise:
+        # the queue was a write-only log, not a current-state view.
+        #
+        # SAFETY: only auto-resolve when ALL checks ran cleanly this cycle. If any
+        # check raised, its findings weren't re-upserted and we must NOT close them
+        # (we don't know their current state). The cutoff is a DB timestamp taken
+        # before the checks ran, so only findings re-seen this run survive.
+        resolved = 0
+        if checks_failed == 0 and _resolve_cutoff is not None:
+            _res_sess = self.db.get_session()
+            try:
+                _res = _res_sess.execute(
+                    text(
+                        "UPDATE system_findings SET status='resolved', resolved_at=NOW(), "
+                        "dismissed_reason='auto-resolved: condition no longer detected', "
+                        "updated_at=NOW() "
+                        "WHERE status='open' AND last_seen < :cutoff"
+                    ),
+                    {"cutoff": _resolve_cutoff},
+                )
+                _res_sess.commit()
+                resolved = _res.rowcount or 0
+                if resolved:
+                    logger.info(f"Intel: auto-resolved {resolved} finding(s) that no longer reproduce")
+            except Exception as exc:
+                logger.warning(f"Intel: auto-resolve pass failed: {exc}")
+                try:
+                    _res_sess.rollback()
+                except Exception:
+                    pass
+            finally:
+                _res_sess.close()
+        elif checks_failed > 0:
+            logger.warning(
+                f"Intel: skipping auto-resolve — {checks_failed} check(s) failed this run "
+                f"(would risk closing findings whose state is unknown)"
+            )
 
         duration = round(time.time() - t0, 2)
 
@@ -302,7 +358,12 @@ class IntelAnalyst:
                 check_id="A1",
                 key=f"strategy:{row[0]}",
                 category="A",
-                severity="P1",
+                # P2, not P1: a BACKTESTED (RESEARCH-stage) strategy with no signals
+                # is a research-pipeline hygiene issue, not a live-capital risk. It was
+                # drowning the P1 queue (213 of 244 P1s) and burying real P1s. Severity
+                # corrected to match impact; auto-resolution (run()) closes these once a
+                # strategy starts generating signals or is retired.
+                severity="P2",
                 title=f"A1: {row[1]} — BACKTESTED {days_since}d with 0 signals",
                 detail="BACKTESTED strategy has not generated any signals since activation. Entry conditions may never fire for current market data.",
                 evidence=evidence,
@@ -1147,6 +1208,33 @@ class IntelAnalyst:
     # Category D — Data Pipeline
     # ═══════════════════════════════════════════════════════════════════════════
 
+    @staticmethod
+    def _business_days_stale(latest_bar) -> float:
+        """Weekday-days elapsed since `latest_bar` (Sat/Sun excluded).
+
+        P1-5: market-hours proxy for data freshness. Raw wall-clock staleness
+        reads ~20h for a current 1d bar intraday and ~3 days over a weekend,
+        which made D1/D2 fire false P1s for every open position every overnight
+        and every Monday. Counting only weekdays after the bar's date ignores
+        normal closures while still catching genuine multi-day gaps (e.g.
+        ALUMINUM at 162h ≈ 5 business days). Returns a large sentinel if
+        latest_bar is None (never synced).
+        """
+        from datetime import timedelta as _td
+        if latest_bar is None:
+            return 9999.0
+        now = datetime.now()
+        if latest_bar >= now:
+            return 0.0
+        days = 0
+        cur = latest_bar.date()
+        today = now.date()
+        while cur < today:
+            cur = cur + _td(days=1)
+            if cur.weekday() < 5:  # Mon–Fri
+                days += 1
+        return float(days)
+
     def _check_d1_stale_1d_bars(self, lookback_days: int) -> Optional[List[Finding]]:
         from sqlalchemy import text
         session = self.db.get_session()
@@ -1171,15 +1259,20 @@ class IntelAnalyst:
 
         findings = []
         for row in rows:
+            # P1-5: skip false positives from weekends/overnight — only flag when
+            # the bar is stale by more than 2 BUSINESS days.
+            bd_stale = self._business_days_stale(row[1])
+            if bd_stale <= 2:
+                continue
             stale_h = round(row[2] or 0, 1)
             latest = row[1].strftime("%Y-%m-%d") if row[1] else "never"
-            evidence = f"Symbol: {row[0]}\nLatest 1d bar: {latest}\nStaleness: {stale_h}h"
+            evidence = f"Symbol: {row[0]}\nLatest 1d bar: {latest}\nStaleness: {stale_h}h ({bd_stale:.0f} business days)"
             findings.append(Finding(
                 check_id="D1",
                 key=f"data_stale:{row[0]}:1d",
                 category="D",
                 severity="P1",
-                title=f"D1: {row[0]} — 1d bars {stale_h:.0f}h stale (open position)",
+                title=f"D1: {row[0]} — 1d bars {bd_stale:.0f} business days stale (open position)",
                 detail="Signal generation is running on stale 1d data for an open position. Indicators may be wrong.",
                 evidence=evidence,
                 recommended_action="Check _sync_price_data for this symbol — may be Yahoo ticker mapping issue or DST crash. Run manual full sync.",
@@ -1214,15 +1307,21 @@ class IntelAnalyst:
 
         findings = []
         for row in rows:
+            # P1-5: 4h bars legitimately age overnight (~17h) and over weekends
+            # (~65h). Only flag genuine multi-day gaps (> 2 business days); the
+            # raw SQL "> 6 hours" HAVING is just a coarse prefilter.
+            bd_stale = self._business_days_stale(row[1])
+            if bd_stale <= 2:
+                continue
             stale_h = round(row[2] or 0, 1)
             latest = row[1].strftime("%Y-%m-%d %H:%M") if row[1] else "never"
-            evidence = f"Symbol: {row[0]}\nLatest 4h bar: {latest}\nStaleness: {stale_h}h"
+            evidence = f"Symbol: {row[0]}\nLatest 4h bar: {latest}\nStaleness: {stale_h}h ({bd_stale:.0f} business days)"
             findings.append(Finding(
                 check_id="D2",
                 key=f"data_stale:{row[0]}:4h",
                 category="D",
                 severity="P1",
-                title=f"D2: {row[0]} — 4h bars {stale_h:.0f}h stale (4h strategy open)",
+                title=f"D2: {row[0]} — 4h bars {bd_stale:.0f} business days stale (4h strategy open)",
                 detail="4h strategy has an open position but 4h bars are stale. TSL ratchet and signal generation may be using wrong data.",
                 evidence=evidence,
                 recommended_action="Check _sync_price_data for this symbol's 4h interval. May need manual sync.",
@@ -1535,8 +1634,14 @@ class IntelAnalyst:
             "Drawdown pause",
             "Market quality gate",
             "Bull market regime gate",
-            "Insufficient balance: $0",   # transient settlement window
-            "insufficient_balance ($0",    # alternate format
+            # Insufficient balance at ANY level is transient (demo balance
+            # depletes during settlement / full deployment and recovers when
+            # positions close). Previously only the "$0" variant was excluded,
+            # so balance blocks at $409/$1059/$1432 survived as "structural" and
+            # produced false E5 "permanent loop" findings (MCHP, Jun 10). Match
+            # both reason-string formats regardless of the dollar amount.
+            "Insufficient balance:",       # "Insufficient balance: $409 < $2000"
+            "insufficient_balance (",      # "insufficient_balance ($409 < $2000 minimum)"
             "Symbol limit:",               # rate-limiting by design
             "Low-confidence exit",         # exit filter, not entry loop
         )
