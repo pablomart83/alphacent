@@ -6,7 +6,29 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**Sprint A complete (Jun 10 2026, 23:27 UTC). Second forensic audit (Opus 4.8) + live-capital correctness fixes deployed & verified live. Service healthy, no post-deploy errors, TSL clean. See "SESSION 2026-06-10 — SPRINT A" below. NEXT UP: Sprint B (graduation rigor + CIO-flag GOOGL/TXN/COPPER) — the live book is net-positive ONLY on one SOXL outlier; 9/10 live symbols are net-negative (GOOGL 11% WR/18 trades, TXN 0%/3). See audit findings P0-1/P0-2.**
+
 **Sprint 14 complete (Jun 10 2026). Forensic audit P0+P1 fixes deployed & verified live. Service healthy, trading cycle + live pass running clean, position sync clean, fresh live snapshot, zero post-deploy errors. See "SESSION 2026-06-10 — SPRINT 14" below.**
+
+---
+
+## SESSION 2026-06-10 — SPRINT A: LIVE-CAPITAL CORRECTNESS (2nd audit)
+
+Second full forensic audit (Opus 4.8) re-verified every Sprint 14 claim against live DB/logs/source. Most infra fixes held. Sprint A executed the four live-capital *correctness* findings. Deployed `trading_scheduler.py` + `monitoring_service.py`, restarted 23:27 UTC, health green, zero post-deploy errors, TSL running clean.
+
+| Fix | What | Root cause |
+|---|---|---|
+| **P1-1** | Live order size now `min(pipeline, CIO/mirror)` (was raw `CIO/mirror`, pipeline discarded as "advisory"). | `validate_signal` computed vol/drawdown/heat-adjusted size + validated symbol/exposure/VaR caps against it, then the live pass threw it away and traded a *different* number — caps validated one size, executed another. Now executed ≤ validated, so caps hold and the risk framework can scale live DOWN in adverse regimes (never above CIO cap → risk only decreases). |
+| **P1-2** | `_adjust_opposing_position_sl`: deleted dead duplicate def (was shadowed), removed the no-op positional call site, added `account_type` filter to the query. | Two methods same name/different signatures; call site 1896 passed positional args → `new_tp=None` → silent no-op; effective method (3554) queried positions with NO account_type filter → a DEMO short on MU/AMD could widen a LIVE position's DB stop (the value TSL breach reads). |
+| **P1-3** | Price-freshness guard at top of `_check_trailing_stops`: if a monitor's last *successful* sync (`_last_full_sync`) > 180s, force a resync before breach enforcement so stops act on fresh `current_price`. | Breach enforcement trusted `current_price` with only a `>0` check. During the 76–86 min loop gaps (observed 2026-06-10), price went stale → real breach missed / ghost breach on live capital. Self-heals the exact gap scenario; never disables stops on outage. |
+| **P1-4** | Per-phase + per-cycle timing instrumentation in the monitoring loop (`[loop-timing]` WARNING when position-sync/trailing phase >30s or cycle >45s). | The 76–86 min loop gaps (root cause of the FIX-09 storms) were invisible — only surfaced downstream as staleness storms. Now greppable in real time so the offending eToro call can be fixed with evidence. Note: eToro calls already have a 30s timeout + bounded retry, so the proper next step was instrumentation, not a guessed timeout change. |
+
+**Verified-correct during audit (no action):** session-rollback-on-checkout; both unique indexes live; P0-2 in-memory live symbol guard; live-pass account scoping; WF (test−train)≤1.5 gate on all 3 paths; transaction costs read `backtest.transaction_costs` (no phantom costs; top-level `transaction_costs` block is dead/unread); conviction normalization denominators internally consistent (no Tier-1 inflation — the `Asset(12)` comment is a typo, denom 101 assumes 15); Intel auto-resolution logic correct; MQS persisting (52.8); P0-4 leveraged SL (20% cap, 0.5× sizing, dead 4% cap gone).
+
+**Still open from 2nd audit (NOT done in Sprint A):**
+- **Sprint B (P0-1/P0-2):** Live book +$73v total is ENTIRELY one SOXL outlier (+$868, n=4, one +46% hold). Ex-SOXL: −$795v ≈ −$101 real (~7.8% of $1.3K stake) across 48 trades. GOOGL 11% WR/18 trades, TXN 0%/3, COPPER (G5). Root cause: graduation gate min_trades 10/15/25 + 55% WR gives a ~±23% WR CI → sub-50% strategies pass by luck; ~300 candidates (multiple testing) ⇒ expected false graduations. Fix: Wilson-lower-bound WR≥0.50 gate, raise min_trades→20, cumulative live-loss/WR auto-halt. Then CIO-flag GOOGL/TXN/COPPER for retirement (NOT auto-retired — rule).
+- **P2 quick wins:** `strategies.py:3174` `(full_config.get('market_regime') or {})` crash; NEW-08 stale-order 404 churn; `position_manager._classify_symbol` still has its own leveraged-ETF set (P0-4 consolidation incomplete); `risk_manager._get_position_value` falls back to share count when `invested_amount` missing.
+- **P1-1 follow-up:** `check_position_limits`/`check_exposure_limits` still use demo `self.config.max_position_size_pct` as the live gate threshold (conservative, not a hole — left untouched to avoid destabilizing the working live gate).
 
 **Sprint 13 complete (Jun 10 2026). 14 crash-audit fixes + 6 Intel fixes + 6 P1 improvements + 3 session-corruption fixes deployed. Live account updated to $1,300 real / 0.127 mirror ratio. Pullback gate recalibrated. System actively trading again.**
 

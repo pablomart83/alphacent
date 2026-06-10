@@ -108,6 +108,14 @@ class MonitoringService:
         # produced the once-per-hour CRITICAL noise. 90 min leaves headroom for
         # a delayed-but-healthy hourly write before we treat the snapshot as stale.
         self._FIX09_STALE_THRESHOLD_S: float = 5400.0  # 90 minutes
+        # P1-4 (Sprint A): per-phase / per-cycle slow-loop instrumentation. When a
+        # monitoring phase (position sync, trailing stops) or the whole cycle exceeds
+        # this, log a WARNING naming the phase. The 76–86 min loop gaps on 2026-06-10
+        # were invisible until they surfaced as a downstream FIX-09 staleness storm;
+        # this makes a stall greppable in real time so the offending call can be fixed
+        # with evidence rather than guessed at.
+        self._SLOW_PHASE_THRESHOLD_S: float = 30.0
+        self._SLOW_CYCLE_THRESHOLD_S: float = 45.0
         # One-time live reconcile: run once before the first position sync to
         # verify recently-filled live orders have open positions (Step 2b).
         # Mirrors the DEMO reconcile_on_startup in trading_scheduler.
@@ -328,8 +336,17 @@ class MonitoringService:
         
         while self._running:
             try:
+                _cycle_t0 = time.time()
                 await self._run_monitoring_cycle()
-                
+                _cycle_dt = time.time() - _cycle_t0
+                if _cycle_dt > self._SLOW_CYCLE_THRESHOLD_S:
+                    logger.warning(
+                        f"[loop-timing] monitoring cycle took {_cycle_dt:.1f}s "
+                        f"(> {self._SLOW_CYCLE_THRESHOLD_S:.0f}s) — the 60s position sync "
+                        f"and trailing-stop cadence are slipping; current_price + equity "
+                        f"snapshot freshness at risk (root cause of the 2026-06-10 gaps)"
+                    )
+
                 # Wait for next interval
                 await asyncio.sleep(loop_interval)
             
@@ -426,6 +443,14 @@ class MonitoringService:
         
         # Sync positions (medium path - with caching)
         if now - self._last_position_sync >= self.position_sync_interval:
+            # P1-4 (Sprint A): time the position-sync phase. This phase makes the
+            # eToro get_positions / get_account_info calls (each up to 30s timeout +
+            # bounded retries + 1s rate-limit between calls), and is the prime suspect
+            # for the 76–86 min monitoring-loop gaps observed on 2026-06-10 that left
+            # the equity snapshot and current_price stale. Logging the duration turns an
+            # invisible stall into a diagnosable, greppable event instead of a silent
+            # gap that only surfaces as a downstream FIX-09 storm.
+            _phase_t0 = time.time()
             try:
                 position_results = self.order_monitor.sync_positions()
                 logger.debug(
@@ -484,16 +509,35 @@ class MonitoringService:
                 self._last_position_sync = now
             except Exception as e:
                 logger.error(f"Error syncing positions: {e}")
+            finally:
+                _phase_dt = time.time() - _phase_t0
+                if _phase_dt > self._SLOW_PHASE_THRESHOLD_S:
+                    logger.warning(
+                        f"[loop-timing] position-sync phase took {_phase_dt:.1f}s "
+                        f"(> {self._SLOW_PHASE_THRESHOLD_S:.0f}s) — a stall here delays "
+                        f"current_price + equity snapshot for the whole loop; "
+                        f"investigate eToro get_positions/get_account_info latency"
+                    )
         
         # Check trailing stops (DB-only — eToro doesn't support SL modification).
         # Updates stop levels in DB and flags positions that breach their stop for closure.
         # _check_trailing_stops emits its own per-cycle INFO summary, so no extra log here.
         if now - self._last_trailing_check >= self.trailing_stops_interval:
+            _phase_t0 = time.time()
             try:
                 self._check_trailing_stops()
                 self._last_trailing_check = now
             except Exception as e:
                 logger.error(f"Error checking trailing stops: {e}")
+            finally:
+                _phase_dt = time.time() - _phase_t0
+                if _phase_dt > self._SLOW_PHASE_THRESHOLD_S:
+                    logger.warning(
+                        f"[loop-timing] trailing-stops phase took {_phase_dt:.1f}s "
+                        f"(> {self._SLOW_PHASE_THRESHOLD_S:.0f}s) — breach enforcement "
+                        f"and SL ratchet are delayed for every open position while this "
+                        f"runs; investigate the freshness resync or DB contention"
+                    )
 
         # FIX-09: Live equity staleness watchdog.
         # If the LIVE equity snapshot hasn't been updated in > threshold, the snapshot
@@ -2669,6 +2713,42 @@ class MonitoringService:
         Returns:
             Dict with counts of updated stops and breach closures.
         """
+
+        # ── P1-3 (Sprint A): price-freshness guard before breach enforcement ──
+        # Breach enforcement (Pass 2 below) compares position.current_price against
+        # stop_loss. current_price is written by the position sync. If the monitoring
+        # loop stalls (observed 76–86 min snapshot/sync gaps on 2026-06-10), the price
+        # goes stale and a real stop breach can be MISSED (price actually blew through
+        # the stop but the stale quote is still above it) or a GHOST breach fired — a
+        # direct real-capital risk on the live book. Before reading positions, force a
+        # resync for any account whose last *successful* sync exceeds the SLA so stops
+        # act on fresh prices. Normal flow syncs every 60s immediately before this, so
+        # _last_full_sync is only seconds old and this never fires; it only triggers
+        # when the loop genuinely stalled, which is exactly when it is needed.
+        import time as _t_fresh
+        _PRICE_FRESHNESS_SLA_S = 180.0  # 3× the 60s sync cadence
+        for _fresh_mon, _fresh_acct in (
+            (self.order_monitor, 'demo'),
+            (self.live_order_monitor, 'live'),
+        ):
+            if _fresh_mon is None:
+                continue
+            _last_sync = getattr(_fresh_mon, '_last_full_sync', 0) or 0
+            _sync_age = _t_fresh.time() - _last_sync
+            if _sync_age > _PRICE_FRESHNESS_SLA_S:
+                logger.warning(
+                    f"[TSL-freshness] {_fresh_acct} position prices stale "
+                    f"({_sync_age:.0f}s > {_PRICE_FRESHNESS_SLA_S:.0f}s SLA) before "
+                    f"breach enforcement — forcing resync so stops act on fresh prices"
+                )
+                try:
+                    _fresh_mon.sync_positions(force=True, account_type=_fresh_acct)
+                except Exception as _fresh_err:
+                    logger.error(
+                        f"[TSL-freshness] forced {_fresh_acct} resync failed: {_fresh_err} "
+                        f"— breach enforcement proceeds on last-known prices (stops stay "
+                        f"active; never disabled by a data outage)"
+                    )
 
         session = self.db.get_session()
 

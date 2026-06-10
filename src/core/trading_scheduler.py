@@ -1892,8 +1892,14 @@ class TradingScheduler:
                                     }
                                 })
 
-                            # Adjust opposing position SL if needed
-                            self._adjust_opposing_position_sl(session, order, signal)
+                            # NOTE (Sprint A / P1-2): the previous
+                            # `self._adjust_opposing_position_sl(session, order, signal)`
+                            # call here was a no-op — it passed positional args into a
+                            # method whose signature is (session, symbol, new_side, new_tp),
+                            # so `new_tp` defaulted to None and the method returned
+                            # immediately. The opposing-SL adjustment belongs at fill time
+                            # (once the new position actually exists), which is the
+                            # correctly-formed call further below. Removed the dead call.
 
                             # Immediately check if order is filled and create position
                             # Market orders on eToro fill instantly — don't wait for order monitor
@@ -1987,12 +1993,16 @@ class TradingScheduler:
                                                 session.add(new_pos)
                                                 logger.info(f"Position created immediately: {order.symbol} {pos_side.value} (eToro: {etoro_position_id})")
 
-                                        # Adjust opposing position's SL if needed
+                                        # Adjust opposing position's SL if needed.
+                                        # P1-2: scope to this order's account_type so a
+                                        # DEMO order can never widen a LIVE position's stop
+                                        # (eToro reuses symbols/IDs across accounts).
                                         self._adjust_opposing_position_sl(
                                             session=session,
                                             symbol=order.symbol,
                                             new_side=pos_side,
                                             new_tp=order.take_profit_price,
+                                            account_type=(getattr(order_orm, 'account_type', None) or 'demo'),
                                         )
 
                                         session.commit()
@@ -2526,19 +2536,38 @@ class TradingScheduler:
                                             )
                                             continue
 
-                                        # CIO position_size is stored in REAL dollars.
-                                        # Convert to virtual — this IS the order size. Final.
-                                        # No YAML min/max applies. validate_signal above checked
-                                        # portfolio-level constraints; if those passed, execute
-                                        # at exactly the CIO-approved size.
+                                        # P1-1 (Sprint A): the order size is the
+                                        # CIO-approved real-dollar size converted to
+                                        # virtual, BUT capped by the risk pipeline output.
+                                        # Previously the pipeline size was computed and
+                                        # discarded ("advisory"), so vol-scaling, drawdown
+                                        # sizing and heat reduction never affected the live
+                                        # order — and validate_signal's symbol/exposure/VaR
+                                        # caps were validated against a number that was not
+                                        # the number actually traded. Taking min() honors the
+                                        # documented contract ("pipeline can size lower than
+                                        # the CIO cap but never higher"): the executed size is
+                                        # always <= the validated pipeline size, so every cap
+                                        # that passed in validate_signal still holds, and the
+                                        # risk framework can now scale the live order DOWN in
+                                        # adverse regimes. It can never scale it ABOVE the CIO
+                                        # cap, so real-capital risk only ever decreases.
                                         _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
                                         _pipeline_size2 = _live_validation2.position_size
                                         _cio_real2 = float(_appr.position_size)
-                                        _live_size2 = _cio_real2 / _mirror2
+                                        _cio_virtual2 = _cio_real2 / _mirror2
+                                        if _pipeline_size2 and _pipeline_size2 > 0:
+                                            _live_size2 = min(_pipeline_size2, _cio_virtual2)
+                                        else:
+                                            _live_size2 = _cio_virtual2
+                                        _size_binding2 = (
+                                            "pipeline" if _live_size2 < _cio_virtual2 else "CIO"
+                                        )
                                         logger.info(
                                             f"Live pass sizing: {_live_sym} "
-                                            f"CIO=${_cio_real2:.0f}r → ${_live_size2:.0f}v "
-                                            f"(pipeline=${_pipeline_size2:.0f}v advisory)"
+                                            f"CIO=${_cio_real2:.0f}r (${_cio_virtual2:.0f}v cap) "
+                                            f"pipeline=${_pipeline_size2:.0f}v → "
+                                            f"order=${_live_size2:.0f}v (binding={_size_binding2})"
                                         )
                                     else:
                                         # Fallback: no risk_manager or no account info —
@@ -2779,93 +2808,12 @@ class TradingScheduler:
             session.close()
 
         return result
-    def _adjust_opposing_position_sl(self, session, order, signal):
-        """
-        When placing an opposing order on a symbol with an existing position,
-        widen the existing position's SL so it doesn't get stopped out before
-        the new opposing position reaches its TP.
-
-        Example: MRNA LONG SL=49.43, new SHORT TP=48.38
-        → LONG SL should move to 48.38 - buffer so both trades can play out.
-        """
-        from src.models.enums import SignalAction, PositionSide
-
-        try:
-            # Determine the new order's direction
-            if signal.action in [SignalAction.ENTER_LONG]:
-                opposing_side = PositionSide.SHORT
-                new_side_label = "LONG"
-            elif signal.action in [SignalAction.ENTER_SHORT]:
-                opposing_side = PositionSide.LONG
-                new_side_label = "SHORT"
-            else:
-                return
-
-            # Find opposing open positions on the same symbol
-            opposing_positions = session.query(PositionORM).filter(
-                PositionORM.symbol == order.symbol,
-                PositionORM.side == opposing_side,
-                PositionORM.closed_at.is_(None),
-                PositionORM.pending_closure == False,
-            ).all()
-
-            if not opposing_positions:
-                return
-
-            new_tp = order.take_profit_price
-            if not new_tp:
-                return
-
-            for opp_pos in opposing_positions:
-                if not opp_pos.stop_loss:
-                    continue
-
-                # Check if the opposing position's SL would be hit before our TP
-                needs_adjustment = False
-                buffer_pct = 0.005  # 0.5% buffer beyond TP
-                new_sl = opp_pos.stop_loss
-
-                if opposing_side == PositionSide.LONG:
-                    # Opposing is LONG, new order is SHORT with TP below current price
-                    # LONG's SL is below entry. If LONG SL > SHORT TP, LONG gets stopped before SHORT profits
-                    if opp_pos.stop_loss > new_tp:
-                        new_sl = new_tp * (1 - buffer_pct)
-                        needs_adjustment = True
-                elif opposing_side == PositionSide.SHORT:
-                    # Opposing is SHORT, new order is LONG with TP above current price
-                    # SHORT's SL is above entry. If SHORT SL < LONG TP, SHORT gets stopped before LONG profits
-                    if opp_pos.stop_loss < new_tp:
-                        new_sl = new_tp * (1 + buffer_pct)
-                        needs_adjustment = True
-
-                if needs_adjustment:
-                    old_sl = opp_pos.stop_loss
-                    opp_pos.stop_loss = round(new_sl, 4)
-                    session.commit()
-
-                    logger.info(
-                        f"Opposing SL adjustment: {opp_pos.symbol} {opposing_side.value} "
-                        f"SL {old_sl:.4f} → {new_sl:.4f} "
-                        f"(widened to accommodate {new_side_label} TP={new_tp:.4f})"
-                    )
-
-                    # Push updated SL to eToro if client available
-                    if self._etoro_client and opp_pos.etoro_position_id:
-                        try:
-                            from src.utils.instrument_mappings import SYMBOL_TO_INSTRUMENT_ID
-                            instrument_id = SYMBOL_TO_INSTRUMENT_ID.get(opp_pos.symbol)
-                            if instrument_id:
-                                self._etoro_client.update_position_stop_loss(
-                                    opp_pos.etoro_position_id,
-                                    new_sl,
-                                    instrument_id=instrument_id
-                                )
-                                logger.info(f"Pushed widened SL to eToro for {opp_pos.symbol} position {opp_pos.etoro_position_id}")
-                        except Exception as e:
-                            logger.warning(f"Failed to push widened SL to eToro: {e}")
-        except Exception as e:
-            logger.warning(f"Error adjusting opposing position SL: {e}")
-
+    # NOTE: the legacy `_adjust_opposing_position_sl(self, session, order, signal)`
+    # definition that used to live here was dead code — it was shadowed by the
+    # later definition with signature (session, symbol, new_side, new_tp) and was
+    # never actually executed. Removed 2026-06-11 (Sprint A / P1-2) along with the
+    # no-op positional call site. The single live definition is below, and is
+    # account_type-scoped so a DEMO order can never mutate a LIVE position's stop.
 
     async def _run_trading_cycle(self):
         """
@@ -3557,6 +3505,7 @@ class TradingScheduler:
         symbol: str,
         new_side,  # PositionSide
         new_tp: float = None,
+        account_type: str = 'demo',
     ):
         """
         When a new position is opened opposing an existing one on the same symbol,
@@ -3565,6 +3514,12 @@ class TradingScheduler:
 
         Example: MRNA LONG SL=49.43, new SHORT TP=48.38
         → LONG SL should move to 48.38 - buffer so both trades can play out.
+
+        P1-2: `account_type` scopes the opposing-position lookup. eToro reuses
+        symbols and numeric IDs across the demo and live accounts, so an
+        unscoped query would let a DEMO order widen a LIVE position's DB stop
+        (the exact value TSL breach enforcement reads), increasing real-capital
+        risk. The query below is filtered to the same account as the new order.
         """
         if not new_tp:
             return
@@ -3576,6 +3531,7 @@ class TradingScheduler:
 
         opposing_positions = session.query(PositionORM).filter(
             PositionORM.symbol == symbol,
+            PositionORM.account_type == account_type,
             PositionORM.side == opposing_side,
             PositionORM.closed_at.is_(None),
             PositionORM.pending_closure == False,
