@@ -207,11 +207,84 @@ class Database:
 
     def get_session(self) -> Session:
         """Get a new database session.
-        
+
+        The returned session is guaranteed to be in a clean (non-aborted)
+        state. If the underlying connection was left in an aborted transaction
+        by a previous caller, we issue an explicit ROLLBACK before handing
+        it out so the next caller never sees InFailedSqlTransaction.
+
+        Callers are responsible for calling session.close() when done.
+        Prefer session_scope() for automatic cleanup.
+
         Returns:
-            SQLAlchemy session
+            SQLAlchemy session in clean state
         """
-        return self.SessionLocal()
+        session = self.SessionLocal()
+        # Reset any aborted transaction state on the underlying connection.
+        # pool_pre_ping detects dead connections but NOT aborted transactions.
+        # An aborted transaction makes every subsequent query fail with
+        # "InFailedSqlTransaction" until a ROLLBACK is issued. This explicit
+        # rollback is a no-op on a clean connection and costs ~0.1ms.
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        return session
+
+    def session_scope(self):
+        """Context manager that provides a transactional scope.
+
+        Guarantees commit on success, rollback+close on any exception.
+        This is the PREFERRED way to use sessions — it prevents aborted
+        transaction states from leaking back into the connection pool.
+
+        Usage:
+            with db.session_scope() as session:
+                session.query(...)
+                session.add(obj)
+                # auto-committed on exit, or rolled back on exception
+
+        The InFailedSqlTransaction cascade that caused DELL orphans and
+        PANW triple-positions happened because code was doing:
+            session = db.get_session()
+            try:
+                session.query(...)   # raises mid-transaction
+            except:
+                logger.error(...)   # no rollback, no close
+            # connection returned to pool in aborted state
+            # next get_session() caller gets aborted connection
+
+        session_scope() eliminates this by wrapping every call in:
+            try: commit
+            except: rollback + raise
+            finally: close
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _scope():
+            session = self.SessionLocal()
+            # Reset any residual aborted state on checkout
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            try:
+                yield session
+                session.commit()
+            except Exception:
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+
+        return _scope()
 
     def close(self) -> None:
         """Close database connection."""
