@@ -3789,6 +3789,31 @@ class MonitoringService:
                     f"for closure — regime is {current_regime}"
                 )
 
+                # Stamp a cooldown on the strategy so it doesn't immediately re-enter.
+                # Without this, the strategy closes, demotes to BACKTESTED, re-fires the
+                # same signal next cycle, and opens again — an infinite open/close loop.
+                # Cooldown: 4 hours (covers the current trading session).
+                try:
+                    from src.models.orm import StrategyORM as _SORM_bg
+                    from sqlalchemy.orm.attributes import flag_modified as _fm_bg
+                    from datetime import timedelta as _td_bg
+                    _strat_bg = session.query(_SORM_bg).filter_by(id=pos.strategy_id).first()
+                    if _strat_bg:
+                        _meta_bg = _strat_bg.strategy_metadata or {}
+                        if not isinstance(_meta_bg, dict):
+                            _meta_bg = {}
+                        _cooldown_until = (datetime.utcnow() + _td_bg(hours=4)).isoformat()
+                        _meta_bg['regime_gate_cooldown_until'] = _cooldown_until
+                        _meta_bg['regime_gate_reason'] = current_regime
+                        _strat_bg.strategy_metadata = _meta_bg
+                        _fm_bg(_strat_bg, 'strategy_metadata')
+                        logger.info(
+                            f"[BullMarketGate] Cooldown set for {pos.symbol} strategy "
+                            f"({pos.strategy_id[:8]}) until {_cooldown_until}"
+                        )
+                except Exception as _cool_err:
+                    logger.debug(f"[BullMarketGate] Failed to set cooldown for {pos.strategy_id}: {_cool_err}")
+
             if flagged > 0:
                 session.commit()
                 logger.info(

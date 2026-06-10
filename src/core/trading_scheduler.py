@@ -313,6 +313,17 @@ class TradingScheduler:
                 meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
                 if meta.get('pending_retirement') or meta.get('superseded'):
                     return False
+                # Regime gate cooldown: bull market gate stamped this strategy for 4h
+                # after closing a SHORT in a bullish regime. Without this, the strategy
+                # immediately re-enters the same SHORT next cycle — infinite loop.
+                _cooldown_str = meta.get('regime_gate_cooldown_until')
+                if _cooldown_str:
+                    try:
+                        _cooldown_dt = datetime.fromisoformat(_cooldown_str)
+                        if datetime.utcnow() < _cooldown_dt:
+                            return False
+                    except Exception:
+                        pass
                 if s.status == StrategyStatus.PAPER:
                     return True
                 if s.status == StrategyStatus.BACKTESTED and meta.get('activation_approved'):
