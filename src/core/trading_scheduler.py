@@ -662,7 +662,13 @@ class TradingScheduler:
             # When market quality is low (<40, choppy/noisy), block new trend-following
             # and momentum LONG entries in the signal cycle — not just reduce their size.
             # Mean reversion, market-neutral, and SHORT entries still run.
-            # The score is cached for 10 minutes so this is fast (no extra API calls).
+            # The score is cached for 10 minutes so this is fast (no extra API calls.
+            #
+            # NEW-01: The MQS also incorporates the intraday stress signal computed
+            # above (_intraday_spy_return). If SPY is down >1.5% intraday, the
+            # effective grade is capped at "normal" — regardless of the 30-day rolling
+            # score. This makes the MQS gate respond to same-session crashes, not just
+            # backward-looking 60-day metrics.
             _mqs_grade = "normal"
             _mqs_score = 50.0
             _mqs_block_trend = False
@@ -672,6 +678,32 @@ class TradingScheduler:
                 _mqs_result = _mqs_analyzer.get_market_quality_score()
                 _mqs_score = _mqs_result.get("score", 50.0)
                 _mqs_grade = _mqs_result.get("grade", "normal")
+
+                # NEW-01: Intraday stress override — cap grade at "normal" when
+                # SPY is down >1.5% intraday. The 30-day rolling MQS stays "high"
+                # through a same-session crash (as seen on Jun 5 and Jun 9 2026).
+                # This fast-path component ensures the gate responds within the
+                # same trading session, not the next day's rolling window.
+                if _intraday_stress and _mqs_grade == "high":
+                    _mqs_grade = "normal"
+                    _mqs_score = min(_mqs_score, 65.0)  # push below "high" threshold
+                    logger.warning(
+                        f"[NEW-01] MQS grade capped from 'high' to 'normal': "
+                        f"SPY intraday={_intraday_spy_return:.2%} < -1.5% "
+                        f"(rolling score={_mqs_result.get('score', 50):.0f} — overridden)"
+                    )
+
+                # Stronger stress: if SPY is down >2.5% intraday, push to "low"
+                # to trigger the full trend/momentum block.
+                if _intraday_spy_return < -0.025 and _mqs_grade != "low":
+                    _mqs_grade = "low"
+                    _mqs_score = min(_mqs_score, 35.0)
+                    logger.warning(
+                        f"[NEW-01] MQS grade forced to 'low': "
+                        f"SPY intraday={_intraday_spy_return:.2%} < -2.5% — "
+                        f"blocking all trend/momentum LONGs this cycle"
+                    )
+
                 if _mqs_grade == "low":
                     _mqs_block_trend = True
                     logger.warning(
@@ -2516,11 +2548,45 @@ class TradingScheduler:
                                         if _intraday_breaker_tripped:
                                             continue  # Skip this live entry signal
 
+                                        # NEW-02: Live SL/TP regime multiplier.
+                                        # The CIO approves SL/TP at graduation for a specific regime.
+                                        # Apply a multiplier to tighten stops when market conditions
+                                        # have deteriorated since graduation. In a correcting/choppy
+                                        # regime, a 6% SL gives back too much on a concentrated tech
+                                        # book before stopping out. Tighter stops + proportionally
+                                        # tighter targets preserves the R:R ratio.
+                                        #
+                                        # Multipliers: trending_up_strong=1.0, trending_up_weak/ranging=0.75,
+                                        # trending_down/high_volatility=0.60. Applied to both SL and TP
+                                        # so the R:R ratio is constant.
+                                        _regime_sl_mult = 1.0
+                                        try:
+                                            _live_mqs_grade = _mqs_grade  # captured from outer scope
+                                            _live_pullback = _pullback_state.get("severity", "none")
+                                            if _live_pullback in ("moderate", "severe") or _live_mqs_grade == "low":
+                                                _regime_sl_mult = 0.60
+                                            elif _live_pullback == "mild" or _live_mqs_grade == "normal":
+                                                _regime_sl_mult = 0.75
+                                            if _regime_sl_mult < 1.0:
+                                                logger.info(
+                                                    f"[NEW-02] Live SL/TP tightened: {_live_sym} "
+                                                    f"SL {_appr.sl_pct*100:.1f}% → {_appr.sl_pct*_regime_sl_mult*100:.1f}% "
+                                                    f"TP {_appr.tp_pct*100:.1f}% → {_appr.tp_pct*_regime_sl_mult*100:.1f}% "
+                                                    f"(regime_mult={_regime_sl_mult:.2f}, "
+                                                    f"mqs={_live_mqs_grade}, pullback={_live_pullback})"
+                                                )
+                                        except Exception as _mult_err:
+                                            logger.debug(f"Regime SL mult failed for {_live_sym}: {_mult_err}")
+                                            _regime_sl_mult = 1.0
+
+                                        _live_sl_pct_adj = _appr.sl_pct * _regime_sl_mult
+                                        _live_tp_pct_adj = _appr.tp_pct * _regime_sl_mult
+
                                         _live_order2 = self._live_order_executor.execute_signal(
                                             signal=_lsig,
                                             position_size=_live_size2,
-                                            stop_loss_pct=_appr.sl_pct,
-                                            take_profit_pct=_appr.tp_pct,
+                                            stop_loss_pct=_live_sl_pct_adj,
+                                            take_profit_pct=_live_tp_pct_adj,
                                             account_type='live',
                                         )
                                         _live_order_orm2 = OrderORM(

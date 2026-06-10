@@ -2699,6 +2699,11 @@ class MonitoringService:
                 )
                 open_positions.append(pos)
                 position_intervals[pos.id] = strat_interval
+                # NEW-03: Tag live positions so position_manager applies tighter
+                # TSL activation thresholds. Key convention: pos.id + ':live' = 'live'
+                # is read in check_trailing_stops to lower activation from 5% to 3%.
+                if getattr(pos_orm, 'account_type', 'demo') == 'live':
+                    position_intervals[pos.id + ':live'] = 'live'
 
             if skipped_stale_data > 0:
                 logger.info(

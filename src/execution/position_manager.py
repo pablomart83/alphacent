@@ -281,10 +281,26 @@ class PositionManager:
                 activation_pct = trail_params["activation"]
                 distance_pct = trail_params["distance"]
 
+                # NEW-03: Live positions use tighter TSL activation (3% stocks/ETFs vs 5%).
+                # Paper positions can afford to let gains develop (data collection mode).
+                # Real capital needs faster protection — activate TSL sooner to lock in gains
+                # before corrections erase them. BREAKEVEN threshold also lowered proportionally.
+                # The monitoring_service tags live positions with position.id + ':live' = 'live'.
+                _is_live_position = (position_intervals or {}).get(position.id + ':live') == 'live'
+                if _is_live_position:
+                    # Tighten activation by ~40% for live positions
+                    # Stock/ETF: 5% → 3%, Commodity: 5% → 3%, Index/ETF: 4% → 2.5%
+                    activation_pct = activation_pct * 0.60
+                    # Distance stays the same — same trail gap, just activates sooner
+
                 is_long = position.side.value == "LONG"
 
                 # ── Stage 1: Breakeven stop ──────────────────────────────────
                 breakeven_threshold = self.BREAKEVEN_STOP_PARAMS.get(asset_class, 0.03)
+                # NEW-03: Live breakeven fires earlier — same 0.60× multiplier as trail activation.
+                # Stock: 3% → 1.8%, ETF: 2.5% → 1.5%. Positions cannot lose money faster.
+                if _is_live_position:
+                    breakeven_threshold = breakeven_threshold * 0.60
                 if profit_pct >= breakeven_threshold:
                     be_sl = position.entry_price
                     if self._is_favourable_move(position.stop_loss, be_sl, is_long):

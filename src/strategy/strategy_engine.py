@@ -11854,6 +11854,39 @@ class StrategyEngine:
         # Trigger 4: Negative returns
         if perf.total_return < 0:
             failure_reasons.append(f"Negative total return ({perf.total_return:.2%})")
+
+        # NEW-04: Dollar-loss threshold — retire if the strategy has lost more than 30%
+        # of its CIO-approved position size since graduation. This catches strategies
+        # like AMD (-$170 on $1K CIO size = -17%) and GOOGL (-$53 over 15 trades)
+        # before they continue degrading without enough trade count to trigger the
+        # statistical gates above.
+        try:
+            meta = strategy.strategy_metadata if isinstance(getattr(strategy, 'strategy_metadata', None), dict) else {}
+            _cio_real = float(meta.get('live_position_size', 0) or 0)
+            if _cio_real > 0:
+                # Total realized P&L from live trades (trade_journal)
+                from src.models.database import get_database as _gdb_ret
+                from src.models.orm import TradeJournalORM as _TJORM
+                _rdb = _gdb_ret()
+                _rsess = _rdb.get_session()
+                try:
+                    _total_pnl = _rsess.execute(
+                        __import__('sqlalchemy').text(
+                            "SELECT COALESCE(SUM(pnl), 0) FROM trade_journal "
+                            "WHERE strategy_id = :sid AND account_type = 'live'"
+                        ),
+                        {"sid": strategy.id}
+                    ).scalar() or 0.0
+                finally:
+                    _rsess.close()
+                _loss_pct_of_cio = abs(float(_total_pnl)) / _cio_real if float(_total_pnl) < 0 else 0.0
+                if _loss_pct_of_cio >= 0.30:
+                    failure_reasons.append(
+                        f"Dollar loss threshold: lost ${abs(float(_total_pnl)):.0f} "
+                        f"({_loss_pct_of_cio:.0%} of CIO size ${_cio_real:.0f})"
+                    )
+        except Exception as _dlt_err:
+            logger.debug(f"Dollar-loss threshold check failed for {strategy.name}: {_dlt_err}")
         
         # Record evaluation result
         evaluation_result = {

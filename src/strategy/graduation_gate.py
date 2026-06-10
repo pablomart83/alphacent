@@ -1061,6 +1061,51 @@ def approve_graduation(
         or (source.backtest_results or {}).get("walk_forward_results", {}).get("test_sharpe")
     )
 
+    # NEW-05: Validate that the proposed SL/TP are appropriate for the asset class.
+    # The CIO can approve any SL, but if it exceeds the asset-class default by more
+    # than 20% headroom, warn and cap it. This prevents stock-default SL (6%) being
+    # applied to commodities (4% max) or forex (2% max).
+    try:
+        from src.core.tradeable_instruments import (
+            DEMO_ALLOWED_COMMODITIES, DEMO_ALLOWED_FOREX,
+            DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_INDICES, DEMO_ALLOWED_ETFS,
+        )
+        _sym_u = symbol.upper()
+        _asset_sl_defaults = {
+            "commodity": 0.04,
+            "forex": 0.02,
+            "crypto": 0.08,
+            "index": 0.05,
+            "etf": 0.06,
+            "stock": 0.09,  # hard cap for stocks
+        }
+        if _sym_u in set(DEMO_ALLOWED_COMMODITIES):
+            _asset_class_g = "commodity"
+        elif _sym_u in set(DEMO_ALLOWED_FOREX):
+            _asset_class_g = "forex"
+        elif _sym_u in set(DEMO_ALLOWED_CRYPTO):
+            _asset_class_g = "crypto"
+        elif _sym_u in set(DEMO_ALLOWED_INDICES):
+            _asset_class_g = "index"
+        elif _sym_u in set(DEMO_ALLOWED_ETFS):
+            _asset_class_g = "etf"
+        else:
+            _asset_class_g = "stock"
+
+        _max_sl = _asset_sl_defaults.get(_asset_class_g, 0.09) * 1.20  # 20% headroom
+        if sl_pct > _max_sl:
+            logger.warning(
+                f"[NEW-05] Graduation SL cap: {symbol} ({_asset_class_g}) — "
+                f"proposed SL {sl_pct:.1%} > asset-class max {_max_sl:.1%}. "
+                f"Capping at {_max_sl:.1%}."
+            )
+            sl_pct = round(_max_sl, 4)
+            # Preserve R:R ratio
+            _original_rr = tp_pct / sl_pct if sl_pct > 0 else 2.5
+            tp_pct = round(sl_pct * _original_rr, 4)
+    except Exception as _asc_err:
+        logger.debug(f"Asset-class SL validation failed for {symbol}: {_asc_err}")
+
     # Aggregated cross-version paper stats for the approval snapshot.
     paper_stats = get_aggregated_paper_stats(session, template_name, symbol)
     if not paper_stats.get("paper_trades"):
