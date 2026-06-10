@@ -43,6 +43,8 @@ Full forensic audit (Opus 4.8) + execution of every P0 and P1 finding. All deplo
 
 Intel changes (P1-5/7/8) take effect on the next `/intel/run`; P1-6 prune runs on the next daily sync.
 
+**Intel validation (run 21:20, post-deploy) — CONFIRMED:** open P1 244→1 (only A7 remains, a real finding), P2 14→169 (A1's 156 reclassified here), 104 stale findings auto-resolved. D1/D2/E5/B4 false positives gone; genuine findings (G5 COPPER, G9) persisted — no over-resolution. Run clean in 70s. All observability fixes verified live.
+
 ### Verified resolved during audit (no action needed)
 - No dual `risk_manager` / `monitoring_service` files (only `src/risk/risk_manager.py`, `src/core/monitoring_service.py`).
 - WF `(test−train) ≤ 1.5` consistency gate wired on all 3 paths (primary/test-dominant/relaxed-OOS).
@@ -51,8 +53,8 @@ Intel changes (P1-5/7/8) take effect on the next `/intel/run`; P1-6 prune runs o
 - Startup demotion properly guarded (60-min fill + 24h trade cooldown).
 
 ### Still open (deferred — trading/CIO decisions, not code)
-- **NEW-07**: retire TQQQ/SOXL from live book (3× ETF instrument fit).
-- **P1-9 / G5**: COPPER live strategies diverging hard from WF (RSI Midrange COPPER live −2.37 vs WF 1.72; Dual MA COPPER −3.58 vs 1.37) — review for retirement.
+- **NEW-07 (CORRECTED — do NOT retire)**: TQQQ/SOXL live performance is positive, not broken. SOXL live: 4 trades, +$868, 50% WR, +15.8% avg (one +46% hold). SOXL demo: 102 trades +$8,948. TQQQ demo: 80 trades +$7,530 (TQQQ has 0 live trades yet). The genuine defect was the dead 4% SL cap (now fixed). Action: **monitor** via G5 divergence as live_trade_count accumulates; the +46% trade means SOXL's live edge is promising but n=4 (not yet proven). Revisit only if G5 shows decay.
+- **P1-9 / G5 (genuine retirement candidate)**: COPPER live diverging hard from WF — RSI Midrange COPPER live −2.37 vs WF 1.72; Dual MA Volume Surge COPPER −3.58 vs 1.37. Real-money underperformance. Recommend CIO review for retirement.
 - 423 silent `except: pass`/`logger.debug` handlers (28% of all) — systemic; lint rule + targeted audit recommended.
 
 ---
