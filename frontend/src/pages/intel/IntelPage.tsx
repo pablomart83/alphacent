@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Play, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/primitives'
 import { cn } from '@/lib/utils'
-import { IntelSummaryTiles } from './IntelSummaryTiles'
 import { FindingsList } from './FindingsList'
 import { FindingDetail } from './FindingDetail'
+import { IntelOverview } from './IntelOverview'
 import { RunHistoryPanel } from './RunHistoryPanel'
 import {
   useIntelFindings,
@@ -12,6 +12,8 @@ import {
   useIntelRuns,
   useIntelSummary,
   useRunAnalysis,
+  severityColor,
+  formatAge,
   type IntelFindingsFilters,
 } from './useIntelData'
 
@@ -23,11 +25,18 @@ const LOOKBACK_OPTIONS = [
   { value: 90, label: '90 days' },
 ]
 
+const SEV_PILLS = [
+  { sev: 'P0', label: 'P0' },
+  { sev: 'P1', label: 'P1' },
+  { sev: 'P2', label: 'P2' },
+  { sev: 'opportunity', label: 'Opp' },
+]
+
 export function IntelPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [lookback, setLookback] = useState(7)
   const [showLookbackPicker, setShowLookbackPicker] = useState(false)
-  const [activeRunId, setActiveRunId] = useState<string | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
   const [filters, setFilters] = useState<IntelFindingsFilters & { statusTab: string }>({
     statusTab: 'open',
     status: 'open',
@@ -45,25 +54,7 @@ export function IntelPage() {
   const runs = useIntelRuns()
   const runAnalysis = useRunAnalysis()
 
-  // Poll runs every 3s while a run is active, stop when complete/error
-  const isRunning = activeRunId !== null
-  const { data: runsData, refetch: refetchRuns } = runs
-
-  useEffect(() => {
-    if (!isRunning) return
-    const interval = setInterval(() => {
-      refetchRuns().then((result) => {
-        const latest = result.data?.find((r) => r.id === activeRunId)
-        if (latest && (latest.status === 'complete' || latest.status === 'error')) {
-          setActiveRunId(null)
-          // Refresh findings and summary once run completes
-          findings.refetch()
-          summary.refetch()
-        }
-      })
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [isRunning, activeRunId, refetchRuns, findings, summary])
+  const allFindings = findings.data ?? []
 
   const handleFiltersChange = (
     patch: Partial<IntelFindingsFilters & { statusTab: string }>,
@@ -80,125 +71,179 @@ export function IntelPage() {
 
   const handleRun = () => {
     setShowLookbackPicker(false)
-    runAnalysis.mutate(lookback, {
-      onSuccess: (data) => {
-        setActiveRunId(data.run_id)
-        refetchRuns()
-      },
-    })
+    runAnalysis.mutate(lookback)
   }
 
-  // Derive running state from active run in runs list
-  const activeRun = runsData?.find((r) => r.id === activeRunId)
-  const lastCompleteRun = runsData?.find((r) => r.status === 'complete')
-  const showRunning = isRunning || runAnalysis.isPending
+  const s = summary.data
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)]">
-      {/* Top bar */}
-      <div className="shrink-0 px-4 py-3 border-b border-[var(--border-subtle)] flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0 space-y-3">
-          <IntelSummaryTiles
-            summary={summary.data}
-            loading={summary.isLoading}
-          />
-          <RunHistoryPanel runs={runsData ?? []} loading={runs.isLoading} />
+
+      {/* ── Top bar ─────────────────────────────────────────────────── */}
+      <div className="shrink-0 px-4 py-2.5 border-b border-[var(--border-subtle)] flex items-center gap-3">
+
+        {/* Severity pills */}
+        <div className="flex items-center gap-1.5">
+          {SEV_PILLS.map(({ sev, label }) => {
+            const count =
+              sev === 'P0' ? (s?.p0_open ?? 0)
+              : sev === 'P1' ? (s?.p1_open ?? 0)
+              : sev === 'P2' ? (s?.p2_open ?? 0)
+              : (s?.opportunities_open ?? 0)
+            const active = filters.severity === sev
+            return (
+              <button
+                key={sev}
+                type="button"
+                onClick={() =>
+                  handleFiltersChange({ severity: active ? undefined : sev })
+                }
+                className={cn(
+                  'flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold mono transition-all border',
+                  active
+                    ? 'border-transparent'
+                    : 'border-[var(--border-subtle)] text-[var(--text-3)] hover:text-[var(--text-1)]',
+                )}
+                style={
+                  active
+                    ? {
+                        background: `${severityColor(sev)}20`,
+                        color: severityColor(sev),
+                        borderColor: `${severityColor(sev)}40`,
+                      }
+                    : undefined
+                }
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{ background: count > 0 ? severityColor(sev) : 'var(--text-3)' }}
+                />
+                {label}
+                <span
+                  className={cn(
+                    'tabular-nums',
+                    count > 0 ? '' : 'text-[var(--text-3)]',
+                  )}
+                  style={count > 0 && !active ? { color: severityColor(sev) } : undefined}
+                >
+                  {count}
+                </span>
+              </button>
+            )
+          })}
+
+          {/* Resolved */}
+          <span className="text-[10px] text-[var(--text-3)] ml-1">
+            ✓ {s?.resolved_this_week ?? 0} resolved 7d
+          </span>
         </div>
 
-        {/* Run controls */}
-        <div className="shrink-0 flex flex-col items-end gap-2">
-          <div className="relative">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setShowLookbackPicker((v) => !v)}
-              disabled={showRunning}
-              className="gap-1.5"
-            >
-              {showRunning ? (
-                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Play className="h-3.5 w-3.5" />
-              )}
-              {showRunning ? 'Running…' : 'Run Analysis'}
-            </Button>
+        {/* Spacer */}
+        <div className="flex-1" />
 
-            {showLookbackPicker && (
-              <div className="absolute right-0 top-full mt-1 z-50 bg-[var(--bg-2)] border border-[var(--border-default)] rounded shadow-lg p-3 w-44">
-                <p className="text-[10px] font-semibold text-[var(--text-2)] mb-2 uppercase tracking-wide">
-                  Lookback window
-                </p>
-                <div className="space-y-1">
-                  {LOOKBACK_OPTIONS.map((opt) => (
-                    <label
-                      key={opt.value}
-                      className="flex items-center gap-2 cursor-pointer group"
-                    >
-                      <input
-                        type="radio"
-                        name="lookback"
-                        value={opt.value}
-                        checked={lookback === opt.value}
-                        onChange={() => setLookback(opt.value)}
-                        className="accent-[var(--accent-primary)]"
-                      />
-                      <span
-                        className={cn(
-                          'text-[11px] group-hover:text-[var(--text-0)] transition-colors',
-                          lookback === opt.value
-                            ? 'text-[var(--text-0)]'
-                            : 'text-[var(--text-2)]',
-                        )}
-                      >
-                        {opt.label}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                <div className="flex gap-2 mt-3">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setShowLookbackPicker(false)}
-                    className="flex-1 text-[var(--text-2)]"
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={handleRun}
-                    className="flex-1"
-                  >
-                    Run →
-                  </Button>
-                </div>
-              </div>
+        {/* Last run info */}
+        {s?.last_run_at && (
+          <button
+            type="button"
+            onClick={() => setShowHistory((v) => !v)}
+            className="text-[10px] text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors"
+          >
+            Last run {formatAge(s.last_run_at)}
+            {s.last_run_findings != null && ` · ${s.last_run_findings} findings`}
+            {s.last_run_duration_s != null && ` · ${s.last_run_duration_s.toFixed(1)}s`}
+          </button>
+        )}
+
+        {/* Run button */}
+        <div className="relative">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setShowLookbackPicker((v) => !v)}
+            disabled={runAnalysis.isPending}
+            className="gap-1.5 h-7 text-[11px]"
+          >
+            {runAnalysis.isPending ? (
+              <RefreshCw className="h-3 w-3 animate-spin" />
+            ) : (
+              <Play className="h-3 w-3" />
             )}
-          </div>
+            {runAnalysis.isPending ? 'Running…' : 'Run Analysis'}
+          </Button>
 
-          {showRunning && (
-            <p className="text-[10px] text-[var(--text-3)] animate-pulse">
-              Analysing… this takes 30-90s
-            </p>
-          )}
-          {!showRunning && lastCompleteRun && (
-            <p className="text-[10px] text-[var(--pnl-up)]">
-              ✓ {lastCompleteRun.findings_total} findings in {lastCompleteRun.duration_s?.toFixed(1)}s
-            </p>
-          )}
-          {activeRun?.status === 'error' && (
-            <p className="text-[10px] text-[var(--pnl-down)]">Run failed</p>
+          {showLookbackPicker && (
+            <div className="absolute right-0 top-full mt-1 z-50 bg-[var(--bg-2)] border border-[var(--border-default)] rounded shadow-lg p-3 w-40">
+              <p className="text-[9px] font-semibold text-[var(--text-3)] mb-2 uppercase tracking-wide">
+                Lookback window
+              </p>
+              <div className="space-y-1">
+                {LOOKBACK_OPTIONS.map((opt) => (
+                  <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="lookback"
+                      value={opt.value}
+                      checked={lookback === opt.value}
+                      onChange={() => setLookback(opt.value)}
+                      className="accent-[var(--accent-primary)]"
+                    />
+                    <span
+                      className={cn(
+                        'text-[11px]',
+                        lookback === opt.value ? 'text-[var(--text-0)]' : 'text-[var(--text-2)]',
+                      )}
+                    >
+                      {opt.label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-1.5 mt-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowLookbackPicker(false)}
+                  className="flex-1 text-[var(--text-2)] h-6 text-[10px]"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={handleRun}
+                  className="flex-1 h-6 text-[10px]"
+                >
+                  Run →
+                </Button>
+              </div>
+            </div>
           )}
         </div>
+
+        {runAnalysis.isSuccess && runAnalysis.data && (
+          <span className="text-[10px] text-[var(--pnl-up)]">
+            ✓ {runAnalysis.data.findings_count} in {(runAnalysis.data.duration_s ?? 0).toFixed(1)}s
+          </span>
+        )}
+        {runAnalysis.isError && (
+          <span className="text-[10px] text-[var(--pnl-down)]">Run failed</span>
+        )}
       </div>
 
-      {/* Main split */}
+      {/* Run history (collapsible) */}
+      {showHistory && (
+        <div className="shrink-0 px-4 py-2 border-b border-[var(--border-subtle)]">
+          <RunHistoryPanel runs={runs.data ?? []} loading={runs.isLoading} />
+        </div>
+      )}
+
+      {/* ── Main split ──────────────────────────────────────────────── */}
       <div className="flex flex-1 min-h-0">
+
         {/* Left: findings list */}
-        <div className="w-72 shrink-0 border-r border-[var(--border-subtle)] flex flex-col min-h-0">
+        <div className="w-64 shrink-0 border-r border-[var(--border-subtle)] flex flex-col min-h-0">
           <FindingsList
-            findings={findings.data ?? []}
+            findings={allFindings}
             loading={findings.isLoading}
             selectedId={selectedId}
             onSelect={setSelectedId}
@@ -207,12 +252,19 @@ export function IntelPage() {
           />
         </div>
 
-        {/* Right: finding detail */}
+        {/* Right: detail or overview */}
         <div className="flex-1 min-w-0 min-h-0">
-          <FindingDetail
-            finding={selectedFinding.data}
-            loading={selectedFinding.isLoading && !!selectedId}
-          />
+          {selectedId ? (
+            <FindingDetail
+              finding={selectedFinding.data}
+              loading={selectedFinding.isLoading && !!selectedId}
+            />
+          ) : (
+            <IntelOverview
+              findings={allFindings}
+              onSelect={setSelectedId}
+            />
+          )}
         </div>
       </div>
     </div>
