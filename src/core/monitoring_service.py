@@ -94,6 +94,14 @@ class MonitoringService:
         self._last_order_check: float = 0
         self._last_position_sync: float = 0
         self._last_trailing_check: float = 0
+        # FIX-09 watchdog cooldown — prevents the staleness watchdog from
+        # calling sync_positions in a tight loop when equity snapshots are
+        # delayed. The watchdog runs inside _check_trailing_stops (every 60s)
+        # but if a sync doesn't write a new snapshot quickly enough, it fires
+        # again on the next trailing-stop cycle. 5-minute cooldown ensures
+        # at most one forced resync per 5 minutes regardless of snapshot lag.
+        self._last_fix09_resync: float = 0
+        self._FIX09_COOLDOWN_S: float = 300.0  # 5 minutes
         # One-time live reconcile: run once before the first position sync to
         # verify recently-filled live orders have open positions (Step 2b).
         # Mirrors the DEMO reconcile_on_startup in trading_scheduler.
@@ -485,29 +493,40 @@ class MonitoringService:
         # If the LIVE equity snapshot hasn't been updated in > 60 minutes, force a live
         # position resync. Catches the Jun 5–7 2026 scenario where LIVE equity was frozen
         # for 48h with no alert raised. Only runs when a live client is configured.
+        #
+        # COOLDOWN: This watchdog runs inside _check_trailing_stops (every 60s). If a
+        # forced sync doesn't write a new snapshot immediately (e.g. equity snapshot
+        # writer is on its own hourly schedule), the stale check fires again every 60s
+        # in a tight loop — each sync_positions call temporarily marks positions as
+        # pending_closure, which can make the trading cycle's duplicate guard see "no
+        # open positions" and fire duplicate live entries. 5-minute cooldown prevents
+        # more than one forced resync per 5 minutes regardless of snapshot lag.
         if self.live_etoro_client is not None and self.live_order_monitor is not None:
             try:
-                _live_staleness_threshold = 3600  # 60 minutes
-                from src.models.orm import EquitySnapshotORM as _EqSnap
-                _snap_sess = self.db.get_session()
-                try:
-                    _last_live_snap = (
-                        _snap_sess.query(_EqSnap)
-                        .filter(_EqSnap.account_type == 'live')
-                        .order_by(_EqSnap.created_at.desc())
-                        .first()
-                    )
-                    if _last_live_snap is not None:
-                        _snap_age = (datetime.utcnow() - _last_live_snap.created_at).total_seconds()
-                        if _snap_age > _live_staleness_threshold:
-                            logger.critical(
-                                f"[FIX-09] LIVE equity snapshot stale for {_snap_age/3600:.1f}h "
-                                f"(last: {_last_live_snap.created_at.isoformat()}) — "
-                                f"forcing live position resync"
-                            )
-                            self.live_order_monitor.sync_positions(account_type='live', force=True)
-                finally:
-                    _snap_sess.close()
+                _fix09_elapsed = now - self._last_fix09_resync
+                if _fix09_elapsed >= self._FIX09_COOLDOWN_S:
+                    _live_staleness_threshold = 3600  # 60 minutes
+                    from src.models.orm import EquitySnapshotORM as _EqSnap
+                    _snap_sess = self.db.get_session()
+                    try:
+                        _last_live_snap = (
+                            _snap_sess.query(_EqSnap)
+                            .filter(_EqSnap.account_type == 'live')
+                            .order_by(_EqSnap.created_at.desc())
+                            .first()
+                        )
+                        if _last_live_snap is not None:
+                            _snap_age = (datetime.utcnow() - _last_live_snap.created_at).total_seconds()
+                            if _snap_age > _live_staleness_threshold:
+                                logger.critical(
+                                    f"[FIX-09] LIVE equity snapshot stale for {_snap_age/3600:.1f}h "
+                                    f"(last: {_last_live_snap.created_at.isoformat()}) — "
+                                    f"forcing live position resync"
+                                )
+                                self.live_order_monitor.sync_positions(account_type='live', force=True)
+                                self._last_fix09_resync = now  # Rate-limit: no more than 1 forced resync per 5m
+                    finally:
+                        _snap_sess.close()
             except Exception as _stale_err:
                 logger.debug(f"Live staleness watchdog check failed (non-fatal): {_stale_err}")
 
