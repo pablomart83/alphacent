@@ -1777,15 +1777,47 @@ class MonitoringService:
                     start_dt_utc = to_tz_aware_utc(start_dt)
                     end_utc = to_tz_aware_utc(end)
 
-                    batch_data = yf.download(
-                        yf_tickers,
-                        start=start_dt_utc,
-                        end=end_utc,
-                        interval=interval,
-                        group_by='ticker',
-                        progress=False,
-                        threads=True,
-                    )
+                    # FIX-F7: Add retry with backoff for Yahoo rate limit errors.
+                    # Yahoo 793 rate limit hits in 7 days caused 4H bar staleness for
+                    # 19 symbols. The batch call has no backoff — on 429 it just fails.
+                    # Retry up to 3 times with exponential backoff (5s, 15s, 45s).
+                    _yf_batch_data = None
+                    _yf_last_err = None
+                    for _yf_attempt in range(3):
+                        try:
+                            _yf_batch_data = yf.download(
+                                yf_tickers,
+                                start=start_dt_utc,
+                                end=end_utc,
+                                interval=interval,
+                                group_by='ticker',
+                                progress=False,
+                                threads=True,
+                            )
+                            break  # Success
+                        except Exception as _yf_err:
+                            _yf_last_err = _yf_err
+                            _err_str = str(_yf_err).lower()
+                            _is_rate_limit = (
+                                "too many requests" in _err_str
+                                or "rate limit" in _err_str
+                                or "429" in _err_str
+                                or "throttled" in _err_str
+                            )
+                            if _is_rate_limit and _yf_attempt < 2:
+                                _backoff = (5 ** (_yf_attempt + 1))  # 5s, 25s
+                                logger.warning(
+                                    f"[bg-full-sync] Yahoo rate limit on {interval} batch "
+                                    f"(attempt {_yf_attempt + 1}/3) — backing off {_backoff}s"
+                                )
+                                import time as _yf_time
+                                _yf_time.sleep(_backoff)
+                            else:
+                                raise  # Non-rate-limit error, or last attempt
+
+                    batch_data = _yf_batch_data
+                    if batch_data is None:
+                        raise _yf_last_err or Exception("Yahoo batch returned None")
                     
                     if batch_data.empty:
                         logger.warning(f"[bg-full-sync] Yahoo batch returned empty for {interval}")

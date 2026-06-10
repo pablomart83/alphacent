@@ -316,6 +316,10 @@ class IntelAnalyst:
         from sqlalchemy import text
         session = self.db.get_session()
         try:
+            # FIX: Only flag positions opened AFTER the pending_retirement flag was set.
+            # Previously used p.opened_at > NOW() - lookback_days, which falsely flagged
+            # pre-existing positions that were legitimately opened before the strategy was
+            # flagged for retirement. Now compares opened_at vs pending_retirement_at.
             rows = session.execute(text(f"""
                 SELECT s.id, s.name, COUNT(p.id) as new_positions
                 FROM strategies s
@@ -323,6 +327,10 @@ class IntelAnalyst:
                 WHERE s.strategy_metadata->>'pending_retirement' = 'true'
                 AND p.opened_at > NOW() - INTERVAL '{lookback_days} days'
                 AND p.closed_at IS NULL
+                AND (
+                    s.strategy_metadata->>'pending_retirement_at' IS NULL
+                    OR p.opened_at > (s.strategy_metadata->>'pending_retirement_at')::timestamp
+                )
                 GROUP BY s.id, s.name HAVING COUNT(p.id) > 0
             """)).fetchall()
         finally:
@@ -333,7 +341,7 @@ class IntelAnalyst:
 
         findings = []
         for row in rows:
-            evidence = f"Strategy: {row[1]}\nNew positions opened while pending_retirement=true: {row[2]}"
+            evidence = f"Strategy: {row[1]}\nNew positions opened AFTER pending_retirement was set: {row[2]}"
             findings.append(Finding(
                 check_id="A2",
                 key=f"strategy:{row[0]}",
@@ -611,6 +619,10 @@ class IntelAnalyst:
         What matters is whether orders are actually being submitted — that's
         the real overtrading signal. A 1D strategy should submit at most 1
         order per symbol per day. A 4H strategy at most 6.
+
+        FIX: Only count ENTRY orders. Exit/close orders are not overtrading —
+        they are expected and can happen multiple times per day as positions
+        are closed by TSL, zombie exit, time-based exit etc.
         """
         from sqlalchemy import text
         session = self.db.get_session()
@@ -625,6 +637,7 @@ class IntelAnalyst:
                 LEFT JOIN strategies s ON s.id = sd.strategy_id
                 WHERE sd.stage = 'order_submitted'
                 AND sd.timestamp > NOW() - INTERVAL '24 hours'
+                AND COALESCE(sd.decision_metadata->>'order_action', 'entry') = 'entry'
                 GROUP BY sd.strategy_id, s.name, s.strategy_metadata->>'interval'
             """)).fetchall()
         finally:
@@ -645,7 +658,7 @@ class IntelAnalyst:
                 continue
             name = row[1] or row[0]
             evidence = (f"Strategy: {name}\nInterval: {interval}\n"
-                       f"Orders submitted (24h): {row[3]}\nSymbol-days: {row[2]}\n"
+                       f"Entry orders submitted (24h): {row[3]}\nSymbol-days: {row[2]}\n"
                        f"Orders per symbol-day: {orders_per_sd:.1f} (max: {threshold})")
             findings.append(Finding(
                 check_id="A10",
@@ -653,7 +666,7 @@ class IntelAnalyst:
                 category="A",
                 severity="P2",
                 title=f"A10: {name} — {orders_per_sd:.0f} orders/symbol/day (overtrading, {interval})",
-                detail=f"Strategy is submitting {orders_per_sd:.0f} orders per symbol per day for a {interval} strategy (max {threshold}). Frequency filter may be too loose.",
+                detail=f"Strategy is submitting {orders_per_sd:.0f} entry orders per symbol per day for a {interval} strategy (max {threshold}). Frequency filter may be too loose.",
                 evidence=evidence,
                 recommended_action="Check alpha_edge.max_trades_per_strategy_per_month or add order cooldown.",
                 context_links=[{"label": "Guard / Audit", "url": "/guard/audit"}],
@@ -948,6 +961,11 @@ class IntelAnalyst:
         from sqlalchemy import text
         session = self.db.get_session()
         try:
+            # FIX: Portfolio heat = sum(invested_amount × stop_loss_pct) / equity
+            # NOT invested / equity (that's deployment ratio, not risk).
+            # The 30% cap means: if every SL fires simultaneously, max drawdown is 30%.
+            # Paper mode bypasses the heat cap (flat $5K sizing), so this check
+            # is informational only for paper — flag at 80%+ to surface genuine risk.
             row = session.execute(text("""
                 WITH equity AS (
                     SELECT COALESCE(
@@ -958,34 +976,54 @@ class IntelAnalyst:
                          ORDER BY updated_at DESC LIMIT 1),
                         1
                     ) as val
+                ),
+                heat_calc AS (
+                    SELECT
+                        SUM(p.invested_amount * COALESCE(
+                            CASE WHEN p.stop_loss IS NOT NULL AND p.entry_price IS NOT NULL
+                                      AND p.entry_price > 0
+                                 THEN ABS(p.entry_price - p.stop_loss) / p.entry_price
+                            END, 0.06
+                        )) as total_heat,
+                        SUM(p.invested_amount) as total_invested
+                    FROM positions p
+                    WHERE p.closed_at IS NULL AND p.account_type = 'demo'
+                    AND p.invested_amount IS NOT NULL AND p.invested_amount > 0
                 )
                 SELECT
-                    SUM(p.invested_amount) as total_invested,
-                    (SELECT val FROM equity) as equity_val,
-                    SUM(p.invested_amount) / (SELECT val FROM equity) as heat
-                FROM positions p
-                WHERE p.closed_at IS NULL AND p.account_type = 'demo'
-                AND p.invested_amount IS NOT NULL AND p.invested_amount > 0
+                    hc.total_heat / e.val as heat_ratio,
+                    hc.total_invested / e.val as deployment_ratio,
+                    hc.total_heat,
+                    hc.total_invested,
+                    e.val as equity_val
+                FROM heat_calc hc, equity e
             """)).fetchone()
         finally:
             session.close()
 
-        if not row or not row[2] or row[2] <= 0.30:
+        if not row or not row[0] or row[0] <= 0.80:
             return None
 
-        heat_pct = round(row[2] * 100, 1)
-        evidence = f"Portfolio heat: {heat_pct}% (limit: 30%)\nTotal invested: ${row[0]:.0f}\nEquity: ${row[1]:.0f}"
+        heat_pct = round(row[0] * 100, 1)
+        deploy_pct = round(row[1] * 100, 1)
+        evidence = (
+            f"Portfolio heat (risk): {heat_pct}% (limit: 30% for live, informational for paper)\n"
+            f"Deployment ratio: {deploy_pct}% of equity\n"
+            f"Total heat: ${row[2]:.0f}\nTotal invested: ${row[3]:.0f}\nEquity: ${row[4]:.0f}\n"
+            f"Note: Paper mode uses flat $5K sizing and bypasses the heat cap gate — "
+            f"this is informational only. Heat this high on a live account would be a P0."
+        )
         return Finding(
             check_id="C2",
             key="portfolio_heat",
             category="C",
-            severity="P1",
-            title=f"C2: Portfolio heat {heat_pct}% exceeds 30% cap",
-            detail="Portfolio heat cap breached. New entries should be blocked until heat drops below 30%.",
+            severity="P2",
+            title=f"C2: Portfolio heat {heat_pct}% (paper mode — informational)",
+            detail="Portfolio heat is high. Note: paper mode bypasses the 30% heat cap intentionally — flat $5K sizing accumulates heat without the risk framework gate. This would be critical on a live account.",
             evidence=evidence,
-            recommended_action="Check risk_manager heat gate. New entries should be blocked until heat drops below 30%.",
+            recommended_action="No action required for paper mode. Monitor live account heat separately.",
             context_links=[{"label": "Guard / Risk", "url": "/guard/risk"}],
-            ask_kiro_prompt=f'Intel finding [C2]: "Portfolio heat {heat_pct}% exceeds 30% cap."\n\nEvidence: {evidence}\n\nRecommended action: Check risk_manager heat gate.',
+            ask_kiro_prompt=f'Intel finding [C2]: "Portfolio heat {heat_pct}% (paper mode)."\n\nEvidence: {evidence}\n\nNote: Paper mode bypasses heat cap by design.',
         )
 
     def _check_c3_profitable_sl_at_entry(self, lookback_days: int) -> Optional[List[Finding]]:
@@ -1471,8 +1509,26 @@ class IntelAnalyst:
         if not rows:
             return None
 
+        # FIX: Exclude strategies blocked by TEMPORARY market-condition gates.
+        # Pullback gate, drawdown pause gate, and MQS gate are intentional — they
+        # block trend-following LONGs during pullbacks/choppy markets. These are
+        # NOT structural loops; they will unblock when market conditions improve.
+        # Only flag strategies blocked by STRUCTURAL gates: balance insufficient,
+        # symbol cap, etc. that will never self-resolve.
+        MARKET_CONDITION_GATE_PREFIXES = (
+            "Pullback gate",
+            "Drawdown pause",
+            "Market quality gate",
+            "Bull market regime gate",
+        )
+
         findings = []
         for row in rows:
+            last_reason = row[4] or ""
+            # Skip if blocked by a market-condition gate (temporary, correct behavior)
+            if any(last_reason.startswith(prefix) for prefix in MARKET_CONDITION_GATE_PREFIXES):
+                continue
+
             # Fallback name lookup for strategies not found via LEFT JOIN
             name = row[1]
             if not name:
@@ -1489,7 +1545,7 @@ class IntelAnalyst:
             evidence = (f"Strategy: {name}\nInterval: {row[5]}\n"
                        f"Gate blocks ({lookback_days}d): {row[2]}\n"
                        f"Orders submitted ({lookback_days}d): {row[3]}\n"
-                       f"Last gate reason: {row[4]}")
+                       f"Last gate reason: {last_reason}")
             findings.append(Finding(
                 check_id="E5",
                 key=f"gate_loop:{row[0]}",

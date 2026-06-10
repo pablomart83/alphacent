@@ -2393,9 +2393,23 @@ class StrategyProposer:
 
                 # Primary path: both train and test above threshold
                 if ts > min_sharpe and tes > min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate:
-                    validated_strategies.append((s, wf))
-                    _decision_rows.append({**_row_base, "stage": "wf_validated", "decision": "accepted",
-                                           "score": tes, "reason": "primary_path"})
+                    # Consistency gate on primary path: if test Sharpe is more than 1.5 points
+                    # above train Sharpe, the test period was regime-lucky — reject even if both
+                    # clear the threshold. Applied to the primary path here to match the
+                    # test-dominant and excellent_oos paths (which already had this gate).
+                    _primary_consistent = (tes - ts) <= 1.5
+                    if not _primary_consistent:
+                        _decision_rows.append({**_row_base, "stage": "wf_rejected", "decision": "rejected",
+                                               "score": tes,
+                                               "reason": f"consistency_gate_primary (test={tes:.2f} train={ts:.2f} diff={tes-ts:.2f}>1.5)"})
+                        logger.info(
+                            f"  Primary path REJECTED (consistency gate): {s.name} "
+                            f"(train={ts:.2f}, test={tes:.2f}, diff={tes-ts:.2f} > 1.5 — regime luck)"
+                        )
+                    else:
+                        validated_strategies.append((s, wf))
+                        _decision_rows.append({**_row_base, "stage": "wf_validated", "decision": "accepted",
+                                               "score": tes, "reason": "primary_path"})
                 # Test-dominant path: test Sharpe is strong, train is non-negative.
                 # The test period is more recent — if it shows edge, the strategy works NOW.
                 # SHORTs must also clear a minimum test_trades floor to avoid n=2-3 flukes.

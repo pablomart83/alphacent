@@ -1312,12 +1312,34 @@ class OrderMonitor:
                         # counterpart in order_executor only fires on immediate fills
                         # which do not happen in practice. Without this, the counter
                         # is always 0 and retirement min-trade gates never fire.
+                        #
+                        # FIX-A3: Use a separate session for this increment so that
+                        # a UniqueViolation rollback on a later order in the same loop
+                        # does not roll back the trade count update. The count must
+                        # survive even if the position insert for the same order fails
+                        # due to a race condition.
                         try:
                             if getattr(order, 'order_action', None) == 'entry' and order.strategy_id:
-                                from src.models.orm import StrategyORM
-                                strat = session.query(StrategyORM).filter_by(id=order.strategy_id).first()
-                                if strat:
-                                    strat.live_trade_count = (strat.live_trade_count or 0) + 1
+                                from src.models.database import get_database as _gdb_ltc
+                                from src.models.orm import StrategyORM as _StratORM
+                                _ltc_sess = _gdb_ltc().get_session()
+                                try:
+                                    _strat = _ltc_sess.query(_StratORM).filter_by(id=order.strategy_id).first()
+                                    if _strat:
+                                        _strat.live_trade_count = (_strat.live_trade_count or 0) + 1
+                                        _ltc_sess.commit()
+                                        logger.debug(
+                                            f"live_trade_count incremented for {order.strategy_id[:8]} "
+                                            f"→ {_strat.live_trade_count}"
+                                        )
+                                except Exception as _ltc_inner:
+                                    logger.debug(f"live_trade_count commit failed for {order.id}: {_ltc_inner}")
+                                    try:
+                                        _ltc_sess.rollback()
+                                    except Exception:
+                                        pass
+                                finally:
+                                    _ltc_sess.close()
                         except Exception as ltc_err:
                             logger.debug(f"live_trade_count increment failed for {order.id}: {ltc_err}")
                 
