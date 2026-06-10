@@ -519,7 +519,12 @@ class StrategyTemplateLibrary:
             strategy_type=StrategyType.TREND_FOLLOWING,
             market_regimes=[MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP_STRONG, MarketRegime.TRENDING_UP_WEAK],
             entry_conditions=[
-                "MACD() > MACD_SIGNAL() AND MACD() > MACD().shift(1)"  # MACD above signal and rising
+                # FIX-15: MACD().shift(1) syntax is invalid in the DSL parser (.shift() is Python,
+                # not a supported DSL method). The intent was "MACD above signal AND rising".
+                # Replaced with CROSSES_ABOVE which captures the rising MACD crossover signal —
+                # a stricter condition that fires only when MACD crosses above the signal line
+                # (implying it was below before, i.e. it is rising through the signal).
+                "MACD() CROSSES_ABOVE MACD_SIGNAL()"
             ],
             exit_conditions=[
                 "MACD() < MACD_SIGNAL()"

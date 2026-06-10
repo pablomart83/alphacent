@@ -481,6 +481,36 @@ class MonitoringService:
             except Exception as e:
                 logger.error(f"Error checking trailing stops: {e}")
 
+        # FIX-09: Live equity staleness watchdog.
+        # If the LIVE equity snapshot hasn't been updated in > 60 minutes, force a live
+        # position resync. Catches the Jun 5–7 2026 scenario where LIVE equity was frozen
+        # for 48h with no alert raised. Only runs when a live client is configured.
+        if self.live_etoro_client is not None and self.live_order_monitor is not None:
+            try:
+                _live_staleness_threshold = 3600  # 60 minutes
+                from src.models.orm import EquitySnapshotORM as _EqSnap
+                _snap_sess = self.db.get_session()
+                try:
+                    _last_live_snap = (
+                        _snap_sess.query(_EqSnap)
+                        .filter(_EqSnap.account_type == 'live')
+                        .order_by(_EqSnap.created_at.desc())
+                        .first()
+                    )
+                    if _last_live_snap is not None:
+                        _snap_age = (datetime.utcnow() - _last_live_snap.created_at).total_seconds()
+                        if _snap_age > _live_staleness_threshold:
+                            logger.critical(
+                                f"[FIX-09] LIVE equity snapshot stale for {_snap_age/3600:.1f}h "
+                                f"(last: {_last_live_snap.created_at.isoformat()}) — "
+                                f"forcing live position resync"
+                            )
+                            self.live_order_monitor.sync_positions(account_type='live', force=True)
+                finally:
+                    _snap_sess.close()
+            except Exception as _stale_err:
+                logger.debug(f"Live staleness watchdog check failed (non-fatal): {_stale_err}")
+
         # Update MAE/MFE on open trade_journal entries.
         # Piggybacks on trailing-stop cadence (60s) — prices are already fresh
         # from the position sync earlier in the cycle. Failure is non-fatal.
@@ -3419,6 +3449,46 @@ class MonitoringService:
             # that eToro no longer recognises, causing silent close failures.
             # Fetch fresh positions and find the matching one by symbol.
             etoro_position_id_to_close = pos.etoro_position_id
+
+            # FIX-05: Guard against closing with a pending_* UUID instead of a real eToro ID.
+            # This caused a CRITICAL failure on ENPH: the close kept returning 400 because
+            # etoro_position_id was still 'pending_c92ddb66-...' (optimistic write ID never
+            # replaced). For LIVE positions the refresh below handles it; for DEMO we check
+            # and force a sync if still pending after more than 2 hours.
+            _id_str = str(etoro_position_id_to_close or "")
+            if _id_str.startswith("pending_"):
+                logger.warning(
+                    f"[FIX-05] Position {pos.id} ({pos.symbol}) has pending etoro_position_id "
+                    f"'{_id_str}' — forcing position sync before close attempt"
+                )
+                try:
+                    if _pos_account_type == 'live' and self.live_order_monitor is not None:
+                        self.live_order_monitor.sync_positions(account_type='live', force=True)
+                    else:
+                        self.order_monitor.sync_positions(force=True)
+                    # Refresh pos from DB after sync
+                    from src.models.orm import PositionORM as _PosORM2
+                    _refreshed = self.db.get_session().query(_PosORM2).filter_by(id=pos.id).first()
+                    if _refreshed and _refreshed.etoro_position_id:
+                        etoro_position_id_to_close = _refreshed.etoro_position_id
+                        pos.etoro_position_id = _refreshed.etoro_position_id
+                        _id_str = str(etoro_position_id_to_close)
+                        if _id_str.startswith("pending_"):
+                            logger.critical(
+                                f"[FIX-05] Position {pos.id} ({pos.symbol}) still has pending ID "
+                                f"after sync — SKIPPING close to avoid invalid eToro API call. "
+                                f"Manual intervention required."
+                            )
+                            return
+                except Exception as _sync_err:
+                    logger.error(f"[FIX-05] Sync failed for pending position {pos.id}: {_sync_err}")
+                    if _id_str.startswith("pending_"):
+                        logger.critical(
+                            f"[FIX-05] Cannot close position {pos.id} ({pos.symbol}) — "
+                            f"etoro_position_id is still '{_id_str}'. Skipping."
+                        )
+                        return
+
             if _pos_account_type == 'live' and self.live_etoro_client is not None:
                 try:
                     live_positions = self.live_etoro_client.get_positions()
@@ -3738,6 +3808,12 @@ class MonitoringService:
         revenue_decline_exit = config.get("revenue_decline_exit", True)
         sector_rotation_exit = config.get("sector_rotation_exit", True)
 
+        # FIX-04: Use a fresh dedicated session for this check so that any
+        # exception inside the per-position loop (FMP call, SQL query, etc.)
+        # that leaves the transaction in an aborted state does NOT corrupt the
+        # shared monitoring session. The shared session was being poisoned daily
+        # at 12:37 UTC, causing cascading InFailedSqlTransaction errors on every
+        # subsequent DB query until the pool dropped the connection.
         session = self.db.get_session()
         checked = 0
         flagged = 0
@@ -3922,10 +3998,16 @@ class MonitoringService:
 
         except Exception as e:
             logger.error(f"Error in fundamental exit check: {e}", exc_info=True)
-            session.rollback()
+            try:
+                session.rollback()
+            except Exception:
+                pass
             return {"checked": checked, "flagged": flagged, "error": str(e)}
         finally:
-            session.close()
+            try:
+                session.close()
+            except Exception:
+                pass
 
     def _check_time_based_exits(self) -> Dict:
         """

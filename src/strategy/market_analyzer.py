@@ -151,6 +151,24 @@ class MarketStatisticsAnalyzer:
                         or "timeout" in err_str
                         or "connection" in err_str
                     )
+                    # FIX-10: Detect 429 rate limit explicitly and apply a longer backoff.
+                    # The Jun 3 error storm (100+ "Too Many Requests" in 90 minutes) was caused
+                    # by the retry wrapper not recognising 429 as a rate-limit response and
+                    # hammering the API every 1–3s. On a 429, back off for 5 minutes minimum.
+                    is_rate_limited = (
+                        "too many requests" in err_str
+                        or "rate limit" in err_str
+                        or "429" in err_str
+                    )
+                    if is_rate_limited:
+                        series_id = args[0] if args else kwargs.get('series_id', '?')
+                        logger.warning(
+                            f"FRED rate limit hit for {series_id} — backing off 300s (fail-open)"
+                        )
+                        import time as _time_rl
+                        _time_rl.sleep(300)  # 5-minute backoff on rate limit
+                        # Don't retry after rate limit — fail-open so callers use cached/default values
+                        raise
                     if not is_transient:
                         raise
                     if attempt < 2:

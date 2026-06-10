@@ -374,6 +374,24 @@ class TradingScheduler:
                 except Exception as _pos_err:
                     logger.debug(f"Could not fetch open position strategy IDs for interval filter: {_pos_err}")
 
+                # FIX-08b: Build set of newly-activation_approved BACKTESTED strategy IDs.
+                # These must bypass the interval filter to get their first signal run
+                # immediately — they proved their edge in WF but the interval rotation
+                # filter was consistently skipping them (4H strategies not at a boundary,
+                # newly approved at an off-boundary hour). Replicate the strategy_ids bypass.
+                _newly_approved_ids: set = set()
+                for _s in active_strategies:
+                    if _s.status == StrategyStatus.BACKTESTED:
+                        _meta = _s.strategy_metadata if isinstance(_s.strategy_metadata, dict) else {}
+                        if _meta.get('activation_approved') and not _meta.get('signal_cycles_without_trade'):
+                            # signal_cycles_without_trade is None/0 = never had a signal run
+                            _newly_approved_ids.add(_s.id)
+                if _newly_approved_ids:
+                    logger.info(
+                        f"[FIX-08b] {len(_newly_approved_ids)} newly-approved BACKTESTED strategies "
+                        f"bypass interval filter for first signal run"
+                    )
+
                 _pre_filter_count = len(active_strategies)
                 _interval_skipped = 0
                 _filtered_strategies = []
@@ -384,6 +402,11 @@ class TradingScheduler:
 
                     # Always run if strategy has an open position (need exit signals)
                     if _s.id in _open_position_strategy_ids:
+                        _filtered_strategies.append(_s)
+                        continue
+
+                    # FIX-08b: Always run newly-approved BACKTESTED strategies
+                    if _s.id in _newly_approved_ids:
                         _filtered_strategies.append(_s)
                         continue
 
@@ -516,18 +539,48 @@ class TradingScheduler:
             # signals immediately. Exit signals still run — they don't need balance.
             # This avoids running 40+ signals through the full pipeline only to have
             # every one rejected at the last step with eToro error 604.
+            #
+            # FIX-11: Use DB-computed available balance instead of eToro-reported credit.
+            # eToro's available_balance figure goes to $0 during settlement windows (when
+            # many stops clear and new fills are pending simultaneously). The DB-computed
+            # value (equity - invested - pending) is stable throughout settlement because
+            # it's based on the 60s equity snapshot minus what we know is committed.
             MINIMUM_ORDER_SIZE = 2000.0
             _available_balance = getattr(account_info, 'balance', 0) or 0
             try:
-                from src.models.orm import AccountInfoORM
+                from src.models.orm import AccountInfoORM, PositionORM as _PosORM_bal, OrderORM as _OrdORM_bal
                 _db_bal_sess = db.get_session()
                 try:
+                    # Use the most recent DEMO equity snapshot as the base
                     _acct_row = _db_bal_sess.query(AccountInfoORM).filter(
                         AccountInfoORM.mode == 'DEMO'
                     ).order_by(
                         AccountInfoORM.updated_at.desc()
                     ).first()
-                    if _acct_row and _acct_row.balance is not None:
+                    if _acct_row and _acct_row.equity is not None:
+                        _db_equity = float(_acct_row.equity)
+                        # Subtract invested capital in open positions
+                        # Use scalar sum without func
+                        _invested_rows = _db_bal_sess.query(_PosORM_bal.invested_amount).filter(
+                            _PosORM_bal.account_type == 'demo',
+                            _PosORM_bal.closed_at.is_(None),
+                        ).all()
+                        _invested = sum(r[0] or 0 for r in _invested_rows)
+                        # Subtract pending order amounts
+                        _pending_rows = _db_bal_sess.query(_OrdORM_bal.quantity).filter(
+                            _OrdORM_bal.account_type == 'demo',
+                            _OrdORM_bal.status == OrderStatus.PENDING,
+                        ).all()
+                        _pending = sum(r[0] or 0 for r in _pending_rows)
+                        _db_computed_balance = max(0.0, float(_db_equity) - float(_invested) - float(_pending))
+                        # Use DB-computed if it looks reasonable (> 0 and less than 2× equity)
+                        if _db_computed_balance > 0:
+                            _available_balance = _db_computed_balance
+                            logger.debug(
+                                f"Pre-flight balance: DB-computed=${_db_computed_balance:.0f} "
+                                f"(equity={_db_equity:.0f} - invested={_invested:.0f} - pending={_pending:.0f})"
+                            )
+                    elif _acct_row and _acct_row.balance is not None:
                         _available_balance = float(_acct_row.balance)
                 finally:
                     _db_bal_sess.close()
@@ -574,6 +627,36 @@ class TradingScheduler:
                     )
             except Exception as _pb_err:
                 logger.debug(f"Pullback detection failed: {_pb_err}")
+
+            # FIX-06: Intraday stress flag — fast regime signal for same-session crashes.
+            # The 20d/50d MQS lookback is blind to intraday selloffs. Compute SPY intraday
+            # return (open→current). If < -1.5%, flag intraday_stress=True so downstream
+            # components (TSL, conviction scorer) can tighten their parameters.
+            # This is an information layer — it doesn't block entries on its own.
+            # The live circuit breaker (FIX-01) is the hard gate; this is the softer signal.
+            _intraday_stress = False
+            _intraday_spy_return = 0.0
+            try:
+                from datetime import date as _date_cls
+                _spy_bars = self._market_data.get_historical_data(
+                    "SPY",
+                    start=datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0),
+                    end=datetime.utcnow(),
+                    interval="1h",
+                ) if self._market_data else []
+                if _spy_bars and len(_spy_bars) >= 2:
+                    _spy_open = _spy_bars[0].open if hasattr(_spy_bars[0], 'open') and _spy_bars[0].open else None
+                    _spy_current = _spy_bars[-1].close if hasattr(_spy_bars[-1], 'close') and _spy_bars[-1].close else None
+                    if _spy_open and _spy_current and _spy_open > 0:
+                        _intraday_spy_return = (_spy_current - _spy_open) / _spy_open
+                        if _intraday_spy_return < -0.015:
+                            _intraday_stress = True
+                            logger.warning(
+                                f"[FIX-06] Intraday stress detected: SPY {_intraday_spy_return:.2%} "
+                                f"today (threshold=-1.5%). TSL and conviction scoring will tighten."
+                            )
+            except Exception as _is_err:
+                logger.debug(f"Intraday stress check failed (fail-open): {_is_err}")
 
             # ── PRE-FLIGHT: Market Quality Score gate ─────────────────────────────
             # When market quality is low (<40, choppy/noisy), block new trend-following
@@ -2384,6 +2467,55 @@ class TradingScheduler:
                                         _live_size2 = float(_appr.position_size) / _mirror2
 
                                     try:
+                                        # FIX-01: Intraday portfolio drawdown circuit breaker (LIVE only).
+                                        # If live equity has dropped > 1.5% in the last 2 hours, skip new
+                                        # live entry signals. Prevents the Jun 5/Jun 9 pattern of buying
+                                        # into a crash. Exit signals are unaffected.
+                                        _live_halt_threshold = float(_live_cfg2.get('intraday_halt_threshold', 0.015))
+                                        _intraday_breaker_tripped = False
+                                        if _lsig.action in [_LiveSignalAction.ENTER_LONG, _LiveSignalAction.ENTER_SHORT]:
+                                            try:
+                                                from src.models.orm import EquitySnapshotORM as _EqSnap2
+                                                from datetime import timedelta as _td2
+                                                _eq_sess2 = db.get_session()
+                                                try:
+                                                    _now2 = datetime.utcnow()
+                                                    _2h_ago2 = _now2 - _td2(hours=2)
+                                                    # Current live equity
+                                                    _snap_now = (
+                                                        _eq_sess2.query(_EqSnap2)
+                                                        .filter(_EqSnap2.account_type == 'live')
+                                                        .order_by(_EqSnap2.created_at.desc())
+                                                        .first()
+                                                    )
+                                                    # Live equity 2h ago
+                                                    _snap_2h = (
+                                                        _eq_sess2.query(_EqSnap2)
+                                                        .filter(
+                                                            _EqSnap2.account_type == 'live',
+                                                            _EqSnap2.created_at <= _2h_ago2,
+                                                        )
+                                                        .order_by(_EqSnap2.created_at.desc())
+                                                        .first()
+                                                    )
+                                                    if _snap_now and _snap_2h and _snap_2h.equity and _snap_2h.equity > 0:
+                                                        _equity_change = (_snap_now.equity - _snap_2h.equity) / _snap_2h.equity
+                                                        if _equity_change < -_live_halt_threshold:
+                                                            _intraday_breaker_tripped = True
+                                                            logger.warning(
+                                                                f"[FIX-01] Intraday circuit breaker: live equity "
+                                                                f"dropped {_equity_change:.2%} in 2h "
+                                                                f"(threshold={-_live_halt_threshold:.2%}) — "
+                                                                f"halting new LIVE entries this cycle"
+                                                            )
+                                                finally:
+                                                    _eq_sess2.close()
+                                            except Exception as _cb_err:
+                                                logger.debug(f"Intraday circuit breaker check failed (fail-open): {_cb_err}")
+
+                                        if _intraday_breaker_tripped:
+                                            continue  # Skip this live entry signal
+
                                         _live_order2 = self._live_order_executor.execute_signal(
                                             signal=_lsig,
                                             position_size=_live_size2,
@@ -3161,7 +3293,21 @@ class TradingScheduler:
                     )
 
                     # Sort by confidence (highest first)
-                    filtered_signals.sort(key=lambda x: x[1].confidence, reverse=True)
+                    # FIX-08a: SHORT entry signals get priority over LONG entry signals
+                    # within the same confidence band. During high-activity cycles,
+                    # available balance is consumed by LONGs first, leaving SHORTs with
+                    # $0 balance and gate-blocked. SHORTs are critical hedges that should
+                    # not be last in the execution queue.
+                    def _signal_sort_key(x):
+                        _sig = x[1]
+                        _is_short_entry = (
+                            hasattr(_sig, 'action') and
+                            'SHORT' in str(getattr(_sig, 'action', '')).upper() and
+                            'ENTER' in str(getattr(_sig, 'action', '')).upper()
+                        )
+                        # Tuple: (priority: 0=SHORT 1=LONG, -confidence for desc)
+                        return (0 if _is_short_entry else 1, -(_sig.confidence or 0))
+                    filtered_signals.sort(key=_signal_sort_key)
 
                     # Keep top N signals based on remaining slots
                     slots_to_fill = min(remaining_slots, len(filtered_signals))

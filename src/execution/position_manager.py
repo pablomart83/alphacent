@@ -328,6 +328,21 @@ class PositionManager:
 
                 trail_sl = position.current_price * (1 - effective_distance) if is_long else position.current_price * (1 + effective_distance)
 
+                # FIX-07: TSL minimum lock buffer — enforce 0.5× ATR minimum distance
+                # between the trailing stop and current price. Prevents noise-level
+                # breaches (observed: stops ratcheted to within 0.001–0.012% of price,
+                # scratching winners at +$0.03 on positions with +$40–50 unrealized P&L).
+                # Root cause: after profit-lock stage sets stop near entry×1.02, the
+                # ratchet advances the stop to within a hair of current price on fast-
+                # moving instruments. Minimum buffer = 0.5× ATR ensures the stop is
+                # always outside normal single-bar noise range.
+                _min_buffer_pct = effective_distance * 0.5  # 0.5× the effective ATR distance
+                _min_buffer_abs = position.current_price * _min_buffer_pct
+                if is_long:
+                    trail_sl = min(trail_sl, position.current_price - _min_buffer_abs)
+                else:
+                    trail_sl = max(trail_sl, position.current_price + _min_buffer_abs)
+
                 if self._is_favourable_move(position.stop_loss, trail_sl, is_long):
                     old_sl_str = f"{position.stop_loss:.4f}" if position.stop_loss else "None"
                     self._apply_sl(
@@ -335,7 +350,8 @@ class PositionManager:
                         trail_sl,
                         f"Trailing stop: {position.symbol} {position.side.value} "
                         f"{old_sl_str} → {trail_sl:.4f} "
-                        f"(profit={profit_pct:.2%}, {asset_class}/{strategy_interval}: {effective_distance:.2%} distance)",
+                        f"(profit={profit_pct:.2%}, {asset_class}/{strategy_interval}: {effective_distance:.2%} distance, "
+                        f"min_buffer={_min_buffer_pct:.3%})",
                     )
                     self._last_tsl_summary["trail"] += 1
 
