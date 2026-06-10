@@ -8,6 +8,50 @@ inclusion: auto
 
 ---
 
+## Strategy Lifecycle — RESEARCH → PAPER → LIVE
+
+The system has three lifecycle stages with different objectives. Every gate, sizing rule and risk check must be classified by which stage it serves. This is the foundational architectural principle that drives all adaptation decisions.
+
+| Stage | DB status | Account | Purpose | Discipline |
+|---|---|---|---|---|
+| **RESEARCH** | `BACKTESTED`, `PROPOSED`, `INVALID` | n/a | Validate edge offline (WF, MC, conviction). | Statistical |
+| **PAPER** | `PAPER` (after first signal) or `BACKTESTED` with `activation_approved=True` | DEMO | **Gather trade data** so the graduation gate has a sample to qualify pairs for live | Maximise data quality and breadth |
+| **LIVE** | `LIVE` | LIVE | **Generate alpha** with real capital under risk discipline | Capital preservation + alpha |
+
+**Critical implication for every change:**
+
+- In PAPER, the goal is to GET trades. Every gate that blocks a signal also blocks a data point we need to graduate strategies. Risk discipline that helps preserve capital actively HURTS data collection. Bias from blocked signals leaks into the graduation `qualification_ratio`.
+- In LIVE, the goal is alpha generation under capital preservation. Every gate that prevents bad trades helps. The full risk framework (vol scaling, heat cap, sector cap, correlation cluster, drawdown sizing, MQS multiplier, conviction-tier sizing) applies here.
+
+**The system was originally built RESEARCH→PAPER as a single pipeline.** Risk machinery was added across the whole thing because there was no LIVE stage to differentiate. Then LIVE was added (May 2026) as a separate signal pass that bypasses the risk framework. The result: PAPER inherits LIVE-grade discipline it doesn't need (slowing data collection), and LIVE bypasses the risk framework that would help (concentrating risk on real capital). Both directions are wrong.
+
+**Operating rule for every change touching gates, sizing or risk:**
+
+1. Before adding or modifying a gate, decide which stages it should affect.
+2. PAPER: relaxed entry gates, flat sizing (already $5,000), fewer rejections, more breadth. Treat it as a data-collection sandbox.
+3. LIVE: the full 11-step sizing pipeline, full `validate_signal` portfolio risk, vol-scaled sizing under the CIO `position_size` cap.
+4. RESEARCH: strict statistical bars (WF, MC, ex-post 730d, DSR — when implemented).
+5. If a gate must apply to multiple stages, parameterise by stage (`paper_trading.*` and `live_trading.*` blocks in YAML, branched by `account_type` in code).
+
+**Where the lifecycle is already wired correctly:**
+- `paper_trading.activation_thresholds` overlay in `portfolio_manager.evaluate_for_activation:702`.
+- `paper_trading.graduation_gate.min_trades_*` in `graduation_gate._get_min_trades_for_interval`.
+- `paper_trading.flat_position_size` in `risk_manager.calculate_position_size:858` (via `is_paper=True`).
+- `paper_trading.activation_thresholds.disable_min_return_per_trade / disable_avg_loss_gate` flags.
+- `paper_trading.conviction_threshold / _crypto` (G-43, fixed 2026-05-17, commit `b1378e1`).
+
+**Where the lifecycle is NOT yet wired (active gaps as of 2026-05-17):**
+- LIVE pass bypasses `RiskManager.validate_signal` entirely — no portfolio risk on real capital (G-44, P0).
+- LIVE pass bypasses `RiskManager.calculate_position_size` — no vol scaling, drawdown sizing, conviction-tier sizing, MQS multiplier on LIVE (G-45, P0).
+- `MAX_PER_SYMBOL_PER_TIMEFRAME = 4` applies uniformly — limits PAPER data breadth (G-46).
+- C1 VIX gate and C3 trend-consistency gate apply to PAPER — biases paper Sharpe (G-50).
+- Avg-loss gate at `autonomous_strategy_manager.py:2258` has no PAPER disable (G-48).
+- AE trade-frequency limiter applies uniformly (G-49).
+
+See `docs/ALPHACENT_SYSTEM_AUDIT_2026-05.md §16` and `docs/GAP_ANALYSIS_2026-05.md §17–§20` for the full lifecycle adaptation analysis.
+
+---
+
 ## Think Like a Trader, Not a Software Engineer
 
 AlphaCent is a trading business, not a code project. Every change is evaluated through the lens of P&L, risk, and capital preservation — not elegance or speed.
@@ -90,6 +134,44 @@ scp -i ~/Downloads/alphacent-key.pem ubuntu@34.252.61.149:/home/ubuntu/alphacent
 ```
 
 After syncing, diff against any local uncommitted changes before proceeding so a UI-initiated change doesn't silently overwrite a pending edit. This exception applies only to `config/autonomous_trading.yaml`. Every other file in the repository still flows local → EC2, never the other way.
+
+---
+
+## Database Session Management — Critical Rule
+
+**Always use `session_scope()` for new code. Never leave a session in an aborted state.**
+
+`InFailedSqlTransaction` is the most dangerous bug class in this system. When a DB session has an exception mid-transaction and the exception is caught without calling `session.rollback()`, the PostgreSQL connection enters an aborted state. That connection is returned to the pool. The next caller gets the same aborted connection and every query fails — silently or with `InFailedSqlTransaction`. This cascade caused:
+- PANW triple-position (Jun 10 2026): duplicate guard read no rows → 3 live entries placed
+- DELL orphan position: live order committed to eToro but DB row lost
+
+**Root fix (Sprint 13, commit `42aa454`):** `Database.get_session()` now calls `session.rollback()` on checkout. This costs 0.1ms and clears any aborted state before a caller sees the connection.
+
+**Rules for all code touching DB sessions:**
+
+1. **Prefer `session_scope()`** for any new function:
+   ```python
+   with db.session_scope() as session:
+       session.query(...)
+       # auto-commit on exit, auto-rollback on exception, auto-close in finally
+   ```
+
+2. **When using `get_session()` directly**, always have `rollback` + `close` in exception handling:
+   ```python
+   session = db.get_session()
+   try:
+       # work
+       session.commit()
+   except Exception:
+       session.rollback()
+       raise
+   finally:
+       session.close()
+   ```
+
+3. **Never share a session across independent operations.** The live pass, duplicate guard, order write, and monitoring checks each get their own isolated session. A long-running main cycle session must not be used for critical writes.
+
+4. **For LIVE pass writes specifically** (order DB write, duplicate guard check): always use a fresh session from `get_database().get_session()`, NOT the main trading cycle `session`. The main session may be hours old and in an unknown state.
 
 ---
 
@@ -242,11 +324,12 @@ Never silent-no-op; every cycle produces this line so outages surface in one `ta
 - Sharpe exception: test_sharpe ≥ 2.0 + ≥ 3 trades bypasses min_trades
 
 ### Conviction Scoring
-- Threshold: **65/100** (was 70, dropped — was above DSL ceiling)
-- **Live pass threshold: 73** — higher bar for real money. Set in `live_strategies.conviction_min`.
+- **PAPER threshold (G-43, 2026-05-17): 60 / 55 (crypto)** — read from `paper_trading.conviction_threshold` and `paper_trading.conviction_threshold_crypto`. Calibrated for data collection breadth on demo capital.
+- **LIVE threshold: 73 / 67 (crypto)** — per-pair from `live_strategies.conviction_min` (CIO-set at graduation), with `live_trading.conviction_threshold` / `_crypto` as the YAML default fallback.
+- The conviction gate at `strategy_engine.generate_signals:5572-5605` branches on `account_type`: PAPER reads `paper_trading.*`, LIVE uses `conviction_override` from the live_strategies row.
 - Components: WF edge (40) + signal quality (25) + regime fit (20) + asset tradability (15) + fundamental quality (±15) + carry bias (±5) + crypto cycle (±5) + news sentiment (±1) + factor exposure (±6)
-- Theoretical max: 132 (normalized to 100)
-- Asset tradability: Tier 1 stocks & major instruments 15pts | Tier 2 liquid 13pts | **ETFs 13pts, Indices 14pts** (bumped May 1 — 64.6% ETF WR, 85.7% index WR live)
+- Theoretical max: 132 (AE path) / per-asset effective denominators for DSL: stock 101, etf 101, forex 104, crypto 106, commodity 98, index 100. Final normalised to 100.
+- Asset tradability: Tier 1 stocks & major instruments 15pts | Tier 2 liquid 13pts | **ETFs 13pts, Indices 14pts** (post May 1 fix — 64.6% ETF WR, 85.7% index WR live)
 - Uptrend SHORT strategies score 20/20 on regime fit (they are the hedge, not fighting the regime)
 
 ### Zombie Exit Thresholds (flat ±1%, differentiated by strategy type)
