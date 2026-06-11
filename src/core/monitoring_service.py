@@ -2730,7 +2730,7 @@ class MonitoringService:
         # _last_full_sync is only seconds old and this never fires; it only triggers
         # when the loop genuinely stalled, which is exactly when it is needed.
         import time as _t_fresh
-        _PRICE_FRESHNESS_SLA_S = 180.0  # 3× the 60s sync cadence
+        from src.core.staleness import PRICE_FRESHNESS_SLA_S as _PRICE_FRESHNESS_SLA_S
         for _fresh_mon, _fresh_acct in (
             (self.order_monitor, 'demo'),
             (self.live_order_monitor, 'live'),
@@ -2984,12 +2984,15 @@ class MonitoringService:
 
         Returns the number of positions newly flagged for closure.
         """
-        _PRICE_FRESHNESS_SLA_S = 180.0
         breach_count = 0
         bsession = self.db.get_session()
         try:
             from src.models.orm import PositionORM
             from sqlalchemy import text as _sql_text
+            from src.core.staleness import (
+                PRICE_FRESHNESS_SLA_S as _PRICE_FRESHNESS_SLA_S,
+                position_price_age_seconds as _price_age_fn,
+            )
             try:
                 bsession.execute(_sql_text("SET LOCAL lock_timeout = '5000'"))
             except Exception as _lt_err:
@@ -3022,10 +3025,7 @@ class MonitoringService:
                     # CRITICAL for LIVE capital so a real-money stop acting on a stale
                     # price is impossible to miss.
                     _price_ts = getattr(pos_orm, 'price_updated_at', None)
-                    _price_age_s = (
-                        (datetime.utcnow() - _price_ts).total_seconds()
-                        if _price_ts else None
-                    )
+                    _price_age_s = _price_age_fn(pos_orm)
                     _stale_price = _price_age_s is not None and _price_age_s > _PRICE_FRESHNESS_SLA_S
                     _age_note = (
                         f", price_age={_price_age_s/60:.0f}m"
