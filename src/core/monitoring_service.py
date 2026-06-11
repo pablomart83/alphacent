@@ -3619,9 +3619,12 @@ class MonitoringService:
         # it can be shares, and eToro sometimes returns garbage values.
         close_dollar_amount = getattr(pos, 'invested_amount', None) or 0
         if close_dollar_amount <= 0:
-            # Fallback: estimate from current price × quantity, but cap at reasonable amount
-            if pos.quantity and pos.current_price and pos.current_price > 0:
-                estimated = abs(pos.quantity * pos.current_price)
+            # Fallback: estimate from current price × shares, but cap at reasonable amount.
+            # A1: position_shares() makes the unit explicit (pos.quantity is SHARES).
+            from src.models.notional import position_shares
+            _shares = position_shares(pos)
+            if _shares and pos.current_price and pos.current_price > 0:
+                estimated = abs(_shares * pos.current_price)
                 # Sanity check: no single position should be > 30% of a $500K portfolio
                 if estimated > 150000:
                     logger.warning(

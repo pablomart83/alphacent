@@ -261,12 +261,12 @@ class RiskManager:
 
     @staticmethod
     def _get_position_value(pos: Position) -> float:
-        """Calculate the dollar value of a position.
+        """Dollar value (capital invested) of a position.
 
-        `invested_amount` is the canonical dollar field (eToro `amount`). When it
-        is missing, `quantity` is SHARES (units) — NOT dollars — so it must be
-        multiplied by price to get a dollar value. (The old code returned raw
-        `quantity` as dollars, which under-counted exposure for share-valued rows.)
+        A1 (typed notional): delegates to the canonical accessor in
+        src/models/notional.py so the shares-vs-dollars rule lives in exactly one
+        place. invested_amount (canonical $) when present, else shares × price —
+        never a raw share count as dollars.
 
         Args:
             pos: Position to calculate value for
@@ -274,22 +274,8 @@ class RiskManager:
         Returns:
             Dollar value of the position (actual capital invested)
         """
-        # Use invested_amount if available (most accurate)
-        invested = getattr(pos, 'invested_amount', None)
-        if invested and invested > 0:
-            return invested
-        # P2 (Sprint C) unit-correctness: `quantity` is SHARES (units), not dollars
-        # (eToro get_positions writes quantity=units, invested_amount=amount). The old
-        # fallback returned raw `quantity` as if it were dollars, which massively
-        # under-counts exposure when invested_amount is missing (e.g. 2.1 shares of a
-        # $370 stock counted as $2.10), silently defeating symbol/heat/exposure caps.
-        # Convert shares → dollars via current_price (fall back to entry_price).
-        qty = getattr(pos, 'quantity', None) or 0.0
-        px = getattr(pos, 'current_price', None) or getattr(pos, 'entry_price', None) or 0.0
-        if qty and px:
-            return float(qty) * float(px)
-        # Last resort: raw quantity (legacy behaviour) — better than 0 for the cap maths.
-        return float(qty)
+        from src.models.notional import position_notional_usd
+        return position_notional_usd(pos)
 
     def _get_pending_entry_exposure(
         self,
@@ -1012,13 +998,15 @@ class RiskManager:
                             _PosORM_ps.closed_at.is_(None),
                         ).all()
                     )
-                    _pending_exp = sum(
-                        float(o.quantity or 0) * float(o.price or 0)
-                        for o in _sess_ps.query(_OrdORM_ps).filter(
-                            _OrdORM_ps.symbol == signal.symbol,
-                            _OrdORM_ps.status == _OS_ps.PENDING,
-                        ).all()
-                    )
+                    # A1 (typed notional) bug fix: pending ENTRY orders store
+                    # `quantity` in DOLLARS (by-amount). The old code here did
+                    # `quantity * price`, inflating pending exposure by a factor of
+                    # `price` (a $5K order at $400 counted as $2M) — which exhausted
+                    # the paper symbol cap whenever any pending order existed on the
+                    # symbol and wrongly blocked paper entries (suppressing the data
+                    # breadth PAPER exists to collect). Reuse the canonical entry-
+                    # exposure helper, which sums entry-order dollars correctly.
+                    _pending_exp, _, _ = self._get_pending_entry_exposure(signal.symbol)
                     _existing_exp = _filled_exp + _pending_exp
                 finally:
                     _sess_ps.close()

@@ -1,6 +1,6 @@
 # Design — A1: Typed Notional (shares vs dollars)
 
-Status: PROPOSED (design for review — no code yet)
+Status: PHASE 1 IMPLEMENTED + DEPLOYED (2026-06-11). Phase 2 (orders notional column) and Phase 3 (rename quantity→shares) NOT done — see §9.
 Author: audit follow-up, 2026-06-11
 Scope: eliminate the recurring shares-vs-dollars bug class in sizing / caps / P&L / VaR.
 
@@ -146,3 +146,40 @@ Because outputs must be **identical**, every step is gated by a reconciliation:
 - Phase 3 (rename, optional): mechanical once phase 1 is done.
 
 Recommend doing **phase 1 only** first, prove the reconciliation, then decide on 2/3.
+
+---
+
+## 9. What was actually implemented (2026-06-11)
+
+**Phase 1 — DONE & deployed.**
+- `src/models/notional.py` — canonical `position_notional_usd()` + `position_shares()`
+  (single source of truth for the shares↔dollars rule).
+- `RiskManager._get_position_value` now delegates to `position_notional_usd` — this is
+  the hub through which ALL risk consumers (symbol cap, sector cap, heat, exposure
+  limits, position limits, VaR) already read position value, so the whole risk
+  subsystem is now centralized on one definition. Behavior-preserving (identical
+  logic): reconciliation baseline demo $236,180.94 / live $2,574.80 unchanged;
+  accessor unit tests pass (AMD 1.68036 sh × $468.59 = $787.40).
+- `monitoring_service._submit_close_order` fallback routes through `position_shares()`.
+- **Bug fixed in passing:** the PAPER sizing symbol-cap check computed pending
+  exposure as `quantity × price` over all pending orders — but entry orders store
+  `quantity` in DOLLARS, inflating pending exposure ~`price`× and wrongly blocking
+  paper entries whenever a pending order existed on the symbol. Now reuses the
+  canonical `_get_pending_entry_exposure` (entry-dollars, no ×price). Demo-only; it
+  was suppressing paper data breadth.
+
+**Phase 2 — NOT done (deferred).** Orders overload `quantity` (entry=dollars,
+close/SL/TP=shares). Every current order-value call site uses column-filtered SQL
+with the correct entry-only dollar rule, so there is no active bug to fix; an
+`order_notional_usd()` accessor + optional `orders.notional_usd` column is the clean
+finish but adds a live migration for no current correctness gain. Do it if/when exit
+orders need dollar valuation outside the entry-only paths.
+
+**Phase 3 — NOT done, and recommended AGAINST for now.** Renaming the
+`positions.quantity` column → `shares` is the "make the bug impossible at
+compile-time" step, but on a live trading DB it requires a dual-read migration
+window, touches an extremely common attribute name that collides with
+`orders.quantity` and signal `quantity`, and delivers marginal safety over Phase 1
+(which already routes every consumer through the typed accessor). High breakage
+risk, low marginal value — not worth it on a live book. Revisit only if a future
+bug slips past the accessor.
