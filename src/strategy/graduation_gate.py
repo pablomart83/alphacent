@@ -45,6 +45,29 @@ MIN_PAPER_WIN_RATE = 0.55        # raised from 0.45 — 45% is too permissive fo
 MIN_PAPER_PNL = 0.0              # must be profitable
 REJECTION_COOLDOWN_DAYS = 14
 
+# ── P0-2 (Sprint B): statistical-power gates ──────────────────────────────────
+# Two independent failures of the old gate let losing strategies reach LIVE
+# (GOOGL 11% WR over 18 live trades, TXN 0% over 3, both bleeding real money):
+#
+#   1. min_trades had NO hard floor. `_get_min_trades_for_interval` used a dynamic
+#      Sharpe formula `max(5, ceil((1.96/sharpe)^2))` as the PRIMARY path, which
+#      collapses to 3–5 trades for paper_sharpe >= 1.0. A 5-trade sample is almost
+#      no evidence. MIN_PAPER_TRADES is now enforced as a HARD FLOOR the dynamic
+#      formula cannot undercut (config: graduation_gate.min_trades, currently 15).
+#
+#   2. The win-rate gate used the POINT estimate (win_rate >= floor). At small n a
+#      point estimate has a wide CI, so a genuinely sub-floor strategy clears it by
+#      luck; with ~300 candidates (multiple testing) several false positives are
+#      expected. We now also require the WILSON LOWER BOUND of the win rate to clear
+#      (type_floor − tolerance), i.e. we must be statistically confident the win rate
+#      is not just a lucky small-sample draw. The bound is taken RELATIVE to the
+#      strategy-type floor (not an absolute number) so legitimately low-WR
+#      trend-following strategies — which the entire live book is — are not wrongly
+#      blocked; only strategies whose lower bound collapses well below their own
+#      type floor are rejected.
+WR_CI_CONFIDENCE = 0.90          # confidence level for the win-rate lower bound
+WR_CI_FLOOR_TOLERANCE = 0.10     # allowed gap below the type floor for the lower bound
+
 # Override constants from YAML if graduation_gate section exists.
 # This means Settings page changes take effect immediately (the PUT endpoint
 # also patches the in-memory constants directly, but this covers the startup
@@ -67,8 +90,36 @@ try:
             MAX_QUALIFICATION_RATIO = float(_gg["max_qualification_ratio_cap"])
         if "rejection_cooldown_days" in _gg:
             REJECTION_COOLDOWN_DAYS = int(_gg["rejection_cooldown_days"])
+        if "wr_ci_confidence" in _gg:
+            WR_CI_CONFIDENCE = float(_gg["wr_ci_confidence"])
+        if "wr_ci_floor_tolerance" in _gg:
+            WR_CI_FLOOR_TOLERANCE = float(_gg["wr_ci_floor_tolerance"])
 except Exception:
     pass  # Fall back to hardcoded defaults — never crash at import time
+
+
+def _wilson_lower_bound(successes: int, n: int, confidence: float = 0.90) -> float:
+    """Wilson score interval lower bound for a binomial proportion.
+
+    More accurate than the normal approximation at small n (which is exactly the
+    regime the graduation gate operates in). Returns the lower bound of the
+    `confidence`-level CI for the true success probability given `successes`
+    out of `n` observations. Used to gate win-rate so a lucky small-sample draw
+    above the floor does not graduate to live capital.
+    """
+    if n <= 0:
+        return 0.0
+    # z for a one-sided lower bound at the given confidence
+    _z_table = {0.80: 0.8416, 0.85: 1.0364, 0.90: 1.2816, 0.95: 1.6449, 0.975: 1.96}
+    # nearest tabulated z (keys are sparse; pick closest)
+    z = _z_table.get(round(confidence, 3))
+    if z is None:
+        z = min(_z_table.items(), key=lambda kv: abs(kv[0] - confidence))[1]
+    p_hat = successes / n
+    denom = 1.0 + (z * z) / n
+    center = (p_hat + (z * z) / (2 * n)) / denom
+    margin = (z / denom) * math.sqrt((p_hat * (1 - p_hat) / n) + (z * z) / (4 * n * n))
+    return max(0.0, center - margin)
 
 
 def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional[float] = None, win_rate: Optional[float] = None) -> int:
@@ -79,28 +130,33 @@ def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional
       dynamic_min = max(5, ceil((1.96 / paper_sharpe)²)), capped at 30.
       This is the primary threshold when paper_sharpe is known.
 
-    When paper_sharpe is None or <= 0, fall back to the YAML interval floor
-    (paper_trading.graduation_gate.min_trades_{interval}).
+    P0-2 (Sprint B) — HARD FLOOR:
+      The result is floored at MIN_PAPER_TRADES (config: graduation_gate.min_trades,
+      currently 15) regardless of how low the dynamic formula or the YAML interval
+      floor would go. Previously the dynamic formula governed alone and collapsed to
+      3–5 trades for paper_sharpe >= 1.0 — i.e. a strategy could reach LIVE on 5 paper
+      trades, which is almost no statistical evidence and is how losing strategies
+      (GOOGL, TXN) reached real capital. The hard floor cannot be undercut by the
+      dynamic formula OR the high-conviction exception.
 
-    The YAML interval floors are NOT combined with the dynamic formula via max()
-    — they are only used as a fallback when Sharpe is unknown. The dynamic
-    formula is self-sufficient: a Sharpe of 0.5 requires 15 trades, a Sharpe
-    of 2.0 requires 4 trades. Applying a YAML floor of 15 on top of the dynamic
-    formula defeats the purpose of the dynamic threshold.
+    When paper_sharpe is None or <= 0, fall back to the YAML interval floor, also
+    floored at MIN_PAPER_TRADES.
 
     High-conviction exception:
-      If paper_sharpe ≥ 2.0 AND win_rate ≥ 0.70, reduce by 40% (floor at 5).
+      If paper_sharpe ≥ 2.0 AND win_rate ≥ 0.70, reduce the dynamic value by 40%
+      — but still floored at MIN_PAPER_TRADES (the floor wins).
     """
     # Dynamic Sharpe-based threshold — primary when Sharpe is known
     if paper_sharpe is not None and paper_sharpe > 0:
         dynamic_min = max(5, math.ceil((1.96 / paper_sharpe) ** 2))
         dynamic_min = min(dynamic_min, 30)  # cap at 30
 
-        # High-conviction exception: strong Sharpe + high win rate → lower bar
+        # High-conviction exception: strong Sharpe + high win rate → lower bar,
+        # but never below the hard floor.
         if win_rate is not None and paper_sharpe >= 2.0 and win_rate >= 0.70:
-            return max(5, int(dynamic_min * 0.60))  # 40% reduction, floor at 5
+            return max(MIN_PAPER_TRADES, int(dynamic_min * 0.60))
 
-        return dynamic_min
+        return max(MIN_PAPER_TRADES, dynamic_min)
 
     # Fallback: YAML interval floor when Sharpe is unknown
     iv = (interval or "1d").lower()
@@ -121,20 +177,20 @@ def _get_min_trades_for_interval(interval: Optional[str], paper_sharpe: Optional
                 pt_gg = _c.get("paper_trading", {}).get("graduation_gate", {})
             _get_min_trades_for_interval._yaml_cache = (_time.time(), pt_gg)
         if iv in ("1h", "2h"):
-            return int(pt_gg.get("min_trades_1h", 12))
+            return max(MIN_PAPER_TRADES, int(pt_gg.get("min_trades_1h", 12)))
         elif iv == "4h":
-            return int(pt_gg.get("min_trades_4h", 8))
+            return max(MIN_PAPER_TRADES, int(pt_gg.get("min_trades_4h", 8)))
         else:
-            return int(pt_gg.get("min_trades_1d", 5))
+            return max(MIN_PAPER_TRADES, int(pt_gg.get("min_trades_1d", 5)))
     except Exception:
         pass
 
-    # Hardcoded fallback
+    # Hardcoded fallback (still floored at the hard minimum)
     if iv in ("1h", "2h"):
-        return 12
+        return max(MIN_PAPER_TRADES, 12)
     elif iv == "4h":
-        return 8
-    return 5
+        return max(MIN_PAPER_TRADES, 8)
+    return max(MIN_PAPER_TRADES, 5)
 
 
 def _get_min_sql_having_trades() -> int:
@@ -505,6 +561,30 @@ def is_qualified(
             f"paper_win_rate={win_rate:.1%} < {effective_win_rate_floor:.0%} "
             f"(floor for {strategy_type or 'unknown'} strategy type)"
         )
+
+    # P0-2 (Sprint B): Wilson lower-bound win-rate gate — statistical-power guard.
+    # The point-estimate floor above passes any strategy whose OBSERVED win rate
+    # cleared the floor, even when that observation is a lucky small-sample draw.
+    # With ~300 candidates (multiple testing) that admits false positives that then
+    # bleed real money (GOOGL 11% WR / 18 live trades, TXN 0% / 3). Additionally
+    # require the Wilson lower bound of the win rate to stay within
+    # WR_CI_FLOOR_TOLERANCE of the type floor — i.e. we are WR_CI_CONFIDENCE-confident
+    # the true win rate is not materially below the floor. The bound is taken
+    # RELATIVE to the (low) strategy-type floor, so legitimately low-WR
+    # trend-following strategies (the entire live book) are not blocked; only
+    # observations whose lower bound collapses below floor−tolerance are rejected.
+    if win_rate is not None and win_rate >= effective_win_rate_floor and trades and trades >= 1:
+        _wins = int(round(win_rate * int(trades)))
+        _wr_lb = _wilson_lower_bound(_wins, int(trades), confidence=WR_CI_CONFIDENCE)
+        _wr_lb_floor = max(0.0, effective_win_rate_floor - WR_CI_FLOOR_TOLERANCE)
+        if _wr_lb < _wr_lb_floor:
+            reasons.append(
+                f"win_rate_lower_bound={_wr_lb:.1%} < {_wr_lb_floor:.0%} "
+                f"({_wins}/{int(trades)}={win_rate:.0%} clears the "
+                f"{effective_win_rate_floor:.0%} floor only on a small sample — the "
+                f"{WR_CI_CONFIDENCE:.0%} CI lower bound is below floor−"
+                f"{WR_CI_FLOOR_TOLERANCE:.0%}; insufficient confidence the edge is real)"
+            )
 
     if wf_sharpe and wf_sharpe > 0 and sharpe is not None:
         ratio = sharpe / wf_sharpe

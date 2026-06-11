@@ -6,7 +6,38 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Sprint A complete (Jun 10 2026, 23:27 UTC). Second forensic audit (Opus 4.8) + live-capital correctness fixes deployed & verified live. Service healthy, no post-deploy errors, TSL clean. See "SESSION 2026-06-10 — SPRINT A" below. NEXT UP: Sprint B (graduation rigor + CIO-flag GOOGL/TXN/COPPER) — the live book is net-positive ONLY on one SOXL outlier; 9/10 live symbols are net-negative (GOOGL 11% WR/18 trades, TXN 0%/3). See audit findings P0-1/P0-2.**
+**Sprint B complete (Jun 11 2026, 07:36 UTC). Graduation-gate statistical-power fixes deployed & verified live (P0-2). Service healthy, zero post-deploy errors. See "SESSION 2026-06-11 — SPRINT B" below. ACTION FOR CIO: review GOOGL / TXN / COPPER live strategies for retirement (flagged, NOT auto-retired — see below).**
+
+**Sprint A complete (Jun 10 2026, 23:27 UTC). Second forensic audit (Opus 4.8) + live-capital correctness fixes deployed & verified live. Service healthy, no post-deploy errors, TSL clean. See "SESSION 2026-06-10 — SPRINT A" below.**
+
+---
+
+## SESSION 2026-06-11 — SPRINT B: GRADUATION RIGOR (P0-2) + LIVE BLEEDER FLAGGING (P0-1)
+
+Deployed `graduation_gate.py` + `config/autonomous_trading.yaml`, restarted 07:36 UTC, health green, zero post-deploy errors.
+
+### P0-2 — graduation gate statistical power (deployed)
+Root cause of GOOGL/TXN reaching live: the gate had no real min-trades floor and a point-estimate win-rate gate with no statistical power.
+
+| Fix | What |
+|---|---|
+| **Hard min_trades floor = 15** | `_get_min_trades_for_interval` used a dynamic Sharpe formula `max(5, ceil((1.96/sharpe)²))` as the PRIMARY path, which collapses to **3–5 trades** for paper_sharpe ≥ 1.0 — i.e. a strategy could graduate to real money on 5 paper trades. The YAML `graduation_gate.min_trades: 15` was LOADED into `MIN_PAPER_TRADES` but never used in this function. Now `MIN_PAPER_TRADES` is enforced as a hard floor the dynamic formula AND the high-conviction exception cannot undercut. (User-set floor = 15.) |
+| **Wilson lower-bound win-rate gate** | The point-estimate WR gate (≥55%/type floor) has no power at small n — a sub-floor strategy clears it by luck; with ~300 candidates (multiple testing) false positives are expected (GOOGL 11% WR/18 live, TXN 0%/3). Added a 90%-confidence Wilson lower-bound check on win rate, taken RELATIVE to the strategy-type floor (`lower_bound ≥ type_floor − 0.10`). Type-relative so the all-trend-following live book (legitimately low WR) is not blocked — only small-sample flukes whose lower bound collapses below the floor. Config: `graduation_gate.wr_ci_confidence: 0.9`, `wr_ci_floor_tolerance: 0.1`. Both gates live in `is_qualified` (the authoritative gate via `get_graduation_queue`). |
+
+Verification: py_compile + YAML valid; service restarted healthy; `graduation_gate` imports at startup (strategies router) with no error; no U+2500/import errors on 06-11. A legitimate trend strategy (type floor 0.35, 55% WR over 18 trades, Sharpe 1.2) still passes both gates (worked example confirmed); a 5-trade or barely-above-floor fluke now fails.
+
+### P0-1 — live bleeders: FLAGGED for CIO (NOT auto-retired, per steering rule)
+Live book is +$73v total **only** because of one SOXL outlier (+$868, n=4). Ex-SOXL: **−$795v ≈ −$101 real (~7.8% of the $1.3K stake)** across 48 trades. Recommend CIO retire:
+- **GOOGL** (4H EMA Ribbon Trend Long) — 11% WR over **18** live trades, −$105v. Statistically broken, not a small sample.
+- **TXN** (Keltner Channel Breakout) — 0% WR / 3, −$196v (worst dollar loss).
+- **COPPER** (Dual MA Volume Surge) — G5 WF-divergence retirement candidate, −$19v.
+
+**Why not auto-retired:** steering rule #7 (no irreversible real-money actions without CIO confirmation). Note discovered during Sprint B: `portfolio_manager.auto_retire_strategy` is a **legacy no-op** (logs only; "risk managed at position level"), so the autonomous cycle's retirement path does NOT actually retire live strategies — yet it still broadcasts a "Strategy Retired" notification, which is misleading. Real retirement is CIO-driven / position-level. **Watch item:** the no-op auto-retire + misleading broadcast means performance-retirement triggers never act — worth a proper fix next (make the LIVE path emit a real `[LIVE-REVIEW]` flag + accurate notification rather than a phantom "retired" broadcast).
+
+### Still open after Sprint B
+- CIO action: retire GOOGL/TXN/COPPER via dashboard.
+- Graduation queue endpoint (`strategies.py:~1955`) has an inline eligibility duplicate that applies the min_trades floor (via `_get_min_trades_for_interval`) but NOT the Wilson gate — secondary display only; authoritative `is_qualified` gate is correct. Route through `is_qualified` in a future cleanup (duplicate-logic debt).
+- Sprint C (P2 quick wins): `strategies.py:3174` market_regime None crash; NEW-08 404 churn; `position_manager._classify_symbol` leveraged-ETF set consolidation; `_get_position_value` share-fallback.
 
 **Sprint 14 complete (Jun 10 2026). Forensic audit P0+P1 fixes deployed & verified live. Service healthy, trading cycle + live pass running clean, position sync clean, fresh live snapshot, zero post-deploy errors. See "SESSION 2026-06-10 — SPRINT 14" below.**
 
