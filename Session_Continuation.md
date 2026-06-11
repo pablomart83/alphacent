@@ -6,6 +6,27 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-11 (PM-2) — DATA-PIPELINE forensic audit (Opus 4.8). P0 + P1 fixed, deployed, repaired, verified live, pushed. Latest commit `7a86071`.**
+
+- **P0 — frozen provisional 1d bars (data integrity).** `_save_historical_to_db` was INSERT-ONLY: today's still-forming 1d bar (written ~market-open by the full sync each morning) froze permanently and was never corrected to the real EOD close. **Verified live: AAPL 1d 06-10 stored 290.31 vs true close ~291.58; ~8,552 daily bars corrupted since the FMP-1d go-live (05-03).** Root fix: PostgreSQL `ON CONFLICT DO UPDATE` upsert + new `_bar_is_complete()` forming-bar exclusion (never persist an unclosed bar — 1d uses 21:00 UTC / crypto next-00:00 UTC; intraday uses open+interval). This also kills the no-savepoint batch-abort on unique collisions. **Repaired** existing bars: `scripts/repair_eod_bars.py` (305 symbols, 0 fail; AAPL 06-10 290.31→291.58). Upsert-only, no deletes; 1d total unchanged (~371K).
+- **P1 — NSDQ100 wrong instrument (ALUMINUM-class).** `fmp_ohlc.SYMBOL_MAP` routed `NSDQ100 → ^IXIC` (Nasdaq **Composite**) while eToro/Yahoo use `^NDX` (Nasdaq-**100**). **FMP Starter doesn't serve `^NDX` at all** (probe-confirmed 402 at 1d+1h), so NSDQ100 must use Yahoo `^NDX`. Fixed map → `^NDX`, marked `^NDX` premium-blocked on FMP (avoids 402 roundtrip), and fixed the intraday dead-end branch (`elif interval in (1h,4h): return []`) so US indices fall through to Yahoo instead of returning empty (was about to silently zero-out NSDQ100 1h/4h). **Purged + re-fetched** NSDQ100 all intervals via `scripts/refetch_symbol.py` — now single-source `^NDX` (1d 2023-06→now, close [14109,30660] = genuine NDX levels). Only NSDQ100 was mismapped (SPX500/DJ30/UK100/GER40 verified consistent).
+
+**Data-pipeline audit findings NOT yet actioned (see full report in session log / `DATA_PIPELINE_AUDIT_PROMPT.md` thread):**
+- **P1 loop-timing still firing** (`47.7s > 45s` at 22:41 live) — root-cause the slow eToro position-sync call; instrumentation exists, fix doesn't.
+- **P2 DST landmine** — `fmp_ohlc._parse_bars` `is_dst=None` raises `AmbiguousTimeError` (not caught by `except (KeyError,ValueError,TypeError)`); latent (forex fold is during weekend close) but will crash a 24/7 FMP fetch on the Nov fold. Catch pytz ambiguous/nonexistent.
+- **P2 staleness predicates ignore holidays** — 4 divergent freshness checks subtract weekends only; `market_hours_manager` (holiday-aware) is the canonical primitive but the data path doesn't use it → false-stale on US holidays. Unify.
+- **P2 `/data/quality`** — 2553ms full seq-scan (EXPLAIN-confirmed); 60s cache is in-process (per-worker). Make process-shared or background-computed.
+- **P2 fetch/save failures logged at `debug`** — invisible/unalerted; add per-cycle failed-symbol count + one greppable summary line.
+- **P2 `_save_historical_to_db` upsert now rewrites all completed bars in data_list each call** — fine at steady state (incremental = ~2 bars); only the rare shallow-cache 5y refetch upserts in bulk.
+- **Architecture** — duplicate shadowing singleton getters/setters in `market_data_manager.py` (top pair is dead + buggy: `MarketDataManager(config)` passes config as etoro_client). `data_management.py:105` queries non-existent `updated_at` column (use `fetched_at`).
+- **LME note** — `ALIUSD`/`ZNUSD` 1d are ALSO premium-blocked on the current Starter plan (log: "premium-blocked: ALIUSD 1day") → ALUMINUM/ZINC fall back to thin Yahoo `ALI=F`/`ZNC=F`. FIX-D's "FMP primary for LME" may be dead on the current plan — re-verify coverage.
+- **RETENTION (flagged, not done)** — 439,014 / 1,656,592 (26.5%) of 1h rows are >730d old; 0 LIVE 1h strategies, WF cap = 730d. Prune candidate `WHERE interval='1h' AND date < now()-'760 days'` in batches off-peak — awaiting go-ahead.
+- **Watch** — `20:58:49` DELL `UniqueViolation` aborted the whole startup reconcile despite the A3 savepoint claim; re-verify A3 is deployed/working (position-sync, out of data-pipeline scope).
+
+**New scripts:** `scripts/repair_eod_bars.py` (one-time EOD repair), `scripts/refetch_symbol.py SYMBOL` (purge+refetch a wrong-instrument symbol). Both run on EC2 with `set -a && . ./.env.production && set +a` for DB creds.
+
+---
+
 **SESSION 2026-06-11 (PM) — 3rd forensic audit (Opus 4.8) + architecture pass + frontend/perf fixes. All deployed, verified live, pushed. Latest commit `e6ef408`.**
 
 Full audit re-verified the live book 3-way (eToro `account_info` LIVE positions_count = DB open live = sync log, reconciled cleanly). Then fixed, in order:
