@@ -26,9 +26,10 @@ from src.core.symbol_registry import get_registry
 _LEVERAGED_ETF_SET = frozenset({
     # 3x / 2x Long
     "SOXL", "TQQQ", "UPRO", "SPXL", "UDOW", "LABU", "TECL", "FAS", "TNA",
+    "NAIL", "CURE", "DFEN", "WANT", "HIBL",
     "SSO", "QLD", "DDM", "ROM", "UWM", "USD",
     # 3x / 2x Inverse
-    "SQQQ", "SPXU", "SDOW", "SOXS", "LABD", "TECS", "FAZ", "TZA",
+    "SQQQ", "SPXU", "SDOW", "SOXS", "LABD", "TECS", "FAZ", "TZA", "HIBS",
 })
 
 

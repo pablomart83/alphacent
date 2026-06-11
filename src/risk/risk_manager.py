@@ -262,14 +262,15 @@ class RiskManager:
     @staticmethod
     def _get_position_value(pos: Position) -> float:
         """Calculate the dollar value of a position.
-        
-        For eToro demo, quantity represents the dollar amount invested (not shares).
-        Use invested_amount if available, otherwise use quantity directly since
-        it IS the dollar amount for eToro positions.
-        
+
+        `invested_amount` is the canonical dollar field (eToro `amount`). When it
+        is missing, `quantity` is SHARES (units) — NOT dollars — so it must be
+        multiplied by price to get a dollar value. (The old code returned raw
+        `quantity` as dollars, which under-counted exposure for share-valued rows.)
+
         Args:
             pos: Position to calculate value for
-            
+
         Returns:
             Dollar value of the position (actual capital invested)
         """
@@ -277,9 +278,18 @@ class RiskManager:
         invested = getattr(pos, 'invested_amount', None)
         if invested and invested > 0:
             return invested
-        # For eToro demo, quantity = amount (dollars invested)
-        # This works for both external and autonomous positions
-        return pos.quantity
+        # P2 (Sprint C) unit-correctness: `quantity` is SHARES (units), not dollars
+        # (eToro get_positions writes quantity=units, invested_amount=amount). The old
+        # fallback returned raw `quantity` as if it were dollars, which massively
+        # under-counts exposure when invested_amount is missing (e.g. 2.1 shares of a
+        # $370 stock counted as $2.10), silently defeating symbol/heat/exposure caps.
+        # Convert shares → dollars via current_price (fall back to entry_price).
+        qty = getattr(pos, 'quantity', None) or 0.0
+        px = getattr(pos, 'current_price', None) or getattr(pos, 'entry_price', None) or 0.0
+        if qty and px:
+            return float(qty) * float(px)
+        # Last resort: raw quantity (legacy behaviour) — better than 0 for the cap maths.
+        return float(qty)
 
     def _get_pending_entry_exposure(
         self,

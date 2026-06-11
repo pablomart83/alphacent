@@ -2976,6 +2976,16 @@ class AutonomousStrategyManager:
                             f"triggered retirement: {retirement_reason}"
                         )
 
+                        # NOTE (Sprint C audit): LIVE strategies never reach here — they
+                        # are skipped with `continue` at the top of this loop (see the
+                        # `status == LIVE` guard above), so the autonomous cycle never
+                        # auto-retires real-money strategies (steering rule #7, verified).
+                        # `auto_retire_strategy` is itself a legacy no-op (risk is managed
+                        # at the position level); demo strategies cycle DEMO→BACKTESTED
+                        # naturally. The only residual is that this still broadcasts a
+                        # "strategy_retired" event for demo triggers even though nothing
+                        # is force-retired — cosmetic, demo-only, left as-is.
+
                         # Auto-retire the strategy
                         try:
                             self.portfolio_manager.auto_retire_strategy(

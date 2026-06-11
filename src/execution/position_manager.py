@@ -152,18 +152,15 @@ class PositionManager:
         """
         sym = symbol.upper() if symbol else ""
 
-        # Leveraged ETF check first — before the general ETF check
-        _LEVERAGED_ETFS = {
-            # 3x Long
-            "SOXL", "TQQQ", "UPRO", "SPXL", "UDOW", "LABU", "TECL",
-            "FAS", "TNA", "NAIL", "CURE", "DFEN", "WANT", "HIBL",
-            # 3x Short / Inverse
-            "SQQQ", "SPXU", "SDOW", "SOXS", "LABD", "TECS",
-            "FAZ", "TZA", "HIBS",
-            # 2x
-            "SSO", "QLD", "DDM", "ROM", "UWM", "USD",
-        }
-        if sym in _LEVERAGED_ETFS:
+        # Leveraged ETF check first — before the general ETF check.
+        # P2 (Sprint C): use the canonical set in sl_caps so TSL classification,
+        # order_executor SL-cap/0.5× sizing, and market_data_manager all agree.
+        # Previously this method kept its OWN hardcoded set that had drifted from
+        # sl_caps (extra NAIL/CURE/DFEN/WANT/HIBL/HIBS), so a symbol could get the
+        # wide leveraged TSL here but not the leveraged SL cap / sizing elsewhere
+        # (or vice-versa). One list, one truth.
+        from src.risk.sl_caps import is_leveraged_etf as _is_lev_etf
+        if _is_lev_etf(sym):
             return "leveraged_etf"
 
         try:

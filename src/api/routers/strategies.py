@@ -1973,10 +1973,26 @@ async def get_approaching_graduation(
             effective_max_ratio = _request_effective_max_ratio
 
             wr_ok = win_rate >= effective_wr_floor
+            # P2 (Sprint C): mirror the authoritative is_qualified Wilson lower-bound
+            # win-rate gate so this "approaching" view is consistent with the real
+            # gate. Without it, a pair that clears the POINT win-rate floor but fails
+            # the Wilson lower bound is treated as fully-qualified here (skipped), yet
+            # rejected by is_qualified — so it vanishes from both the queue and this
+            # list. Compute the same type-floor-relative bound.
+            from src.strategy.graduation_gate import (
+                _wilson_lower_bound as _wlb, WR_CI_CONFIDENCE as _WRZ,
+                WR_CI_FLOOR_TOLERANCE as _WRTOL,
+            )
+            _wr_ci_ok = True
+            _wr_lb_disp = None
+            if win_rate is not None and trades and trades >= 1:
+                _wins_disp = int(round(win_rate * int(trades)))
+                _wr_lb_disp = _wlb(_wins_disp, int(trades), confidence=_WRZ)
+                _wr_ci_ok = _wr_lb_disp >= max(0.0, effective_wr_floor - _WRTOL)
             ratio = (sharpe / wf_sharpe) if wf_sharpe > 0 and sharpe > 0 else None
             ratio_ok = ratio is not None and ratio >= MIN_QUALIFICATION_RATIO and ratio <= effective_max_ratio
 
-            if trades_ok and pnl_ok and wr_ok and ratio_ok:
+            if trades_ok and pnl_ok and wr_ok and _wr_ci_ok and ratio_ok:
                 continue  # fully qualified — graduation gate should have it
 
             # Composite graduation score (0-100): weighted progress toward each gate.
@@ -2005,6 +2021,11 @@ async def get_approaching_graduation(
                 missing.append(f"P&L {total_pnl:.0f} ≤ 0")
             if not wr_ok:
                 missing.append(f"win rate {win_rate*100:.1f}% < {effective_wr_floor*100:.0f}% ({_strat_type or 'default'} floor)")
+            elif not _wr_ci_ok and _wr_lb_disp is not None:
+                missing.append(
+                    f"win rate CI lower bound {_wr_lb_disp*100:.0f}% < "
+                    f"{max(0.0, effective_wr_floor - _WRTOL)*100:.0f}% (small-sample — needs more trades)"
+                )
             if not ratio_ok:
                 if ratio is not None:
                     if ratio > effective_max_ratio:
@@ -3170,9 +3191,15 @@ async def get_autonomous_status(
         autonomous_config = full_config.get('autonomous', {})
         enabled = autonomous_config.get('enabled', True)
 
-        # Get market regime from config or default
-        market_regime = full_config.get('market_regime', {}).get('current', 'unknown')
-        market_confidence = full_config.get('market_regime', {}).get('confidence', 0.0)
+        # Get market regime from config or default.
+        # P2 (Sprint C): the `{}` default only applies when the key is ABSENT. The
+        # autonomous cycle and the Settings PUT can transiently write
+        # `market_regime: null`, so `.get('market_regime', {})` returns None and the
+        # chained `.get('current')` raised AttributeError, breaking this endpoint
+        # (observed in errors.log 2026-06-10 11:48). `or {}` handles present-but-None.
+        _mr = full_config.get('market_regime') or {}
+        market_regime = _mr.get('current', 'unknown')
+        market_confidence = _mr.get('confidence', 0.0)
 
         # DB queries for counts and cycle info
         db = get_database()

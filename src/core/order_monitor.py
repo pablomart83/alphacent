@@ -2604,18 +2604,39 @@ class OrderMonitor:
                                 logger.warning(f"Failed to cancel stale order {order.id}: eToro API returned False")
                                 failed_count += 1
                         except EToroOrderNotFoundError:
-                            # 404 on the cancel endpoint: order is queued on eToro
-                            # (e.g. waiting for market open) and cannot be cancelled
-                            # via this route.  Leave as PENDING — the status-poll
-                            # path in check_submitted_orders will establish ground
-                            # truth when the order fills or expires.
-                            logger.warning(
-                                f"cancel_order 404 for stale order {order.id} "
-                                f"({order.symbol}, eToro: {order.etoro_order_id}) "
-                                f"— order may be queued for market open. "
-                                f"Leaving as PENDING; status-poll will resolve."
-                            )
-                            failed_count += 1
+                            # NEW-08 (Sprint C): a 404 on cancel means eToro has no
+                            # cancellable record of this order. For an order already
+                            # past the stale timeout (>24h PENDING), leaving it PENDING
+                            # is a dead end — the status-poll in check_submitted_orders
+                            # also 404s, so the same order churns a 404 every cycle
+                            # forever (observed in errors.log). Resolve it here: if a
+                            # corresponding open position exists (the order actually
+                            # filled), leave it PENDING for the fill/reconcile path;
+                            # otherwise the order is genuinely dead — mark CANCELLED to
+                            # end the 404 dead-end. Scoped to this monitor's account_type.
+                            _has_open_pos = session.query(PositionORM).filter(
+                                PositionORM.strategy_id == order.strategy_id,
+                                PositionORM.symbol == order.symbol,
+                                PositionORM.account_type == self.account_type,
+                                PositionORM.closed_at.is_(None),
+                            ).first()
+                            if _has_open_pos:
+                                logger.warning(
+                                    f"cancel_order 404 for stale order {order.id} "
+                                    f"({order.symbol}, eToro: {order.etoro_order_id}) but an "
+                                    f"open {self.account_type} position exists — leaving "
+                                    f"PENDING; fill/reconcile path will resolve."
+                                )
+                                failed_count += 1
+                            else:
+                                order.status = OrderStatus.CANCELLED
+                                cancelled_pending += 1
+                                logger.info(
+                                    f"NEW-08: stale order {order.id} ({order.symbol}, "
+                                    f"eToro: {order.etoro_order_id}) returned 404 on cancel "
+                                    f"and has no open position after {age_hours:.1f}h — "
+                                    f"marking CANCELLED to end the 404 dead-end."
+                                )
                         except Exception as e:
                             logger.error(f"Failed to cancel stale order {order.id} via eToro API: {e}")
                             # Non-404 error: mark cancelled so the stale order
