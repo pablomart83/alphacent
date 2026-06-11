@@ -26,8 +26,13 @@ let lastFiredAt = 0
  * Rate-limit the auth-error broadcast. When a session dies, 8-12 in-flight
  * queries will all 401 in the same tick. We only need to trigger the
  * redirect once; the rest should be silent.
+ *
+ * 10s window (was 2s): after a successful login the browser may still have
+ * queued retries from the previous expired session that arrive 2-5s later.
+ * A 2s window let those fire a second clear() that wiped the freshly-set
+ * auth state, causing the double-login prompt.
  */
-const MIN_INTERVAL_MS = 2_000
+const MIN_INTERVAL_MS = 10_000
 
 export function setAuthErrorHandler(h: AuthErrorHandler | null): void {
   handler = h
@@ -36,6 +41,9 @@ export function setAuthErrorHandler(h: AuthErrorHandler | null): void {
 export function notifyAuthError(reason: AuthErrorReason): void {
   const now = Date.now()
   if (now - lastFiredAt < MIN_INTERVAL_MS) return
+  // Don't fire if we're already on the login page — there's nothing to clear
+  // and doing so would wipe the auth state we're about to rebuild after login.
+  if (typeof window !== 'undefined' && window.location.pathname === '/login') return
   lastFiredAt = now
   if (handler) {
     try {

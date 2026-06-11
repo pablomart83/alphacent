@@ -61,8 +61,10 @@ export interface IntelSummary {
 
 export interface IntelRunResponse {
   run_id: string
-  status: string
-  message: string
+  findings_created: number
+  findings_updated: number
+  findings_count: number
+  duration_s: number
 }
 
 export interface IntelFindingsFilters {
@@ -156,11 +158,11 @@ export function useResolveFinding() {
 export function severityColor(severity: string): string {
   switch (severity) {
     case 'P0':
-      return 'var(--pnl-down)'
+      return 'var(--pnl-down)'       // red
     case 'P1':
-      return 'var(--status-warning)'
+      return 'var(--status-warning)' // amber
     case 'P2':
-      return '#eab308' // yellow-500
+      return '#60a5fa'               // blue-400 — distinct from P1 amber
     case 'opportunity':
       return 'var(--accent-primary)'
     default:
@@ -175,7 +177,7 @@ export function severityBg(severity: string): string {
     case 'P1':
       return 'rgba(245,158,11,0.12)'
     case 'P2':
-      return 'rgba(234,179,8,0.10)'
+      return 'rgba(96,165,250,0.10)'
     case 'opportunity':
       return 'rgba(59,130,246,0.10)'
     default:
