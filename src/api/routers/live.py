@@ -280,8 +280,14 @@ async def retire_live_strategy(
     db: Session = Depends(get_db_session),
 ):
     """
-    Retire a live authorization — stops live fills for this (strategy, symbol) pair.
-    Sets retired_at = NOW(). The strategy continues paper-trading on DEMO.
+    Retire a live authorization — stops live fills for this (strategy, symbol) pair
+    AND flags any open live position for that strategy for closure.
+
+    Sets retired_at = NOW(); the strategy continues paper-trading on DEMO. Open
+    live positions are flagged (pending_closure = True) — the live MonitoringService
+    pending-closure pass submits the close orders on its next 60s cycle. Retiring is
+    an explicit CIO action, so flagging the real-money position for closure is the
+    intended behaviour (a retired strategy should not keep holding real capital).
     """
     ls = db.query(LiveStrategyORM).filter_by(id=live_id).first()
     if not ls:
@@ -290,12 +296,46 @@ async def retire_live_strategy(
         raise HTTPException(status_code=400, detail="Already retired")
 
     ls.retired_at = datetime.now()
+
+    # Flag any OPEN LIVE position for this strategy for closure. Scoped to
+    # account_type='live' so a paper/demo position for the same strategy is never
+    # touched, and to closed_at IS NULL / not-already-pending so it is idempotent.
+    open_live_positions = db.query(PositionORM).filter(
+        PositionORM.strategy_id == ls.strategy_id,
+        PositionORM.account_type == 'live',
+        PositionORM.closed_at.is_(None),
+        PositionORM.pending_closure == False,  # noqa: E712 — SQLAlchemy boolean filter
+    ).all()
+    flagged = 0
+    for _pos in open_live_positions:
+        _pos.pending_closure = True
+        _pos.closure_reason = (
+            f"Live strategy retired by {username} "
+            f"({ls.template_name} / {ls.symbol}) — flagged for closure on retire"
+        )
+        flagged += 1
+
     db.commit()
-    logger.info(f"User {username} retired live strategy {live_id} ({ls.template_name} / {ls.symbol})")
+
+    if flagged:
+        logger.warning(
+            f"User {username} retired live strategy {live_id} "
+            f"({ls.template_name} / {ls.symbol}) and flagged {flagged} open live "
+            f"position(s) for closure — pending-closure pass will submit close order(s)"
+        )
+    else:
+        logger.info(
+            f"User {username} retired live strategy {live_id} "
+            f"({ls.template_name} / {ls.symbol}) — no open live position to close"
+        )
     return {
         "success": True,
-        "message": f"{ls.template_name} / {ls.symbol} retired from live trading",
+        "message": (
+            f"{ls.template_name} / {ls.symbol} retired from live trading"
+            + (f"; {flagged} open position(s) flagged for closure" if flagged else "")
+        ),
         "retired_at": ls.retired_at.isoformat(),
+        "positions_flagged_for_closure": flagged,
     }
 
 
