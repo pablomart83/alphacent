@@ -1422,17 +1422,34 @@ class MarketDataManager:
                         )
                         return []
                 elif interval in ("1h", "4h"):
-                    # FMP explicitly does not support this (symbol, interval) combo
-                    # AND there is no 1H→4H resample path available
-                    # (e.g. non-US indices GER40/FR40, foreign listings RHM.DE/RR.L
-                    # which are blocked at both 1H and 4H). Yahoo will also fail or
-                    # return daily data masquerading as intraday — skip it entirely.
-                    # The DB cache holds the last successful fetch.
+                    # FMP does not support this (symbol, interval) combo AND
+                    # there is no 1H→4H resample path (FMP blocks 1H too).
+                    #
+                    # Two sub-cases:
+                    #  - Genuinely Yahoo-unservable instruments (non-US indices
+                    #    GER40/FR40/STOXX50/UK100, foreign listings RHM.DE/RR.L):
+                    #    Yahoo returns daily-masquerading-as-intraday or fails,
+                    #    so skip it — the DB cache serves. Returning [] here
+                    #    prevents the "possibly delisted" 1h error spam.
+                    #  - US indices FMP can't serve under Starter but Yahoo CAN
+                    #    (NSDQ100 → ^NDX is premium-blocked on FMP at every
+                    #    interval, but Yahoo serves ^NDX intraday fine). These
+                    #    MUST fall through to Yahoo, else NSDQ100 1h/4h would
+                    #    silently get zero data (2026-06-11 fix).
+                    _NO_YAHOO_INTRADAY = {
+                        "GER40", "FR40", "STOXX50", "UK100", "RHM.DE", "RR.L"
+                    }
+                    if symbol.upper().strip() in _NO_YAHOO_INTRADAY:
+                        logger.debug(
+                            f"FMP does not support {symbol} {interval} (known-blocked, "
+                            f"no 1H resample path, no Yahoo intraday); DB cache will serve."
+                        )
+                        return []
                     logger.debug(
-                        f"FMP does not support {symbol} {interval} (known-blocked, "
-                        f"no 1H resample path); skipping Yahoo fallback — DB cache will serve."
+                        f"FMP cannot serve {symbol} {interval} (Starter-blocked); "
+                        f"falling through to Yahoo intraday."
                     )
-                    return []
+                    # fall through to the Yahoo path below (no return)
             except ImportError:
                 # FMP adapter absent (e.g. stale deploy). Silently fall
                 # through to Yahoo so the primary path keeps working.
@@ -1842,6 +1859,55 @@ class MarketDataManager:
             logger.debug(f"Error reading historical data from DB for {symbol}: {e}")
             return None
 
+    def _bar_is_complete(
+        self,
+        ts: datetime,
+        interval: str,
+        symbol: str,
+        now_utc: Optional[datetime] = None,
+    ) -> bool:
+        """Return True if the bar starting at `ts` has fully closed (UTC-naive).
+
+        Prevents persisting a provisional, still-forming bar. The old
+        insert-only persist froze whatever value a bar had at first write — for
+        1d that was a ~market-open snapshot masquerading as the EOD close
+        (verified 2026-06-11: AAPL 1d 06-10 stored 290.31 vs true close
+        ~291.66; ~8,500 daily bars affected since the FMP-1d path went live on
+        05-03). Daily strategies, ATR stops, and WF/conviction all read these.
+
+        Completion rule:
+          - 1d crypto (24/7, 00:00 UTC candle): closed at the next 00:00 UTC.
+          - 1d everything else (equity/ETF/index/commodity/forex): the trading
+            session is closed by 21:00 UTC of the bar date (covers the latest
+            US close, 16:00 ET / 21:00 UTC under EST). Conservative on purpose —
+            never write a bar that might still be moving.
+          - intraday (1h/4h): closed `interval` seconds after the bar open.
+        """
+        if now_utc is None:
+            now_utc = datetime.utcnow()
+        if ts is None:
+            return False
+        if hasattr(ts, 'tzinfo') and ts.tzinfo is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+
+        if interval == "1d":
+            sym = symbol.upper().strip()
+            try:
+                from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+                crypto_bases = {s.replace("USD", "") for s in DEMO_ALLOWED_CRYPTO}
+                is_crypto = sym.replace("USD", "") in crypto_bases
+            except Exception:
+                is_crypto = False
+            day0 = ts.replace(hour=0, minute=0, second=0, microsecond=0)
+            if is_crypto:
+                return now_utc >= day0 + timedelta(days=1)
+            return now_utc >= day0 + timedelta(hours=21)
+
+        bar_seconds = 3600 if interval == "1h" else (4 * 3600 if interval == "4h" else None)
+        if bar_seconds is None:
+            return True  # unknown interval — don't block the write
+        return now_utc >= ts + timedelta(seconds=bar_seconds)
+
     def _save_historical_to_db(
         self,
         symbol: str,
@@ -1850,8 +1916,9 @@ class MarketDataManager:
     ) -> None:
         """Save historical OHLCV data to the database cache.
 
-        Uses bulk insert with conflict ignore for efficiency.
-        The unique index on (symbol, date, interval) prevents duplicates.
+        UPSERTs on (symbol, date, interval) — see the on_conflict_do_update
+        below. Provisional (still-forming) bars are excluded via
+        `_bar_is_complete` so the durable cache only ever holds closed bars.
 
         Args:
             symbol: Instrument symbol
@@ -1889,7 +1956,7 @@ class MarketDataManager:
         try:
             from src.models.database import get_database
             from src.models.orm import HistoricalPriceCacheORM
-            from sqlalchemy import text
+            from sqlalchemy.dialects.postgresql import insert as _pg_insert
 
             db = get_database()
             session = db.get_session()
@@ -1908,54 +1975,23 @@ class MarketDataManager:
                         if md.timestamp:
                             md.timestamp = md.timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
 
-                # Get existing timestamps in one query to avoid per-bar lookups
-                existing_timestamps = set()
-                existing = session.query(HistoricalPriceCacheORM.date).filter(
-                    HistoricalPriceCacheORM.symbol == symbol,
-                    HistoricalPriceCacheORM.interval == interval,
-                    HistoricalPriceCacheORM.date >= data_list[0].timestamp,
-                    HistoricalPriceCacheORM.date <= data_list[-1].timestamp
-                ).all()
-                
-                if interval == "1d":
-                    # For daily bars, normalize to date-only for comparison
-                    for r in existing:
-                        d = r.date
-                        if hasattr(d, 'date') and callable(d.date):
-                            existing_timestamps.add(d.date())
-                        else:
-                            existing_timestamps.add(d)
-                else:
-                    # For intraday bars, use full timestamp
-                    for r in existing:
-                        d = r.date
-                        if hasattr(d, 'replace'):
-                            existing_timestamps.add(d.replace(tzinfo=None) if hasattr(d, 'tzinfo') and d.tzinfo else d)
-                        else:
-                            existing_timestamps.add(d)
-
-                # Bulk insert only new bars
-                new_records = []
+                # Build upsert rows. Two filters:
+                #   1. Forming-bar exclusion (P0, 2026-06-11) — never persist a
+                #      bar whose period hasn't closed. Under the old insert-only
+                #      path a provisional bar written mid-session was frozen
+                #      forever (daily "close" was a market-open snapshot).
+                #   2. F27 OHLC sanity at the write boundary (high >= max(o,c),
+                #      low <= min(o,c)); epsilon 1e-8 matches validate_data.
                 now = datetime.now()
-                rejected_ohlc = 0  # F27: count bars rejected for invalid OHLC
+                now_utc = datetime.utcnow()
+                rows = []
+                rejected_ohlc = 0
+                skipped_forming = 0
+                _eps = 1e-8
                 for md in data_list:
-                    if interval == "1d":
-                        md_key = md.timestamp.date() if hasattr(md.timestamp, 'date') and callable(md.timestamp.date) else md.timestamp
-                    else:
-                        md_key = md.timestamp.replace(tzinfo=None) if hasattr(md.timestamp, 'tzinfo') and md.timestamp.tzinfo else md.timestamp
-                    
-                    if md_key in existing_timestamps:
+                    if not self._bar_is_complete(md.timestamp, interval, symbol, now_utc):
+                        skipped_forming += 1
                         continue
-
-                    # F27 (2026-05-01): validate OHLC at write boundary.
-                    # Bars with high < max(open, close) or low > min(open, close)
-                    # are mathematically invalid. Historically such bars slipped in
-                    # via `monitoring_service._sync_price_data` (batch Yahoo path)
-                    # which didn't call `validate_data()` before save. Same rule as
-                    # `validate_data` uses at read-time, applied here so downstream
-                    # readers don't have to re-filter (and re-log warnings) every
-                    # cycle. Epsilon 1e-8 matches validate_data.
-                    _eps = 1e-8
                     if md.high is not None and md.open is not None and md.close is not None:
                         if md.high < md.open - _eps or md.high < md.close - _eps:
                             rejected_ohlc += 1
@@ -1964,19 +2000,18 @@ class MarketDataManager:
                         if md.low > md.open + _eps or md.low > md.close + _eps:
                             rejected_ohlc += 1
                             continue
-
-                    new_records.append(HistoricalPriceCacheORM(
-                        symbol=symbol,
-                        date=md.timestamp,
-                        interval=interval,
-                        open=md.open,
-                        high=md.high,
-                        low=md.low,
-                        close=md.close,
-                        volume=md.volume,
-                        source=md.source.value if hasattr(md.source, 'value') else str(md.source),
-                        fetched_at=now
-                    ))
+                    rows.append({
+                        "symbol": symbol,
+                        "date": md.timestamp,
+                        "interval": interval,
+                        "open": md.open,
+                        "high": md.high,
+                        "low": md.low,
+                        "close": md.close,
+                        "volume": md.volume,
+                        "source": md.source.value if hasattr(md.source, 'value') else str(md.source),
+                        "fetched_at": now,
+                    })
 
                 if rejected_ohlc > 0:
                     logger.info(
@@ -1984,10 +2019,35 @@ class MarketDataManager:
                         f"{interval} bars for {symbol} (likely partial/forming bars)"
                     )
 
-                if new_records:
-                    session.bulk_save_objects(new_records)
+                if rows:
+                    # UPSERT (P0, 2026-06-11) on (symbol, date, interval).
+                    # The previous insert-only path SKIPPED any existing
+                    # (symbol, date) row, so a bar first written mid-session
+                    # (provisional) was NEVER corrected to its real EOD value,
+                    # and a single unique collision aborted the whole batch
+                    # (no savepoint). ON CONFLICT DO UPDATE fixes both:
+                    # completed bars are refreshed on every refetch (so a stale
+                    # provisional bar self-heals), and a collision updates in
+                    # place instead of raising.
+                    stmt = _pg_insert(HistoricalPriceCacheORM.__table__).values(rows)
+                    stmt = stmt.on_conflict_do_update(
+                        constraint="uq_historical_symbol_date_interval",
+                        set_={
+                            "open": stmt.excluded.open,
+                            "high": stmt.excluded.high,
+                            "low": stmt.excluded.low,
+                            "close": stmt.excluded.close,
+                            "volume": stmt.excluded.volume,
+                            "source": stmt.excluded.source,
+                            "fetched_at": stmt.excluded.fetched_at,
+                        },
+                    )
+                    session.execute(stmt)
                     session.commit()
-                    logger.debug(f"Bulk saved {len(new_records)} new {interval} bars for {symbol} to DB cache")
+                    logger.debug(
+                        f"Upserted {len(rows)} {interval} bars for {symbol} to DB cache"
+                        + (f" (skipped {skipped_forming} forming)" if skipped_forming else "")
+                    )
 
             except Exception as e:
                 logger.warning(f"Error saving historical data to DB for {symbol}: {e}")

@@ -101,9 +101,17 @@ EXPLICIT_BLOCKED: set = {
     # Indices at 4h — Starter provides 1h but not 4h
     ("^GSPC", "4hour"),
     ("^IXIC", "4hour"),
+    ("^NDX",  "4hour"),
     ("^DJI",  "4hour"),
     ("^FTSE", "4hour"),
     ("^STOXX50E", "4hour"),
+    # Nasdaq-100 (^NDX) is premium-blocked on Starter at EVERY interval
+    # (confirmed via live probe 2026-06-11: 1d and 1h both return the
+    # premium-query error). NSDQ100 must route to Yahoo (^NDX); blocking all
+    # three intervals here avoids a wasted 402 roundtrip on the FMP primary
+    # path before the Yahoo fallthrough. (FMP serves ^IXIC, the Composite,
+    # but that is the WRONG instrument for NSDQ100 — see SYMBOL_MAP.)
+    ("^NDX", "1hour"), ("^NDX", "1day"),
     # Commodities — oil and copper are blocked at 1h AND 1d on Starter
     # (confirmed via /historical-price-eod/full probe). 4h works.
     ("CLUSD", "1hour"), ("CLUSD", "1day"),
@@ -139,7 +147,12 @@ SUPPORT: Dict[Tuple[str, str], bool] = {}  # legacy placeholder; kept for backwa
 SYMBOL_MAP: Dict[str, str] = {
     # Indices (display name → FMP caret-prefixed ticker)
     "SPX500": "^GSPC",
-    "NSDQ100": "^IXIC",
+    # NSDQ100 is the Nasdaq-100 (^NDX), NOT the Nasdaq Composite (^IXIC).
+    # eToro's NSDQ100 instrument tracks the Nasdaq-100, and the Yahoo fallback
+    # (symbol_mapper.YAHOO_FINANCE_TICKERS) already maps NSDQ100 → ^NDX. The
+    # old ^IXIC mapping silently served Composite bars to every NSDQ100
+    # strategy (ALUMINUM-class wrong-instrument routing bug, fixed 2026-06-11).
+    "NSDQ100": "^NDX",
     "DJ30":   "^DJI",
     "UK100":  "^FTSE",
     "GER40":  "^GDAXI",
