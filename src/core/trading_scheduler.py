@@ -28,6 +28,26 @@ logger = logging.getLogger(__name__)
 # duplicate orders for the same strategy+symbol.
 _signal_gen_lock = threading.Lock()
 
+
+def _resolve_mirror_ratio(live_cfg: dict):
+    """Return the configured live mirror_ratio, or None if missing/invalid.
+
+    P2-1: A missing/zero key must NEVER fall back to a guessed ratio. The live order
+    size = CIO_real / mirror_ratio, so a wrong ratio silently mis-sizes a REAL-money
+    order (the old 0.10 default vs the real 0.127 = +27% real exposure — exactly how
+    PANW ended up at $1,000v/$127r). Callers MUST skip the live order when this returns
+    None rather than trade on a guess.
+    """
+    mr = (live_cfg or {}).get('mirror_ratio')
+    try:
+        mr = float(mr)
+    except (TypeError, ValueError):
+        return None
+    if mr <= 0:
+        return None
+    return mr
+
+
 # Import emit_service_event lazily to avoid circular imports at module load time
 def _emit(service: str, event: str, level: str = "info", detail: str = None):
     """Fire-and-forget wrapper around emit_service_event — never raises."""
@@ -935,13 +955,23 @@ class TradingScheduler:
                     # DSL exit conditions have fired, meaning the edge is gone.
                     from src.models.enums import SignalAction as _SignalAction
                     if signal.action in [_SignalAction.EXIT_LONG, _SignalAction.EXIT_SHORT]:
+                        # P1-4: Process the exit-signal position-close write on a FRESH
+                        # ISOLATED session. The main cycle `session` is long-lived and
+                        # can be poisoned mid-cycle (InFailedSqlTransaction) by an
+                        # upstream failure — on 2026-06-11 11:22 a DIA exit was lost
+                        # this way after the 11:20 TSL timeout. An isolated session both
+                        # survives a poisoned main session AND prevents an exit failure
+                        # from poisoning the rest of the cycle. (rollback-on-checkout
+                        # only clears state at checkout, not after a mid-cycle failure.)
+                        from src.models.database import get_database as _gdb_exit
+                        _exit_sess = _gdb_exit().get_session()
                         try:
                             from src.utils.symbol_normalizer import normalize_symbol as _norm_exit
                             _exit_sym = _norm_exit(signal.symbol)
                             _exit_side = PositionSide.LONG if signal.action == _SignalAction.EXIT_LONG else PositionSide.SHORT
 
                             # Find the open position for this strategy + symbol + side
-                            pos_to_close = session.query(PositionORM).filter(
+                            pos_to_close = _exit_sess.query(PositionORM).filter(
                                 PositionORM.strategy_id == strategy.id,
                                 PositionORM.symbol == signal.symbol,
                                 PositionORM.side == _exit_side,
@@ -988,12 +1018,14 @@ class TradingScheduler:
                                 f"Strategy exit signal: {conditions_str} "
                                 f"(confidence: {signal.confidence:.2f})"
                             )
-                            session.commit()
+                            session_commit_pnl = pos_to_close.unrealized_pnl
+                            _pos_id_short = pos_to_close.id[:8]
+                            _exit_sess.commit()
 
                             logger.info(
                                 f"✅ Exit signal processed: {strategy.name} → close {_exit_side.value} "
-                                f"{signal.symbol} (position {pos_to_close.id[:8]}..., "
-                                f"unrealized P&L: ${pos_to_close.unrealized_pnl:.2f})"
+                                f"{signal.symbol} (position {_pos_id_short}..., "
+                                f"unrealized P&L: ${session_commit_pnl:.2f})"
                             )
 
                             # ── PAIRS TRADING: Close hedge leg when primary exits ──────
@@ -1004,7 +1036,7 @@ class TradingScheduler:
                                 try:
                                     # Find the hedge leg position (opposite side, same strategy)
                                     _hedge_exit_side = PositionSide.SHORT if _exit_side == PositionSide.LONG else PositionSide.LONG
-                                    _hedge_pos = session.query(PositionORM).filter(
+                                    _hedge_pos = _exit_sess.query(PositionORM).filter(
                                         PositionORM.strategy_id == signal.strategy_id,
                                         PositionORM.symbol == _exit_partner,
                                         PositionORM.side == _hedge_exit_side,
@@ -1016,13 +1048,14 @@ class TradingScheduler:
                                         _hedge_pos.closure_reason = (
                                             f"Pairs Trading hedge exit: primary leg {signal.symbol} closed"
                                         )
-                                        session.commit()
+                                        _exit_sess.commit()
                                         logger.info(
                                             f"Pairs Trading hedge leg marked for closure: "
                                             f"{_exit_partner} {_hedge_exit_side.value} "
                                             f"(strategy: {strategy.name})"
                                         )
                                 except Exception as _hedge_exit_err:
+                                    _exit_sess.rollback()
                                     logger.warning(f"Failed to close pairs hedge leg {_exit_partner}: {_hedge_exit_err}")
 
                             # Log the decision
@@ -1038,7 +1071,9 @@ class TradingScheduler:
 
                         except Exception as e:
                             logger.error(f"Failed to process exit signal for {signal.symbol}: {e}")
-                            session.rollback()
+                            _exit_sess.rollback()
+                        finally:
+                            _exit_sess.close()
                         continue  # Skip the ENTRY logic below
 
                     # ── ENTRY SIGNAL HANDLING ─────────────────────────────
@@ -1729,7 +1764,14 @@ class TradingScheduler:
                                                     # validate_signal above checked portfolio-level
                                                     # constraints (heat cap, sector cap, VaR) —
                                                     # if those passed, execute at exactly the CIO size.
-                                                    _mirror = _live_cfg.get('mirror_ratio', 0.10)
+                                                    _mirror = _resolve_mirror_ratio(_live_cfg)
+                                                    if _mirror is None:
+                                                        logger.critical(
+                                                            f"LIVE FILL {_sig_sym}: mirror_ratio "
+                                                            f"missing/invalid in live_trading config — "
+                                                            f"skipping live order (refusing to size on a guess)"
+                                                        )
+                                                        continue
                                                     _cio_real = float(_approval.position_size)
                                                     _live_size = _cio_real / _mirror
                                                     logger.info(
@@ -1743,7 +1785,14 @@ class TradingScheduler:
                                                         f"for {_sig_sym} — falling back to CIO size"
                                                     )
                                                     # CIO size is real dollars — convert to virtual
-                                                    _mirror = _live_cfg.get('mirror_ratio', 0.10)
+                                                    _mirror = _resolve_mirror_ratio(_live_cfg)
+                                                    if _mirror is None:
+                                                        logger.critical(
+                                                            f"LIVE FILL {_sig_sym}: mirror_ratio "
+                                                            f"missing/invalid in live_trading config — "
+                                                            f"skipping live order (refusing to size on a guess)"
+                                                        )
+                                                        continue
                                                     _live_size = float(_approval.position_size) / _mirror
 
                                                 # Execute with CIO-approved SL/TP
@@ -1787,7 +1836,7 @@ class TradingScheduler:
                                                 logger.info(
                                                     f"LIVE FILL: {_sig_sym} {_sig_dir} "
                                                     f"${_live_size:.0f}v "
-                                                    f"(${_live_size * _live_cfg.get('mirror_ratio', 0.10):.0f}r) "
+                                                    f"(${_live_size * _mirror:.0f}r) "
                                                     f"conviction={_sig_conv:.1f}>={_live_conv_min} "
                                                     f"order_id={_live_order.id}"
                                                 )
@@ -2591,7 +2640,14 @@ class TradingScheduler:
                                         # opened AMD at $25r instead of the approved $100r on
                                         # 2026-06-11 (pipeline hit its $200v floor on a drawn-down
                                         # live book). The pipeline size is advisory only here.
-                                        _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
+                                        _mirror2 = _resolve_mirror_ratio(_live_cfg2)
+                                        if _mirror2 is None:
+                                            logger.critical(
+                                                f"LIVE pass {_live_sym}: mirror_ratio missing/invalid "
+                                                f"in live_trading config — skipping live order "
+                                                f"(refusing to size on a guess)"
+                                            )
+                                            continue
                                         _pipeline_size2 = _live_validation2.position_size
                                         _cio_real2 = float(_appr.position_size)
                                         _live_size2 = _cio_real2 / _mirror2
@@ -2617,7 +2673,14 @@ class TradingScheduler:
                                             f"for {_live_sym} — falling back to CIO size "
                                             f"(validate_signal bypassed)"
                                         )
-                                        _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
+                                        _mirror2 = _resolve_mirror_ratio(_live_cfg2)
+                                        if _mirror2 is None:
+                                            logger.critical(
+                                                f"LIVE pass {_live_sym}: mirror_ratio missing/invalid "
+                                                f"in live_trading config — skipping live order "
+                                                f"(refusing to size on a guess)"
+                                            )
+                                            continue
                                         _live_size2 = float(_appr.position_size) / _mirror2
 
                                     try:
@@ -2689,6 +2752,22 @@ class TradingScheduler:
                                                 _regime_sl_mult = 0.60
                                             elif _live_pullback == "mild" or _live_mqs_grade == "normal":
                                                 _regime_sl_mult = 0.75
+
+                                            # P2-3: NEVER tighten the stop on a leveraged (2x/3x) ETF.
+                                            # Their daily ATR is multiples of an ordinary stock, so a
+                                            # regime-tightened 0.60× stop (e.g. 6% → 3.6%) sits INSIDE
+                                            # normal single-day noise and guarantees a premature stop-out.
+                                            # Leveraged names already carry their own risk controls
+                                            # (0.5× sizing + the 20% leveraged SL cap); the CIO SL stands.
+                                            from src.risk.sl_caps import is_leveraged_etf as _is_lev_etf
+                                            if _regime_sl_mult < 1.0 and _is_lev_etf(_live_sym):
+                                                logger.info(
+                                                    f"[NEW-02] Leveraged ETF {_live_sym}: regime "
+                                                    f"tightening skipped (mult {_regime_sl_mult:.2f}→1.0) — "
+                                                    f"a tightened stop on a 2x/3x ETF is inside daily noise"
+                                                )
+                                                _regime_sl_mult = 1.0
+
                                             if _regime_sl_mult < 1.0:
                                                 logger.info(
                                                     f"[NEW-02] Live SL/TP tightened: {_live_sym} "
@@ -2780,7 +2859,7 @@ class TradingScheduler:
                                             logger.info(
                                                 f"LIVE FILL (independent pass): {_live_sym} "
                                                 f"{_lsig.action.value} ${_live_size2:.0f}v "
-                                                f"(${_live_size2 * _live_cfg2.get('mirror_ratio', 0.10):.0f}r) "
+                                                f"(${_live_size2 * _mirror2:.0f}r) "
                                                 f"conviction={_sig_conv2:.1f}>={_live_conv_min2}"
                                             )
                                         else:

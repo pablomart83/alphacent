@@ -123,6 +123,7 @@ class IntelAnalyst:
             self._check_g5_live_sharpe_divergence,
             self._check_g7_regime_template_loser,
             self._check_g9_extreme_degradation,
+            self._check_g11_live_winrate_probation,
             self._check_h1_config_code_divergence,
             self._check_h3_graduation_min_trades_low,
             self._check_h4_paper_conviction_threshold,
@@ -2113,6 +2114,111 @@ class IntelAnalyst:
                 context_links=[{"label": "Strategies", "url": "/strategies"}, {"label": "Research / Attribution", "url": "/research/attribution"}],
                 ask_kiro_prompt=f'Intel finding [G5]: "{a["name"]} — live Sharpe {a["live_sharpe"]} vs WF {a["wf_test_sharpe"]}."\n\nEvidence: {evidence}\n\nRecommended action: Consider retiring strategy.',
             ))
+        return findings if findings else None
+
+    def _check_g11_live_winrate_probation(self, lookback_days: int) -> Optional[List[Finding]]:
+        """P1-5: Post-graduation LIVE win-rate probation — catches a graduated pair
+        whose live win rate is statistically below its strategy-type floor (GOOGL went
+        11% WR over 18 live trades after graduating on paper). Graduation-time WR gates
+        cannot catch paper→live regime divergence; only live data can. This is a
+        DETECTION check — it flags for CIO review (rule #7: no auto-retire of live).
+
+        Method: for each live strategy with ≥10 closed live trades, compute the Wilson
+        90% upper bound of the live win rate. If even the optimistic upper bound is
+        below the strategy-type floor, we are statistically confident the edge is
+        broken (not small-sample noise — TXN's 0/3 is excluded by the n≥10 floor).
+        """
+        from sqlalchemy import text
+        import math
+        session = self.db.get_session()
+        try:
+            rows = session.execute(text("""
+                SELECT s.id, s.name,
+                       s.strategy_metadata->>'strategy_type' AS stype,
+                       COUNT(*) AS n,
+                       COUNT(*) FILTER (WHERE tj.pnl > 0) AS wins,
+                       COALESCE(SUM(tj.pnl), 0) AS total_pnl
+                FROM trade_journal tj
+                JOIN strategies s ON s.id = tj.strategy_id
+                WHERE tj.account_type = 'live' AND tj.exit_time IS NOT NULL
+                GROUP BY s.id, s.name, stype
+                HAVING COUNT(*) >= 10
+            """)).fetchall()
+        except Exception:
+            return None
+        finally:
+            session.close()
+
+        if not rows:
+            return None
+
+        try:
+            from src.strategy.graduation_gate import _get_strategy_type_win_rate_floor
+        except Exception:
+            _get_strategy_type_win_rate_floor = None
+
+        def _wilson_upper(wins: int, n: int, z: float = 1.6449) -> float:
+            if n <= 0:
+                return 1.0
+            p = wins / n
+            denom = 1 + z * z / n
+            center = (p + z * z / (2 * n)) / denom
+            margin = (z / denom) * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+            return min(1.0, center + margin)
+
+        findings = []
+        for r in rows:
+            n = int(r.n)
+            wins = int(r.wins)
+            wr = wins / n if n else 0.0
+            # Strategy-type floor (the live book is all trend-following → 0.45 when
+            # the type is unknown, matching the graduation gate's trend floor).
+            if _get_strategy_type_win_rate_floor is not None:
+                floor = _get_strategy_type_win_rate_floor(r.stype)
+                if r.stype is None:
+                    floor = 0.45
+            else:
+                floor = 0.45
+            wr_upper = _wilson_upper(wins, n)
+            if wr_upper < floor:
+                evidence = (
+                    f"Strategy: {r.name}\n"
+                    f"Live trades: {n}\n"
+                    f"Live win rate: {wr:.0%} ({wins}/{n})\n"
+                    f"Wilson 90% upper bound: {wr_upper:.0%}\n"
+                    f"Strategy-type floor: {floor:.0%}\n"
+                    f"Live total P&L (virtual): {float(r.total_pnl):.2f}\n"
+                    f"Even the optimistic upper bound is below the floor → the live edge "
+                    f"is statistically broken, not small-sample noise."
+                )
+                findings.append(Finding(
+                    check_id="G11",
+                    key=f"strategy:{r.id}",
+                    category="G",
+                    severity="P1",
+                    title=(
+                        f"G11: {r.name} — live WR {wr:.0%} ({wins}/{n}), "
+                        f"Wilson upper {wr_upper:.0%} < {floor:.0%} floor (live edge broken)"
+                    ),
+                    detail=(
+                        "A graduated LIVE pair's win rate is statistically below its "
+                        "strategy-type floor over a meaningful live sample. Paper "
+                        "performance did not translate (regime divergence / overfit). "
+                        "Real capital is at risk."
+                    ),
+                    evidence=evidence,
+                    recommended_action=(
+                        "CIO review for retirement (real money — not auto-retired per "
+                        "operating rule #7). Reposition or retire the live_strategies row."
+                    ),
+                    context_links=[{"label": "Strategies", "url": "/strategies"},
+                                   {"label": "Research / Attribution", "url": "/research/attribution"}],
+                    ask_kiro_prompt=(
+                        f'Intel finding [G11]: "{r.name} live WR {wr:.0%} ({wins}/{n}), '
+                        f'Wilson upper {wr_upper:.0%} < {floor:.0%} floor."\n\n'
+                        f'Evidence: {evidence}\n\nRecommended action: CIO review for retirement.'
+                    ),
+                ))
         return findings if findings else None
 
     def _check_g7_regime_template_loser(self, lookback_days: int) -> Optional[List[Finding]]:

@@ -972,7 +972,15 @@ async def sync_positions(
     try:
         # Fetch positions from eToro
         etoro_positions = etoro_client.get_positions()
-        
+
+        # CRITICAL account scoping (2026-06-11 incident): `mode`'s client returns
+        # ONLY that account's positions, so every DB touch below MUST filter by the
+        # matching account_type. Without it, syncing/viewing DEMO marks LIVE positions
+        # "no longer on eToro" and closes them (this closed live AMD+PANW on 2026-06-11,
+        # then the live pass re-entered → duplicate). eToro also reuses numeric position
+        # IDs across accounts, so etoro_position_id lookups must be account-scoped too.
+        _acct_type = 'live' if mode == TradingMode.LIVE else 'demo'
+
         synced_count = 0
         new_count = 0
         closed_count = 0
@@ -983,8 +991,10 @@ async def sync_positions(
             etoro_pos_id = str(ep.etoro_position_id or ep.id or "")
             etoro_position_ids.add(etoro_pos_id)
             
-            # Check if position exists in DB
-            existing = db.query(PositionORM).filter_by(etoro_position_id=etoro_pos_id).first()
+            # Check if position exists in DB (account-scoped — IDs reuse across accounts)
+            existing = db.query(PositionORM).filter_by(
+                etoro_position_id=etoro_pos_id, account_type=_acct_type
+            ).first()
             
             if existing:
                 # Update current price if available
@@ -1010,6 +1020,7 @@ async def sync_positions(
                 # Check if a position already exists for this symbol (different etoro_position_id)
                 existing_by_symbol = db.query(PositionORM).filter(
                     PositionORM.symbol == normalized_symbol,
+                    PositionORM.account_type == _acct_type,
                     PositionORM.closed_at.is_(None),
                 ).first()
                 
@@ -1035,21 +1046,31 @@ async def sync_positions(
                         etoro_position_id=etoro_pos_id,
                         stop_loss=ep.stop_loss,
                         take_profit=ep.take_profit,
+                        account_type=_acct_type,
                     )
                     db.add(new_pos)
                     new_count += 1
                     logger.info(f"Created new position for {normalized_symbol} (eToro ID: {etoro_pos_id})")
         
-        # Check for positions in DB that are no longer on eToro
-        open_positions = db.query(PositionORM).filter(
-            PositionORM.closed_at.is_(None)
-        ).all()
-        
-        for pos in open_positions:
-            if pos.etoro_position_id and pos.etoro_position_id not in etoro_position_ids:
-                _finalize_position_close(pos)
-                closed_count += 1
-                logger.info(f"Position {pos.id} ({pos.symbol}) no longer on eToro — marking closed")
+        # Check for positions in DB that are no longer on eToro — SCOPED to this
+        # account, and SKIPPED on an empty eToro response (a transient/auth blip must
+        # never wholesale-close the book; the monitoring sync has its own miss guard).
+        if etoro_positions:
+            open_positions = db.query(PositionORM).filter(
+                PositionORM.closed_at.is_(None),
+                PositionORM.account_type == _acct_type,
+            ).all()
+
+            for pos in open_positions:
+                if pos.etoro_position_id and pos.etoro_position_id not in etoro_position_ids:
+                    _finalize_position_close(pos)
+                    closed_count += 1
+                    logger.info(f"Position {pos.id} ({pos.symbol}) [{_acct_type}] no longer on eToro — marking closed")
+        else:
+            logger.warning(
+                f"eToro returned 0 positions for {_acct_type} — skipping close pass "
+                f"(transient/auth guard; not wholesale-closing the book)"
+            )
         
         db.commit()
         
@@ -1514,10 +1535,20 @@ async def close_all_positions(
     
     from src.models.orm import OrderORM
     from src.models.enums import OrderStatus
-    
-    # Get all open positions
+
+    # CRITICAL account scoping (2026-06-11 incident class). `mode`'s eToro client
+    # returns ONLY that account's positions, so every DB touch below MUST filter by
+    # the matching account_type. Without it, "Close All" on the DEMO dashboard would
+    # iterate LIVE positions too, call _finalize_position_close on live AMD/PANW, and
+    # close the live book in the DB (the live pass then re-enters → duplicate REAL
+    # position). Same root cause as the POST /positions/sync incident — that endpoint
+    # was scoped; this one was missed.
+    _account_type = "live" if mode == TradingMode.LIVE else "demo"
+
+    # Get all open positions for THIS account only
     open_positions = db.query(PositionORM).filter(
-        PositionORM.closed_at.is_(None)
+        PositionORM.closed_at.is_(None),
+        PositionORM.account_type == _account_type,
     ).all()
     
     if not open_positions:
@@ -1528,9 +1559,10 @@ async def close_all_positions(
             "fail_count": 0
         }
     
-    # Cancel all pending orders first
+    # Cancel all pending orders first — scoped to this account_type
     pending_orders = db.query(OrderORM).filter(
-        OrderORM.status == OrderStatus.PENDING
+        OrderORM.status == OrderStatus.PENDING,
+        OrderORM.account_type == _account_type,
     ).all()
     
     cancelled_orders = 0
@@ -1678,9 +1710,14 @@ async def trigger_fundamental_check(
         from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
         from src.risk.risk_manager import get_symbol_sector
 
-        # Get open positions (stocks only)
+        # Get open positions (stocks only) — SCOPED to the account implied by `mode`.
+        # Unscoped, a demo-context fundamental check would flag LIVE positions for
+        # closure (pending_closure → pending-closure processor closes a real position),
+        # bypassing the rule that live exits are CIO decisions.
+        _account_type_fc = "live" if mode == TradingMode.LIVE else "demo"
         open_positions = db.query(PositionORM).filter(
-            PositionORM.closed_at.is_(None)
+            PositionORM.closed_at.is_(None),
+            PositionORM.account_type == _account_type_fc,
         ).all()
 
         checked = 0
@@ -1727,9 +1764,18 @@ async def trigger_fundamental_check(
                     reasons.append(f"Revenue decline: growth {rev_growth:.1f}%")
 
                 if reasons:
-                    # Flag position for closure
                     reason_str = f"Fundamental exit: {'; '.join(reasons)}"
-                    if not pos.pending_closure:
+                    if (pos.account_type or "demo") == "live":
+                        # LIVE exits are a CIO decision (rule #7) — never auto-flag a
+                        # real position for closure. Surface a [LIVE-REVIEW] instead.
+                        flagged += 1
+                        details.append({"symbol": pos.symbol, "reason": reason_str, "live_review": True})
+                        logger.warning(
+                            f"[LIVE-REVIEW] {pos.symbol} fundamental deterioration: {reason_str} "
+                            f"— flagged for CIO review (not auto-closed)"
+                        )
+                    elif not pos.pending_closure:
+                        # Flag demo position for closure
                         pos.pending_closure = True
                         pos.closure_reason = reason_str
                         flagged += 1

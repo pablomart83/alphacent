@@ -401,8 +401,9 @@ All three gates are armed by default, use live data via `market_data_manager`, s
 
 Qualification criteria for promoting a (template, symbol) paper pair to live trading. All must pass:
 
-- `paper_trades ≥ min_trades` (currently 15 in YAML — was lowered from 20 to enable GOOGL test graduation; raise back to 20 once stable)
-- `paper_win_rate ≥ min_win_rate_pct / 100` (currently 55%)
+- `paper_trades ≥ min_trades` (currently 15 in YAML — was lowered from 20 to enable GOOGL test graduation; raise back to 20 once stable). Enforced as a HARD floor in `_get_min_trades_for_interval` (`max(MIN_PAPER_TRADES, …)`) — the dynamic Sharpe formula and high-conviction exception cannot undercut it.
+- `paper_win_rate ≥ type-aware floor` — NOT a flat 55%. `_get_strategy_type_win_rate_floor` returns **0.45 for trend/momentum/breakout** (the entire live book), **0.55 for mean-reversion/volatility**, **0.50 otherwise**. The YAML `min_win_rate_pct: 55` only applies as the fallback when `strategy_type` is unknown. (Do not describe this gate as "55%".)
+- Wilson lower-bound WR gate: among pairs that clear the point floor, also require the 90% Wilson lower bound of the win rate to stay within `wr_ci_floor_tolerance` (0.10) of the **type floor** — i.e. ≥ floor−0.10. Taken relative to the (low) type floor so legitimately low-WR trend strategies are not blocked; only small-sample flukes whose lower bound collapses are rejected. NOTE: graduation-time WR gates cannot catch paper→live regime divergence (GOOGL graduated on paper then went 11% WR / 18 live). That is caught post-graduation by Intel **G11** (live-WR probation: flags a live pair whose Wilson-90%-upper live WR is below the type floor over ≥10 live trades — detection only, CIO-retired per rule #7) and **G5** (live-vs-WF Sharpe divergence).
 - `paper_pnl > 0`
 - `paper_sharpe / wf_sharpe ≥ min_qualification_ratio` (currently 0.60)
 - `paper_sharpe / wf_sharpe ≤ max_qualification_ratio_cap` (currently 2.0) — **regime-luck guard**: if paper Sharpe is more than 2× the WF Sharpe, the paper period was unusually favorable, not a genuine edge confirmation. Graduating a strategy with ratio 3× is graduating the regime, not the strategy.

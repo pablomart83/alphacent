@@ -2756,6 +2756,19 @@ class MonitoringService:
 
         session = self.db.get_session()
 
+        # P1-3: Fast-fail on lock contention. The breach read is a plain SELECT over
+        # ~90 open rows; it should never take seconds. On 2026-06-11 11:20 it was
+        # blocked long enough to hit the 120s statement_timeout, which threw and
+        # SKIPPED breach enforcement for the whole cycle (the DB-side stop is the only
+        # live stop path). A short lock_timeout makes a blocked read fail in ~5s; the
+        # decoupled breach pass below runs on its own isolated session so a blocked
+        # recalc can no longer disable stop enforcement.
+        try:
+            from sqlalchemy import text as _sql_text
+            session.execute(_sql_text("SET LOCAL lock_timeout = '5000'"))
+        except Exception as _lt_err:
+            logger.debug(f"Could not set lock_timeout on TSL session: {_lt_err}")
+
         try:
             from src.models.orm import PositionORM
             from src.models.dataclasses import Position
@@ -2798,6 +2811,7 @@ class MonitoringService:
             except Exception:
                 stale_checker = None
 
+            stale_trail_ids: set = set()
             for pos_orm in open_positions_orm:
                 if not self._is_symbol_market_open(pos_orm.symbol):
                     skipped_market_closed += 1
@@ -2805,9 +2819,14 @@ class MonitoringService:
 
                 strat_interval = _get_strategy_interval_for_pos(pos_orm)
 
-                # Freshness check against the strategy's own interval.
-                # Only affects SL recalculation. Breach enforcement (below)
-                # ignores this filter — it only needs live current_price.
+                # P1-2: Freshness gates ONLY the ATR-trail stage (Stage 3 in
+                # position_manager), which needs fresh bars to compute ATR. The
+                # breakeven and profit-lock ratchets (Stages 1-2) need only live
+                # current_price, so a stale-bar position must STILL be recalced for
+                # them — otherwise a winner keeps its SL at breakeven and gives back
+                # all unrealized profit on a reversal (observed 2026-06-11: SOXL +8%,
+                # SL stuck at entry). We therefore include the position and record it
+                # in stale_trail_ids so only the trail step is skipped.
                 if stale_checker is not None:
                     try:
                         is_fresh, reason = stale_checker.is_data_fresh_for_signal(
@@ -2815,12 +2834,13 @@ class MonitoringService:
                         )
                         if not is_fresh:
                             skipped_stale_data += 1
+                            stale_trail_ids.add(pos_orm.id)
                             logger.warning(
-                                f"[freshness-sla] Skipping trailing stop RECALC for "
-                                f"{pos_orm.symbol} ({strat_interval}): {reason}. "
-                                f"Existing SL preserved; breach enforcement still active."
+                                f"[freshness-sla] Stale bars for {pos_orm.symbol} "
+                                f"({strat_interval}): {reason}. ATR-trail skipped; "
+                                f"breakeven/profit-lock still applied on live price; "
+                                f"breach enforcement still active."
                             )
-                            continue
                     except Exception as _fresh_err:
                         logger.debug(
                             f"[freshness-sla] Check failed for {pos_orm.symbol}: "
@@ -2853,8 +2873,8 @@ class MonitoringService:
 
             if skipped_stale_data > 0:
                 logger.info(
-                    f"[freshness-sla] {skipped_stale_data} positions skipped trailing "
-                    f"stop RECALC due to stale data (existing SLs preserved)"
+                    f"[freshness-sla] {skipped_stale_data} positions had stale bars — "
+                    f"ATR-trail skipped for them; breakeven/profit-lock still applied."
                 )
 
             # ── Pass 1: SL recalculation ──────────────────────────────────────
@@ -2864,6 +2884,7 @@ class MonitoringService:
                 open_positions,
                 skip_etoro_update=True,
                 position_intervals=position_intervals,
+                skip_trail_ids=stale_trail_ids,
             )
             tsl_summary = getattr(
                 self.order_monitor.position_manager, "_last_tsl_summary", {}
@@ -2884,69 +2905,14 @@ class MonitoringService:
 
             session.commit()
 
-            # ── Pass 2: Breach enforcement ────────────────────────────────────
-            # Runs for ALL open positions, NOT filtered by market-open or freshness.
-            # Only needs current_price + stop_loss, both live in DB. A historical-
-            # bar outage (Yahoo down, DST crash, forex-4H stale) must not disable
-            # stop-loss enforcement — that's the whole point of DB-side SL.
-            breach_count = 0
-            for pos_orm in open_positions_orm:
-                if pos_orm.closed_at or pos_orm.pending_closure:
-                    continue
-                if not pos_orm.stop_loss or not pos_orm.current_price:
-                    continue
-                if pos_orm.stop_loss <= 0 or pos_orm.current_price <= 0:
-                    continue
-
-                side_str = str(pos_orm.side).upper() if pos_orm.side else 'LONG'
-                is_long = 'LONG' in side_str or 'BUY' in side_str
-
-                breached = False
-                if is_long and pos_orm.current_price <= pos_orm.stop_loss:
-                    breached = True
-                elif not is_long and pos_orm.current_price >= pos_orm.stop_loss:
-                    breached = True
-
-                if breached:
-                    # A2 (staleness unification): annotate the breach with price
-                    # freshness from price_updated_at. A stop that fires on a stale
-                    # quote is suspect — we STILL enforce it (never disable stops on
-                    # stale data, per steering), but surface the age, and escalate to
-                    # CRITICAL for LIVE capital so a real-money stop acting on a stale
-                    # price is impossible to miss. (_PRICE_FRESHNESS_SLA_S is defined
-                    # by the freshness guard at the top of this method.)
-                    _price_ts = getattr(pos_orm, 'price_updated_at', None)
-                    _price_age_s = (
-                        (datetime.utcnow() - _price_ts).total_seconds()
-                        if _price_ts else None
-                    )
-                    _stale_price = _price_age_s is not None and _price_age_s > _PRICE_FRESHNESS_SLA_S
-                    _age_note = (
-                        f", price_age={_price_age_s/60:.0f}m"
-                        if _price_age_s is not None else ", price_age=unknown"
-                    )
-                    pos_orm.pending_closure = True
-                    pos_orm.closure_reason = (
-                        f"Trailing stop breached: price {pos_orm.current_price:.4f} "
-                        f"{'<=' if is_long else '>='} stop {pos_orm.stop_loss:.4f}"
-                    )
-                    breach_count += 1
-                    if _stale_price and (pos_orm.account_type or 'demo') == 'live':
-                        logger.critical(
-                            f"[A2] LIVE stop-loss breach acted on STALE price for "
-                            f"{pos_orm.symbol} ({pos_orm.id}): price={pos_orm.current_price:.4f} "
-                            f"age={_price_age_s/60:.0f}m > {_PRICE_FRESHNESS_SLA_S/60:.0f}m SLA — "
-                            f"closing on best-known price; investigate position-sync staleness."
-                        )
-                    logger.warning(
-                        f"Stop-loss breach for {pos_orm.symbol} ({pos_orm.id}): "
-                        f"price={pos_orm.current_price:.4f}, stop={pos_orm.stop_loss:.4f}, "
-                        f"side={'LONG' if is_long else 'SHORT'}{_age_note}"
-                    )
-
-            if breach_count > 0:
-                session.commit()
-                logger.info(f"Flagged {breach_count} positions for closure (stop-loss breach)")
+            # ── Pass 2: Breach enforcement (decoupled, isolated session) ──────
+            # P1-3: Breach enforcement is the safety net (DB-side SL is the only live
+            # stop path). It now runs on its OWN short-lived session with its own
+            # lock_timeout, so a blocked/slow recalc read above can never skip stop
+            # enforcement for a whole cycle (the 2026-06-11 11:20 incident). It is also
+            # invoked from the except branch below. Idempotent: positions already
+            # flagged pending_closure are skipped.
+            breach_count = self._enforce_stop_breaches()
 
             # ── Per-cycle INFO summary ────────────────────────────────────────
             # Always emit so "cycle ran, nothing to do" is distinguishable from
@@ -2989,10 +2955,111 @@ class MonitoringService:
         except Exception as e:
             logger.error(f"Error checking trailing stops: {e}", exc_info=True)
             session.rollback()
-            return {"updated": 0, "breach_closures": 0, "error": str(e)}
+            # P1-3: recalc failed, but breach enforcement is the safety net and MUST
+            # still run — on its own isolated session, independent of this one.
+            _breach_fallback = 0
+            try:
+                _breach_fallback = self._enforce_stop_breaches()
+            except Exception as _be:
+                logger.error(
+                    f"Breach enforcement (fallback) also failed: {_be}", exc_info=True
+                )
+            return {"updated": 0, "breach_closures": _breach_fallback, "error": str(e)}
 
         finally:
             session.close()
+
+    def _enforce_stop_breaches(self) -> int:
+        """Stop-loss breach enforcement on an ISOLATED, short-lived session.
+
+        P1-3: This is the live capital safety net (eToro has no SL-modify API, so the
+        DB-side stop is the only stop path). It is deliberately decoupled from the SL
+        recalculation pass so that a blocked/slow/poisoned recalc session can never
+        skip stop enforcement for a whole cycle (2026-06-11 11:20: a 120s
+        statement_timeout on the recalc read aborted the entire TSL cycle). Uses its
+        own session with a short lock_timeout (fast-fail on contention) and only needs
+        current_price + stop_loss (both written by the 60s position sync). Idempotent:
+        positions already flagged pending_closure are skipped, so calling it twice in a
+        cycle (normal path + except fallback) is harmless.
+
+        Returns the number of positions newly flagged for closure.
+        """
+        _PRICE_FRESHNESS_SLA_S = 180.0
+        breach_count = 0
+        bsession = self.db.get_session()
+        try:
+            from src.models.orm import PositionORM
+            from sqlalchemy import text as _sql_text
+            try:
+                bsession.execute(_sql_text("SET LOCAL lock_timeout = '5000'"))
+            except Exception as _lt_err:
+                logger.debug(f"Could not set lock_timeout on breach session: {_lt_err}")
+
+            open_positions_orm = bsession.query(PositionORM).filter(
+                PositionORM.closed_at.is_(None)
+            ).all()
+
+            for pos_orm in open_positions_orm:
+                if pos_orm.closed_at or pos_orm.pending_closure:
+                    continue
+                if not pos_orm.stop_loss or not pos_orm.current_price:
+                    continue
+                if pos_orm.stop_loss <= 0 or pos_orm.current_price <= 0:
+                    continue
+
+                side_str = str(pos_orm.side).upper() if pos_orm.side else 'LONG'
+                is_long = 'LONG' in side_str or 'BUY' in side_str
+
+                breached = False
+                if is_long and pos_orm.current_price <= pos_orm.stop_loss:
+                    breached = True
+                elif not is_long and pos_orm.current_price >= pos_orm.stop_loss:
+                    breached = True
+
+                if breached:
+                    # A2: annotate breach with price freshness. We STILL enforce on a
+                    # stale quote (never disable stops on stale data), but escalate to
+                    # CRITICAL for LIVE capital so a real-money stop acting on a stale
+                    # price is impossible to miss.
+                    _price_ts = getattr(pos_orm, 'price_updated_at', None)
+                    _price_age_s = (
+                        (datetime.utcnow() - _price_ts).total_seconds()
+                        if _price_ts else None
+                    )
+                    _stale_price = _price_age_s is not None and _price_age_s > _PRICE_FRESHNESS_SLA_S
+                    _age_note = (
+                        f", price_age={_price_age_s/60:.0f}m"
+                        if _price_age_s is not None else ", price_age=unknown"
+                    )
+                    pos_orm.pending_closure = True
+                    pos_orm.closure_reason = (
+                        f"Trailing stop breached: price {pos_orm.current_price:.4f} "
+                        f"{'<=' if is_long else '>='} stop {pos_orm.stop_loss:.4f}"
+                    )
+                    breach_count += 1
+                    if _stale_price and (pos_orm.account_type or 'demo') == 'live':
+                        logger.critical(
+                            f"[A2] LIVE stop-loss breach acted on STALE price for "
+                            f"{pos_orm.symbol} ({pos_orm.id}): price={pos_orm.current_price:.4f} "
+                            f"age={_price_age_s/60:.0f}m > {_PRICE_FRESHNESS_SLA_S/60:.0f}m SLA — "
+                            f"closing on best-known price; investigate position-sync staleness."
+                        )
+                    logger.warning(
+                        f"Stop-loss breach for {pos_orm.symbol} ({pos_orm.id}): "
+                        f"price={pos_orm.current_price:.4f}, stop={pos_orm.stop_loss:.4f}, "
+                        f"side={'LONG' if is_long else 'SHORT'}{_age_note}"
+                    )
+
+            if breach_count > 0:
+                bsession.commit()
+                logger.info(f"Flagged {breach_count} positions for closure (stop-loss breach)")
+            return breach_count
+        except Exception as e:
+            logger.error(f"Error in breach enforcement: {e}", exc_info=True)
+            bsession.rollback()
+            return breach_count
+        finally:
+            bsession.close()
 
     def _update_trade_excursions(self) -> None:
         """Update MAE / MFE on open trade_journal rows.

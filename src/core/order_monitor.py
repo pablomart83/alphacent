@@ -1228,6 +1228,25 @@ class OrderMonitor:
                         # Compute execution-quality metrics (F04 Part 3) BEFORE log_entry
                         # so they go into trade_journal and are persisted on OrderORM.
                         try:
+                            # P2-2: Several fill paths (status poll without a positions
+                            # array, eToro position not yet in the live list) leave
+                            # order.filled_price None, so slippage was NULL on ~75% of
+                            # fills. The position we just matched/created carries the
+                            # ACTUAL eToro entry (fill) price — recover it from there
+                            # (account-scoped) rather than leaving slippage unmeasurable.
+                            if not order.filled_price:
+                                _fill_pos = session.query(PositionORM).filter(
+                                    PositionORM.strategy_id == order.strategy_id,
+                                    PositionORM.symbol == order.symbol,
+                                    PositionORM.account_type == self.account_type,
+                                    PositionORM.closed_at.is_(None),
+                                ).order_by(PositionORM.opened_at.desc()).first()
+                                if _fill_pos and _fill_pos.entry_price:
+                                    order.filled_price = _fill_pos.entry_price
+                                    logger.debug(
+                                        f"Order {order.id} filled_price recovered from "
+                                        f"position {_fill_pos.id[:8]}: {order.filled_price}"
+                                    )
                             if order.filled_price and order.expected_price and order.expected_price > 0:
                                 # Slippage: positive = adverse (paid more than expected for buy,
                                 # received less for sell). Stored as % of expected price.

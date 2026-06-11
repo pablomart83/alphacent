@@ -188,6 +188,7 @@ class PositionManager:
         positions: List[Position],
         skip_etoro_update: bool = False,
         position_intervals: Optional[Dict[str, str]] = None,
+        skip_trail_ids: Optional[set] = None,
     ) -> List[Order]:
         """Check positions for trailing stop-loss adjustments.
 
@@ -325,6 +326,15 @@ class PositionManager:
                         self._last_tsl_summary["lock"] += 1
 
                 # ── Stage 3: Trailing stop ───────────────────────────────────
+                # P1-2: The ATR-trail distance needs FRESH timeframe bars to compute
+                # ATR. When the caller marks this position's bars as stale, skip ONLY
+                # this stage — Stages 1-2 (breakeven/profit-lock) above already ran on
+                # live current_price and must not be gated by bar freshness (otherwise
+                # a winner with stale bars keeps SL at breakeven and surrenders all
+                # unrealized profit on a reversal — observed: SOXL +8%, SL=entry).
+                if skip_trail_ids and position.id in skip_trail_ids:
+                    continue
+
                 if profit_pct < activation_pct:
                     continue  # Not yet in trail zone
 
