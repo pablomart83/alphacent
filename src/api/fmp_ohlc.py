@@ -126,10 +126,18 @@ EXPLICIT_BLOCKED: set = {
     # Non-US / non-majors stocks in our universe known to be sparse or
     # premium (foreign listings that FMP only serves at EOD).
     # Add as they surface in logs (runtime-observed block-set below).
-    # LME metals — FMP only carries 1d EOD data on Starter. Block intraday
-    # explicitly to avoid 402 roundtrips on every WF cycle.
-    ("ALIUSD", "1hour"), ("ALIUSD", "4hour"),
-    ("ZNUSD",  "1hour"), ("ZNUSD",  "4hour"),
+    # Commodity & LME-metal EOD coverage (re-probed 2026-06-11): FMP Starter
+    # serves ONLY GOLD (GCUSD) and SILVER (SIUSD) at 1d. OIL (CLUSD), COPPER
+    # (HGUSD), PLATINUM (PLUSD), NATGAS (NGUSD), ALUMINUM (ALIUSD) and ZINC
+    # (ZNUSD) are premium-blocked at EVERY interval — they route to Yahoo
+    # (=F futures). FIX-D's "FMP primary for LME 1d" premise was FALSE on the
+    # current Starter plan (ALIUSD/ZNUSD 1d 402). Block all their intervals
+    # explicitly so the forex/LME branch and full-sync skip FMP without a
+    # wasted 402 roundtrip and fall straight to Yahoo.
+    ("ALIUSD", "1hour"), ("ALIUSD", "4hour"), ("ALIUSD", "1day"),
+    ("ZNUSD",  "1hour"), ("ZNUSD",  "4hour"), ("ZNUSD",  "1day"),
+    ("PLUSD",  "1hour"), ("PLUSD",  "4hour"), ("PLUSD",  "1day"),
+    ("NGUSD",  "1hour"), ("NGUSD",  "4hour"), ("NGUSD",  "1day"),
 }
 
 
@@ -163,11 +171,12 @@ SYMBOL_MAP: Dict[str, str] = {
     "SILVER":   "SIUSD",
     "OIL":      "CLUSD",
     "COPPER":   "HGUSD",
-    "NATGAS":   "NGUSD",      # natgas — FMP support unknown, test at runtime
-    "PLATINUM": "PLUSD",
-    # LME metals — FMP carries EOD data under these tickers on Starter.
-    # Only 1d is available (LME settles once daily); intraday is blocked
-    # and listed in EXPLICIT_BLOCKED below.
+    "NATGAS":   "NGUSD",      # premium-blocked on Starter → routes to Yahoo NG=F
+    "PLATINUM": "PLUSD",      # premium-blocked on Starter → routes to Yahoo PL=F
+    # LME metals — premium-blocked on Starter at EVERY interval (re-probed
+    # 2026-06-11: ALIUSD/ZNUSD 1d return 402). The mapping is kept so the
+    # symbol resolves consistently, but all intervals are in EXPLICIT_BLOCKED
+    # above so these route to Yahoo (ALI=F / ZNC=F) without a wasted 402.
     "ALUMINUM": "ALIUSD",
     "ZINC":     "ZNUSD",
     # Crypto display → FMP pair (only used on the FMP-fallback path for crypto)
@@ -309,14 +318,24 @@ def _parse_bars(payload: list, symbol: str) -> List[MarketData]:
             else:
                 # Intraday: parse as naive ET, localize, convert to UTC,
                 # drop tzinfo to stay naive-UTC (DB convention).
-                # `is_dst=None` raises on DST-ambiguous hours (once per fall
-                # on 01:00-02:00 ET); FMP never returns bars in the phantom
-                # spring-forward hour and is well-behaved across the fall
-                # fold — in practice we'll never hit the raise path, but
-                # surfacing it as an error is better than silently choosing
-                # either side of the fold.
+                # DST-safe (2026-06-11): is_dst=None raises on the fall-back
+                # fold (01:00-01:59 ET, twice) and the spring-forward gap
+                # (02:00-02:59 ET, never). Those exceptions are pytz
+                # AmbiguousTimeError / NonExistentTimeError — NOT subclasses of
+                # ValueError, so they would escape the outer
+                # `except (KeyError, ValueError, TypeError)` and crash the whole
+                # symbol fetch (the exact AmbiguousTimeError class the steering
+                # warns about). 24/7 FMP instruments (forex/crypto) CAN return a
+                # fold-hour bar, so resolve deterministically instead of raising.
                 naive_et = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-                aware_et = _ET.localize(naive_et, is_dst=None)
+                try:
+                    aware_et = _ET.localize(naive_et, is_dst=None)
+                except pytz.exceptions.AmbiguousTimeError:
+                    # Fall-back fold — pick standard time (is_dst=False).
+                    aware_et = _ET.localize(naive_et, is_dst=False)
+                except pytz.exceptions.NonExistentTimeError:
+                    # Spring-forward gap — shift the phantom hour forward 1h.
+                    aware_et = _ET.localize(naive_et + timedelta(hours=1), is_dst=True)
                 ts = aware_et.astimezone(timezone.utc).replace(tzinfo=None)
             bars.append(MarketData(
                 symbol=symbol,

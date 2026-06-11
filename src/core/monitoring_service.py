@@ -204,6 +204,19 @@ class MonitoringService:
         self._last_quick_price_update: float = 0
         self._quick_price_interval = 600  # 10 minutes
         self._last_quick_update_result: Optional[dict] = None
+
+        # Account-info (equity/balance) sync — decoupled from the 60s position
+        # sync (P1, 2026-06-11). get_account_info for demo+live added two extra
+        # serialized eToro calls (each ≥1s rate-limit + up to 30s timeout/retry)
+        # to every 60s position-sync phase, slipping the loop to 47s+ (root
+        # cause of the loop-timing warnings). Equity/balance does NOT need 60s
+        # freshness — the hourly equity snapshot and the FIX-09 watchdog own
+        # equity staleness — so refresh it every 5 minutes OFF the critical
+        # price-freshness path. The 60s position sync keeps only the two
+        # get_positions calls that refresh current_price (the safety-critical
+        # input to TSL breach enforcement).
+        self._last_account_info_sync: float = 0
+        self._account_info_interval = 300  # 5 minutes
         
         # Background threads for heavy data operations — never block the monitoring loop
         import threading as _bg_threading
@@ -456,19 +469,19 @@ class MonitoringService:
             # gap that only surfaces as a downstream FIX-09 storm.
             _phase_t0 = time.time()
             try:
+                _demo_t0 = time.time()
                 position_results = self.order_monitor.sync_positions()
+                _demo_dt = time.time() - _demo_t0
+                if _demo_dt > 15:
+                    logger.warning(f"[loop-timing] demo sync_positions took {_demo_dt:.1f}s")
                 logger.debug(
                     f"Position sync: {position_results['updated']} updated, "
                     f"{position_results['created']} created"
                 )
-                # Upsert DEMO account_info — keeps equity/balance fresh even
-                # when no user hits the dashboard. Without this, the dashboard
-                # handler only refreshes account_info opportunistically on
-                # request, which goes stale between hits.
-                try:
-                    self._sync_account_info(account_type='demo')
-                except Exception as _acct_err:
-                    logger.warning(f"DEMO account_info sync failed: {_acct_err}")
+                # NOTE: DEMO/LIVE account_info (equity/balance) sync was moved
+                # out of this 60s phase to its own 5-min cadence (see the
+                # account-info block after this phase) — it added two serialized
+                # eToro get_account_info calls to the critical price path.
 
                 # Phase 2: sync live positions if live client is configured
                 if self.live_order_monitor is not None:
@@ -491,7 +504,11 @@ class MonitoringService:
                             self._live_reconcile_done = True  # don't retry on every cycle
 
                     try:
+                        _live_t0 = time.time()
                         live_results = self.live_order_monitor.sync_positions(account_type="live")
+                        _live_dt = time.time() - _live_t0
+                        if _live_dt > 15:
+                            logger.warning(f"[loop-timing] live sync_positions took {_live_dt:.1f}s")
                         logger.info(
                             f"Live position sync: {live_results.get('updated', 0)} updated, "
                             f"{live_results.get('created', 0)} created, "
@@ -500,15 +517,8 @@ class MonitoringService:
                     except Exception as _live_sync_err:
                         logger.error(f"Live position sync failed: {_live_sync_err}")
 
-                # Upsert LIVE account_info — always attempt when a live client
-                # is configured, even if there are no live positions yet. The
-                # Command page needs equity/balance to render real numbers on
-                # first LIVE view.
-                if self.live_etoro_client is not None:
-                    try:
-                        self._sync_account_info(account_type='live')
-                    except Exception as _acct_err:
-                        logger.warning(f"LIVE account_info sync failed: {_acct_err}")
+                # NOTE: LIVE account_info sync also moved to the 5-min
+                # account-info phase below (off the 60s critical price path).
 
                 self._last_position_sync = now
             except Exception as e:
@@ -523,6 +533,24 @@ class MonitoringService:
                         f"investigate eToro get_positions/get_account_info latency"
                     )
         
+        # Account-info (equity/balance) sync — every 5 min, OFF the 60s
+        # position-sync critical path (P1, 2026-06-11). Two serialized eToro
+        # get_account_info calls (demo + live, each ≥1s rate-limit + up to 30s
+        # timeout) used to run inside the 60s phase and were a primary cause of
+        # the 47s+ loop slip. Equity staleness is covered independently by the
+        # hourly snapshot + FIX-09 watchdog, so 5-min freshness is ample.
+        if now - self._last_account_info_sync >= self._account_info_interval:
+            try:
+                self._sync_account_info(account_type='demo')
+            except Exception as _acct_err:
+                logger.warning(f"DEMO account_info sync failed: {_acct_err}")
+            if self.live_etoro_client is not None:
+                try:
+                    self._sync_account_info(account_type='live')
+                except Exception as _acct_err:
+                    logger.warning(f"LIVE account_info sync failed: {_acct_err}")
+            self._last_account_info_sync = now
+
         # Check trailing stops (DB-only — eToro doesn't support SL modification).
         # Updates stop levels in DB and flags positions that breach their stop for closure.
         # _check_trailing_stops emits its own per-cycle INFO summary, so no extra log here.
@@ -1321,20 +1349,29 @@ class MonitoringService:
                             # Crypto/forex — any gap > 1 day means stale
                             _is_stale_1d = gap_days > 1.2
                         else:
-                            # Stocks/ETFs/indices/commodities — skip weekend gaps.
-                            # Friday bar is present, today is Sat/Sun/Mon with gap ≤ 3: normal.
-                            # Thursday bar present on Friday morning before market open: also normal (gap ≈ 1 day).
-                            # Otherwise: stale.
-                            latest_weekday = latest_ts.weekday()  # 0=Mon .. 4=Fri
-                            today_weekday = end.weekday()
-                            is_weekend_gap = (
-                                # Latest = Friday, today = Sat/Sun/Mon
-                                (latest_weekday == 4 and today_weekday in (5, 6, 0) and gap_days <= 3.2)
-                                # Today = Sat/Sun, any recent bar
-                                or (today_weekday in (5, 6) and gap_days <= 2.2)
-                            )
-                            # Anything > 1 trading day behind and not explained by weekend = stale
-                            _is_stale_1d = gap_days > 1.2 and not is_weekend_gap
+                            # Stocks/ETFs/indices/commodities — a 1d bar is stale
+                            # only if more than ~1 *trading* day has elapsed.
+                            # Subtract weekend + US-holiday days in the gap
+                            # (2026-06-11: was weekend-only, which false-flagged
+                            # the trading day after a holiday and triggered a
+                            # pointless full refetch). Shares the canonical
+                            # market_hours_manager holiday calendar.
+                            try:
+                                from src.data.market_hours_manager import US_HOLIDAYS as _USH
+                                _hol = {d.date() for d in _USH}
+                            except Exception:
+                                _hol = set()
+                            _nontrading = 0
+                            _d = latest_ts.date()
+                            _end_d = end.date()
+                            _g = 0
+                            while _d < _end_d and _g < 400:
+                                _g += 1
+                                _d = _d + timedelta(days=1)
+                                if _d.weekday() >= 5 or _d in _hol:
+                                    _nontrading += 1
+                            _trading_days_behind = gap_days - _nontrading
+                            _is_stale_1d = _trading_days_behind > 1.2
 
                         # Depth check: even if the latest bar is fresh, if the
                         # cache depth is less than our 5y target (with some
@@ -2257,13 +2294,22 @@ class MonitoringService:
                 pass  # fmp_ohlc missing — 4h non-crypto stays on-demand via Yahoo
 
             elapsed = _time.time() - t0
-            logger.info(
+            _sync_errs = stats.get('errors', 0)
+            _sync_summary = (
                 f"Price data sync complete: {stats['1d']} daily + {stats['1h']} hourly "
                 f"+ {stats.get('4h', 0)} 4h symbols synced in {elapsed:.1f}s "
                 f"({stats['db_cached']} from DB cache, "
                 f"{stats['yahoo_batch']} from Yahoo batch, {stats['memory_loaded']} loaded to memory, "
-                f"{stats['errors']} errors, {len(active_symbols)} active strategy symbols)"
+                f"{_sync_errs} errors, {len(active_symbols)} active strategy symbols)"
             )
+            # Escalate to WARNING when any symbol failed so a degraded feed
+            # surfaces in warnings.log instead of being buried at INFO
+            # (observability fix 2026-06-11). The line token "Price data sync
+            # complete" stays stable for one-tail grepping.
+            if _sync_errs > 0:
+                logger.warning(_sync_summary + " — feed degraded, check upstream")
+            else:
+                logger.info(_sync_summary)
 
             # Persist result for the System page (background_threads section).
             # Consumer: src/api/routers/control.py get_system_health.

@@ -25,7 +25,7 @@ class FMPCacheWarmer:
 
     # Symbols that don't have traditional fundamentals
     SKIP_FUNDAMENTALS = {
-        'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'EURGBP',  # Forex
+        'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCAD', 'USDCHF', 'EURGBP', 'NZDUSD',  # Forex
         'SPX500', 'NSDQ100', 'DJ30', 'UK100', 'GER40',  # Indices
         'GOLD', 'SILVER', 'OIL', 'COPPER', 'NATGAS', 'PLATINUM', 'ALUMINUM', 'ZINC',  # Commodities
         'BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'AVAX', 'DOT', 'LINK',  # Crypto
@@ -34,6 +34,16 @@ class FMPCacheWarmer:
         'TLT', 'HYG', 'UNG', 'USO',  # Bond/Commodity ETFs
         'XLE', 'XLF', 'XLK', 'XLU', 'XLV', 'XLI', 'XLP', 'XLY',  # Sector ETFs
         'XHB', 'XBI', 'ARKK', 'ITA', 'FXI',  # Thematic ETFs
+        # ETFs (sector/thematic/commodity/leveraged) and a forex pair that have
+        # NO FMP fundamentals — they returned None on every warm and, because
+        # they sorted to the FRONT of the per-cycle queue as "never fetched",
+        # starved the 30-symbol budget so real stocks went stale (coverage
+        # stuck ~69%, System tab "Failed"). 2026-06-11.
+        'CIBR', 'COPX', 'DBA', 'DFEN', 'EEM', 'EWZ', 'KWEB', 'PALL', 'SMH',
+        'SOXL', 'SOXX', 'SPXU', 'SQQQ', 'TQQQ', 'UPRO', 'URA', 'WEAT',
+        # Foreign listings — FMP Starter is US-only (the provider also early-
+        # returns on '.'-containing tickers). Skip so they don't drag coverage.
+        'RHM.DE', 'RR.L',
     }
 
     def __init__(self, config: Dict):

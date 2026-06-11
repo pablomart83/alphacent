@@ -93,7 +93,10 @@ async def get_data_sync_status():
         pass
 
     # If still None (fresh restart), derive last_run from the most recent
-    # historical_price_cache row — that's what the quick update writes to.
+    # historical_price_cache 1h row's fetched_at — a proxy for the last sync
+    # that touched 1h data. (NOTE: the quick update is in-memory-only and does
+    # not write the DB; this reflects the full hourly sync. The column is
+    # `fetched_at` — `updated_at` does not exist on this table.)
     if not quick_update:
         try:
             from src.models.database import get_database
@@ -102,7 +105,7 @@ async def get_data_sync_status():
             session = db.get_session()
             try:
                 row = session.execute(text(
-                    "SELECT MAX(updated_at) FROM historical_price_cache WHERE interval = '1h'"
+                    "SELECT MAX(fetched_at) FROM historical_price_cache WHERE interval = '1h'"
                 )).fetchone()
                 if row and row[0]:
                     quick_update = {

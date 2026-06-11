@@ -49,51 +49,15 @@ from src.utils.symbol_mapper import to_etoro_wire_format as normalize_symbol, to
 logger = logging.getLogger(__name__)
 
 # ── Module-level singleton ────────────────────────────────────────────────────
-# MarketDataManager is expensive to construct (reads config, creates HTTP session,
-# initialises DataQualityValidator). Instantiating it per-symbol inside loops
-# (trailing stops, risk checks, order executor) creates hundreds of objects per
-# minute and floods the log with "Initialized MarketDataManager" lines.
-#
-# get_market_data_manager() returns a shared instance, creating it on first call.
-# Callers that need a fresh instance (e.g. after config reload) can pass
-# force_new=True.
-_shared_mdm: "Optional[MarketDataManager]" = None
-_shared_mdm_lock = _yf_threading.Lock()
-
-def get_market_data_manager(config: dict = None, force_new: bool = False) -> "Optional[MarketDataManager]":
-    """Return the shared MarketDataManager singleton, creating it if needed.
-    
-    Returns None if not yet initialized and config is not available.
-    The monitoring_service registers the authoritative instance via
-    set_market_data_manager() once it has the etoro_client available.
-    """
-    global _shared_mdm
-    if _shared_mdm is not None and not force_new:
-        return _shared_mdm
-    with _shared_mdm_lock:
-        if _shared_mdm is not None and not force_new:
-            return _shared_mdm
-        if config is None:
-            try:
-                import yaml
-                from pathlib import Path
-                _p = Path("config/autonomous_trading.yaml")
-                config = yaml.safe_load(_p.read_text()) if _p.exists() else {}
-            except Exception:
-                config = {}
-        _shared_mdm = MarketDataManager(config)
-        return _shared_mdm
-
-
-def set_market_data_manager(instance: "MarketDataManager") -> None:
-    """Register an externally-created MarketDataManager as the shared singleton.
-    
-    Called by MonitoringService after it creates an instance with etoro_client.
-    This ensures the singleton has live price access, not just DB/Yahoo.
-    """
-    global _shared_mdm
-    with _shared_mdm_lock:
-        _shared_mdm = instance
+# The shared MarketDataManager singleton + its get_/set_ accessors are defined
+# at the BOTTOM of this module (search "_mdm_singleton"). They were previously
+# ALSO defined here at the top with a different signature
+# (get_market_data_manager(config, force_new)); the bottom definitions shadowed
+# these at import time, so the top pair was dead code — and buggy: it called
+# MarketDataManager(config), passing `config` as the FIRST positional arg
+# (etoro_client). Removed 2026-06-11. Every caller uses the no-arg
+# get_market_data_manager(); the monitoring service registers the authoritative
+# instance via set_market_data_manager() once it has the etoro_client.
 
 
 class MarketDataCache:
@@ -502,32 +466,40 @@ class MarketDataManager:
         return ts
 
     def _subtract_weekend_hours(self, latest: datetime, now: datetime) -> timedelta:
-        """Compute data age, subtracting weekend gaps when the latest bar is
-        from before the weekend.
+        """Compute data age, subtracting non-trading days (weekends + US
+        holidays) that fall in the gap.
 
-        Applies to any market that closes over the weekend (equities, ETFs,
-        indices, commodities, and forex — all of which have a Fri evening to
-        Sun evening hiatus, approximately 48h). Crypto trades 24/7 and does
-        NOT get this adjustment.
+        Applies to any market that closes over weekends/holidays (equities,
+        ETFs, indices, commodities, and forex). Crypto trades 24/7 and does
+        NOT get this adjustment (handled by the caller).
 
-        2026-05-03: previously only applied for stock_etf_index; commodities
-        and forex were measured raw, which tripped the freshness SLA every
-        Sunday UTC cycle for GOLD/NATGAS/SILVER 1d and USDCHF/USDCAD 4h. The
-        underlying asset was correctly closed — the data was as fresh as it
-        can be until Sun 22:00 UTC / Mon 09:30 ET. Now we treat the weekend
-        as a legitimate market-closed period for these asset classes too.
+        2026-06-11: generalised from a flat 48h weekend subtraction to a
+        per-day count that ALSO subtracts US market holidays. The old version
+        ignored holidays, so the trading day AFTER a holiday (e.g. Mon after a
+        Fri July-4 close) measured ~2 effective days stale and could trip the
+        freshness SLA, wrongly BLOCKING signals on a legitimate trading day.
+        Uses the canonical holiday calendar from market_hours_manager so the
+        data path and the order path agree on what "closed" means.
         """
         raw_age = now - latest
-        # If latest bar is Fri and now is Sat/Sun/Mon, we crossed the
-        # weekend — subtract ~48 hours of "market was closed anyway" time.
-        if latest.weekday() == 4 and now.weekday() in (5, 6, 0):
-            return raw_age - timedelta(hours=48)
-        # If latest bar is Thu or earlier and now is Sun/Mon, only one
-        # weekend was crossed; still subtract 48h.
-        if latest.weekday() <= 4 and now.weekday() in (5, 6, 0) and raw_age > timedelta(hours=48):
-            # Only subtract if the weekend actually falls inside the age window
-            return raw_age - timedelta(hours=48)
-        return raw_age
+        try:
+            from src.data.market_hours_manager import US_HOLIDAYS
+            _holidays = {d.date() for d in US_HOLIDAYS}
+        except Exception:
+            _holidays = set()
+        # Count whole non-trading days strictly after the latest bar's day, up
+        # to and including 'now's day → each is 24h the market was closed.
+        nontrading_days = 0
+        d = latest.date()
+        end_d = now.date()
+        guard = 0
+        while d < end_d and guard < 400:
+            guard += 1
+            d = d + timedelta(days=1)
+            if d.weekday() >= 5 or d in _holidays:
+                nontrading_days += 1
+        adjusted = raw_age - timedelta(days=nontrading_days)
+        return adjusted if adjusted > timedelta(0) else timedelta(0)
 
     def is_data_fresh_for_signal(
         self,
