@@ -768,6 +768,13 @@ class TradingScheduler:
                     take_profit=pos_orm.take_profit,
                     closed_at=pos_orm.closed_at,
                     pending_closure=getattr(pos_orm, 'pending_closure', False),
+                    # A1 follow-up: carry the canonical dollar field so
+                    # _get_position_value uses invested_amount instead of the
+                    # shares×price fallback. Without this the dataclass had
+                    # invested_amount=None and the fallback inflated demo positions
+                    # whose `quantity` is dollar-valued (AMD/QQQ → $1.17M/$1.76M),
+                    # falsely tripping the position-limit cap and blocking entries.
+                    invested_amount=getattr(pos_orm, 'invested_amount', None),
                 )
                 position_dataclasses.append(pos_dc)
 
@@ -1650,6 +1657,8 @@ class TradingScheduler:
                                                         take_profit=p.take_profit,
                                                         closed_at=p.closed_at,
                                                         pending_closure=getattr(p, 'pending_closure', False),
+                                                        # A1 follow-up: carry canonical dollar field
+                                                        invested_amount=getattr(p, 'invested_amount', None),
                                                     )
                                                     for p in _live_pos_orms
                                                 ]
@@ -2338,6 +2347,8 @@ class TradingScheduler:
                                 take_profit=p.take_profit,
                                 closed_at=p.closed_at,
                                 pending_closure=getattr(p, 'pending_closure', False),
+                                # A1 follow-up: carry canonical dollar field
+                                invested_amount=getattr(p, 'invested_amount', None),
                             )
                             for p in _live_pos_orms2
                         ]

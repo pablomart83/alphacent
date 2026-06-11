@@ -4463,6 +4463,7 @@ async def get_size_estimate(
                 unrealized_pnl=float(p.unrealized_pnl or 0),
                 stop_loss=float(p.stop_loss) if p.stop_loss else None,
                 take_profit=float(p.take_profit) if p.take_profit else None,
+                invested_amount=float(p.invested_amount) if getattr(p, 'invested_amount', None) else None,  # A1: canonical dollar field
             )
             for p in live_pos_orms
         ]
