@@ -332,15 +332,28 @@ class IntelAnalyst:
         from sqlalchemy import text
         session = self.db.get_session()
         try:
+            # Source-of-truth fix (Sprint D): previously this read
+            # `strategies.performance->>'last_signal_at'`, a key that is NEVER written
+            # to the performance JSON (it only ever holds avg_loss/sharpe/win_rate/etc.).
+            # As a result EVERY aged BACKTESTED strategy was flagged "0 signals" — a
+            # 100% false positive (verified: 188/300 BACKTESTED strategies emitted
+            # signals in the last 7d; all 171 previously-flagged had submitted orders).
+            # The real signal history lives in signal_decisions (stage='signal_emitted'),
+            # the same source the /strategies API uses. Read from there.
             rows = session.execute(text("""
-                SELECT id, name, activated_at,
-                       performance->>'last_signal_at' as last_signal_at
-                FROM strategies
-                WHERE status = 'BACKTESTED'
-                AND activated_at < NOW() - INTERVAL '3 days'
+                SELECT s.id, s.name, s.activated_at, ls.last_signal_at
+                FROM strategies s
+                LEFT JOIN (
+                    SELECT strategy_id, MAX(timestamp) AS last_signal_at
+                    FROM signal_decisions
+                    WHERE stage = 'signal_emitted'
+                    GROUP BY strategy_id
+                ) ls ON ls.strategy_id = s.id
+                WHERE s.status = 'BACKTESTED'
+                AND s.activated_at < NOW() - INTERVAL '3 days'
                 AND (
-                    performance->>'last_signal_at' IS NULL
-                    OR (performance->>'last_signal_at')::timestamp < NOW() - INTERVAL '3 days'
+                    ls.last_signal_at IS NULL
+                    OR ls.last_signal_at < NOW() - INTERVAL '3 days'
                 )
             """)).fetchall()
         finally:
@@ -352,24 +365,23 @@ class IntelAnalyst:
         findings = []
         for row in rows:
             days_since = (datetime.now() - row[2]).days if row[2] else "?"
-            last_sig = row[3] or "never"
-            evidence = f"Strategy: {row[1]}\nActivated: {days_since}d ago\nLast signal: {last_sig}"
+            last_sig = row[3].isoformat() if row[3] else "never"
+            evidence = f"Strategy: {row[1]}\nActivated: {days_since}d ago\nLast signal_emitted: {last_sig}"
             findings.append(Finding(
                 check_id="A1",
                 key=f"strategy:{row[0]}",
                 category="A",
-                # P2, not P1: a BACKTESTED (RESEARCH-stage) strategy with no signals
-                # is a research-pipeline hygiene issue, not a live-capital risk. It was
-                # drowning the P1 queue (213 of 244 P1s) and burying real P1s. Severity
-                # corrected to match impact; auto-resolution (run()) closes these once a
-                # strategy starts generating signals or is retired.
+                # P2, not P1: a BACKTESTED (RESEARCH-stage) strategy that is idle for
+                # 3+ days is research-pipeline hygiene, not a live-capital risk. Many
+                # are simply daily trend strategies that fire infrequently — not broken.
+                # Auto-resolution closes these once the strategy signals again.
                 severity="P2",
-                title=f"A1: {row[1]} — BACKTESTED {days_since}d with 0 signals",
-                detail="BACKTESTED strategy has not generated any signals since activation. Entry conditions may never fire for current market data.",
+                title=f"A1: {row[1]} — BACKTESTED {days_since}d, no signal in 3d+",
+                detail="BACKTESTED strategy has not emitted a signal in the last 3+ days (per signal_decisions). Often a low-frequency daily strategy; investigate the entry conditions only if persistently idle across many cycles.",
                 evidence=evidence,
-                recommended_action="Check entry conditions in strategy_engine logs. Entry conditions may never fire for current market data. Consider retiring or adjusting template parameters.",
+                recommended_action="Check signal_decisions / strategy_engine logs for this strategy. If entry conditions never fire for current market data across many cycles, consider retiring or adjusting template parameters.",
                 context_links=[{"label": "Guard / Audit", "url": "/guard/audit"}],
-                ask_kiro_prompt=f'Intel finding [A1]: "{row[1]} — BACKTESTED {days_since}d with 0 signals."\n\nEvidence: {evidence}\n\nRecommended action: Check entry conditions in strategy_engine logs. Investigate and fix.',
+                ask_kiro_prompt=f'Intel finding [A1]: "{row[1]} — BACKTESTED {days_since}d, no signal in 3d+."\n\nEvidence: {evidence}\n\nRecommended action: Check signal_decisions for this strategy. Investigate only if persistently idle.',
             ))
         return findings if findings else None
 
@@ -538,14 +550,33 @@ class IntelAnalyst:
             # Only flag strategies that have signals but no paper trades.
             # Strategies with 0 signals are already covered by A1 — suppress A6
             # for those to avoid duplicate findings on the same strategy.
+            #
+            # Source-of-truth fix (Sprint D): previously this gated on
+            # `performance->>'last_signal_at' IS NOT NULL` and `performance->>'paper_trades'`,
+            # but NEITHER key is ever written to the performance JSON, so the
+            # `IS NOT NULL` condition was never true and A6 NEVER fired (a dead
+            # detector — a false negative). Signals live in signal_decisions
+            # (stage='signal_emitted') and completed paper trades live in
+            # trade_journal (account_type='demo') — read from those.
             rows = session.execute(text("""
-                SELECT id, name, activated_at,
-                       COALESCE((performance->>'paper_trades')::int, 0) as pt
-                FROM strategies WHERE status = 'BACKTESTED'
-                AND activated_at < NOW() - INTERVAL '7 days'
-                AND COALESCE((performance->>'paper_trades')::int, 0) = 0
-                AND performance->>'last_signal_at' IS NOT NULL
-                AND (performance->>'last_signal_at')::timestamp > NOW() - INTERVAL '7 days'
+                SELECT s.id, s.name, s.activated_at
+                FROM strategies s
+                JOIN (
+                    SELECT strategy_id, MAX(timestamp) AS last_signal_at
+                    FROM signal_decisions
+                    WHERE stage = 'signal_emitted'
+                    GROUP BY strategy_id
+                ) ls ON ls.strategy_id = s.id
+                LEFT JOIN (
+                    SELECT strategy_id, COUNT(*) AS n
+                    FROM trade_journal
+                    WHERE account_type = 'demo'
+                    GROUP BY strategy_id
+                ) tj ON tj.strategy_id = s.id
+                WHERE s.status = 'BACKTESTED'
+                AND s.activated_at < NOW() - INTERVAL '7 days'
+                AND COALESCE(tj.n, 0) = 0
+                AND ls.last_signal_at > NOW() - INTERVAL '7 days'
             """)).fetchall()
         finally:
             session.close()

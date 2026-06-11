@@ -6,7 +6,40 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Sprint B complete (Jun 11 2026, 07:36 UTC). Graduation-gate statistical-power fixes deployed & verified live (P0-2). Service healthy, zero post-deploy errors. See "SESSION 2026-06-11 — SPRINT B" below. ACTION FOR CIO: review GOOGL / TXN / COPPER live strategies for retirement (flagged, NOT auto-retired — see below).**
+**Sprint C + D complete (Jun 11 2026, ~09:00 UTC). P2 quick-wins deployed; Intel A1 "156 dead strategies" finding FALSIFIED by ground truth (it was a telemetry false positive — no mass action needed). See "SESSION 2026-06-11 — SPRINT C + D" below.**
+
+**Sprint B complete (Jun 11 2026, 07:36 UTC). Graduation-gate statistical-power fixes deployed & verified live (P0-2). ACTION FOR CIO: review GOOGL / TXN / COPPER live strategies for retirement (flagged, NOT auto-retired).**
+
+---
+
+## SESSION 2026-06-11 — SPRINT C + D
+
+### Sprint C — P2 correctness / quick wins (deployed, commit `65f1e9a`)
+| Fix | What |
+|---|---|
+| market_regime crash | `strategies.py` `get_autonomous_status`: `(full_config.get('market_regime') or {})` — the `{}` default only applied when the key was absent; a present-but-None value crashed the endpoint (errors.log 06-10 11:48). |
+| `_get_position_value` units | `risk_manager`: when `invested_amount` missing, value = `quantity × price` (shares→dollars) instead of raw share count (was under-counting exposure, defeating symbol/heat caps). Docstring corrected. |
+| Leveraged-ETF consolidation | `position_manager._classify_symbol` now routes through canonical `sl_caps.is_leveraged_etf`; added the previously-divergent NAIL/CURE/DFEN/WANT/HIBL/HIBS to the canonical set (finishes P0-4 consolidation — nothing regresses). |
+| NEW-08 404 dead-end | `order_monitor.cancel_stale_orders`: on a 404 cancelling an already-stale (>24h) order with NO open position, mark CANCELLED instead of leaving PENDING forever (status-poll also 404s → infinite churn). If an open position exists, leave for the fill/reconcile path. |
+| Graduation queue consistency | `strategies.py` approaching-graduation view now mirrors `is_qualified`'s Wilson WR lower-bound gate, so a Wilson-blocked pair doesn't vanish from both the queue and the approaching list. |
+| (verified, no change) | LIVE strategies are already skipped at the top of the autonomous retirement loop (rule #7 satisfied); `auto_retire_strategy` is a legacy no-op. Clarifying comment only. |
+
+### Sprint D — RESEARCH: the "156 zero-signal BACKTESTED strategies" (Intel A1) — FALSIFIED
+**Conclusion: A1 was a 100% false positive. There are NO structurally-dead strategies. No mass retirement is warranted.** (commit `<intel>`)
+
+Ground truth (live DB, signal_decisions):
+- All 300 BACKTESTED strategies had `performance->>'last_signal_at'` = NULL — not "stale", *never populated*.
+- The `performance` JSON only ever contains `{avg_loss, sharpe_ratio, avg_win, sortino_ratio, max_drawdown, win_rate, total_return, total_trades}` — **`last_signal_at` and `paper_trades` keys are never written**.
+- Real signal history (signal_decisions): **188/300 BACKTESTED strategies emitted signals in the last 7 days** (22,111 `signal_emitted` rows, 554 orders submitted, 48 fills).
+- Of the 171 strategies A1 flagged as "0 signals": **138 emitted in the last 7d, 160 ever, and all 171 submitted orders.**
+
+Root cause: A1 read `strategies.performance->>'last_signal_at'`, a field nothing writes. The `/strategies` API computes last-signal correctly from `signal_decisions` (`strategies.py:667`) — A1 just used the wrong source. **Same root cause broke A6** (its `last_signal_at IS NOT NULL` guard was never true → A6 never fired → a dead "signals firing but not converting to trades" detector, a false negative).
+
+Fix deployed (both checks re-pointed at the real sources):
+- **A1** now reads `signal_decisions` (stage=`signal_emitted`). Flagged count drops 171 → **81** (the genuinely-idle-3d+ set, mostly low-frequency daily strategies — not broken). Title reworded "no signal in 3d+", stays P2.
+- **A6** now reads `signal_decisions` for signals + `trade_journal` (account_type=demo) for paper trades. Restored from dead → working; currently **0 findings** (signals are converting fine — fires only when a real conviction/gate conversion problem appears).
+
+Minor follow-up (not done): A1's 3-day idle threshold is aggressive for daily strategies (a daily trend strategy idle 3d is normal); consider an interval-aware idle threshold. INTEL_SPEC.md still documents A1 as P1 — stale doc.
 
 **Sprint A complete (Jun 10 2026, 23:27 UTC). Second forensic audit (Opus 4.8) + live-capital correctness fixes deployed & verified live. Service healthy, no post-deploy errors, TSL clean. See "SESSION 2026-06-10 — SPRINT A" below.**
 
