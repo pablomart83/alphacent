@@ -6,7 +6,7 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Sprint C + D complete + follow-ups (Jun 11 2026). A1 now interval-aware (1h/2h→2d, 4h→5d, 1d→10d; 81→39 genuinely-stuck); INTEL_SPEC A1 doc corrected; fixed pre-existing graduation size-estimate 500 (AccountInfo missing mode/updated_at). CIO ACTIONS OUTSTANDING: (1) TXN live is NOT retired (the −$196/0%WR loser) — still trading; (2) SOXL was retired (the +$868 winner) — confirm if intended; (3) GOOGL+COPPER retired OK, but COPPER still holds an open $1,000 live position (retirement stops new entries only).**
+**Sprint C + D complete + follow-ups (Jun 11 2026). A1 now interval-aware (1h/2h→2d, 4h→5d, 1d→10d; 81→39 genuinely-stuck); INTEL_SPEC A1 doc corrected; fixed pre-existing graduation size-estimate 500 (AccountInfo missing mode/updated_at). LIVE BOOK CLEANED UP (CIO actions done): GOOGL, COPPER, TXN retired (losers); SOXL re-graduated (winner, new live_strategies row id 15, position_size 100.4 / conviction_min 72). Active live: AMD, DELL, INTC, MU×4, PANW, SOXL, TQQQ, XLK. NOTE: COPPER still holds an open $1,000 live position (retirement stops new entries only — closes on SL/TP or manual).**
 
 **Sprint B complete (Jun 11 2026, 07:36 UTC). Graduation-gate statistical-power fixes deployed & verified live (P0-2).**
 
