@@ -1355,6 +1355,14 @@ class DataQualityResponse(BaseModel):
     entries: List[DataQualityEntry] = []
 
 
+# Module-level TTL cache for /data/quality. The endpoint aggregates the full
+# ~2.5M-row historical_price_cache (~1.2s); the data only changes on the
+# 10-/55-min sync cadence, so a short in-process cache is both correct and a
+# large latency win for the System tab.
+_DATA_QUALITY_CACHE: dict = {"ts": 0.0, "payload": None}
+_DATA_QUALITY_TTL_S: float = 60.0
+
+
 @router.get("/quality", response_model=DataQualityResponse)
 async def get_data_quality():
     """
@@ -1363,7 +1371,22 @@ async def get_data_quality():
     Collapses any wire-form (`BTCUSD`) or Yahoo-ticker (`BTC-USD`) legacy rows
     into their canonical display form (`BTC`) so the UI never shows duplicate
     entries for the same underlying asset.
+
+    PERF: the per-interval freshness query is a full aggregate over the
+    ~2.5M-row historical_price_cache (a parallel seq scan, ~1.2s — the COUNT(*)
+    forces reading every row, so no index avoids it). The underlying data only
+    changes on the 10-min quick-update / 55-min full-sync cadence, so the result
+    is cached in-process for `_DATA_QUALITY_TTL_S`. This turns the System tab's
+    per-load 1.2s hit into a sub-millisecond cache read for all but one call per
+    TTL window. The cache is invalidated implicitly by TTL expiry (no staleness
+    concern at this granularity).
     """
+    import time as _t_dq
+    _now_mono = _t_dq.monotonic()
+    _cached = _DATA_QUALITY_CACHE.get("payload")
+    if _cached is not None and (_now_mono - _DATA_QUALITY_CACHE["ts"]) < _DATA_QUALITY_TTL_S:
+        return _cached
+
     from src.models.database import get_database
     from src.models.orm import DataQualityReportORM, FundamentalDataORM
     from sqlalchemy import text
@@ -1629,7 +1652,13 @@ async def get_data_quality():
     except Exception as e:
         logger.error(f"Error computing data quality: {e}")
 
-    return DataQualityResponse(entries=entries)
+    _response = DataQualityResponse(entries=entries)
+    # Only cache a successful, non-empty computation so a transient DB error
+    # doesn't pin an empty payload for the whole TTL window.
+    if entries:
+        _DATA_QUALITY_CACHE["payload"] = _response
+        _DATA_QUALITY_CACHE["ts"] = _t_dq.monotonic()
+    return _response
 
 
 # ============================================================================
