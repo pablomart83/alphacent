@@ -47,14 +47,39 @@ export function formatNumber(
   })
 }
 
+/**
+ * Coerce any reasonable timestamp input into a Date, or null when it can't be
+ * interpreted. Accepts ISO strings, epoch numbers (seconds OR milliseconds —
+ * auto-detected), and Date objects. This is the single guard that prevents
+ * `x.getTime is not a function` when a non-string, non-Date value (e.g. an
+ * epoch number from the API) reaches a date formatter.
+ */
+export function coerceToDate(
+  value: string | number | Date | null | undefined,
+): Date | null {
+  if (value == null) return null
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  if (typeof value === 'string') {
+    const d = parseUtcIso(value)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Heuristic: values below 1e12 are epoch SECONDS, at/above are milliseconds.
+    // Covers both common backend conventions without a year-33658 mishap.
+    const ms = value < 1e12 ? value * 1000 : value
+    const d = new Date(ms)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  return null
+}
+
 /** Format an ISO timestamp for display. Defaults to local 'MMM d, HH:mm'. */
 export function formatTimestamp(
-  iso: string | Date | null | undefined,
+  iso: string | number | Date | null | undefined,
   format: 'short' | 'long' | 'date' | 'time' = 'short',
 ): string {
-  if (!iso) return '—'
-  const parsed = typeof iso === 'string' ? parseUtcIso(iso) : iso
-  if (!parsed || Number.isNaN(parsed.getTime())) return '—'
+  const parsed = coerceToDate(iso)
+  if (!parsed) return '—'
 
   switch (format) {
     case 'long':
@@ -100,10 +125,9 @@ export function parseUtcIso(iso: string): Date {
 }
 
 /** Human-readable age from an ISO timestamp: "23s ago", "4m ago", "2.1h ago". */
-export function formatAge(iso: string | Date | null | undefined): string {
-  if (!iso) return '—'
-  const d = typeof iso === 'string' ? parseUtcIso(iso) : iso
-  if (!d || Number.isNaN(d.getTime())) return '—'
+export function formatAge(iso: string | number | Date | null | undefined): string {
+  const d = coerceToDate(iso)
+  if (!d) return '—'
   const age = (Date.now() - d.getTime()) / 1000
   if (age < 0) return 'just now'
   if (age < 60) return `${Math.round(age)}s ago`
