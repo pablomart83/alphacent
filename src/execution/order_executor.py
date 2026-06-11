@@ -543,8 +543,8 @@ class OrderExecutor:
                 reason=reason,
                 metadata={k: v for k, v in meta.items() if k in ('conviction_score', 'wf_test_sharpe', 'template_name')},
             )
-        except Exception:
-            pass
+        except Exception:  # silent-ok: decision-log analytics is fire-and-forget; must never affect execution
+            pass  # silent-ok
 
     def _check_vix_entry_gate(self, symbol: str) -> Optional[str]:
         """Block LONG entries during VIX spike windows.
@@ -769,7 +769,7 @@ class OrderExecutor:
                     return AssetClass.COMMODITY
                 if 'index' in asset_type:
                     return AssetClass.INDEX
-        except Exception:
+        except Exception:  # silent-ok: classification fallback returns AssetClass.STOCK (safe default) below
             pass
 
         return AssetClass.STOCK

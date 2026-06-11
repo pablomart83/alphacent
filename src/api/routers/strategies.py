@@ -1953,10 +1953,8 @@ async def get_approaching_graduation(
             # Skip pairs that have already crossed ALL thresholds — they should
             # be in the graduation queue (we excluded them above, but belt+braces).
             _pair_interval = _strat_interval_by_pair.get((tname, sym))
-            from src.strategy.graduation_gate import _get_min_trades_for_interval
+            from src.strategy.graduation_gate import _get_min_trades_for_interval, is_qualified
             _effective_min_trades = _get_min_trades_for_interval(_pair_interval, paper_sharpe=sharpe, win_rate=win_rate)
-            trades_ok = trades >= _effective_min_trades
-            pnl_ok = total_pnl > MIN_PAPER_PNL
 
             # Skip strategies with negative Sharpe — they are losing money on average
             # and have no realistic path to graduation. Show only strategies with a
@@ -1971,29 +1969,26 @@ async def get_approaching_graduation(
             effective_wr_floor = _get_strategy_type_win_rate_floor(_strat_type)
             # Use the pre-computed regime-adjusted max ratio (computed once per request above)
             effective_max_ratio = _request_effective_max_ratio
-
-            wr_ok = win_rate >= effective_wr_floor
-            # P2 (Sprint C): mirror the authoritative is_qualified Wilson lower-bound
-            # win-rate gate so this "approaching" view is consistent with the real
-            # gate. Without it, a pair that clears the POINT win-rate floor but fails
-            # the Wilson lower bound is treated as fully-qualified here (skipped), yet
-            # rejected by is_qualified — so it vanishes from both the queue and this
-            # list. Compute the same type-floor-relative bound.
-            from src.strategy.graduation_gate import (
-                _wilson_lower_bound as _wlb, WR_CI_CONFIDENCE as _WRZ,
-                WR_CI_FLOOR_TOLERANCE as _WRTOL,
-            )
-            _wr_ci_ok = True
-            _wr_lb_disp = None
-            if win_rate is not None and trades and trades >= 1:
-                _wins_disp = int(round(win_rate * int(trades)))
-                _wr_lb_disp = _wlb(_wins_disp, int(trades), confidence=_WRZ)
-                _wr_ci_ok = _wr_lb_disp >= max(0.0, effective_wr_floor - _WRTOL)
             ratio = (sharpe / wf_sharpe) if wf_sharpe > 0 and sharpe > 0 else None
-            ratio_ok = ratio is not None and ratio >= MIN_QUALIFICATION_RATIO and ratio <= effective_max_ratio
 
-            if trades_ok and pnl_ok and wr_ok and _wr_ci_ok and ratio_ok:
-                continue  # fully qualified — graduation gate should have it
+            # A5: route the eligibility decision through the AUTHORITATIVE gate
+            # (is_qualified) instead of re-implementing the trades / pnl / win-rate /
+            # Wilson / qualification-ratio gates inline. One source of truth means the
+            # graduation queue and this "approaching" view can never disagree — the
+            # old inline copy had already drifted from is_qualified (it lacked the
+            # avg-pnl, WF-sharpe-CI, alpha and DSR gates), so a pair could show as
+            # "approaching/qualified" here yet be rejected by the real gate.
+            _paper_stats = {
+                "paper_trades": trades,
+                "paper_sharpe": sharpe,
+                "paper_win_rate": win_rate,
+                "paper_total_pnl": total_pnl,
+            }
+            _qualified, _reasons = is_qualified(
+                _paper_stats, wf_sharpe, interval=_pair_interval, strategy_type=_strat_type
+            )
+            if _qualified:
+                continue  # fully qualified — it belongs in the graduation queue, not here
 
             # Composite graduation score (0-100): weighted progress toward each gate.
             # Weights: trades 30%, qual_ratio 35%, win_rate 20%, pnl 15%.
@@ -2013,29 +2008,9 @@ async def get_approaching_graduation(
             pnl_pct = 1.0 if total_pnl > 0 else 0.0
             score = (trades_pct * 30 + sharpe_pct * 35 + wr_pct * 20 + pnl_pct * 15)
 
-            # Missing criteria — what's blocking graduation
-            missing = []
-            if not trades_ok:
-                missing.append(f"trades {trades}/{_effective_min_trades}")
-            if not pnl_ok:
-                missing.append(f"P&L {total_pnl:.0f} ≤ 0")
-            if not wr_ok:
-                missing.append(f"win rate {win_rate*100:.1f}% < {effective_wr_floor*100:.0f}% ({_strat_type or 'default'} floor)")
-            elif not _wr_ci_ok and _wr_lb_disp is not None:
-                missing.append(
-                    f"win rate CI lower bound {_wr_lb_disp*100:.0f}% < "
-                    f"{max(0.0, effective_wr_floor - _WRTOL)*100:.0f}% (small-sample — needs more trades)"
-                )
-            if not ratio_ok:
-                if ratio is not None:
-                    if ratio > effective_max_ratio:
-                        missing.append(f"qual ratio {ratio:.2f} > {effective_max_ratio:.1f}× (regime-adjusted cap)")
-                    else:
-                        missing.append(f"qual ratio {ratio:.2f} < {MIN_QUALIFICATION_RATIO}")
-                elif wf_sharpe <= 0:
-                    missing.append("no WF sharpe on record")
-                else:
-                    missing.append("Sharpe not computable")
+            # Missing criteria — the AUTHORITATIVE failure reasons from is_qualified
+            # (A5: no longer re-derived inline, so they always match the real gate).
+            missing = _reasons
 
             approaching.append({
                 "template_name": tname,

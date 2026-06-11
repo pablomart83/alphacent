@@ -422,8 +422,8 @@ class RiskManager:
                 active_strategy_ids = {s.id for s in active}
             finally:
                 session.close()
-        except Exception:
-            pass  # If DB unavailable, fall back to old behavior
+        except Exception:  # silent-ok: DB-unavailable → fall back to non-strategy-filtered behavior (safe)
+            pass
 
         return [
             pos for pos in positions
@@ -508,7 +508,7 @@ class RiskManager:
                         (closes[i] - closes[i - 1]) / closes[i - 1]
                         for i in range(1, len(closes))
                     ]
-            except Exception:
+            except Exception:  # silent-ok: missing returns → correlation sizing sub-step skipped (fail-open)
                 pass
 
             portfolio_value = getattr(account, 'equity', None) or account.balance
