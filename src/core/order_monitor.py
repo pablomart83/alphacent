@@ -352,6 +352,7 @@ class OrderMonitor:
                         logger.warning(f"  Could not match position to order: {e}")
 
                     import uuid
+                    from sqlalchemy.exc import IntegrityError as _IntegrityErr
                     new_pos = PositionORM(
                         id=str(uuid.uuid4()),
                         strategy_id=matched_strategy_id,
@@ -369,7 +370,24 @@ class OrderMonitor:
                         closed_at=None,
                         account_type=self.account_type,
                     )
-                    session.add(new_pos)
+                    # A3: isolate each create in a SAVEPOINT. An orphan position that
+                    # maps to an already-open (strategy_id, symbol, account_type) — via
+                    # the 'etoro_position' fallback or eToro ID oscillation — collides
+                    # with uq_open_pos_strategy_symbol_acct. Without the savepoint the
+                    # single UniqueViolation aborts the ENTIRE startup reconcile at
+                    # commit (observed 2026-06-11 20:58). The savepoint rolls back only
+                    # the offending row so the rest of the reconcile completes.
+                    try:
+                        with session.begin_nested():
+                            session.add(new_pos)
+                            session.flush()
+                    except _IntegrityErr as _ie:
+                        logger.warning(
+                            f"  SKIPPED create for {normalized_symbol} (eToro ID: {etoro_id}) "
+                            f"[{self.account_type}]: an open position already exists for this "
+                            f"(strategy, symbol, account) — {getattr(_ie, 'orig', _ie)}"
+                        )
+                        continue
                     results["positions_created"] += 1
 
                     discrepancy = f"CREATED: Position {normalized_symbol} (eToro ID: {etoro_id}) - existed on eToro but not in DB"
@@ -1966,7 +1984,22 @@ class OrderMonitor:
                             else None
                         ),
                     )
-                    session.add(new_pos)
+                    # A3: isolate the create in a SAVEPOINT so a unique-index
+                    # collision (uq_open_pos_strategy_symbol_acct) on one position
+                    # can't abort the whole 60s sync at commit. Roll back just this
+                    # row and continue syncing the rest of the book.
+                    from sqlalchemy.exc import IntegrityError as _IntegrityErrSync
+                    try:
+                        with session.begin_nested():
+                            session.add(new_pos)
+                            session.flush()
+                    except _IntegrityErrSync as _ie_sync:
+                        logger.warning(
+                            f"SKIPPED create for {normalized_symbol} (eToro ID: {pos.etoro_position_id}) "
+                            f"[{account_type}]: open position already exists for this "
+                            f"(strategy, symbol, account) — {getattr(_ie_sync, 'orig', _ie_sync)}"
+                        )
+                        continue
                     created_count += 1
                     logger.info(f"Created new position from eToro: {normalized_symbol} {pos_side_str} (eToro ID: {pos.etoro_position_id})")
                     # Update in-memory dicts so subsequent iterations in this same sync
