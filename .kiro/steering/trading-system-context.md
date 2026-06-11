@@ -427,6 +427,24 @@ Every component that touches DB positions or orders **must** scope to `account_t
 
 **DB constraint:** `positions.etoro_position_id` unique constraint is composite `(etoro_position_id, account_type)` — not global. Migration: `migrations/migrate_etoro_id_constraint.sql`.
 
+**Position-CLOSE paths are the most dangerous (2026-06-11 incident).** ANY code path that marks a position closed — monitoring sync, the `account.py` endpoints (`/positions`, `POST /positions/sync`), strategy retirement, zombie exits — must obey TWO rules:
+1. **Account-scope the close-check query.** `POST /positions/sync` had no `account_type` filter on its "positions in DB no longer on eToro → close" query. The endpoint's eToro client is mode-scoped (DEMO client returns only demo positions), so loading/syncing the DEMO view marked the LIVE AMD+PANW "no longer on eToro" and closed them. Every close-check must compare DB positions of account X only against eToro's account-X response.
+2. **Never close on an EMPTY/partial eToro response.** A transient API blip returning `[]` must not wholesale-close the book. Skip the close pass when the eToro list is empty; only the monitoring sync's consecutive-miss guard may close on absence, and only after N consecutive non-empty misses.
+
+**Erroneous-close → duplicate-entry cascade.** When a live position is wrongly closed in the DB, the live-pass duplicate guard (reads DB open positions) sees an empty slot and RE-ENTERS → a duplicate REAL position on eToro. The `uq_open_pos_strategy_symbol_acct` index then blocks reopening the original. This cascade turned one bad close into a duplicate PANW + an unmanaged original. Closing a position in the DB is never harmless — it can spawn a real order.
+
+### LIVE Sizing — CIO position_size is Authoritative (post-2026-06-11)
+
+For a LIVE (template, symbol) pair, the CIO-approved `live_strategies.position_size` (REAL dollars) IS the risk decision. The live order size = `position_size ÷ mirror_ratio`, full stop. `RiskManager.validate_signal` runs on the live pass as a **GATE only** — it may VETO an entry (kill switch, circuit breaker, VaR, exposure/symbol caps) but it must **NEVER shrink the order below the CIO-approved size**. A reverted Sprint-A change (`_live_size2 = min(pipeline, CIO/mirror)`) let the vol/drawdown pipeline shrink AMD to $25 real vs the approved $100 — the CIO never approved that. The vol/drawdown/heat pipeline governs DEMO/PAPER sizing, not the CIO live size. Reposition (close + re-enter) is the only way to resize an open live position, and it is a CIO decision.
+
+### Typed Notional — Single Source of Truth (post-2026-06-11)
+
+`positions.quantity` is **SHARES** (units); `invested_amount` is the canonical **DOLLAR** field; entry orders store dollars; close/SL/TP orders inherit share-valued quantity. `src/models/notional.py` (`position_notional_usd` / `position_shares`) is the one place that knows the rule — route every position dollar-value read through it (or `RiskManager._get_position_value`, which delegates to it). **Critical:** every `Position(...)` dataclass built from an ORM row that feeds the risk path MUST set `invested_amount`. If omitted, the accessor falls back to `shares × price`, and for dollar-valued demo `quantity` (~2500) that inflates exposure to >$1M and falsely trips the position/exposure cap (blocked demo paper entries on 2026-06-11).
+
+### Position Price Freshness (A2, post-2026-06-11)
+
+`positions.price_updated_at` is the canonical "how fresh is current_price" field — stamped by the position sync on positions present on eToro that cycle. TSL breach enforcement reads it (forces a resync if stale, escalates a stale-price LIVE stop to CRITICAL). The FIX-09 watchdog and D1/D2 staleness checks should standardise on it (not-yet-unified — open architecture item).
+
 Every template × symbol × stage decision per cycle is persisted in `signal_decisions`. One row per (stage, decision) per strategy per cycle. Stages written:
 
 - `proposed` — proposer emits a strategy (track_proposals → decision_log.record_batch)

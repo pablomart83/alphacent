@@ -247,16 +247,17 @@ Three layers of defense deployed:
 
 ---
 
-## CURRENT SYSTEM STATE (2026-06-10 end of session)
+## CURRENT SYSTEM STATE (2026-06-11 end of session)
 
-- **DEMO equity:** ~$535K | **Open positions:** ~55 PAPER | **Regime:** trending_up_weak (normal)
-- **DEMO balance (free):** ~$385K | **Deployed:** ~$147K
-- **LIVE strategies:** 14 active (DELL, MU×4, COPPER, PANW, TQQQ, SOXL, TXN, INTC, XLK, GOOGL, AMD)
-- **LIVE equity:** ~$10,240 virtual / ~$1,300 real | **Mirror ratio:** 0.127
-- **LIVE open positions:** 6 (AMD, DELL, MU, COPPER, INTC, PANW)
-- **BACKTESTED strategies:** 302 (approved, generating signals)
-- **Pullback gate:** ACTIVE (mild, -1.4% 5d SPY) — only blocks intraday/aggressive, not daily trend
-- **Latest commits:** `42aa454` (DB session fix) → `28911e1` (duplicate guard) → `7d0aae4` (live order write) → `b1b8481` (pullback gate) → `2b44eee` (P1 fixes) → `581362d` (Intel fixes) → `2ba01e0` (crash audit fixes)
+- **DEMO equity:** ~$533K | **Open positions:** ~75 PAPER | **Deployed:** ~$282K (deploying again after the pullback deep-oversold exemption; was idle ~$300K free)
+- **Regime:** moderate pullback (SPY 5d −2.9%, RSI(5)=18, deeply oversold)
+- **LIVE strategies:** ~11 active — AMD, DELL, INTC, MU×4, PANW, SOXL, TQQQ, XLK. (GOOGL, TXN, COPPER RETIRED 2026-06-11; SOXL RE-GRADUATED.)
+- **LIVE equity:** ~$10,260 virtual / ~$1,300 real | **Mirror ratio:** 0.127
+- **LIVE open positions (reconciled to eToro):** PANW ($1,000v original) + AMD (re-entering at approved $100r after reposition). Verify next session that AMD re-entered at $100r and the book matches eToro.
+- **BACKTESTED strategies:** ~301 (approved; emitting 5–9K signals/day — NOT idle/broken)
+- **Pullback gate:** ACTIVE (moderate) — blocks intraday/momentum + broad trend, BUT exempts daily trend-following when RSI(5)<20 (deep-oversold buy-the-dip, evidence-based).
+- **Latest commits (2026-06-11):** `2679ec3` (Sprint B graduation rigor) → `65f1e9a` (Sprint C P2) → `503a39f` (Sprint D Intel A1/A6) → `fa8ec84` (A1 interval + size-estimate fix) → `8474f3e` (retire→flag closure) → `da3f032` (F31+A2+A4+A1-doc) → `91e148d` (A1 phase1 + phantom-exposure fix) → `3c4dc42` (pullback deep-oversold exemption) → `f34acb3` (REVERT P1-1 min, honor CIO size) → `54fca40` (live incident docs)
+- **eToro vs DB vs UI:** all three diverged today (account.py cross-account close bug) — now reconciled + fixed. ALWAYS reconcile live 3-way (see steering).
 
 ---
 
