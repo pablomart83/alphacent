@@ -59,44 +59,20 @@ def get_etoro_client(mode: TradingMode, config: Configuration = Depends(get_conf
         return None
 
 
-def _finalize_position_close(position_orm) -> None:
-    """Set closed_at and compute realized_pnl when closing a position.
-    
-    Calculates realized P&L from price difference (not stale unrealized_pnl).
-    After closing, unrealized is zeroed out. Also logs the exit to the trade journal
-    so the performance feedback loop has accurate data.
-    """
-    position_orm.closed_at = datetime.now()
-    # Calculate realized PnL from actual price movement
-    entry = position_orm.entry_price or 0
-    current = position_orm.current_price or entry
-    invested = getattr(position_orm, 'invested_amount', None) or getattr(position_orm, 'quantity', 0) or 0
-    if entry > 0 and invested > 0:
-        side_str = str(position_orm.side).upper() if position_orm.side else 'LONG'
-        if 'SHORT' in side_str or 'SELL' in side_str:
-            calculated_pnl = invested * (entry - current) / entry
-        else:
-            calculated_pnl = invested * (current - entry) / entry
-        position_orm.realized_pnl = (position_orm.realized_pnl or 0) + calculated_pnl
-    else:
-        position_orm.realized_pnl = (position_orm.realized_pnl or 0) + (position_orm.unrealized_pnl or 0)
-    position_orm.unrealized_pnl = 0.0
-    position_orm.pending_closure = False
+def _finalize_position_close(position_orm, *, expected_account_type=None, reason="position_closed") -> bool:
+    """Mark a position closed. Delegates to the canonical close primitive
+    (src.core.position_close) so the account-scope guard + P&L + journaling
+    live in ONE place. Returns True if closed, False if refused (cross-account).
 
-    # Log to trade journal for performance feedback loop
-    try:
-        from src.analytics.trade_journal import TradeJournal
-        from src.models.database import get_database
-        journal = TradeJournal(get_database())
-        journal.log_exit(
-            trade_id=str(position_orm.id),
-            exit_time=position_orm.closed_at,
-            exit_price=position_orm.current_price,
-            exit_reason="position_closed",
-            symbol=position_orm.symbol,
-        )
-    except Exception as e:
-        logger.debug(f"Could not log exit to trade journal for {getattr(position_orm, 'symbol', '?')}: {e}")
+    `expected_account_type` should be passed by every caller that knows the
+    request's mode, so a demo-mode request can never finalize a live position.
+    """
+    from src.core.position_close import finalize_position_close as _canonical_close
+    return _canonical_close(
+        position_orm,
+        reason=reason,
+        expected_account_type=expected_account_type,
+    )
 
 
 def _resolve_instrument_id(symbol: str):
@@ -748,7 +724,7 @@ async def approve_position_closure(
         etoro_client.close_position(position_orm.etoro_position_id, instrument_id=instrument_id)
         
         # Update position in database
-        _finalize_position_close(position_orm)
+        _finalize_position_close(position_orm, expected_account_type=("live" if mode == TradingMode.LIVE else "demo"))
         db.commit()
         
         logger.info(f"Position {position_id} closed successfully")
@@ -827,7 +803,7 @@ async def approve_bulk_closures(
             # If monitoring service already submitted a close order, just mark as closed in DB
             if position_orm.close_order_id:
                 logger.info(f"Position {position_id} ({position_orm.symbol}) already has close order {position_orm.close_order_id} — marking as closed")
-                _finalize_position_close(position_orm)
+                _finalize_position_close(position_orm, expected_account_type=("live" if mode == TradingMode.LIVE else "demo"))
                 success_count += 1
                 continue
             
@@ -835,7 +811,7 @@ async def approve_bulk_closures(
             try:
                 instrument_id = _resolve_instrument_id(position_orm.symbol)
                 etoro_client.close_position(position_orm.etoro_position_id, instrument_id=instrument_id)
-                _finalize_position_close(position_orm)
+                _finalize_position_close(position_orm, expected_account_type=("live" if mode == TradingMode.LIVE else "demo"))
                 success_count += 1
             except CircuitBreakerOpen:
                 # Circuit breaker tripped — mark for monitoring service to handle
@@ -848,7 +824,7 @@ async def approve_bulk_closures(
                 # If position is already closed on eToro (404, not found, etc.), mark as closed
                 if "not found" in error_msg or "404" in error_msg or "already closed" in error_msg or "does not exist" in error_msg:
                     logger.info(f"Position {position_id} ({position_orm.symbol}) appears already closed on eToro — marking as closed")
-                    _finalize_position_close(position_orm)
+                    _finalize_position_close(position_orm, expected_account_type=("live" if mode == TradingMode.LIVE else "demo"))
                     success_count += 1
                 else:
                     logger.error(f"Failed to close position {position_id}: {e}")
@@ -1052,18 +1028,16 @@ async def sync_positions(
                     new_count += 1
                     logger.info(f"Created new position for {normalized_symbol} (eToro ID: {etoro_pos_id})")
         
-        # Check for positions in DB that are no longer on eToro — SCOPED to this
-        # account, and SKIPPED on an empty eToro response (a transient/auth blip must
-        # never wholesale-close the book; the monitoring sync has its own miss guard).
+        # Check for positions in DB that are no longer on eToro. Both guards
+        # (account-scope + empty-response) are enforced by the canonical
+        # positions_absent_from_etoro helper, and finalize asserts the account
+        # so a demo-scoped sync can never close a live row (2026-06-11 incident).
+        from src.core.position_close import positions_absent_from_etoro
         if etoro_positions:
-            open_positions = db.query(PositionORM).filter(
-                PositionORM.closed_at.is_(None),
-                PositionORM.account_type == _acct_type,
-            ).all()
-
-            for pos in open_positions:
-                if pos.etoro_position_id and pos.etoro_position_id not in etoro_position_ids:
-                    _finalize_position_close(pos)
+            for pos in positions_absent_from_etoro(db, _acct_type, etoro_position_ids):
+                if _finalize_position_close(
+                    pos, expected_account_type=_acct_type, reason="no longer on eToro"
+                ):
                     closed_count += 1
                     logger.info(f"Position {pos.id} ({pos.symbol}) [{_acct_type}] no longer on eToro — marking closed")
         else:
@@ -1169,7 +1143,7 @@ async def close_positions(
             etoro_client.close_position(position_orm.etoro_position_id, instrument_id=instrument_id)
             
             # Update position in database
-            _finalize_position_close(position_orm)
+            _finalize_position_close(position_orm, expected_account_type=("live" if mode == TradingMode.LIVE else "demo"))
             success_count += 1
             
             logger.info(f"Position {position_id} ({position_orm.symbol}) closed successfully")
@@ -1595,7 +1569,7 @@ async def close_all_positions(
         try:
             instrument_id = _resolve_instrument_id(position_orm.symbol)
             etoro_client.close_position(position_orm.etoro_position_id, instrument_id=instrument_id)
-            _finalize_position_close(position_orm)
+            _finalize_position_close(position_orm, expected_account_type=_account_type)
             success_count += 1
             
             # Log to trade journal for analytics

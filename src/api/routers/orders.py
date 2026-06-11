@@ -871,11 +871,14 @@ async def close_filled_order_position(
         # Determine expected position side from order side
         expected_position_side = PositionSide.LONG if order_orm.side == OrderSide.BUY else PositionSide.SHORT
         
-        # Find open position with matching symbol and strategy
+        # Find open position with matching symbol and strategy — account-scoped
+        # (eToro reuses position IDs across accounts; never match the wrong book).
+        _acct_close = "live" if mode == TradingMode.LIVE else "demo"
         position_orm = session.query(PositionORM).filter_by(
             symbol=order_orm.symbol,
             strategy_id=order_orm.strategy_id,
-            side=expected_position_side
+            side=expected_position_side,
+            account_type=_acct_close,
         ).filter(
             PositionORM.closed_at.is_(None)
         ).first()
@@ -913,9 +916,15 @@ async def close_filled_order_position(
                 instrument_id=instrument_id
             )
             
-            # Update position in database
-            from datetime import datetime
-            position_orm.closed_at = datetime.now()
+            # Update position in database — canonical close (computes realized P&L,
+            # journals the exit, and asserts account scope). The previous raw
+            # `closed_at = now()` left realized_pnl and the trade-journal exit unset.
+            from src.core.position_close import finalize_position_close
+            finalize_position_close(
+                position_orm,
+                reason="closed_via_order_endpoint",
+                expected_account_type=_acct_close,
+            )
             session.commit()
             
             logger.info(f"Closed position {position_orm.id} for order {order_id}")
