@@ -256,6 +256,12 @@ class PositionORM(Base):
     close_order_id = Column(String, nullable=True)  # ID of the close order submitted for this position
     close_attempts = Column(Integer, nullable=False, default=0)  # Number of close order attempts
     invested_amount = Column(Float, nullable=True)  # Actual capital invested (from eToro 'amount' field, not leveraged notional)
+    # A2 (staleness unification): timestamp current_price was last refreshed from
+    # eToro by the position sync. Single source of truth for "how fresh is this
+    # position's price" — used by breach enforcement (stops must act on fresh
+    # prices), and the canonical input the FIX-09 / D1-D2 staleness predicates
+    # should standardise on. Nullable: backfilled on the next sync after migration.
+    price_updated_at = Column(DateTime, nullable=True)
 
     # Phase 2: which account this position belongs to ('demo' or 'live')
     account_type = Column(String(10), nullable=False, default='demo')

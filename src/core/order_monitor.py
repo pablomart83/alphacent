@@ -929,7 +929,10 @@ class OrderMonitor:
                                                 f"order {order.id[:8]} (error {error_code}: {error_message})"
                                             )
                                     except Exception as _del_err:
-                                        logger.debug(f"Could not delete ghost position for {order.id[:8]}: {_del_err}")
+                                        # A4: bumped debug→warning. A lingering ghost
+                                        # optimistic position pollutes the book and later
+                                        # surfaces as a misleading "Etoro Closed" — visible.
+                                        logger.warning(f"Could not delete ghost position for {order.id[:8]}: {_del_err}")
                                     continue
                                 
                                 # Update based on statusID
@@ -1348,7 +1351,11 @@ class OrderMonitor:
                                 finally:
                                     _ltc_sess.close()
                         except Exception as ltc_err:
-                            logger.debug(f"live_trade_count increment failed for {order.id}: {ltc_err}")
+                            # A4: bumped debug→warning. live_trade_count gates the
+                            # retirement evaluation (min_live_trades_before_evaluation);
+                            # a silent undercount lets a losing LIVE strategy evade
+                            # retirement checks. Must be visible.
+                            logger.warning(f"live_trade_count increment failed for {order.id}: {ltc_err}")
                 
                 except Exception as e:
                     _emsg = str(e)
@@ -2268,6 +2275,32 @@ class OrderMonitor:
             
             # Update last sync time
             self._last_full_sync = time.time()
+
+            # A2 (staleness unification): stamp price_updated_at for every open
+            # position of this account that was confirmed present on eToro this
+            # sync — its current_price was just refreshed in the loop above. This
+            # is the single source of truth for per-position price freshness that
+            # breach enforcement reads (a stop must act on a fresh price). Scoped
+            # to etoro_position_ids so a position kept open by the consecutive-miss
+            # guard (price NOT refreshed this cycle) is correctly NOT marked fresh.
+            try:
+                from datetime import datetime as _dt_price
+                if etoro_position_ids:
+                    session.query(PositionORM).filter(
+                        PositionORM.account_type == account_type,
+                        PositionORM.closed_at.is_(None),
+                        PositionORM.etoro_position_id.in_(etoro_position_ids),
+                    ).update(
+                        {PositionORM.price_updated_at: _dt_price.utcnow()},
+                        synchronize_session=False,
+                    )
+                    session.commit()
+            except Exception as _price_ts_err:
+                logger.debug(f"price_updated_at stamp failed (non-fatal): {_price_ts_err}")
+                try:
+                    session.rollback()
+                except Exception:
+                    pass
 
             # ── Wire live_strategies.live_trades and live_pnl ────────────────────
             # Update the live_strategies row with current live trade counts and P&L.

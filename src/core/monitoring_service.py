@@ -116,6 +116,10 @@ class MonitoringService:
         # with evidence rather than guessed at.
         self._SLOW_PHASE_THRESHOLD_S: float = 30.0
         self._SLOW_CYCLE_THRESHOLD_S: float = 45.0
+        # F31: max real close orders auto-submitted per pending-closure cycle.
+        # Generous (live book is ≤ ~14) so normal crash stop-outs are never delayed;
+        # only a runaway flag / accidental bulk retire trips it (capped + CRITICAL alert).
+        self._max_closures_per_cycle: int = 25
         # One-time live reconcile: run once before the first position sync to
         # verify recently-filled live orders have open positions (Step 2b).
         # Mirrors the DEMO reconcile_on_startup in trading_scheduler.
@@ -2904,16 +2908,40 @@ class MonitoringService:
                     breached = True
 
                 if breached:
+                    # A2 (staleness unification): annotate the breach with price
+                    # freshness from price_updated_at. A stop that fires on a stale
+                    # quote is suspect — we STILL enforce it (never disable stops on
+                    # stale data, per steering), but surface the age, and escalate to
+                    # CRITICAL for LIVE capital so a real-money stop acting on a stale
+                    # price is impossible to miss. (_PRICE_FRESHNESS_SLA_S is defined
+                    # by the freshness guard at the top of this method.)
+                    _price_ts = getattr(pos_orm, 'price_updated_at', None)
+                    _price_age_s = (
+                        (datetime.utcnow() - _price_ts).total_seconds()
+                        if _price_ts else None
+                    )
+                    _stale_price = _price_age_s is not None and _price_age_s > _PRICE_FRESHNESS_SLA_S
+                    _age_note = (
+                        f", price_age={_price_age_s/60:.0f}m"
+                        if _price_age_s is not None else ", price_age=unknown"
+                    )
                     pos_orm.pending_closure = True
                     pos_orm.closure_reason = (
                         f"Trailing stop breached: price {pos_orm.current_price:.4f} "
                         f"{'<=' if is_long else '>='} stop {pos_orm.stop_loss:.4f}"
                     )
                     breach_count += 1
+                    if _stale_price and (pos_orm.account_type or 'demo') == 'live':
+                        logger.critical(
+                            f"[A2] LIVE stop-loss breach acted on STALE price for "
+                            f"{pos_orm.symbol} ({pos_orm.id}): price={pos_orm.current_price:.4f} "
+                            f"age={_price_age_s/60:.0f}m > {_PRICE_FRESHNESS_SLA_S/60:.0f}m SLA — "
+                            f"closing on best-known price; investigate position-sync staleness."
+                        )
                     logger.warning(
                         f"Stop-loss breach for {pos_orm.symbol} ({pos_orm.id}): "
                         f"price={pos_orm.current_price:.4f}, stop={pos_orm.stop_loss:.4f}, "
-                        f"side={'LONG' if is_long else 'SHORT'}"
+                        f"side={'LONG' if is_long else 'SHORT'}{_age_note}"
                     )
 
             if breach_count > 0:
@@ -3440,6 +3468,33 @@ class MonitoringService:
 
             if not pending_positions:
                 return {"submitted": 0, "failed": 0, "skipped": 0, "total": 0}
+
+            # F31: mass-closure guard. This method auto-submits real close orders
+            # with no rate limit — a runaway flag (a bug, or an accidental bulk
+            # retire) could liquidate the whole book in one ~12s burst. Cap the
+            # number of submissions per cycle and raise a CRITICAL alert when the
+            # cap is hit. Breach/stop closures are prioritized so genuine stop-loss
+            # exits during a crash are never starved by the cap; the overflow
+            # (typically intentional/retirement closures) is processed on subsequent
+            # 60s cycles. With the live book ≤ ~14 positions the cap never affects
+            # live; it protects against a demo-side runaway or a future larger book.
+            if len(pending_positions) > self._max_closures_per_cycle:
+                logger.critical(
+                    f"[F31] mass-closure guard: {len(pending_positions)} positions "
+                    f"pending closure (> {self._max_closures_per_cycle}/cycle cap) — "
+                    f"possible runaway flag or accidental bulk retire. Processing "
+                    f"{self._max_closures_per_cycle} this cycle (breach/stop closures "
+                    f"first); remainder deferred to next cycle. REVIEW IMMEDIATELY."
+                )
+
+                def _is_breach_closure(p) -> bool:
+                    _r = (getattr(p, 'closure_reason', '') or '').lower()
+                    return ('breach' in _r) or ('stop' in _r) or ('sl ' in _r)
+
+                # Stable sort: breach/stop closures first (key 0), then the rest (key 1).
+                pending_positions = sorted(
+                    pending_positions, key=lambda p: 0 if _is_breach_closure(p) else 1
+                )[: self._max_closures_per_cycle]
 
             logger.info(f"Processing {len(pending_positions)} positions pending closure")
 
