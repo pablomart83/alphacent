@@ -2580,38 +2580,34 @@ class TradingScheduler:
                                             )
                                             continue
 
-                                        # P1-1 (Sprint A): the order size is the
-                                        # CIO-approved real-dollar size converted to
-                                        # virtual, BUT capped by the risk pipeline output.
-                                        # Previously the pipeline size was computed and
-                                        # discarded ("advisory"), so vol-scaling, drawdown
-                                        # sizing and heat reduction never affected the live
-                                        # order — and validate_signal's symbol/exposure/VaR
-                                        # caps were validated against a number that was not
-                                        # the number actually traded. Taking min() honors the
-                                        # documented contract ("pipeline can size lower than
-                                        # the CIO cap but never higher"): the executed size is
-                                        # always <= the validated pipeline size, so every cap
-                                        # that passed in validate_signal still holds, and the
-                                        # risk framework can now scale the live order DOWN in
-                                        # adverse regimes. It can never scale it ABOVE the CIO
-                                        # cap, so real-capital risk only ever decreases.
+                                        # The order size is the CIO-approved real-dollar
+                                        # size converted to virtual. The CIO position_size IS
+                                        # the risk decision for a live (template, symbol) pair:
+                                        # validate_signal above is a GATE (kill-switch, circuit
+                                        # breaker, VaR, exposure/symbol caps) — if it passes we
+                                        # execute at EXACTLY the CIO-approved size. We do NOT let
+                                        # the vol/drawdown/heat pipeline shrink it below the CIO
+                                        # size. The reverted P1-1 min() did exactly that and
+                                        # opened AMD at $25r instead of the approved $100r on
+                                        # 2026-06-11 (pipeline hit its $200v floor on a drawn-down
+                                        # live book). The pipeline size is advisory only here.
                                         _mirror2 = _live_cfg2.get('mirror_ratio', 0.10)
                                         _pipeline_size2 = _live_validation2.position_size
                                         _cio_real2 = float(_appr.position_size)
-                                        _cio_virtual2 = _cio_real2 / _mirror2
-                                        if _pipeline_size2 and _pipeline_size2 > 0:
-                                            _live_size2 = min(_pipeline_size2, _cio_virtual2)
-                                        else:
-                                            _live_size2 = _cio_virtual2
-                                        _size_binding2 = (
-                                            "pipeline" if _live_size2 < _cio_virtual2 else "CIO"
-                                        )
+                                        _live_size2 = _cio_real2 / _mirror2
+                                        if _pipeline_size2 and _pipeline_size2 > _live_size2:
+                                            # CIO size exceeds what the risk pipeline would allow
+                                            # — informational; CIO sizes are intentionally small
+                                            # and below the live caps, but surface it if not.
+                                            logger.debug(
+                                                f"Live pass sizing: {_live_sym} CIO size "
+                                                f"${_live_size2:.0f}v exceeds pipeline "
+                                                f"${_pipeline_size2:.0f}v (CIO is authoritative)"
+                                            )
                                         logger.info(
                                             f"Live pass sizing: {_live_sym} "
-                                            f"CIO=${_cio_real2:.0f}r (${_cio_virtual2:.0f}v cap) "
-                                            f"pipeline=${_pipeline_size2:.0f}v → "
-                                            f"order=${_live_size2:.0f}v (binding={_size_binding2})"
+                                            f"CIO=${_cio_real2:.0f}r → ${_live_size2:.0f}v "
+                                            f"(pipeline=${_pipeline_size2:.0f}v advisory, CIO authoritative)"
                                         )
                                     else:
                                         # Fallback: no risk_manager or no account info —
