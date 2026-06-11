@@ -4403,8 +4403,15 @@ async def get_size_estimate(
         if not acct_row:
             raise HTTPException(status_code=503, detail="Live account info not available")
 
+        # P2 fix (Sprint C follow-up): AccountInfo requires `mode` and `updated_at`
+        # (no defaults). They were omitted here, so this size-estimate endpoint 500'd
+        # with "AccountInfo.__init__() missing 2 required positional arguments" every
+        # time the CIO opened the graduation size preview. Pre-existing; unrelated to
+        # the A1/graduation-gate changes.
+        from src.models.enums import TradingMode as _TM_size
         account = AccountInfo(
             account_id=acct_row.account_id,
+            mode=_TM_size.LIVE,
             balance=float(acct_row.balance),
             equity=float(acct_row.equity),
             buying_power=float(acct_row.buying_power or acct_row.balance),
@@ -4413,6 +4420,7 @@ async def get_size_estimate(
             daily_pnl=float(acct_row.daily_pnl or 0),
             total_pnl=float(acct_row.total_pnl or 0),
             positions_count=int(acct_row.positions_count or 0),
+            updated_at=acct_row.updated_at or datetime.now(),
         )
 
         # Build a synthetic signal for sizing purposes

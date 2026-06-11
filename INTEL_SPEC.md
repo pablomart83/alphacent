@@ -198,23 +198,35 @@ Key format is always specific enough to dedup correctly across runs.
 
 ### Category A — Strategy Health
 
-**A1 — BACKTESTED strategy with 0 signals for >3 days**
+**A1 — BACKTESTED strategy idle past its interval-aware threshold**
 ```
 key: f"strategy:{strategy.id}"
-query: SELECT id, name, status, activated_at, performance->>'last_signal_at'
-       FROM strategies
-       WHERE status = 'BACKTESTED'
-       AND (performance->>'last_signal_at' IS NULL
-            OR (performance->>'last_signal_at')::timestamp < NOW() - INTERVAL '3 days')
-       AND activated_at < NOW() - INTERVAL '3 days'
-severity: P1
-evidence: List of strategy names + days since activation + days since last signal
-action: "Check entry conditions in strategy_engine logs. Entry conditions may never fire
-         for current market data. Consider retiring or adjusting template parameters."
-ask_kiro: "Finding A1: [N] BACKTESTED strategies have had 0 signals for >3 days.
+source-of-truth: signal_decisions (stage='signal_emitted'). NOTE: do NOT use
+       strategies.performance->>'last_signal_at' — that key is never written
+       (the performance JSON only holds avg_loss/sharpe/win_rate/total_trades/etc.),
+       so reading it flags EVERY aged BACKTESTED strategy (100% false positive,
+       confirmed Sprint D 2026-06-11: 188/300 BACKTESTED strategies were actively
+       signalling while all were flagged "0 signals").
+query: WITH last_sig AS (
+           SELECT strategy_id, MAX(timestamp) AS last_signal_at
+           FROM signal_decisions WHERE stage='signal_emitted' GROUP BY strategy_id)
+       SELECT s.id, s.name, s.activated_at, ls.last_signal_at, <interval>
+       FROM strategies s LEFT JOIN last_sig ls ON ls.strategy_id = s.id
+       WHERE s.status = 'BACKTESTED'
+       AND activated_at < NOW() - <idle_threshold>
+       AND (ls.last_signal_at IS NULL OR ls.last_signal_at < NOW() - <idle_threshold>)
+idle_threshold: interval-aware — 1h/2h → 2 days, 4h → 5 days, 1d (default) → 10 days.
+       (A flat 3-day window wrongly flagged low-frequency daily strategies that
+        routinely go a week+ between signals.)
+severity: P2  (RESEARCH-stage hygiene, not a live-capital risk; was P1, drowned the queue)
+evidence: strategy name + interval + days since activation + last signal_emitted + threshold
+action: "Check signal_decisions / strategy_engine logs. If entry conditions never fire
+         across many cycles, consider retiring or adjusting template parameters."
+ask_kiro: "Finding A1: [N] BACKTESTED strategies idle past their interval-aware threshold.
            Strategies: [list]. Check if entry conditions are achievable in current regime.
            Evidence: [evidence]. Investigate and recommend action."
 ```
+
 
 **A2 — pending_retirement strategy still generating new positions**
 ```

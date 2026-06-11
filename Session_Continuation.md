@@ -6,9 +6,9 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**Sprint C + D complete (Jun 11 2026, ~09:00 UTC). P2 quick-wins deployed; Intel A1 "156 dead strategies" finding FALSIFIED by ground truth (it was a telemetry false positive — no mass action needed). See "SESSION 2026-06-11 — SPRINT C + D" below.**
+**Sprint C + D complete + follow-ups (Jun 11 2026). A1 now interval-aware (1h/2h→2d, 4h→5d, 1d→10d; 81→39 genuinely-stuck); INTEL_SPEC A1 doc corrected; fixed pre-existing graduation size-estimate 500 (AccountInfo missing mode/updated_at). CIO ACTIONS OUTSTANDING: (1) TXN live is NOT retired (the −$196/0%WR loser) — still trading; (2) SOXL was retired (the +$868 winner) — confirm if intended; (3) GOOGL+COPPER retired OK, but COPPER still holds an open $1,000 live position (retirement stops new entries only).**
 
-**Sprint B complete (Jun 11 2026, 07:36 UTC). Graduation-gate statistical-power fixes deployed & verified live (P0-2). ACTION FOR CIO: review GOOGL / TXN / COPPER live strategies for retirement (flagged, NOT auto-retired).**
+**Sprint B complete (Jun 11 2026, 07:36 UTC). Graduation-gate statistical-power fixes deployed & verified live (P0-2).**
 
 ---
 

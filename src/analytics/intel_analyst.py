@@ -338,22 +338,40 @@ class IntelAnalyst:
             # As a result EVERY aged BACKTESTED strategy was flagged "0 signals" — a
             # 100% false positive (verified: 188/300 BACKTESTED strategies emitted
             # signals in the last 7d; all 171 previously-flagged had submitted orders).
-            # The real signal history lives in signal_decisions (stage='signal_emitted'),
-            # the same source the /strategies API uses. Read from there.
+            # The real signal history lives in signal_decisions (stage='signal_emitted').
+            #
+            # Interval-aware idle threshold (Sprint D follow-up): a flat 3-day idle
+            # window is wrong for low-frequency strategies — a *daily* trend strategy
+            # routinely goes a week+ between signals and is not "broken". Scale the
+            # idle threshold by the strategy's interval so A1 only flags genuinely
+            # stuck strategies: 1h/2h → 2d, 4h → 5d, 1d (default) → 10d.
             rows = session.execute(text("""
-                SELECT s.id, s.name, s.activated_at, ls.last_signal_at
-                FROM strategies s
-                LEFT JOIN (
+                WITH last_sig AS (
                     SELECT strategy_id, MAX(timestamp) AS last_signal_at
                     FROM signal_decisions
                     WHERE stage = 'signal_emitted'
                     GROUP BY strategy_id
-                ) ls ON ls.strategy_id = s.id
-                WHERE s.status = 'BACKTESTED'
-                AND s.activated_at < NOW() - INTERVAL '3 days'
+                ),
+                cand AS (
+                    SELECT s.id, s.name, s.activated_at, ls.last_signal_at,
+                           COALESCE(s.strategy_metadata->>'interval',
+                                    s.rules->>'interval', '1d') AS iv
+                    FROM strategies s
+                    LEFT JOIN last_sig ls ON ls.strategy_id = s.id
+                    WHERE s.status = 'BACKTESTED'
+                )
+                SELECT id, name, activated_at, last_signal_at, iv
+                FROM cand
+                WHERE activated_at < NOW() - (
+                        CASE WHEN iv IN ('1h','2h') THEN INTERVAL '2 days'
+                             WHEN iv = '4h'         THEN INTERVAL '5 days'
+                             ELSE                        INTERVAL '10 days' END)
                 AND (
-                    ls.last_signal_at IS NULL
-                    OR ls.last_signal_at < NOW() - INTERVAL '3 days'
+                    last_signal_at IS NULL
+                    OR last_signal_at < NOW() - (
+                        CASE WHEN iv IN ('1h','2h') THEN INTERVAL '2 days'
+                             WHEN iv = '4h'         THEN INTERVAL '5 days'
+                             ELSE                        INTERVAL '10 days' END)
                 )
             """)).fetchall()
         finally:
@@ -362,26 +380,36 @@ class IntelAnalyst:
         if not rows:
             return None
 
+        _idle_days_by_iv = {"1h": 2, "2h": 2, "4h": 5}
         findings = []
         for row in rows:
             days_since = (datetime.now() - row[2]).days if row[2] else "?"
             last_sig = row[3].isoformat() if row[3] else "never"
-            evidence = f"Strategy: {row[1]}\nActivated: {days_since}d ago\nLast signal_emitted: {last_sig}"
+            iv = row[4] or "1d"
+            idle_threshold = _idle_days_by_iv.get(iv, 10)
+            evidence = (
+                f"Strategy: {row[1]}\nInterval: {iv}\nActivated: {days_since}d ago\n"
+                f"Last signal_emitted: {last_sig}\nIdle threshold for {iv}: {idle_threshold}d"
+            )
             findings.append(Finding(
                 check_id="A1",
                 key=f"strategy:{row[0]}",
                 category="A",
-                # P2, not P1: a BACKTESTED (RESEARCH-stage) strategy that is idle for
-                # 3+ days is research-pipeline hygiene, not a live-capital risk. Many
-                # are simply daily trend strategies that fire infrequently — not broken.
-                # Auto-resolution closes these once the strategy signals again.
+                # P2, not P1: a BACKTESTED (RESEARCH-stage) strategy that is idle past
+                # its interval-aware threshold is research-pipeline hygiene, not a
+                # live-capital risk. Auto-resolution closes it once it signals again.
                 severity="P2",
-                title=f"A1: {row[1]} — BACKTESTED {days_since}d, no signal in 3d+",
-                detail="BACKTESTED strategy has not emitted a signal in the last 3+ days (per signal_decisions). Often a low-frequency daily strategy; investigate the entry conditions only if persistently idle across many cycles.",
+                title=f"A1: {row[1]} — BACKTESTED {days_since}d, no signal in {idle_threshold}d+ ({iv})",
+                detail=(
+                    f"BACKTESTED strategy has not emitted a signal in the last "
+                    f"{idle_threshold}+ days (interval-aware threshold for a {iv} strategy, "
+                    f"per signal_decisions). Persistently idle past this window suggests the "
+                    f"entry conditions rarely/never fire for current market data."
+                ),
                 evidence=evidence,
-                recommended_action="Check signal_decisions / strategy_engine logs for this strategy. If entry conditions never fire for current market data across many cycles, consider retiring or adjusting template parameters.",
+                recommended_action="Check signal_decisions / strategy_engine logs for this strategy. If entry conditions never fire across many cycles, consider retiring or adjusting template parameters.",
                 context_links=[{"label": "Guard / Audit", "url": "/guard/audit"}],
-                ask_kiro_prompt=f'Intel finding [A1]: "{row[1]} — BACKTESTED {days_since}d, no signal in 3d+."\n\nEvidence: {evidence}\n\nRecommended action: Check signal_decisions for this strategy. Investigate only if persistently idle.',
+                ask_kiro_prompt=f'Intel finding [A1]: "{row[1]} — BACKTESTED {days_since}d, no signal in {idle_threshold}d+ ({iv})."\n\nEvidence: {evidence}\n\nRecommended action: Check signal_decisions for this strategy. Investigate the entry conditions if persistently idle.',
             ))
         return findings if findings else None
 
