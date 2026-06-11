@@ -432,6 +432,13 @@ Every component that touches DB positions or orders **must** scope to `account_t
 1. **Account-scope the close-check query.** `POST /positions/sync` had no `account_type` filter on its "positions in DB no longer on eToro → close" query. The endpoint's eToro client is mode-scoped (DEMO client returns only demo positions), so loading/syncing the DEMO view marked the LIVE AMD+PANW "no longer on eToro" and closed them. Every close-check must compare DB positions of account X only against eToro's account-X response.
 2. **Never close on an EMPTY/partial eToro response.** A transient API blip returning `[]` must not wholesale-close the book. Skip the close pass when the eToro list is empty; only the monitoring sync's consecutive-miss guard may close on absence, and only after N consecutive non-empty misses.
 
+**Canonical close primitives (A1, post-2026-06-11) — USE THESE, do not re-implement.** `src/core/position_close.py` is the single source of truth:
+- `finalize_position_close(pos, *, expected_account_type=..., reason=...)` — sets `closed_at` + realized P&L + journals the exit, and **REFUSES (logs CRITICAL, no-op) a cross-account close**. Every caller that knows the request mode MUST pass `expected_account_type`.
+- `positions_absent_from_etoro(session, account_type, etoro_position_ids)` — the canonical "no longer on eToro → candidate to close" query: account-scoped, and returns `[]` on an empty id set (the transient-blip guard). `allow_empty=True` only for callers with their own absence guard.
+The `account.py` close surface (sync close-check, single/bulk/close-all) and `orders.py` are routed through these. `order_monitor`'s reconcile/sync close paths are account-scoped per-instance with their own empty + consecutive-miss guards (sharing the finalize mechanics is a documented follow-up).
+
+**Batch position-creates MUST be savepoint-isolated (A3, post-2026-06-11).** `order_monitor.reconcile_on_startup` and `_sync_positions` create many positions in one transaction. A single `uq_open_pos_strategy_symbol_acct` collision (orphan → `etoro_position` fallback, or eToro ID oscillation) at commit aborted the WHOLE batch and left the session `InFailedSqlTransaction`. Each create is wrapped in `session.begin_nested()`; a collision rolls back only that row (logged `SKIPPED create`) and the batch completes. New batch-write code must follow this pattern.
+
 **Erroneous-close → duplicate-entry cascade.** When a live position is wrongly closed in the DB, the live-pass duplicate guard (reads DB open positions) sees an empty slot and RE-ENTERS → a duplicate REAL position on eToro. The `uq_open_pos_strategy_symbol_acct` index then blocks reopening the original. This cascade turned one bad close into a duplicate PANW + an unmanaged original. Closing a position in the DB is never harmless — it can spawn a real order.
 
 ### LIVE Sizing — CIO position_size is Authoritative (post-2026-06-11)
@@ -444,7 +451,7 @@ For a LIVE (template, symbol) pair, the CIO-approved `live_strategies.position_s
 
 ### Position Price Freshness (A2, post-2026-06-11)
 
-`positions.price_updated_at` is the canonical "how fresh is current_price" field — stamped by the position sync on positions present on eToro that cycle. TSL breach enforcement reads it (forces a resync if stale, escalates a stale-price LIVE stop to CRITICAL). The FIX-09 watchdog and D1/D2 staleness checks should standardise on it (not-yet-unified — open architecture item).
+`positions.price_updated_at` is the canonical "how fresh is current_price" field — stamped by the position sync on positions present on eToro that cycle. TSL breach enforcement reads it (forces a resync if stale, escalates a stale-price LIVE stop to CRITICAL). **Canonical helper (A2): `src/core/staleness.py`** — `PRICE_FRESHNESS_SLA_S` (180s) + `position_price_age_seconds()` / `is_position_price_stale()`. The TSL pre-breach resync guard and the breach age annotation import these (was a 3×-duplicated literal). NOTE: this is POSITION-PRICE freshness only; historical-bar freshness (SL-recalc/ATR, Intel D1/D2) and live equity-snapshot staleness (FIX-09) are distinct concepts with their own thresholds — do not merge them onto this.
 
 Every template × symbol × stage decision per cycle is persisted in `signal_decisions`. One row per (stage, decision) per strategy per cycle. Stages written:
 
