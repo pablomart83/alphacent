@@ -2553,6 +2553,29 @@ class TradingScheduler:
                                     conviction_override=int(_appr.conviction_min) if _appr.conviction_min is not None else None,
                                 )
                                 from src.models.enums import SignalAction as _LiveSignalAction
+
+                                def _rec_live(stage, decision, reason, sig, score=None):
+                                    """Funnel write for the live pass (2026-06-12). Previously
+                                    the live pass logged blocks/failures only to the text log:
+                                    signal_emitted appeared in signal_decisions, then the signal
+                                    vanished with no gate_blocked/order_failed row, hiding WHY a
+                                    live signal never became a trade (e.g. MU 06-05: conviction
+                                    80 but no fill → invisible). Fire-and-forget; never raises."""
+                                    try:
+                                        from src.analytics.decision_log import record_decision as _rd_live
+                                        _act_val = getattr(getattr(sig, 'action', None), 'value', '') or ''
+                                        _dir = 'long' if 'LONG' in _act_val else 'short'
+                                        _smeta = sig.metadata if isinstance(getattr(sig, 'metadata', None), dict) else {}
+                                        _rd_live(
+                                            stage=stage, decision=decision,
+                                            strategy_id=_live_strat_id, symbol=_live_sym,
+                                            direction=_dir, template=getattr(_strat_obj, 'name', None),
+                                            score=score, reason=reason,
+                                            metadata={'account_type': 'live', 'template': _smeta.get('template_name')},
+                                        )
+                                    except Exception:
+                                        pass
+
                                 for _lsig in _live_signals:
                                     if _lsig.symbol != _live_sym:
                                         continue
@@ -2566,6 +2589,8 @@ class TradingScheduler:
                                             f"Live pass: skipping {_lsig.action.value} {_live_sym} "
                                             f"— position/pending order already exists (duplicate guard)"
                                         )
+                                        _rec_live("gate_blocked", "skipped",
+                                                  "duplicate_guard: live position/pending order exists", _lsig)
                                         continue
 
                                     # Conviction gate
@@ -2593,6 +2618,9 @@ class TradingScheduler:
                                             f"score={_sig_conv2:.1f} < {_live_conv_min2} "
                                             f"(live_strategies.conviction_min)"
                                         )
+                                        _rec_live("gate_blocked", "rejected",
+                                                  f"live_conviction {_sig_conv2:.1f} < {_live_conv_min2}",
+                                                  _lsig, score=_sig_conv2)
                                         continue
 
                                     # ── Risk validation (G-44) + sizing pipeline (G-45) ──────
@@ -2620,6 +2648,9 @@ class TradingScheduler:
                                                 f"{_val_err2} — skipping signal",
                                                 exc_info=True,
                                             )
+                                            _rec_live("order_failed", "error",
+                                                      f"validate_signal_error: {str(_val_err2)[:200]}",
+                                                      _lsig, score=_sig_conv2)
                                             continue
 
                                         if not _live_validation2.is_valid:
@@ -2627,6 +2658,9 @@ class TradingScheduler:
                                                 f"Live pass: validate_signal rejected {_live_sym}: "
                                                 f"{_live_validation2.reason}"
                                             )
+                                            _rec_live("gate_blocked", "rejected",
+                                                      f"validate_signal: {_live_validation2.reason}",
+                                                      _lsig, score=_sig_conv2)
                                             continue
 
                                         # The order size is the CIO-approved real-dollar
@@ -2647,6 +2681,9 @@ class TradingScheduler:
                                                 f"in live_trading config — skipping live order "
                                                 f"(refusing to size on a guess)"
                                             )
+                                            _rec_live("order_failed", "error",
+                                                      "mirror_ratio missing/invalid in live_trading config",
+                                                      _lsig, score=_sig_conv2)
                                             continue
                                         _pipeline_size2 = _live_validation2.position_size
                                         _cio_real2 = float(_appr.position_size)
@@ -2680,6 +2717,9 @@ class TradingScheduler:
                                                 f"in live_trading config — skipping live order "
                                                 f"(refusing to size on a guess)"
                                             )
+                                            _rec_live("order_failed", "error",
+                                                      "mirror_ratio missing/invalid in live_trading config",
+                                                      _lsig, score=_sig_conv2)
                                             continue
                                         _live_size2 = float(_appr.position_size) / _mirror2
 
@@ -2873,6 +2913,9 @@ class TradingScheduler:
                                             f"{_live_exec_err}",
                                             exc_info=True,
                                         )
+                                        _rec_live("order_failed", "error",
+                                                  f"exec_error: {str(_live_exec_err)[:200]}",
+                                                  _lsig, score=_sig_conv2)
                             except Exception as _live_sig_err:
                                 logger.error(
                                     f"Live pass signal gen failed for strategy "
