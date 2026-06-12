@@ -2365,10 +2365,24 @@ class StrategyProposer:
                 #
                 # direction comes from _detect_strategy_direction — canonical values
                 # are 'LONG' and 'SHORT' (uppercase strings). Check defensively.
+                #
+                # REGIME-SCOPING (2026-06-12 audit): the TSLA failure mode is specific to
+                # SHORTs firing into reversals *within an uptrend*. Applying the +0.3 Sharpe
+                # floor and removing the relaxed-OOS rescue in EVERY regime over-suppressed
+                # legitimate shorts in ranging/down markets (SHORT WF pass rate 2.6% vs LONG
+                # 8.9%). Scope the tightening to trending_up* only — the regime it was built
+                # for. In ranging/trending_down, shorts use the standard bars (the regime
+                # itself is short-appropriate, so no extra penalty is warranted).
                 is_short = isinstance(direction, str) and direction.lower() == 'short'
+                _regime_str_wf = market_regime.value if hasattr(market_regime, 'value') else str(market_regime)
+                _short_tightening_active = is_short and _regime_str_wf.startswith('trending_up')
                 if is_short:
-                    min_sharpe = max(min_sharpe, min_sharpe + 0.3)
-                    short_min_trades = max(4, test_trades if False else 4)
+                    if _short_tightening_active:
+                        min_sharpe = min_sharpe + 0.3
+                        short_min_trades = 4
+                    else:
+                        # Non-uptrend regime: shorts are regime-appropriate — standard bars.
+                        short_min_trades = 4
                 else:
                     short_min_trades = 3
 
@@ -2425,10 +2439,11 @@ class StrategyProposer:
                     )
                 # Fallback for excellent OOS performers with negative train Sharpe.
                 # Train period may have had an adverse regime for this strategy type.
-                # SHORTs don't get this relaxed path — too much risk of late-cycle overfitting.
+                # SHORTs are excluded from this rescue ONLY in trending_up* (the TSLA
+                # late-cycle-overfit risk). In ranging/down, shorts are eligible like LONGs.
                 # Consistency gate: test_sharpe - train_sharpe ≤ 1.5 — if the jump is larger
                 # than that, the test period was regime-lucky, not a genuine edge confirmation.
-                elif ts >= -0.3 and tes >= min_sharpe * 2 and test_trades >= 5 and test_return >= min_return and test_win_rate >= min_win_rate and not is_short and (tes - ts) <= 1.5:
+                elif ts >= -0.3 and tes >= min_sharpe * 2 and test_trades >= 5 and test_return >= min_return and test_win_rate >= min_win_rate and (not _short_tightening_active) and (tes - ts) <= 1.5:
                     validated_strategies.append((s, wf))
                     _decision_rows.append({**_row_base, "stage": "wf_validated", "decision": "accepted",
                                            "score": tes, "reason": "excellent_oos"})
@@ -2437,12 +2452,12 @@ class StrategyProposer:
                         f"(train={ts:.2f}, test={tes:.2f}, test_trades={test_trades}, "
                         f"threshold={min_sharpe}, edge_ratio={_er:.2f})"
                     )
-                elif is_short and ts >= -0.3 and tes >= min_sharpe * 2:
+                elif _short_tightening_active and ts >= -0.3 and tes >= min_sharpe * 2:
                     _decision_rows.append({**_row_base, "stage": "wf_rejected", "decision": "rejected",
                                            "score": tes, "reason": "short_no_relaxed_path"})
                     logger.info(
-                        f"  SHORT rejected on relaxed-OOS path (no rescue for SHORTs): {s.name} "
-                        f"(train={ts:.2f}, test={tes:.2f}) — SHORTs must pass primary or test-dominant paths"
+                        f"  SHORT rejected on relaxed-OOS path (no rescue for uptrend SHORTs): {s.name} "
+                        f"(train={ts:.2f}, test={tes:.2f}) — uptrend SHORTs must pass primary or test-dominant paths"
                     )
                 else:
                     _decision_rows.append({**_row_base, "stage": "wf_rejected", "decision": "rejected",

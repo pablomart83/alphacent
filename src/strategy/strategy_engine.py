@@ -5670,13 +5670,31 @@ class StrategyEngine:
                     'conviction_threshold_crypto',
                     _ae_config.get('min_conviction_score_crypto', 62),
                 )
+                # Alpha-Edge-specific paper threshold (2026-06-12). AE is a structural-ceiling
+                # class like crypto: the 40-pt WF-edge component is scored off a fundamental
+                # backtest (not a true OOS DSL walk-forward) and the fundamental component is
+                # frequently 0 for sparse/foreign names — so AE tops out well below equity DSL.
+                # Calibrated 5 below the equity floor, mirroring the crypto offset, so AE paper
+                # data can actually be collected. Falls back to the equity floor if unset
+                # (preserves prior behaviour). NOT a boost — a path-calibrated data-collection bar.
+                min_conviction_alpha_edge = _paper_cfg.get(
+                    'conviction_threshold_alpha_edge',
+                    min_conviction,
+                )
                 logger.info(
-                    f"Conviction thresholds (PAPER): min={min_conviction}, crypto_min={min_conviction_crypto} "
-                    f"(from paper_trading.conviction_threshold; fallback to alpha_edge.* if absent)"
+                    f"Conviction thresholds (PAPER): min={min_conviction}, crypto_min={min_conviction_crypto}, "
+                    f"ae_min={min_conviction_alpha_edge} (from paper_trading.*; fallback to alpha_edge.* if absent)"
                 )
             else:
                 min_conviction = _ae_config.get('min_conviction_score', 70)
                 min_conviction_crypto = _ae_config.get('min_conviction_score_crypto', 62)
+                # LIVE AE threshold: live_trading.conviction_threshold_alpha_edge if set, else the
+                # standard AE live floor. (A per-pair conviction_override still wins below.)
+                _live_cfg = config.get('live_trading', {}) if config else {}
+                min_conviction_alpha_edge = _live_cfg.get(
+                    'conviction_threshold_alpha_edge',
+                    _ae_config.get('min_conviction_score', 70),
+                )
 
             # Apply per-strategy conviction override (used by live-independent pass
             # to enforce the CIO-approved conviction_min from live_strategies).
@@ -5702,6 +5720,13 @@ class StrategyEngine:
                     min_conviction_crypto = conviction_override
                 # else: leave min_conviction_crypto at the YAML value (equity strategy
                 # override must not bleed into the crypto threshold)
+                # An AE live pair's CIO conviction_min is authoritative for the AE gate too.
+                _strategy_is_ae_override = (
+                    isinstance(getattr(strategy, 'metadata', None), dict)
+                    and strategy.metadata.get('strategy_category') == 'alpha_edge'
+                )
+                if _strategy_is_ae_override:
+                    min_conviction_alpha_edge = conviction_override
 
             # Resolve crypto symbol set once for the loop
             _crypto_symbols: set = set()
@@ -5860,6 +5885,8 @@ class StrategyEngine:
                 _effective_threshold = (
                     min_conviction_crypto
                     if _is_crypto_signal and not _is_alpha_edge_signal
+                    else min_conviction_alpha_edge
+                    if _is_alpha_edge_signal
                     else min_conviction
                 )
 
@@ -5869,7 +5896,11 @@ class StrategyEngine:
                     _sig_details = conviction.breakdown.get('signal_quality', {}).get('details', {})
                     _persistence = _sig_details.get('entry_persistence')
                     _persistence_str = f", persistence={_persistence}" if _persistence is not None else ""
-                    _threshold_label = f"{_effective_threshold}" + (" [crypto]" if _is_crypto_signal and not _is_alpha_edge_signal else "")
+                    _threshold_label = f"{_effective_threshold}" + (
+                        " [crypto]" if _is_crypto_signal and not _is_alpha_edge_signal
+                        else " [alpha_edge]" if _is_alpha_edge_signal
+                        else ""
+                    )
                     _conv_reason = (
                         f"filter:conviction ({conviction.total_score:.1f} < {_threshold_label}; "
                         f"wf_edge={conviction.breakdown.get('walkforward_edge', {}).get('score', 0):.1f}, "

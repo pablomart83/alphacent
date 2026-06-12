@@ -86,8 +86,16 @@ class ConvictionScorer:
     # Carry(5) is forex-only; crypto cycle(5) is crypto-only. Normalizing stock/commodity/index
     # strategies against 111 structurally depresses their scores by ~9 pts vs what they can earn.
     # Asset max also varies by class (stock base 12, commodity 12, index 14, forex 13, crypto 15).
-    _THEORETICAL_MAX_DSL = 111.0  # kept for AE path and legacy references
-    _THEORETICAL_MAX_AE  = 132.0
+    #
+    # AE effective denominator (2026-06-12): the same correction applies to the AE path.
+    # Alpha Edge strategies are EQUITY-ONLY, so the carry(5, forex-only) and crypto-cycle(5,
+    # crypto-only) components in the 132 theoretical max are structurally UNEARNABLE. Normalizing
+    # AE against 132 depressed every AE score by ~7.6% — the exact bias the 2026-05-15 DSL fix
+    # removed, but AE was left at 132 with a self-contradictory "equity-only" rationale. Earnable
+    # AE max = WF(40)+Signal(25)+Regime(20)+Asset(15)+News(1)+Fundamental(15)+Factor(6) = 122.
+    _THEORETICAL_MAX_DSL = 111.0  # kept for legacy references
+    _THEORETICAL_MAX_AE  = 132.0  # theoretical (carry+crypto included); NOT used for normalization
+    _EFFECTIVE_MAX_AE    = 122.0  # carry(5)+crypto(5) removed — AE is equity-only
     _DSL_EFFECTIVE_MAX = {
         # asset_class → effective max raw score
         'stock':     101,  # WF(40)+Signal(25)+Regime(20)+Asset(12)+News(1)   — no carry, no crypto
@@ -189,12 +197,13 @@ class ConvictionScorer:
             total_score += factor_adj
 
         # ── Normalize to 0-100 ───────────────────────────────────────────
-        # AE path: unchanged at 132 (AE strategies are equity-only).
-        # DSL path: use per-asset-class effective denominator so that a stock
-        # strategy that earns 95% of what it can possibly earn scores ~95/100,
-        # not ~86/100 because the denominator includes carry/crypto it can never earn.
+        # Per-class effective denominator so a strategy that earns X% of what it
+        # can possibly earn scores ~X/100 — not depressed by components it can never
+        # earn (carry is forex-only, crypto-cycle is crypto-only).
+        # AE path: 122 (equity-only — carry+crypto removed; 2026-06-12 fix).
+        # DSL path: per-asset-class effective denominator (2026-05-15 fix).
         if is_alpha_edge:
-            theoretical_max = self._THEORETICAL_MAX_AE
+            theoretical_max = self._EFFECTIVE_MAX_AE
         else:
             asset_class = (strategy.metadata or {}).get('asset_class', 'stock') if strategy.metadata else 'stock'
             theoretical_max = float(self._DSL_EFFECTIVE_MAX.get(asset_class, self._THEORETICAL_MAX_DSL))
