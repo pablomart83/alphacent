@@ -377,10 +377,43 @@ class AutonomousStrategyManager:
                             "from_cache": warm_stats.get("fundamentals_cached", 0),
                         })
 
-                    cache_warmer.warm_all_symbols(progress_callback=_cache_warm_progress)
-                    self._emit_stage_event("cache_warming", "complete", 4, {
-                        "skipped": False,
-                    })
+                    # Time-box the warm (2026-06-12). warm_all_symbols can stall
+                    # for minutes when the FMP 300/min budget is starved (e.g. a
+                    # concurrent full price-sync backfill) — each of ~30 symbols
+                    # waits up to 30s for a token. A stall here used to hold the
+                    # cycle DB lock indefinitely and wedge ALL future cycles. The
+                    # warm is non-critical (cached fundamentals still serve), so
+                    # run it in a worker thread and proceed if it exceeds the
+                    # budget; the abandoned warm finishes on its own daemon threads.
+                    import threading as _wthr
+                    _warm_done = _wthr.Event()
+                    _warm_err = [None]
+
+                    def _do_warm():
+                        try:
+                            cache_warmer.warm_all_symbols(progress_callback=_cache_warm_progress)
+                        except Exception as _we:  # noqa: BLE001
+                            _warm_err[0] = _we
+                        finally:
+                            _warm_done.set()
+
+                    _WARM_BUDGET_S = 180
+                    _wt = _wthr.Thread(target=_do_warm, name="cache-warm-bounded", daemon=True)
+                    _wt.start()
+                    if not _warm_done.wait(timeout=_WARM_BUDGET_S):
+                        logger.warning(
+                            f"  Cache warming exceeded {_WARM_BUDGET_S}s budget — proceeding "
+                            f"with cycle (warm continues in background, cached fundamentals serve)"
+                        )
+                        self._emit_stage_event("cache_warming", "complete", 4, {
+                            "skipped": False, "timed_out": True,
+                        })
+                    elif _warm_err[0] is not None:
+                        raise _warm_err[0]
+                    else:
+                        self._emit_stage_event("cache_warming", "complete", 4, {
+                            "skipped": False,
+                        })
             except Exception as e:
                 logger.warning(f"  Cache warming failed (non-critical): {e}")
                 self._emit_stage_event("cache_warming", "complete", 4, {

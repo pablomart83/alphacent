@@ -45,7 +45,55 @@ _running_cycle_id: Optional[str] = None
 
 # Global DB write lock — prevents concurrent writes between manual cycle and scheduler
 import threading as _threading
+import time as _cyclelock_time
 _db_cycle_lock = _threading.Lock()
+
+# Lock-leak self-heal (2026-06-12). `_db_cycle_lock` is a plain threading.Lock
+# released only in run_cycle_in_thread's finally — so a cycle that HANGS inside
+# run_strategy_cycle (e.g. cache-warming stalled on FMP token starvation under
+# heavy load) leaks the lock permanently and blocks EVERY future cycle with
+# "Could not acquire DB lock" until a manual restart (observed 2026-06-11).
+# We track the holder thread + acquire time so an abandoned lock (holder thread
+# dead, or held absurdly long past any legitimate cycle) can be force-released
+# and re-acquired instead of wedging the cycle system forever.
+_cycle_lock_holder: "Optional[_threading.Thread]" = None
+_cycle_lock_acquired_at: float = 0.0
+_MAX_CYCLE_DURATION_S = 1800  # 30 min — far beyond a normal cycle (WF included)
+
+
+def _acquire_cycle_lock(timeout: float = 30) -> bool:
+    """Acquire the cycle lock, self-healing an abandoned/wedged lock.
+
+    Returns True if acquired. On timeout, if the current holder thread is dead
+    or has held the lock past _MAX_CYCLE_DURATION_S (a genuine wedge — no
+    legitimate cycle runs that long), force-release and retry once. A plain
+    threading.Lock has no owner concept, so release() from another thread is
+    valid.
+    """
+    global _cycle_lock_holder, _cycle_lock_acquired_at
+    if _db_cycle_lock.acquire(timeout=timeout):
+        _cycle_lock_holder = _threading.current_thread()
+        _cycle_lock_acquired_at = _cyclelock_time.time()
+        return True
+
+    holder = _cycle_lock_holder
+    held_for = (_cyclelock_time.time() - _cycle_lock_acquired_at) if _cycle_lock_acquired_at else 0.0
+    holder_dead = holder is not None and not holder.is_alive()
+    holder_wedged = _cycle_lock_acquired_at > 0 and held_for > _MAX_CYCLE_DURATION_S
+    if holder_dead or holder_wedged:
+        logger.warning(
+            f"Cycle lock abandoned (holder={'dead' if holder_dead else 'alive'}, "
+            f"held_for={held_for:.0f}s) — force-releasing the wedged lock and retrying"
+        )
+        try:
+            _db_cycle_lock.release()
+        except RuntimeError:
+            pass  # already released by someone else — fine
+        if _db_cycle_lock.acquire(timeout=5):
+            _cycle_lock_holder = _threading.current_thread()
+            _cycle_lock_acquired_at = _cyclelock_time.time()
+            return True
+    return False
 
 
 def _make_serializable(obj):
@@ -88,11 +136,12 @@ def launch_autonomous_cycle_thread(cycle_id: str, filters: Optional[Dict] = None
 
     def run_cycle_in_thread():
         global _running_cycle_thread, _running_cycle_id
+        global _cycle_lock_holder, _cycle_lock_acquired_at
         with open('cycle_error.log', 'w') as f:
             f.write(f"Thread started for {cycle_id} at {datetime.now().isoformat()}\n")
         try:
             logger.info(f"Cycle {cycle_id}: acquiring DB lock...")
-            acquired = _db_cycle_lock.acquire(timeout=30)
+            acquired = _acquire_cycle_lock(timeout=30)
             if not acquired:
                 raise RuntimeError("Could not acquire DB lock — scheduler may be stuck")
             logger.info(f"Cycle {cycle_id}: DB lock acquired")
@@ -156,6 +205,8 @@ def launch_autonomous_cycle_thread(cycle_id: str, filters: Optional[Dict] = None
                     f.write(f"Cycle {cycle_id} completed successfully at {datetime.now().isoformat()}\n")
             finally:
                 _db_cycle_lock.release()
+                _cycle_lock_holder = None
+                _cycle_lock_acquired_at = 0.0
                 logger.info(f"Cycle {cycle_id}: DB lock released")
         except Exception as e:
             import traceback
