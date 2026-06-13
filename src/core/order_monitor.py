@@ -812,6 +812,31 @@ class OrderMonitor:
         finally:
             session.close()
 
+    def _open_slot_taken(self, session, strategy_id, symbol, exclude_pos_id=None) -> bool:
+        """True if another OPEN position already holds (strategy_id, symbol, account_type).
+
+        Guards the `uq_open_pos_strategy_symbol_acct` partial unique index
+        (strategy_id, symbol, account_type WHERE closed_at IS NULL). Reassigning a
+        position's strategy_id from the 'etoro_position' placeholder to a real
+        strategy_id, or creating a new position, must not collide with an already-open
+        position for the same pair — otherwise the violation surfaces only at the final
+        batch commit and aborts the WHOLE cycle's fill processing (recurring every cycle).
+        """
+        try:
+            q = session.query(PositionORM.id).filter(
+                PositionORM.strategy_id == strategy_id,
+                PositionORM.symbol == symbol,
+                PositionORM.account_type == self.account_type,
+                PositionORM.closed_at.is_(None),
+            )
+            if exclude_pos_id is not None:
+                q = q.filter(PositionORM.id != exclude_pos_id)
+            return session.query(q.exists()).scalar()
+        except Exception:
+            # Fail-safe: if the check itself errors, treat the slot as taken so we
+            # skip the risky reassignment rather than risk a batch-aborting violation.
+            return True
+
     def check_submitted_orders(self) -> dict:
         """Check status of all submitted orders and update database.
         
@@ -1156,10 +1181,20 @@ class OrderMonitor:
                             ).first()
                             
                             if existing_pos:
-                                # Update strategy_id if it's the default "etoro_position"
+                                # Update strategy_id if it's the default "etoro_position",
+                                # but ONLY if it won't collide with an already-open position
+                                # for the same (strategy_id, symbol, account_type).
                                 if existing_pos.strategy_id == "etoro_position":
-                                    existing_pos.strategy_id = order.strategy_id
-                                    logger.info(f"Updated position {existing_pos.id} strategy_id from 'etoro_position' to '{order.strategy_id}'")
+                                    if self._open_slot_taken(session, order.strategy_id, order.symbol, exclude_pos_id=existing_pos.id):
+                                        logger.warning(
+                                            f"Skipped strategy_id reassign for position {existing_pos.id} "
+                                            f"({order.symbol}): an open position already holds "
+                                            f"({order.strategy_id[:8]}, {order.symbol}, {self.account_type}) — "
+                                            f"leaving as 'etoro_position' to avoid uq_open_pos violation"
+                                        )
+                                    else:
+                                        existing_pos.strategy_id = order.strategy_id
+                                        logger.info(f"Updated position {existing_pos.id} strategy_id from 'etoro_position' to '{order.strategy_id}'")
                                 # Also update current prices
                                 existing_pos.current_price = etoro_pos.current_price
                                 existing_pos.unrealized_pnl = etoro_pos.unrealized_pnl
@@ -1172,7 +1207,9 @@ class OrderMonitor:
 
                                 if existing_symbol_pos:
                                     # Update existing position instead of creating duplicate
-                                    if existing_symbol_pos.strategy_id == "etoro_position":
+                                    if existing_symbol_pos.strategy_id == "etoro_position" and not self._open_slot_taken(
+                                        session, order.strategy_id, order.symbol, exclude_pos_id=existing_symbol_pos.id
+                                    ):
                                         existing_symbol_pos.strategy_id = order.strategy_id
                                     existing_symbol_pos.etoro_position_id = etoro_pos.etoro_position_id
                                     existing_symbol_pos.current_price = etoro_pos.current_price
@@ -1195,7 +1232,9 @@ class OrderMonitor:
                                         existing_same_side.etoro_position_id = etoro_pos.etoro_position_id
                                         existing_same_side.current_price = etoro_pos.current_price
                                         existing_same_side.unrealized_pnl = etoro_pos.unrealized_pnl
-                                        if existing_same_side.strategy_id == "etoro_position":
+                                        if existing_same_side.strategy_id == "etoro_position" and not self._open_slot_taken(
+                                            session, order.strategy_id, order.symbol, exclude_pos_id=existing_same_side.id
+                                        ):
                                             existing_same_side.strategy_id = order.strategy_id
                                         logger.info(
                                             f"DEDUP: Updated existing {order.symbol} position {existing_same_side.id} "
@@ -1204,28 +1243,47 @@ class OrderMonitor:
                                         )
                                         positions_created += 1
                                     else:
-                                        # Create new position with correct strategy_id
-                                        import uuid
-                                    
-                                        new_pos = PositionORM(
-                                            id=str(uuid.uuid4()),
-                                            strategy_id=order.strategy_id,  # Use strategy_id from order
-                                            symbol=order.symbol,  # ✅ Use our consistent symbol, not eToro's internal ID
-                                            side=etoro_pos.side,
-                                            quantity=etoro_pos.quantity,
-                                            entry_price=etoro_pos.entry_price,
-                                            current_price=etoro_pos.current_price,
-                                            unrealized_pnl=etoro_pos.unrealized_pnl,
-                                            realized_pnl=etoro_pos.realized_pnl,
-                                            opened_at=etoro_pos.opened_at,
-                                            etoro_position_id=etoro_pos.etoro_position_id,
-                                            stop_loss=etoro_pos.stop_loss or order.stop_price,
-                                            take_profit=etoro_pos.take_profit or order.take_profit_price,
-                                            closed_at=None
-                                        )
-                                        session.add(new_pos)
-                                        positions_created += 1
-                                        logger.info(f"Created position {new_pos.id} for order {order.id} with strategy_id '{order.strategy_id}'")
+                                        # Create new position with correct strategy_id.
+                                        # Guard + savepoint-isolate so a uq_open_pos collision
+                                        # (race with sync_positions, or duplicate fill) rolls back
+                                        # ONLY this row instead of aborting the whole batch commit.
+                                        if self._open_slot_taken(session, order.strategy_id, order.symbol):
+                                            logger.warning(
+                                                f"Skipped new position for {order.symbol}: open slot "
+                                                f"({order.strategy_id[:8]}, {order.symbol}, {self.account_type}) "
+                                                f"already taken — not creating duplicate"
+                                            )
+                                        else:
+                                            import uuid
+                                            from sqlalchemy.exc import IntegrityError as _IntegrityErrCSO
+
+                                            new_pos = PositionORM(
+                                                id=str(uuid.uuid4()),
+                                                strategy_id=order.strategy_id,  # Use strategy_id from order
+                                                symbol=order.symbol,  # ✅ Use our consistent symbol, not eToro's internal ID
+                                                side=etoro_pos.side,
+                                                quantity=etoro_pos.quantity,
+                                                entry_price=etoro_pos.entry_price,
+                                                current_price=etoro_pos.current_price,
+                                                unrealized_pnl=etoro_pos.unrealized_pnl,
+                                                realized_pnl=etoro_pos.realized_pnl,
+                                                opened_at=etoro_pos.opened_at,
+                                                etoro_position_id=etoro_pos.etoro_position_id,
+                                                stop_loss=etoro_pos.stop_loss or order.stop_price,
+                                                take_profit=etoro_pos.take_profit or order.take_profit_price,
+                                                closed_at=None
+                                            )
+                                            try:
+                                                with session.begin_nested():
+                                                    session.add(new_pos)
+                                                    session.flush()
+                                                positions_created += 1
+                                                logger.info(f"Created position {new_pos.id} for order {order.id} with strategy_id '{order.strategy_id}'")
+                                            except _IntegrityErrCSO:
+                                                logger.warning(
+                                                    f"SKIPPED create for {order.symbol} (order {order.id}): "
+                                                    f"uq_open_pos collision — savepoint rolled back, batch continues"
+                                                )
                         else:
                             # Before warning, check if sync_positions already created/matched
                             # a position for this strategy+symbol — if so, this is a false alarm.

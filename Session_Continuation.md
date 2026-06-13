@@ -26,7 +26,9 @@ Audit of why AlphaCent under-generates Alpha-Edge / crypto / SHORT. Triangulated
 - **Steering doc** `trading-system-context.md` still says AE denom 132 / `min_sharpe_crypto: 0.5` — update to AE 122 + note WF uses direction-aware thresholds.
 - Verify on the next market-hours cycle: AE `signal_emitted` with `decision=emitted` > 0, and SHORT WF pass-rate rises in ranging.
 
-**Pre-existing OPEN (unchanged this session):** `order_monitor.check_submitted_orders` `uq_open_pos_strategy_symbol_acct` UniqueViolation (still firing 07:49; the 3rd unwrapped position-create path — needs `begin_nested()`); cycle lock-leak self-heal; Marketaux/FRED/insider audit; retention prune.
+**Pre-existing OPEN (unchanged this session):** ~~`order_monitor.check_submitted_orders` `uq_open_pos_strategy_symbol_acct` UniqueViolation~~ **FIXED 2026-06-13** (see P0 entry below); cycle lock-leak self-heal; Marketaux/FRED/insider audit; retention prune.
+
+**P0 FIX (2026-06-13) — `check_submitted_orders` `uq_open_pos_strategy_symbol_acct` UniqueViolation (deployed, healthy).** Root cause: the method reassigns a position's `strategy_id` from the `'etoro_position'` placeholder to `order.strategy_id` (3 sites) and creates new positions — but never checked whether an OPEN position already held `(order.strategy_id, symbol, account_type)`. The bad UPDATE staged in-memory and only violated the partial unique index at the **final batch `session.commit()`**, aborting the WHOLE cycle's fill processing → recurred every cycle (firing 06-12 07:49 on AMD/demo). Fix: added `_open_slot_taken()` guard before all 3 `strategy_id` reassignments (skip + WARN if the slot is taken, leave as `etoro_position`) and savepoint-isolated (`begin_nested()`+flush+guard) the new-position create (A3 pattern). Proper root-cause fix, not a patch. Verify Monday (market-hours order flow) that the guard WARN lines appear and no `uq_open_pos` errors recur.
 
 ---
 
