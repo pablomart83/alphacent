@@ -170,6 +170,7 @@ export interface LiveTradingConfigShape {
   mirror_ratio: number
   conviction_threshold: number
   conviction_threshold_crypto: number
+  conviction_threshold_alpha_edge: number
   // Graduation gate thresholds
   graduation_min_trades?: number
   graduation_min_win_rate?: number
@@ -205,6 +206,7 @@ export interface PaperTradingConfigShape {
   flat_position_size: number
   conviction_threshold: number
   conviction_threshold_crypto: number
+  conviction_threshold_alpha_edge: number
   min_sharpe: number
   min_sharpe_crypto: number
   min_sharpe_commodity: number

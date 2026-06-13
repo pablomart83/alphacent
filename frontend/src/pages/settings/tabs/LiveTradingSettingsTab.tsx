@@ -54,6 +54,7 @@ export function LiveTradingSettingsTab() {
         mirror_ratio: form.mirror_ratio / 100,
         conviction_threshold: form.conviction_threshold,
         conviction_threshold_crypto: form.conviction_threshold_crypto,
+        conviction_threshold_alpha_edge: form.conviction_threshold_alpha_edge,
         graduation_min_trades: form.graduation_min_trades,
         graduation_min_win_rate: form.graduation_min_win_rate,
         graduation_min_qualification_ratio: form.graduation_min_qualification_ratio,
@@ -175,6 +176,15 @@ export function LiveTradingSettingsTab() {
           max={100}
           step={1}
         />
+        <NumberRow
+          label="Alpha Edge threshold"
+          hint="Conviction floor for live Alpha Edge (fundamental-path) signals. Per-pair CIO conviction_min still overrides at graduation; this is the default fallback."
+          value={form?.conviction_threshold_alpha_edge ?? 0}
+          onChange={(v) => set('conviction_threshold_alpha_edge', Math.round(v))}
+          min={40}
+          max={100}
+          step={1}
+        />
       </Card>
 
       <Card padding="md" className="space-y-3">
@@ -247,6 +257,7 @@ function extract(c: LiveTradingConfigShape) {
     mirror_ratio: Number(((c.mirror_ratio ?? 0) * 100).toFixed(2)),
     conviction_threshold: Number(c.conviction_threshold ?? 0),
     conviction_threshold_crypto: Number(c.conviction_threshold_crypto ?? 0),
+    conviction_threshold_alpha_edge: Number(c.conviction_threshold_alpha_edge ?? 67),
     graduation_min_trades: Number(c.graduation_min_trades ?? 20),
     graduation_min_win_rate: Number(c.graduation_min_win_rate ?? 55),
     graduation_min_qualification_ratio: Number(c.graduation_min_qualification_ratio ?? 0.60),

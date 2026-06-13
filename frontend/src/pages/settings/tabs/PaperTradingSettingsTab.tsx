@@ -59,6 +59,7 @@ export function PaperTradingSettingsTab() {
         flat_position_size: form.flat_position_size,
         conviction_threshold: form.conviction_threshold,
         conviction_threshold_crypto: form.conviction_threshold_crypto,
+        conviction_threshold_alpha_edge: form.conviction_threshold_alpha_edge,
         min_sharpe: form.min_sharpe,
         min_sharpe_crypto: form.min_sharpe_crypto,
         min_sharpe_commodity: form.min_sharpe_commodity,
@@ -133,6 +134,15 @@ export function PaperTradingSettingsTab() {
           hint="Paper conviction floor for crypto"
           value={form?.conviction_threshold_crypto ?? 55}
           onChange={(v) => set('conviction_threshold_crypto', Math.round(v))}
+          min={40}
+          max={100}
+          step={1}
+        />
+        <NumberRow
+          label="Alpha Edge threshold"
+          hint="Paper conviction floor for Alpha Edge (fundamental-path) strategies. Lower than equity because AE has a structural scoring ceiling (no carry/crypto components; WF-edge scored off a fundamental backtest). Mirrors the crypto offset."
+          value={form?.conviction_threshold_alpha_edge ?? 55}
+          onChange={(v) => set('conviction_threshold_alpha_edge', Math.round(v))}
           min={40}
           max={100}
           step={1}
@@ -346,6 +356,7 @@ function extract(c: PaperTradingConfigShape) {
     flat_position_size: Number(c.flat_position_size ?? 5000),
     conviction_threshold: Number(c.conviction_threshold ?? 60),
     conviction_threshold_crypto: Number(c.conviction_threshold_crypto ?? 55),
+    conviction_threshold_alpha_edge: Number(c.conviction_threshold_alpha_edge ?? 55),
     min_sharpe: Number(c.min_sharpe ?? 0.5),
     min_sharpe_crypto: Number(c.min_sharpe_crypto ?? 0.2),
     min_sharpe_commodity: Number(c.min_sharpe_commodity ?? 0.3),

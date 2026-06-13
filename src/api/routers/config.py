@@ -1727,6 +1727,7 @@ class LiveTradingConfigResponse(BaseModel):
     portfolio_heat_cap: float = 90.0    # percentage (yaml: 0.90)
     conviction_threshold: int = 74
     conviction_threshold_crypto: int = 68
+    conviction_threshold_alpha_edge: int = 67
     # Graduation gate thresholds — stored in graduation_gate.py constants
     # but surfaced here so the CIO can tune them from the Settings page.
     graduation_min_trades: int = 20
@@ -1752,6 +1753,7 @@ class LiveTradingConfigRequest(BaseModel):
     portfolio_heat_cap: Optional[float] = None  # percentage (0-100)
     conviction_threshold: Optional[int] = None
     conviction_threshold_crypto: Optional[int] = None
+    conviction_threshold_alpha_edge: Optional[int] = None
     # Graduation gate thresholds
     graduation_min_trades: Optional[int] = Field(None, ge=5, le=100)
     graduation_min_win_rate: Optional[float] = Field(None, ge=30.0, le=90.0)   # percentage
@@ -1766,6 +1768,7 @@ class PaperTradingConfigResponse(BaseModel):
     flat_position_size: float = 5000.0
     conviction_threshold: int = 60
     conviction_threshold_crypto: int = 55
+    conviction_threshold_alpha_edge: int = 55
     # Activation thresholds (paper-specific relaxed values)
     min_sharpe: float = 0.5
     min_sharpe_crypto: float = 0.2
@@ -1792,6 +1795,7 @@ class PaperTradingConfigRequest(BaseModel):
     flat_position_size: Optional[float] = Field(None, ge=500.0, le=50000.0)
     conviction_threshold: Optional[int] = Field(None, ge=40, le=100)
     conviction_threshold_crypto: Optional[int] = Field(None, ge=40, le=100)
+    conviction_threshold_alpha_edge: Optional[int] = Field(None, ge=40, le=100)
     min_sharpe: Optional[float] = Field(None, ge=-2.0, le=5.0)
     min_sharpe_crypto: Optional[float] = Field(None, ge=-2.0, le=5.0)
     min_sharpe_commodity: Optional[float] = Field(None, ge=-2.0, le=5.0)
@@ -1834,6 +1838,7 @@ async def get_paper_trading_config(
         flat_position_size=float(pt.get("flat_position_size", 5000.0)),
         conviction_threshold=int(pt.get("conviction_threshold", 60)),
         conviction_threshold_crypto=int(pt.get("conviction_threshold_crypto", 55)),
+        conviction_threshold_alpha_edge=int(pt.get("conviction_threshold_alpha_edge", 55)),
         min_sharpe=float(pt_act.get("min_sharpe", 0.5)),
         min_sharpe_crypto=float(pt_act.get("min_sharpe_crypto", 0.2)),
         min_sharpe_commodity=float(pt_act.get("min_sharpe_commodity", 0.3)),
@@ -1883,6 +1888,8 @@ async def update_paper_trading_config(
         pt["conviction_threshold"] = int(request.conviction_threshold)
     if request.conviction_threshold_crypto is not None:
         pt["conviction_threshold_crypto"] = int(request.conviction_threshold_crypto)
+    if request.conviction_threshold_alpha_edge is not None:
+        pt["conviction_threshold_alpha_edge"] = int(request.conviction_threshold_alpha_edge)
 
     # Activation thresholds — stored as decimals in YAML (win_rate as 0.40, not 40.0)
     if request.min_sharpe is not None:
@@ -1980,6 +1987,7 @@ async def get_live_trading_config(
         portfolio_heat_cap=float(lt.get("portfolio_heat_cap", 0.90)) * 100,
         conviction_threshold=int(lt.get("conviction_threshold", 74)),
         conviction_threshold_crypto=int(lt.get("conviction_threshold_crypto", 68)),
+        conviction_threshold_alpha_edge=int(lt.get("conviction_threshold_alpha_edge", 67)),
         graduation_min_trades=int(gg.get("min_trades", MIN_PAPER_TRADES)),
         graduation_min_win_rate=float(gg.get("min_win_rate_pct", MIN_PAPER_WIN_RATE * 100)),
         graduation_min_qualification_ratio=float(gg.get("min_qualification_ratio", MIN_QUALIFICATION_RATIO)),
@@ -2031,6 +2039,8 @@ async def update_live_trading_config(
         lt["conviction_threshold"] = int(request.conviction_threshold)
     if request.conviction_threshold_crypto is not None:
         lt["conviction_threshold_crypto"] = int(request.conviction_threshold_crypto)
+    if request.conviction_threshold_alpha_edge is not None:
+        lt["conviction_threshold_alpha_edge"] = int(request.conviction_threshold_alpha_edge)
 
     # Graduation gate thresholds — stored under graduation_gate section in YAML
     # and also applied to the in-memory graduation_gate module constants so

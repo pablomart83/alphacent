@@ -30,6 +30,15 @@ Audit of why AlphaCent under-generates Alpha-Edge / crypto / SHORT. Triangulated
 
 ---
 
+**Follow-up batch (same session, 2026-06-13):** worked the 5 open items.
+- **A-3 (deployed):** AE fundamental component was *always 0* (verified: 0/2080 AE rows ever showed a `fundamental=` term) because `alpha_edge.fundamental_filters.enabled=false` → no fundamental_report fetched. Root fix in `strategy_engine.generate_signals`: **decoupled** the AE fundamental-data fetch from the fundamental *rejection* gate — AE strategies now fetch fundamentals for the ±15 conviction component even when the gate is off; the hard reject still only fires when the gate is globally enabled (so the DSL equity book is never fundamental-gated). Fail-open.
+- **#3 UI (deployed):** added `conviction_threshold_alpha_edge` to the paper-trading + live-trading config endpoints (`config.py` GET/PUT/models) and the Settings UI (`PaperTradingSettingsTab`, `LiveTradingSettingsTab`, `useSettingsData`). Frontend rebuilt on EC2 (✓ 25s). CIO can now tune the AE floor from Settings.
+- **#4 steering doc (committed):** updated `trading-system-context.md` — AE denom 132→122, AE conviction thresholds, `min_sharpe_crypto` is applied at activation (not WF), SHORT WF tightening now regime-scoped, directional-quotas-disabled state.
+- **B-5 (no change, documented):** `requires_cross_validation`/`family_universe` are set by NO template → the cross-validation family rescue is dormant. Enabling needs per-template `family_universe` design and would admit thin-evidence crypto in the current downtrend — deferred as a design item, not shipped (no-stopgap rule).
+- **#5 verification — PENDING (market closed, Sat).** No signal cycle has run since deploy. On the next market-hours cycle confirm: `SELECT decision,count(*) FROM signal_decisions WHERE reason LIKE '%path=alpha_edge%' AND timestamp > '<deploy>' GROUP BY decision` shows `emitted>0`; AE `order_submitted/order_filled` go positive; SHORT WF pass-rate rises in ranging. Commit `92550c1` (A-1/A-2/C-1) + this batch.
+
+---
+
 **SESSION 2026-06-12 — DATA-PIPELINE P2 batch + FMP-warm fix + live-pass observability (Opus 4.8). All deployed, verified live, pushed. Latest commit `8d8d566`.**
 
 Continued from the data-pipeline audit. Completed the remaining flagged items + two user-reported issues:

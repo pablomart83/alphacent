@@ -319,16 +319,18 @@ TSL cycle: total=90 recalc_eligible=88 skipped_market=0 skipped_stale=0 breakeve
 Never silent-no-op; every cycle produces this line so outages surface in one `tail`.
 
 ### Activation Thresholds
-- `min_sharpe`: **1.0** (was 0.4) | `min_sharpe_crypto`: 0.5 | `min_sharpe_commodity`: 0.5
+- `min_sharpe`: **1.0** (was 0.4) | `min_sharpe_crypto`: 0.3 | `min_sharpe_commodity`: 0.5
+- Note: `min_sharpe_crypto` is applied at the **activation stage** (`portfolio_manager.evaluate_for_activation`), NOT at the WF acceptance pass. WF acceptance uses `backtest.walk_forward.direction_aware_thresholds` (regime × direction), which has no crypto branch — crypto WF uses the regime-relaxed Sharpe like equity. `min_sharpe_crypto` also feeds the WF cache hash. (Confirmed 2026-06-12 audit.)
 - `min_trades_dsl`: 8 (1d) | `min_trades_dsl_4h`: 8 | `min_trades_alpha_edge`: 8 | `min_trades_commodity`: 6 | `min_trades_dsl_1h`: 15
 - Sharpe exception: test_sharpe ≥ 2.0 + ≥ 3 trades bypasses min_trades
 
 ### Conviction Scoring
-- **PAPER threshold (G-43, 2026-05-17): 60 / 55 (crypto)** — read from `paper_trading.conviction_threshold` and `paper_trading.conviction_threshold_crypto`. Calibrated for data collection breadth on demo capital.
-- **LIVE threshold: 73 / 67 (crypto)** — per-pair from `live_strategies.conviction_min` (CIO-set at graduation), with `live_trading.conviction_threshold` / `_crypto` as the YAML default fallback.
-- The conviction gate at `strategy_engine.generate_signals:5572-5605` branches on `account_type`: PAPER reads `paper_trading.*`, LIVE uses `conviction_override` from the live_strategies row.
+- **PAPER threshold (G-43, 2026-05-17): 60 / 55 (crypto) / 55 (alpha_edge, 2026-06-12)** — read from `paper_trading.conviction_threshold`, `paper_trading.conviction_threshold_crypto`, and `paper_trading.conviction_threshold_alpha_edge`. Calibrated for data collection breadth on demo capital. AE gets its own (lower) floor because, like crypto, it has a structural scoring ceiling (no carry/crypto components; WF-edge scored off a fundamental backtest).
+- **LIVE threshold: 73 / 67 (crypto) / 67 (alpha_edge)** — per-pair from `live_strategies.conviction_min` (CIO-set at graduation), with `live_trading.conviction_threshold` / `_crypto` / `_alpha_edge` as the YAML default fallback.
+- The conviction gate at `strategy_engine.generate_signals` branches by class: crypto-DSL → crypto threshold, alpha_edge → AE threshold, else equity. PAPER reads `paper_trading.*`, LIVE uses `conviction_override` from the live_strategies row (override wins for crypto/AE too when the live pair is that class).
 - Components: WF edge (40) + signal quality (25) + regime fit (20) + asset tradability (15) + fundamental quality (±15) + carry bias (±5) + crypto cycle (±5) + news sentiment (±1) + factor exposure (±6)
-- Theoretical max: 132 (AE path) / per-asset effective denominators for DSL: stock 101, etf 101, forex 104, crypto 106, commodity 98, index 100. Final normalised to 100.
+- Effective normalization denominators (carry is forex-only, crypto-cycle is crypto-only — never include points a class can't earn): **AE path 122** (2026-06-12: was 132; carry+crypto removed since AE is equity-only — the analog of the 2026-05-15 DSL fix); DSL per-asset: stock 101, etf 101, forex 104, crypto 106, commodity 98, index 100. Final normalised to 100.
+- **AE fundamental data (2026-06-12):** AE strategies fetch fundamental data for the ±15 `fundamental_quality` component **even when `alpha_edge.fundamental_filters.enabled=false`** (the global fundamental *rejection* gate stays off so the DSL equity book is never fundamental-gated). The fetch is decoupled from the reject in `generate_signals`: AE always populates the report for scoring; the hard reject only fires when the gate is globally enabled. Before this, AE's fundamental component was structurally 0 (gate disabled → no report).
 - Asset tradability: Tier 1 stocks & major instruments 15pts | Tier 2 liquid 13pts | **ETFs 13pts, Indices 14pts** (post May 1 fix — 64.6% ETF WR, 85.7% index WR live)
 - Uptrend SHORT strategies score 20/20 on regime fit (they are the hedge, not fighting the regime)
 
@@ -349,6 +351,7 @@ Never silent-no-op; every cycle produces this line so outages surface in one `ta
 - `trending_up_weak`: min_long 75%, min_short 8%
 - `trending_up_strong`: min_long 85%, min_short 3%
 - Never run zero short exposure in any regime
+- **Current state (2026-06-12):** `position_management.directional_quotas.enabled` and `directional_balance.enabled` are **both `false`** in the live yaml, and `ranging_low_vol.min_short_pct: 0.0`. With quotas off, the short floor is NOT enforced by any mechanism — shorts are non-zero today only organically. This is a UI/CIO-owned setting; the "never zero short" rule is currently unenforced-by-design. CIO decision pending: enable quotas (+ set a ranging_low_vol short floor) or formally make the rule regime-conditional.
 
 ### SHORT Template Policy
 - Generic shorts (RSI Overbought Short, Moving Average Breakdown, etc.) suppressed in trending_up — correct
@@ -374,7 +377,7 @@ Performance feedback to the proposer must decay over time or it becomes a perman
 - **Neglected-symbol slot reservation** (`_build_watchlists` Phase 3): 15% of each template's watchlist (min 1 slot) reserved for symbols not seen in any proposal in the last 7 days. Prevents round-robin lockout of negatively-scored symbols.
 - **Directional-rebalance bonus** (`_match_templates_to_symbols`): +8 score when symbol has all-one-side losing history (≥3 trades, net-negative P&L) and current template is counter-direction. Surfaces TSLA-like imbalances automatically.
 - **Per-pair sizing penalty** (`risk_manager.calculate_position_size` Step 10b): halves position size when (template, symbol) has ≥3 net-losing trades in trade_journal. Resets when net P&L flips positive.
-- **SHORT-side WF tightening**: min_sharpe +0.3 for shorts on primary path; relaxed-OOS rescue path **removed** for shorts (too much overfit risk); test-dominant path requires ≥4 test trades for shorts.
+- **SHORT-side WF tightening (regime-scoped, 2026-06-12)**: in `trending_up*` regimes only — min_sharpe +0.3 for shorts, relaxed-OOS rescue path **removed**, test-dominant requires ≥4 test trades. In ranging/trending_down regimes shorts use the standard bars and ARE eligible for the excellent-OOS rescue (the +0.3/no-rescue was over-suppressing legitimate range/down shorts: SHORT WF pass 2.6% vs LONG 8.9%). The TSLA failure mode it guards against — shorts firing into uptrend reversals — is specific to uptrends; signal-time C3 trend-consistency gate + MC bootstrap + (test−train)≤1.5 consistency gate still protect in all regimes.
 
 ### Symbol Analytics — Current vs Lifetime
 

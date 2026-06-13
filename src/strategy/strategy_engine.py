@@ -5163,7 +5163,17 @@ class StrategyEngine:
         data_provider = None
         fundamental_config = {}
         strategy_type = "default"
-        
+        # Alpha Edge strategies' edge IS the fundamental signal. They must fetch
+        # fundamental data for conviction scoring (the ±15 fundamental_quality
+        # component) EVEN when the global fundamental *filter* (a rejection gate
+        # for the whole equity book) is disabled. Decoupling the data fetch from
+        # the reject gate (2026-06-12): without it AE's fundamental component was
+        # structurally 0 — the AE differentiator never fired.
+        _is_ae_strategy = bool(
+            strategy.metadata and isinstance(strategy.metadata, dict)
+            and strategy.metadata.get('strategy_category') == 'alpha_edge'
+        )
+
         try:
             import yaml
             from pathlib import Path
@@ -5177,7 +5187,10 @@ class StrategyEngine:
                 alpha_edge_config = config.get('alpha_edge', {})
                 fundamental_config = alpha_edge_config.get('fundamental_filters', {})
                 
-                if fundamental_config.get('enabled', False):
+                # Initialize the provider/filter when the global gate is enabled OR
+                # when this is an AE strategy (which needs the data for scoring even
+                # if the gate is off).
+                if fundamental_config.get('enabled', False) or _is_ae_strategy:
                     # Initialize providers but don't filter yet - wait until we have signals
                     from src.data.fundamental_data_provider import FundamentalDataProvider, get_fundamental_data_provider
                     from src.strategy.fundamental_filter import FundamentalFilter
@@ -5630,7 +5643,9 @@ class StrategyEngine:
             conviction_scorer = ConvictionScorer(
                 config=config,
                 database=self.db,
-                fundamental_filter=fundamental_filter if fundamental_config.get('enabled', False) else None,
+                # Pass the filter whenever it was initialized (gate enabled OR AE strategy)
+                # so AE conviction scoring can read fundamental data.
+                fundamental_filter=fundamental_filter,
                 market_analyzer=getattr(self, 'market_analyzer', None)
             )
             
@@ -5833,14 +5848,23 @@ class StrategyEngine:
                 except ImportError:
                     pass
 
-                if fundamental_config.get('enabled', False) and fundamental_filter and not _skip_fundamental:
+                if fundamental_filter and not _skip_fundamental and (fundamental_config.get('enabled', False) or _is_ae_strategy):
                     try:
                         t_fund = _time.time()
                         fundamental_report = fundamental_filter.filter_symbol(signal.symbol, strategy_type)
                         fund_time = _time.time() - t_fund
-                        
-                        # Reject signal if fundamental filter fails
-                        if not fundamental_report.passed:
+
+                        # The fundamental filter acts as a REJECTION GATE only when it is
+                        # globally enabled. For AE strategies when the gate is OFF, we still
+                        # fetch the report (above) purely to populate the conviction
+                        # fundamental_quality component — we do NOT reject here. AE's
+                        # direction-aware fundamental scoring (±15) already penalizes a
+                        # LONG on weak fundamentals; a hard reject would re-introduce a
+                        # fundamental gate that the equity book deliberately doesn't run.
+                        _fund_gate_on = fundamental_config.get('enabled', False)
+
+                        # Reject signal if fundamental filter fails (gate-on only)
+                        if _fund_gate_on and not fundamental_report.passed:
                             failed_checks = [r.check_name for r in fundamental_report.results if not r.passed]
                             logger.info(
                                 f"Signal rejected for {signal.symbol}: fundamental filter failed "
@@ -5860,12 +5884,19 @@ class StrategyEngine:
                                 },
                             )
                             continue
-                        
-                        logger.info(
-                            f"Signal passed fundamental filter for {signal.symbol}: "
-                            f"{fundamental_report.checks_passed}/{fundamental_report.checks_total} checks passed "
-                            f"[took {fund_time:.2f}s]"
-                        )
+
+                        if _fund_gate_on:
+                            logger.info(
+                                f"Signal passed fundamental filter for {signal.symbol}: "
+                                f"{fundamental_report.checks_passed}/{fundamental_report.checks_total} checks passed "
+                                f"[took {fund_time:.2f}s]"
+                            )
+                        else:
+                            logger.info(
+                                f"Fetched fundamentals for AE scoring {signal.symbol}: "
+                                f"{fundamental_report.checks_passed}/{fundamental_report.checks_total} checks "
+                                f"(gate off — data used for conviction only) [took {fund_time:.2f}s]"
+                            )
                     except Exception as e:
                         logger.warning(f"Could not get fundamental report for {signal.symbol}: {e}")
                         # Continue without fundamental filtering if it fails
