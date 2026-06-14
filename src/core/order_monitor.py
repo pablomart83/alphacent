@@ -1326,10 +1326,17 @@ class OrderMonitor:
                             if order.filled_price and order.expected_price and order.expected_price > 0:
                                 # Slippage: positive = adverse (paid more than expected for buy,
                                 # received less for sell). Stored as % of expected price.
-                                raw_slip = (order.filled_price - order.expected_price) / order.expected_price
-                                if hasattr(order.side, 'value') and str(order.side.value).upper() in ('SELL', 'SHORT'):
-                                    raw_slip = -raw_slip  # invert for sells
-                                order.slippage = raw_slip
+                                # Drift guard: only record when the fill landed within
+                                # SLIPPAGE_MAX_FILL_GAP_S of submission — a longer gap (order
+                                # queued to the next session) is market drift, not slippage.
+                                from src.analytics.trade_journal import compute_execution_slippage as _ces
+                                order.slippage = _ces(
+                                    expected_price=order.expected_price,
+                                    filled_price=order.filled_price,
+                                    order_side=order.side.value if hasattr(order.side, 'value') else str(order.side),
+                                    submitted_at=order.submitted_at,
+                                    filled_at=order.filled_at,
+                                )
                             if order.filled_at and order.submitted_at:
                                 delta = (order.filled_at - order.submitted_at).total_seconds()
                                 if delta >= 0:
@@ -1368,6 +1375,7 @@ class OrderMonitor:
                                 expected_price=order.expected_price,
                                 order_side=order.side.value if hasattr(order.side, 'value') else str(order.side),
                                 account_type=getattr(order, 'account_type', 'demo') or 'demo',
+                                entry_submitted_at=order.submitted_at,
                                 metadata={
                                     "etoro_order_id": order.etoro_order_id,
                                     "fill_time_seconds": order.fill_time_seconds,

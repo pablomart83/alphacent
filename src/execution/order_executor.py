@@ -1097,6 +1097,9 @@ class OrderExecutor:
                             exit_order_id=order.id,
                             symbol=existing_position.symbol,
                             account_type=getattr(existing_position, 'account_type', 'demo') or 'demo',
+                            expected_exit_price=getattr(order, 'expected_price', None),
+                            exit_order_side=order.side.value if order.side else None,
+                            exit_submitted_at=getattr(order, 'submitted_at', None),
                         )
                         logger.debug(f"Logged trade exit to journal: {existing_position.id}")
                     except Exception as e:
@@ -1186,7 +1189,8 @@ class OrderExecutor:
                         ml_confidence=ml_confidence,
                         metadata=metadata,
                         expected_price=order.expected_price,
-                        order_side=order.side.value if order.side else None
+                        order_side=order.side.value if order.side else None,
+                        entry_submitted_at=getattr(order, 'submitted_at', None),
                     )
                     logger.debug(f"Logged trade entry to journal: {position.id}")
                 except Exception as e:
@@ -1227,6 +1231,9 @@ class OrderExecutor:
                             exit_order_id=order.id,
                             symbol=existing_position.symbol,
                             account_type=getattr(existing_position, 'account_type', 'demo') or 'demo',
+                            expected_exit_price=getattr(order, 'expected_price', None),
+                            exit_order_side=order.side.value if order.side else None,
+                            exit_submitted_at=getattr(order, 'submitted_at', None),
                         )
                         logger.debug(f"Logged trade exit to journal: {existing_position.id}")
                     except Exception as e:
@@ -1316,7 +1323,8 @@ class OrderExecutor:
                         ml_confidence=ml_confidence,
                         metadata=metadata,
                         expected_price=order.expected_price,
-                        order_side=order.side.value if order.side else None
+                        order_side=order.side.value if order.side else None,
+                        entry_submitted_at=getattr(order, 'submitted_at', None),
                     )
                     logger.debug(f"Logged trade entry to journal: {position.id}")
                 except Exception as e:

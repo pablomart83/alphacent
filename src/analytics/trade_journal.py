@@ -13,6 +13,50 @@ from src.models.orm import Base
 logger = logging.getLogger(__name__)
 
 
+# Beyond this submit→fill gap, the difference between expected and filled price is
+# market DRIFT (e.g. an order eToro queued to the next session and filled 13–17h
+# later), NOT execution slippage. Recording it as slippage poisoned the cost model
+# (observed: SOXL "slippage" of 1528 bps = 15% overnight move on a 3x ETF). When the
+# gap exceeds this threshold we record slippage = None rather than a contaminated value.
+SLIPPAGE_MAX_FILL_GAP_S = 900  # 15 minutes
+
+
+def compute_execution_slippage(
+    expected_price: Optional[float],
+    filled_price: Optional[float],
+    order_side: Optional[str],
+    submitted_at: Optional[datetime] = None,
+    filled_at: Optional[datetime] = None,
+) -> Optional[float]:
+    """Directional execution slippage as a fraction, or None if not cleanly measurable.
+
+    Positive = adverse fill (bought higher / sold lower than expected).
+    Works for both entries and exits: pass the actual order side of the fill
+    (entry BUY/SELL, or the CLOSING order's side for an exit — long-close = SELL,
+    short-close = BUY).
+
+    Returns None when:
+      - expected_price or filled_price is missing/invalid, or
+      - the submit→fill gap exceeds SLIPPAGE_MAX_FILL_GAP_S (the price delta is
+        market drift over a deferral/queue, not execution slippage).
+    """
+    if not expected_price or expected_price <= 0 or not filled_price or filled_price <= 0:
+        return None
+    if submitted_at is not None and filled_at is not None:
+        try:
+            gap_s = abs((filled_at - submitted_at).total_seconds())
+            if gap_s > SLIPPAGE_MAX_FILL_GAP_S:
+                return None
+        except Exception:
+            pass
+    if order_side and str(order_side).upper() in ("SELL", "SHORT"):
+        # Sell/short-side fill: adverse = sold/covered lower than expected
+        return (expected_price - filled_price) / expected_price
+    # Buy/long-side fill: adverse = bought higher than expected
+    return (filled_price - expected_price) / expected_price
+
+
+
 class TradeJournalEntryORM(Base):
     """Trade journal entry ORM model."""
     __tablename__ = "trade_journal"
@@ -146,6 +190,7 @@ class TradeJournal:
         expected_price: Optional[float] = None,
         order_side: Optional[str] = None,
         account_type: str = 'demo',
+        entry_submitted_at: Optional[datetime] = None,
     ) -> None:
         """Log trade entry.
         
@@ -169,18 +214,27 @@ class TradeJournal:
         """
         logger.info(f"Logging trade entry: {trade_id} - {symbol} @ {entry_price}")
 
-        # Calculate entry slippage if expected_price is available
-        entry_slippage_pct = None
-        if expected_price and expected_price > 0 and entry_price:
-            if order_side and order_side.upper() == "SELL":
-                # For sells: positive slippage = sold lower than expected (bad)
-                entry_slippage_pct = (expected_price - entry_price) / expected_price
-            else:
-                # For buys: positive slippage = bought higher than expected (bad)
-                entry_slippage_pct = (entry_price - expected_price) / expected_price
+        # Calculate entry slippage if expected_price is available.
+        # Uses the drift guard: a fill that landed >15 min after submission (e.g. an
+        # order eToro queued overnight to the next session) reflects market drift, not
+        # execution slippage, so it is recorded as None rather than a contaminated value.
+        entry_slippage_pct = compute_execution_slippage(
+            expected_price=expected_price,
+            filled_price=entry_price,
+            order_side=order_side,
+            submitted_at=entry_submitted_at,
+            filled_at=entry_time,
+        )
+        if entry_slippage_pct is not None:
             logger.info(
                 f"Entry slippage for {trade_id}: {entry_slippage_pct:.4%} "
                 f"(expected={expected_price:.4f}, filled={entry_price:.4f}, side={order_side})"
+            )
+        elif expected_price and entry_submitted_at and (entry_time - entry_submitted_at).total_seconds() > SLIPPAGE_MAX_FILL_GAP_S:
+            logger.info(
+                f"Entry slippage for {trade_id} not recorded — submit→fill gap "
+                f"{(entry_time - entry_submitted_at).total_seconds()/3600:.1f}h exceeds "
+                f"{SLIPPAGE_MAX_FILL_GAP_S}s (market drift, not execution slippage)"
             )
 
         # Enrich metadata with slippage info
@@ -267,6 +321,9 @@ class TradeJournal:
         exit_slippage: Optional[float] = None,
         symbol: Optional[str] = None,
         account_type: Optional[str] = None,
+        expected_exit_price: Optional[float] = None,
+        exit_order_side: Optional[str] = None,
+        exit_submitted_at: Optional[datetime] = None,
     ) -> None:
         """Log trade exit and calculate performance metrics.
         
@@ -278,12 +335,30 @@ class TradeJournal:
             exit_order_id: Order ID for exit
             max_adverse_excursion: Worst drawdown during trade
             max_favorable_excursion: Best profit during trade
-            exit_slippage: Slippage on exit
+            exit_slippage: Slippage on exit (if precomputed; otherwise derived below)
             symbol: Symbol for fallback lookup when trade_id doesn't match
             account_type: 'demo' or 'live' — scopes fallback lookups so a live
                           exit never accidentally closes a demo entry and vice versa.
+            expected_exit_price: Price expected when the close order was submitted —
+                          used (with the drift guard) to derive exit_slippage when it
+                          isn't passed explicitly.
+            exit_order_side: Side of the CLOSING order ('SELL' to close a long,
+                          'BUY' to close a short) — for directional slippage.
+            exit_submitted_at: Close-order submission time — drives the drift guard.
         """
         logger.info(f"Logging trade exit: {trade_id} @ {exit_price}")
+
+        # Derive exit slippage from expected price if not explicitly provided.
+        # Same drift guard as entry: a close that filled >15 min after submission
+        # (e.g. queued to the next session) reflects market drift, not slippage.
+        if exit_slippage is None and expected_exit_price:
+            exit_slippage = compute_execution_slippage(
+                expected_price=expected_exit_price,
+                filled_price=exit_price,
+                order_side=exit_order_side,
+                submitted_at=exit_submitted_at,
+                filled_at=exit_time,
+            )
 
         session = self.database.get_session()
         try:
