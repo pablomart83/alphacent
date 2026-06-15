@@ -576,7 +576,17 @@ class TradingScheduler:
             # many stops clear and new fills are pending simultaneously). The DB-computed
             # value (equity - invested - pending) is stable throughout settlement because
             # it's based on the 60s equity snapshot minus what we know is committed.
-            MINIMUM_ORDER_SIZE = 2000.0
+            # Minimum order size below which entries are pointless — aligned to the
+            # demo floor (paper_trading.min_order_size, default $1000, the highest eToro
+            # per-instrument minimum). Was a hardcoded $2000 that would skip all entries
+            # when balance sat in the $1000–2000 band even though $1000 orders are viable.
+            MINIMUM_ORDER_SIZE = 1000.0
+            try:
+                import yaml as _yaml_mos
+                _pt_mos = (yaml.safe_load(open('config/autonomous_trading.yaml')) or {}).get('paper_trading', {})
+                MINIMUM_ORDER_SIZE = float(_pt_mos.get('min_order_size', 1000.0))
+            except Exception:
+                MINIMUM_ORDER_SIZE = 1000.0
             _available_balance = getattr(account_info, 'balance', 0) or 0
             try:
                 from src.models.orm import AccountInfoORM, PositionORM as _PosORM_bal, OrderORM as _OrdORM_bal

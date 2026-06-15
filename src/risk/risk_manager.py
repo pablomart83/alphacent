@@ -252,12 +252,44 @@ class RiskManager:
         # field in the gate_blocked decision row.
         self._last_sizing_reason: str = ""
 
+        # Cached DEMO/PAPER minimum order size. Read from
+        # paper_trading.min_order_size (default 1000 — the highest eToro
+        # per-instrument minimum, $1000 for indices/commodity CFDs like
+        # SPX500/GER40/ALUMINUM; stocks/ETFs/crypto are ~$10). $1000 clears
+        # every instrument while letting paper size drop from the legacy $5000
+        # to $1000 — ~5x more concurrent paper positions on the demo book for
+        # research breadth. Was hardcoded $2000 in 3 spots.
+        self._paper_min_order_size_cache: Optional[float] = None
+
         logger.info(
             f"RiskManager initialized with config: "
             f"max_position_size={config.max_position_size_pct:.1%}, "
             f"max_exposure={config.max_exposure_pct:.1%}, "
             f"max_daily_loss={config.max_daily_loss_pct:.1%}"
         )
+
+    def _get_demo_min_order_size(self) -> float:
+        """DEMO/PAPER minimum order size, from paper_trading.min_order_size (default 1000).
+
+        $1000 is the highest eToro per-instrument minimum (indices/commodity CFDs
+        like SPX500/GER40/ALUMINUM; stocks/ETFs/crypto are ~$10), so it clears every
+        instrument while allowing the paper flat size to drop to $1000 for ~5x more
+        concurrent paper positions. Cached after first read. Never raises.
+        """
+        if self._paper_min_order_size_cache is not None:
+            return self._paper_min_order_size_cache
+        val = 1000.0
+        try:
+            import yaml
+            from pathlib import Path
+            _p = Path("config/autonomous_trading.yaml")
+            if _p.exists():
+                _cfg = yaml.safe_load(_p.read_text()) or {}
+                val = float((_cfg.get("paper_trading", {}) or {}).get("min_order_size", 1000.0))
+        except Exception:
+            val = 1000.0
+        self._paper_min_order_size_cache = val
+        return val
 
     @staticmethod
     def _get_position_value(pos: Position) -> float:
@@ -656,8 +688,9 @@ class RiskManager:
             # Post-adjustment minimum floor: if correlation or regime adjustments
             # pushed the size below the minimum, bump back up to minimum.
             # The system decided to trade this signal — submit at minimum rather than failing.
-            # LIVE minimum is $200 (live_trading.min_order_size), DEMO is $2,000.
-            MINIMUM_ORDER_SIZE_POST = 200.0 if is_live else 2000.0
+            # LIVE minimum is $200 (live_trading.min_order_size), DEMO is config-driven
+            # (paper_trading.min_order_size, default $1000 — clears every eToro instrument min).
+            MINIMUM_ORDER_SIZE_POST = 200.0 if is_live else self._get_demo_min_order_size()
 
             if 0 < position_size < MINIMUM_ORDER_SIZE_POST:
                 # Only bump if we actually have the balance to cover it.
@@ -888,7 +921,7 @@ class RiskManager:
         if equity <= 0:
             equity = account.balance
 
-        MINIMUM_ORDER_SIZE = 2000.0
+        MINIMUM_ORDER_SIZE = self._get_demo_min_order_size()
         if available_balance < MINIMUM_ORDER_SIZE and not is_live:
             # For LIVE, the minimum is $200 (live_trading.min_order_size) — checked
             # after the LIVE parameter block below loads the correct value.
@@ -973,9 +1006,9 @@ class RiskManager:
                 if _cfg_path_ps.exists():
                     with open(_cfg_path_ps, "r") as _f_ps:
                         _cfg_ps = _yaml_ps.safe_load(_f_ps) or {}
-                _flat_size = float(_cfg_ps.get("paper_trading", {}).get("flat_position_size", 5000.0))
+                _flat_size = float(_cfg_ps.get("paper_trading", {}).get("flat_position_size", 1000.0))
             except Exception:
-                _flat_size = 5000.0
+                _flat_size = 1000.0
 
             # Apply symbol concentration cap (hard limit — still enforced for paper)
             # G-47: raised from 5% to 10% of equity for PAPER.
@@ -1443,9 +1476,9 @@ class RiskManager:
         # penalty) fired, DO NOT bump — bumping would defeat the penalty. Return
         # 0 instead so the trade is skipped.
         #
-        # DEMO minimum: $2,000 (lowered from $5,000 on 2026-05-06).
+        # DEMO minimum: config-driven (paper_trading.min_order_size, default $1000).
         # LIVE minimum: $200 (live_trading.min_order_size) — LIVE orders are small.
-        MINIMUM_ORDER_SIZE = _live_min_order_size if is_live else 2000.0
+        MINIMUM_ORDER_SIZE = _live_min_order_size if is_live else self._get_demo_min_order_size()
         if position_size <= 0:
             # Earlier caps brought size to 0 without explicit early return
             # (shouldn't happen in practice but defensive). Reason was
