@@ -1476,7 +1476,7 @@ def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
                         reason = last_sd.reason or ""
                         if "conviction" in reason.lower():
                             d["last_signal_status"] = "blocked_conviction"
-                            score = f" (score {last_sd.score:.0f})" if last_sd.score else ""
+                            score = f" (score {last_sd.score:.1f})" if last_sd.score else ""
                             d["last_signal_detail"] = f"Blocked: conviction{score} {age_str}"
                         elif "frequency" in reason.lower():
                             d["last_signal_status"] = "blocked_frequency"

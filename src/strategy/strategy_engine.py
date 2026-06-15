@@ -5773,7 +5773,8 @@ class StrategyEngine:
                 # 2026-05-04 the filter paths only logged to alphacent.log, so the
                 # UI and audit queries saw 0 rejections even when the footer said
                 # `[SIGNALS] 2 generated → 2 rejected`.
-                def _log_filter_rejection(reason_text: str, extra_md: Optional[Dict[str, Any]] = None) -> None:
+                def _log_filter_rejection(reason_text: str, extra_md: Optional[Dict[str, Any]] = None,
+                                          score: Optional[float] = None) -> None:
                     try:
                         from src.analytics.decision_log import record_decision as _rec_dec
                         _meta_s = getattr(strategy, 'metadata', {}) or {}
@@ -5790,6 +5791,7 @@ class StrategyEngine:
                             symbol=signal.symbol,
                             direction=_direction,
                             reason=reason_text,
+                            score=score,
                             metadata=extra_md,
                         )
                     except Exception:
@@ -5948,6 +5950,7 @@ class StrategyEngine:
                             "min_conviction": _effective_threshold,
                             "breakdown": conviction.breakdown,
                         },
+                        score=conviction.total_score,
                     )
                     continue
 
