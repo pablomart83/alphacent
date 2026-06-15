@@ -2445,9 +2445,22 @@ class TradingScheduler:
                         # just-submitted order if its DB write failed (the DELL-orphan
                         # path: eToro filled but the order row was lost). This set is
                         # populated the instant execute_signal returns — BEFORE and
-                        # independent of the DB write — so strategies 2..N for the same
-                        # symbol in this cycle are blocked even when the row write fails.
-                        _live_symbols_submitted_this_cycle: set = set()
+                        # independent of the DB write. It is keyed by (strategy_id, symbol)
+                        # so DIFFERENT strategies can trade the same symbol (intended —
+                        # each (template,symbol) is a distinct edge); it only blocks the
+                        # SAME pair from re-submitting and feeds the symbol concentration count.
+                        _live_pairs_submitted_this_cycle: set = set()
+
+                        # Concentration cap: max distinct strategies that may concurrently
+                        # hold/enter the same symbol on the LIVE book. Multi-strategy-per-symbol
+                        # is intended; this bounds how many stack on one name. Configurable.
+                        _max_live_per_symbol = 3
+                        try:
+                            import yaml as _yaml_mlp
+                            _lt_mlp = (yaml.safe_load(open('config/autonomous_trading.yaml')) or {}).get('live_trading', {})
+                            _max_live_per_symbol = int(_lt_mlp.get('max_positions_per_symbol', 3))
+                        except Exception:
+                            _max_live_per_symbol = 3
 
                         for _appr in _all_approvals:
                             _live_strat_id = _appr.strategy_id
@@ -2480,63 +2493,62 @@ class TradingScheduler:
                                 )
                                 continue
 
-                            # ── P0 DUPLICATE GUARD ────────────────────────────────────────
-                            # Before generating any entry signals, check whether a live
-                            # position or pending order already exists for this symbol.
-                            #
-                            # IMPORTANT: Use a fresh session for these checks. The main
-                            # `session` may be in a stale/rolled-back state from earlier
-                            # errors (InFailedSqlTransaction cascade), causing it to return
-                            # no rows even when positions exist — exactly what caused the
-                            # PANW triple-position bug on Jun 10: session was poisoned,
-                            # duplicate guard returned empty, 3 entries were placed.
+                            # ── DUPLICATE (pair-level) + CONCENTRATION (symbol-level) GUARD ──
+                            # Multi-strategy-per-symbol is intended (the DB constraint is on
+                            # (strategy_id, symbol, account_type), and the risk framework caps
+                            # cumulative per-symbol exposure). So we block:
+                            #   - DUPLICATE: only if THIS (strategy_id, symbol) already has an
+                            #     open position / pending order / same-cycle submission.
+                            #   - CONCENTRATION: if the number of DISTINCT strategies already
+                            #     holding/entering this symbol has reached _max_live_per_symbol.
+                            # Fresh session — the main one may be in a stale/rolled-back state
+                            # (InFailedSqlTransaction cascade) and return no rows (the PANW
+                            # triple-position root cause). The uq_open_pos_strategy_symbol_acct
+                            # DB index is the hard backstop against a true pair-duplicate.
                             _skip_live_entries = False
                             try:
                                 from src.models.database import get_database as _gdb_dup
                                 _dup_sess = _gdb_dup().get_session()
                                 try:
-                                    # (0) Already submitted this cycle for this symbol (in-memory
-                                    # guard) — covers the window where a prior strategy's order
-                                    # DB write failed but the eToro submit succeeded (P0-2).
-                                    if _live_sym in _live_symbols_submitted_this_cycle:
+                                    # Distinct strategies with LIVE exposure on this symbol:
+                                    # open positions + pending orders + earlier this cycle.
+                                    _holders: set = set()
+                                    for _r in _dup_sess.query(PositionORM.strategy_id).filter(
+                                        PositionORM.account_type == 'live',
+                                        PositionORM.symbol == _live_sym,
+                                        PositionORM.closed_at.is_(None),
+                                    ).all():
+                                        _holders.add(_r[0])
+                                    for _r in _dup_sess.query(OrderORM.strategy_id).filter(
+                                        OrderORM.account_type == 'live',
+                                        OrderORM.symbol == _live_sym,
+                                        OrderORM.status == OrderStatus.PENDING,
+                                    ).all():
+                                        _holders.add(_r[0])
+                                    _holders |= {
+                                        _sid for (_sid, _sym) in _live_pairs_submitted_this_cycle
+                                        if _sym == _live_sym
+                                    }
+
+                                    if _live_strat_id in _holders:
                                         logger.info(
-                                            f"Live pass: {_live_sym} already submitted this cycle "
-                                            f"(in-memory guard) — skipping entry signals"
+                                            f"Live pass: ({_live_strat_id[:8]}, {_live_sym}) already has an "
+                                            f"open position / pending order / submission this cycle — "
+                                            f"skipping entry signals (pair-level duplicate guard)"
                                         )
                                         _skip_live_entries = True
-
-                                    # (a) Any open live position for this symbol → skip all entries
-                                    if not _skip_live_entries:
-                                        _live_open_pos = _dup_sess.query(PositionORM).filter(
-                                            PositionORM.account_type == 'live',
-                                            PositionORM.symbol == _live_sym,
-                                            PositionORM.closed_at.is_(None),
-                                        ).first()
-                                        if _live_open_pos:
-                                            logger.info(
-                                                f"Live pass: open position exists for {_live_sym} "
-                                                f"(id={str(_live_open_pos.id)[:8]}) — skipping entry signals"
-                                            )
-                                            _skip_live_entries = True
-
-                                    # (b) Any pending live order for this symbol → skip entries
-                                    if not _skip_live_entries:
-                                        _live_pending_order = _dup_sess.query(OrderORM).filter(
-                                            OrderORM.account_type == 'live',
-                                            OrderORM.symbol == _live_sym,
-                                            OrderORM.status == OrderStatus.PENDING,
-                                        ).first()
-                                        if _live_pending_order:
-                                            logger.info(
-                                                f"Live pass: pending order exists for {_live_sym} "
-                                                f"(order={_live_pending_order.id[:8]}) — skipping entry signals"
-                                            )
-                                            _skip_live_entries = True
+                                    elif len(_holders) >= _max_live_per_symbol:
+                                        logger.info(
+                                            f"Live pass: {_live_sym} concentration cap reached "
+                                            f"({len(_holders)}/{_max_live_per_symbol} distinct strategies "
+                                            f"hold/entering) — skipping {_live_strat_id[:8]} entry signals"
+                                        )
+                                        _skip_live_entries = True
                                 finally:
                                     _dup_sess.close()
                             except Exception as _dup_check_err:
                                 logger.warning(
-                                    f"Live pass: duplicate guard check failed for {_live_sym}: "
+                                    f"Live pass: duplicate/concentration guard check failed for {_live_sym}: "
                                     f"{_dup_check_err} — proceeding (fail-open)"
                                 )
 
@@ -2832,9 +2844,10 @@ class TradingScheduler:
                                         )
                                         # P0-2: record the eToro submit in-memory IMMEDIATELY,
                                         # before the DB write. If the order row write below
-                                        # fails, this still blocks duplicate entries for the
-                                        # same symbol from later strategies in this cycle.
-                                        _live_symbols_submitted_this_cycle.add(_live_sym)
+                                        # fails, this still blocks the SAME (strategy,symbol)
+                                        # pair from re-submitting and feeds the symbol
+                                        # concentration count for later strategies this cycle.
+                                        _live_pairs_submitted_this_cycle.add((_live_strat_id, _live_sym))
                                         _live_order_orm2 = OrderORM(
                                             id=_live_order2.id,
                                             strategy_id=_live_order2.strategy_id,
