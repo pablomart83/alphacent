@@ -6,6 +6,28 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSIONS 2026-06-12 → 06-15 (Opus 4.8) — all deployed live + verified healthy + pushed. Latest commit `e8d68c7`.** Rollup of everything done across these sessions (detailed entries below):
+1. **AE / crypto / SHORT generation-bias audit + fixes** — AE effective denominator 132→122; AE-calibrated conviction threshold (paper 55 / live 67); AE fundamental-data fetch decoupled from the reject gate (was always 0); SHORT WF tightening regime-scoped to `trending_up*` only; crypto confirmed regime-appropriate (BTC −22%/mo); `conviction_threshold_alpha_edge` exposed in Settings UI. Commits `92550c1`, `2b5c4c4`.
+2. **P0 — `uq_open_pos` UniqueViolation** in `order_monitor.check_submitted_orders` (recurring, real-money duplicate risk): pair-level `_open_slot_taken()` guard on strategy_id reassigns + savepoint-isolated create. Commit `4701700`.
+3. **Slippage measurement fix (A+B+C)** — `exit_slippage` was 100% NULL; `entry_slippage` contaminated by overnight drift (13–17h queued fills). New `compute_execution_slippage()` with 15-min drift guard; exit slippage now captured. Commit `a69cb6b`.
+4. **F3 verified** — vectorbt `freq='1D'` annualizes Sharpe by 365 (calendar) not 252 → daily Sharpe overstated ~1.204×. `scripts/verify_sharpe_annualization.py`. NOT fixed (bundle with F1/F2 cost-Sharpe recalibration). Commit `c361a9d`.
+5. **Conviction-score badge** — "Blocked: conviction" live badge now shows the actual score (`_log_filter_rejection` populates `score`; badge `.1f`). Commit `9319d2d`.
+6. **LIVE multi-strategy-per-symbol** — live-pass guard changed symbol-level → pair-level (duplicate) + distinct-strategy concentration cap (default 3, `live_trading.max_positions_per_symbol`). MU strategies can now coexist. Commit `7e2c104`.
+7. **PAPER research breadth** — flat paper size $5K→$1K + config-driven demo min order ($1K, the validated eToro floor: indices/commodity CFDs need $1K, stocks/ETF/crypto $10). ~100→~500 concurrent paper slots > 370 strategies, killing the balance-exhaustion sampling bias. Commit `e8d68c7`.
+
+**STILL OPEN / NEXT:**
+- **Backtest F1/F2 + F3 recalibration (bundled):** Sharpe & win-rate are GROSS of costs (F1/F2), and daily Sharpe is calendar-annualized (F3). Fix = route validated per-trade costs into `from_signals(fees=…)` + correct the 1d annualization, THEN re-baseline WF/conviction/graduation thresholds against the measured gross→net shift. Prereq: **Fix D** — derive empirical per-asset costs from the now-clean slippage data (a few market-hours days needed) and repair historical contaminated `entry_slippage` rows.
+- **`strategies.status` ↔ `live_strategies.retired_at` sync bug** — `strategies.status` stays `LIVE` after a pair is retired in `live_strategies` (misled a query; any UI reading `strategies.status` overstates the live book).
+- **C-2 (CIO decision):** directional quotas + directional_balance are DISABLED in the yaml; "never zero short" unenforced (empirically non-zero). Enable + set a `ranging_low_vol` short floor, or formally make the rule regime-conditional.
+- **Live Portfolio & Alpha audit (recommended):** active live book is net-negative ex the retired SOXL outlier (27% live WR) and concentrated long-tech-momentum — worth a P&L-attribution + factor-concentration pass.
+- **B-5:** crypto cross-validation family rescue is dormant (no template sets `requires_cross_validation`).
+- **demo 604s:** the demo `604 insufficient funds` were the saturation symptom — should subside as the $1K paper sizing recycles the book; confirm.
+- **Verify Monday+ (market-hours):** AE `signal_emitted=emitted`>0 + AE orders fire; SHORT WF pass-rate rises in ranging; conviction badge shows scores; multiple MU live positions coexist (watch `concentration cap reached`); clean (non-drift) slippage rows accumulate; demo paper positions open at ~$1K.
+
+**NEXT TASK — STRATEGY TEMPLATE SYSTEM REDESIGN.** `src/strategy/strategy_templates.py` is an 8,567-line single file, 259 `StrategyTemplate(...)` all in one `_create_templates()` method, with policy embedded in the dataclass `__post_init__` (ADX-gate injection, SL/TP floors, R:R enforcement), load-time culling (`REMOVE_TEMPLATES` + `_MIN_CRYPTO_TP`), free-text DSL strings, and 9 consumers. A full deep-dive + redesign prompt (strategy-as-data catalog, schema validation, behavior-preserving migration) was drafted this session — paste it into a fresh session. Templates are name-keyed across DB history (`strategies`, `signal_decisions`, `live_strategies`) — names must stay stable or be migration-mapped.
+
+---
+
 **SESSION 2026-06-12 (PM-2) — AE / CRYPTO / SHORT generation-bias audit + fixes (Opus 4.8). Code deployed + verified live, healthy. Local commit `92550c1` — NOT pushed yet (git push needs the hardware security-key PIN; key locked after failed attempts — re-insert key and `git -c core.hooksPath=/dev/null push`).**
 
 Audit of why AlphaCent under-generates Alpha-Edge / crypto / SHORT. Triangulated the `signal_decisions` funnel (since 05-30) vs live code + DB. **Live regime is `ranging_low_vol`** (conf 0.61, not `trending_up_strong` as assumed). Found WHERE each class dies:
