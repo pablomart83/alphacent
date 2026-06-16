@@ -24,7 +24,24 @@
 - **demo 604s:** the demo `604 insufficient funds` were the saturation symptom — should subside as the $1K paper sizing recycles the book; confirm.
 - **Verify Monday+ (market-hours):** AE `signal_emitted=emitted`>0 + AE orders fire; SHORT WF pass-rate rises in ranging; conviction badge shows scores; multiple MU live positions coexist (watch `concentration cap reached`); clean (non-drift) slippage rows accumulate; demo paper positions open at ~$1K.
 
-**SESSION 2026-06-16 (PM) — full autonomous-cycle audit + AE/regime/short/data fixes (Opus 4.8). P1/P2/P3/P5 deployed live, healthy, pushed (`83b7f13`).**
+**SESSION 2026-06-16 (PM) — full autonomous-cycle audit + AE/regime/short/data fixes + edge-template expansion (Opus 4.8). All deployed live, healthy, pushed (`88c7232`).**
+
+EDGE EXPANSION (2026-06-16) — added 4 validated price-factor templates (216 total). Each validated end-to-end (parse + indicator-compute + produces trades on real data via `scripts/validate_new_templates.py`) before shipping; each still must clear WF+MC to trade. New file `config/strategy_catalog/factor_price.yaml`:
+- **Multi-Month High Momentum** (#1) — George-Hwang high-proximity momentum; `CLOSE>=DONCHIAN_UPPER(120)*0.98 AND ADX>20 AND RSI 50-80`. Lookback 120d (252 is all-NaN in a 365d WF test split); RSI as a RANGE (the semantic validator treats any RSI<X entry as oversold and silently skips it — latent issue, see below). Commit `1fd103b`.
+- **Dual Momentum Trend Long** (#4) — Antonacci; `CLOSE>SMA(200) AND LAG_RETURN("SELF",126,"1d")>0`.
+- **Cross-Asset Trend Follow Long** (#6) — MOP TSMOM; `CLOSE>SMA(200) AND LAG_RETURN("SELF",252,"1d")>0`; targets indices/commodities/broad-ETFs.
+- **Cross-Sectional Momentum Long** (#2) — Jegadeesh-Titman; `RANK_IN_UNIVERSE("SELF",[20 mega-caps],126,8)>0 AND CLOSE>SMA(200)`. Commit `88c7232`.
+
+EDGE-GAP STATUS (Tier 1-4):
+- **Tier 1/2 shipped:** #1 #2 #4 #6 (above). 
+- **#7 Sector Rotation — already fixed** (catalog template already lists all 11 SPDR sectors; dated known-issue is stale).
+- **#3 Low-Vol factor + #5 Short-Term Reversal — NEED a primitive-build increment** (NOT rushed): RANK_IN_UNIVERSE only does top-N-by-return. #5 needs a bottom-rank variant; #3 needs a vol-rank (rank by inverse realized vol). Each = new key in `trading_dsl.INDICATOR_MAPPING` + extractor/compute in `cross_asset_primitives.py` + wiring, with exact key-matching (code warns key-mismatch → silent 0-trade). Do as a focused increment with its own tests + the validate harness.
+- **#8 Pairs — dormant, needs design session** (per steering): the pairs ENGINE exists (`_simulate_pairs_trading_trades`, rolling-OLS z-score, PAIRS_MAP) but NO catalog template proposes it. Adding requires defining PAIRS_MAP pairs + end-to-end validation.
+- **Tier 4 investigated:** Forex carry FEASIBLE (FRED rate data already integrated — earlier "data-gated" was wrong); crypto funding carry NOT feasible (onchain_client only has btc_dominance, no funding); seasonality feasible via dedicated calendar handlers (end_of_month pattern; DSL has no date primitive).
+
+LATENT ISSUE surfaced: `strategy_engine.validate_rule_semantics` treats ANY `RSI(14) < X` entry as an oversold (mean-reversion) signal and caps it at 65 — silently SKIPPING momentum templates that use RSI<X as a blow-off filter (the rule is dropped, entries go all-False, 0 trades, no error). Worked around in #1 by using an RSI range; the validator itself should be made momentum-aware (a real refinement).
+
+
 
 After the template-catalog migration (above), ran a full forensic pass on autonomous cycle `cycle_1781595884` (regime trending_up_strong 97%, 518s, completed clean). The template layer is clean (200 proposed → 50 distinct, all resolve in catalog; zero catalog/DSL errors). Findings beyond the migration + fixes:
 
