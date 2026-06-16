@@ -889,11 +889,17 @@ class ConvictionScorer:
                 set(DEMO_ALLOWED_ETFS)
             )
             if sym in non_stock:
+                logger.info(f"[AE-FUND-DIAG] {sym}: _score early-return — symbol in non_stock set")
                 return 0.0
         except ImportError:
             pass
 
         if not fundamental_report or not fundamental_report.fundamental_data:
+            logger.info(
+                f"[AE-FUND-DIAG] {sym}: _score early-return — "
+                f"report={'present' if fundamental_report else 'None'}, "
+                f"fundamental_data={'present' if (fundamental_report and fundamental_report.fundamental_data) else 'None'}"
+            )
             return 0.0
 
         fd = fundamental_report.fundamental_data
@@ -972,6 +978,14 @@ class ConvictionScorer:
                 f"Fundamental quality for {sym} ({direction_label}): "
                 f"raw={raw_score:+.1f} ({quality_label}), "
                 f"direction_adjusted={direction_score:+.1f}"
+            )
+        else:
+            # [AE-FUND-DIAG] data present but score 0 — show which fields were None/neutral.
+            logger.info(
+                f"[AE-FUND-DIAG] {sym}: _score computed 0 — "
+                f"earnings_surprise={fd.earnings_surprise} revenue_growth={fd.revenue_growth} "
+                f"insider_net_buying={fd.insider_net_buying} roe={fd.roe} "
+                f"shares_change_percent={fd.shares_change_percent}"
             )
 
         return direction_score

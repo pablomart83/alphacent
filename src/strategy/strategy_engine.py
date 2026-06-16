@@ -5903,6 +5903,25 @@ class StrategyEngine:
                         logger.warning(f"Could not get fundamental report for {signal.symbol}: {e}")
                         # Continue without fundamental filtering if it fails
                 
+                # [AE-FUND-DIAG 2026-06-16] Trace AE fundamental_report state at conviction
+                # time to root-cause fundamental_quality_adj=0 despite populated snapshots
+                # (ASML had earnings_surprise=+8.4%/roe=49% yet scored 0). REMOVE after fix.
+                if _is_ae_strategy:
+                    try:
+                        _fr = fundamental_report
+                        _fd = getattr(_fr, 'fundamental_data', None) if _fr else None
+                        logger.info(
+                            f"[AE-FUND-DIAG] {signal.symbol} {strategy.name}: "
+                            f"report={'present' if _fr else 'None'} "
+                            f"passed={getattr(_fr, 'passed', 'NA') if _fr else 'NA'} "
+                            f"fundamental_data={'present' if _fd else 'None'} "
+                            f"roe={getattr(_fd, 'roe', None) if _fd else None} "
+                            f"earnings_surprise={getattr(_fd, 'earnings_surprise', None) if _fd else None} "
+                            f"skip_fundamental={_skip_fundamental}"
+                        )
+                    except Exception as _diag_err:
+                        logger.info(f"[AE-FUND-DIAG] log failed: {_diag_err}")
+
                 # Score conviction
                 conviction = conviction_scorer.score_signal(signal, strategy, fundamental_report)
 
