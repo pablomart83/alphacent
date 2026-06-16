@@ -14,7 +14,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src.api.dependencies import get_current_user, get_db_session
-from src.models.orm import PositionORM, OrderORM, LiveStrategyORM, GraduationApprovalORM
+from src.models.orm import PositionORM, OrderORM, LiveStrategyORM, GraduationApprovalORM, StrategyORM
+from src.models.enums import StrategyStatus
 
 logger = logging.getLogger(__name__)
 
@@ -297,6 +298,22 @@ async def retire_live_strategy(
 
     ls.retired_at = datetime.now()
 
+    # Revert the strategy's lifecycle status LIVE → PAPER so the live book is not
+    # overstated. A live_strategies row with retired_at set is excluded from the
+    # live pass (get_all_live_approvals filters retired_at IS NULL), but the
+    # strategies.status field was previously left at 'LIVE' forever — so any UI or
+    # query that counts status='LIVE' (the live book) over-reported retired pairs
+    # (confirmed 2026-06-16: 15 status='LIVE' rows vs 10 active live_strategies).
+    # PAPER is the documented post-retire state ("the strategy continues
+    # paper-trading on DEMO"): it re-enters the DEMO loop for data collection and
+    # can only return to live via an explicit CIO graduate action. Scoped to the
+    # exact strategy_id; only flip when currently LIVE (idempotent / safe).
+    status_reverted = False
+    strat_orm = db.query(StrategyORM).filter_by(id=ls.strategy_id).first()
+    if strat_orm is not None and strat_orm.status == StrategyStatus.LIVE:
+        strat_orm.status = StrategyStatus.PAPER
+        status_reverted = True
+
     # Flag any OPEN LIVE position for this strategy for closure. Scoped to
     # account_type='live' so a paper/demo position for the same strategy is never
     # touched, and to closed_at IS NULL / not-already-pending so it is idempotent.
@@ -322,11 +339,13 @@ async def retire_live_strategy(
             f"User {username} retired live strategy {live_id} "
             f"({ls.template_name} / {ls.symbol}) and flagged {flagged} open live "
             f"position(s) for closure — pending-closure pass will submit close order(s)"
+            f"{' [status LIVE→PAPER]' if status_reverted else ''}"
         )
     else:
         logger.info(
             f"User {username} retired live strategy {live_id} "
             f"({ls.template_name} / {ls.symbol}) — no open live position to close"
+            f"{' [status LIVE→PAPER]' if status_reverted else ''}"
         )
     return {
         "success": True,
@@ -336,6 +355,7 @@ async def retire_live_strategy(
         ),
         "retired_at": ls.retired_at.isoformat(),
         "positions_flagged_for_closure": flagged,
+        "status_reverted_to_paper": status_reverted,
     }
 
 
