@@ -48,6 +48,15 @@ from src.utils.symbol_mapper import to_etoro_wire_format as normalize_symbol, to
 
 logger = logging.getLogger(__name__)
 
+# yfinance logs "$SYM: possibly delisted; no price data found" at ERROR on its own
+# logger for transient/empty fetches (brief Yahoo outages, the 1h 730d-cap miss, etc).
+# In our multi-source design these are EXPECTED — every Yahoo miss is already logged by
+# us at WARNING before we fall through to FMP/eToro, and a genuinely dead symbol still
+# surfaces via our own "all sources failed" ERROR. Suppress yfinance's redundant ERROR
+# so it doesn't drown real errors in errors.log (it produced 500+ lines during the
+# 2026-06-14/15 SPY Yahoo outage alone).
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+
 # ── Module-level singleton ────────────────────────────────────────────────────
 # The shared MarketDataManager singleton + its get_/set_ accessors are defined
 # at the BOTTOM of this module (search "_mdm_singleton"). They were previously
@@ -967,13 +976,24 @@ class MarketDataManager:
                     self._historical_memory_cache[cache_key] = (result, datetime.now())
                 return result
             else:
-                logger.error(f"No valid data from eToro for {db_symbol}")
+                # eToro is the LAST RESORT and genuinely lacks historical OHLCV for
+                # many symbols (Yahoo/FMP are primary by design) — a miss here is
+                # expected, not a system error. Log WARNING; the real, actionable
+                # event is the "all sources failed" raise below.
+                logger.warning(f"No valid data from eToro for {db_symbol} (last-resort source)")
 
         except EToroAPIError as e:
-            logger.error(f"eToro API failed for {db_symbol}: {e}")
+            logger.warning(f"eToro API (last-resort) has no historical data for {db_symbol}: {e}")
         except Exception as e:
-            logger.error(f"eToro API error for {db_symbol}: {e}")
+            logger.warning(f"eToro API (last-resort) error for {db_symbol}: {e}")
 
+        # All sources (DB cache → Yahoo → FMP → eToro) failed — this is the single
+        # genuine, actionable error. The caller logs/handles the raised ValueError;
+        # we do NOT serve stale data here (that would silently mask a real outage).
+        logger.error(
+            f"All historical data sources failed for {db_symbol} "
+            f"({interval}) — Yahoo, FMP and eToro all returned no valid data"
+        )
         raise ValueError(f"Failed to fetch historical data for {db_symbol} from all sources")
     
     def _validate_and_return_historical_data(

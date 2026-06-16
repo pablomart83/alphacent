@@ -687,36 +687,50 @@ class OrderMonitor:
             submitted_count = 0
             failed_count = 0
 
+            # ── Pre-submission balance snapshot (read ONCE per pass) ──────────
+            # Skip orders we already know eToro will reject for insufficient funds
+            # (error 604) so we don't burn an API call or spam errors.log.
+            # CRITICAL: filter by THIS monitor's account (mode) — account_info
+            # holds both demo and live rows, and ordering by updated_at alone can
+            # return the OTHER account's balance (e.g. the demo monitor reading a
+            # funded live balance → submitting doomed demo orders → the 604 burst).
+            # live_balance is None when the read fails → fail OPEN (let eToro be
+            # the arbiter rather than wedging ALL submissions on a transient DB
+            # hiccup — the previous code set 0.0 here, which blocked everything).
+            try:
+                from src.models.orm import AccountInfoORM
+                _mode = TradingMode.LIVE if self.account_type == 'live' else TradingMode.DEMO
+                _bal_sess = self.db.get_session()
+                try:
+                    _acct = _bal_sess.query(AccountInfoORM).filter(
+                        AccountInfoORM.mode == _mode
+                    ).order_by(AccountInfoORM.updated_at.desc()).first()
+                    live_balance = float(_acct.balance) if _acct and _acct.balance is not None else None
+                finally:
+                    _bal_sess.close()
+            except Exception as _bal_err:
+                logger.debug(f"Pre-submission balance read failed ({_bal_err}) — failing open")
+                live_balance = None
+
+            # Reserve committed value as we submit, so a burst of pending orders
+            # isn't all waved through against ONE stale snapshot (that over-commit
+            # is what turns a near-empty account into a flood of 604 rejections).
+            reserved_this_pass = 0.0
+
             for order in pending_orders:
                 order_id = str(order.id)
 
-                # ── Pre-submission balance check ──────────────────────────────
-                # Re-read live balance from DB before every submission attempt.
-                # If balance < order size, skip immediately — don't burn an eToro
-                # API call that will return error 604. The order stays PENDING and
-                # will be retried next cycle (when a position may have closed and
-                # freed up capital). Log at WARNING so it's visible but not an error.
-                try:
-                    from src.models.orm import AccountInfoORM
-                    _bal_sess = self.db.get_session()
-                    try:
-                        _acct = _bal_sess.query(AccountInfoORM).order_by(
-                            AccountInfoORM.updated_at.desc()
-                        ).first()
-                        live_balance = float(_acct.balance) if _acct and _acct.balance else 0.0
-                    finally:
-                        _bal_sess.close()
-                except Exception:
-                    live_balance = 0.0  # fail-open: let eToro be the final arbiter
-
-                if live_balance < order.quantity:
-                    logger.warning(
-                        f"Skipping order {order.id} ({order.symbol} ${order.quantity:.0f}): "
-                        f"insufficient balance (${live_balance:.0f} available). "
-                        f"Order stays PENDING — will retry when capital is freed."
-                    )
-                    continue  # don't increment attempt counter — this isn't a failure
-                order_id = str(order.id)
+                # Pre-submission balance check (skipped when balance unknown).
+                if live_balance is not None:
+                    available = live_balance - reserved_this_pass
+                    if available < (order.quantity or 0.0):
+                        logger.warning(
+                            f"Skipping order {order.id} ({order.symbol} ${order.quantity:.0f}): "
+                            f"insufficient {self.account_type} balance (${available:.0f} available "
+                            f"after ${reserved_this_pass:.0f} reserved this pass). "
+                            f"Stays PENDING — retries when capital is freed."
+                        )
+                        continue  # not a failure — don't increment the attempt counter
 
                 # Check if max submission attempts exceeded
                 attempts = self._submission_attempts.get(order_id, 0)
@@ -762,6 +776,9 @@ class OrderMonitor:
                     order.submitted_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
                     submitted_count += 1
+                    # Reserve this order's value so subsequent orders in the same
+                    # pass see the reduced effective balance (prevents over-commit).
+                    reserved_this_pass += float(order.quantity or 0.0)
                     # Reset attempts on success
                     self._submission_attempts.pop(order_id, None)
                     logger.info(f"Order {order.id} submitted successfully, eToro order ID: {order.etoro_order_id}")
@@ -949,7 +966,22 @@ class OrderMonitor:
                                 # CRITICAL: Check for errors first
                                 # Status 4 with errorCode != 0 means FAILED/REJECTED
                                 if error_code and error_code != 0:
-                                    logger.error(f"Order {order.id} failed with error {error_code}: {error_message}")
+                                    # 604 (insufficient funds) and 789 (units round
+                                    # to zero) are EXPECTED demo-saturation rejections,
+                                    # not system errors — the account is simply out of
+                                    # capital. The handling below (mark FAILED + delete
+                                    # the optimistic position) is correct either way;
+                                    # log them at WARNING so a real rejection code isn't
+                                    # buried under saturation noise in errors.log.
+                                    _EXPECTED_REJECT_CODES = {604, 789}
+                                    try:
+                                        _ec_int = int(error_code)
+                                    except (TypeError, ValueError):
+                                        _ec_int = None
+                                    _rej_log = (logger.warning
+                                                if _ec_int in _EXPECTED_REJECT_CODES
+                                                else logger.error)
+                                    _rej_log(f"Order {order.id} failed with error {error_code}: {error_message}")
                                     order.status = OrderStatus.FAILED
                                     failed_count += 1
                                     # Invalidate order cache on state change
