@@ -236,6 +236,11 @@ class ConvictionScorer:
                 'max': 5,
                 'details': self._get_carry_details(signal)
             },
+            'crypto_cycle': {
+                'score': crypto_cycle_adjustment,
+                'max': 5,
+                'details': {'symbol': signal.symbol},
+            },
             'fundamental_quality_direction': {
                 'score': fundamental_quality_adj,
                 'max': 15,

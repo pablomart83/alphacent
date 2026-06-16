@@ -5934,12 +5934,32 @@ class StrategyEngine:
                         else " [alpha_edge]" if _is_alpha_edge_signal
                         else ""
                     )
+                    # Complete component breakdown so a conviction rejection is fully
+                    # diagnosable from signal_decisions alone. Always show the 4 core
+                    # components; append conditional ones (fundamental/factor/carry/
+                    # crypto/news) only when non-zero so DSL strings stay compact while
+                    # AE/forex/crypto rejections show what actually moved the score.
+                    def _bd(_key):
+                        _v = conviction.breakdown.get(_key)
+                        return (_v.get('score', 0.0) if isinstance(_v, dict) else (_v or 0.0))
+                    _extra_parts = []
+                    for _lbl, _key in (
+                        ('fundamental', 'fundamental_quality_direction'),
+                        ('factor', 'factor_exposure'),
+                        ('carry', 'carry_bias'),
+                        ('crypto_cycle', 'crypto_cycle'),
+                        ('news', 'news_sentiment'),
+                    ):
+                        _sv = _bd(_key)
+                        if abs(_sv) >= 0.05:
+                            _extra_parts.append(f"{_lbl}={_sv:+.1f}")
+                    _extra_str = (", " + ", ".join(_extra_parts)) if _extra_parts else ""
                     _conv_reason = (
                         f"filter:conviction ({conviction.total_score:.1f} < {_threshold_label}; "
                         f"wf_edge={conviction.breakdown.get('walkforward_edge', {}).get('score', 0):.1f}, "
                         f"signal={conviction.signal_strength_score:.1f}{_persistence_str}, "
                         f"asset={conviction.fundamental_score:.1f}, "
-                        f"regime={conviction.regime_alignment_score:.1f}, "
+                        f"regime={conviction.regime_alignment_score:.1f}{_extra_str}, "
                         f"path={_scoring_path})"
                     )
                     logger.info(f"Signal rejected for {signal.symbol}: {_conv_reason}")
