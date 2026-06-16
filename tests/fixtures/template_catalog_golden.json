@@ -8809,5 +8809,136 @@
     ],
     "risk_reward_ratio": 2.9,
     "strategy_type": "momentum"
+  },
+  {
+    "default_parameters": {
+      "adx_period": 14,
+      "donchian_period": 120,
+      "hold_period_max": 60,
+      "position_size_atr_multiplier": 1.0,
+      "risk_per_trade_pct": 0.01,
+      "rsi_period": 14,
+      "sizing_method": "volatility",
+      "sma_period": 50,
+      "stop_loss_pct": 0.08,
+      "take_profit_pct": 0.16
+    },
+    "description": "Buy when price is within 2% of its 120-day (6-month) high with a confirmed trend (ADX>20) and healthy-but-not-blowoff momentum (RSI 50-80). High-proximity momentum (George & Hwang 2004, 52-week-high effect) \u2014 lookback set to 120d so the signal has valid values inside the WF test window (a 252-day Donchian is all-NaN in a ~250-bar test split). RSI expressed as a range so it reads as a momentum filter, not an oversold entry.",
+    "entry_conditions": [
+      "CLOSE >= DONCHIAN_UPPER(120) * 0.98 AND ADX(14) > 20 AND RSI(14) > 50 AND RSI(14) < 80"
+    ],
+    "exit_conditions": [
+      "CLOSE < SMA(50) OR RSI(14) > 85"
+    ],
+    "expected_holding_period": "10-40 days",
+    "expected_trade_frequency": "2-4 trades/month",
+    "market_regimes": [
+      "trending_up",
+      "trending_up_strong",
+      "trending_up_weak",
+      "ranging_low_vol"
+    ],
+    "metadata": {
+      "direction": "long",
+      "interval": "1d"
+    },
+    "name": "Multi-Month High Momentum",
+    "required_indicators": [
+      "Donchian Upper:120",
+      "ADX",
+      "RSI",
+      "SMA:50"
+    ],
+    "risk_reward_ratio": 2.0,
+    "strategy_type": "momentum"
+  },
+  {
+    "default_parameters": {
+      "hold_period_max": 120,
+      "momentum_lookback_days": 126,
+      "position_size_atr_multiplier": 1.0,
+      "risk_per_trade_pct": 0.01,
+      "sizing_method": "volatility",
+      "sma_period": 200,
+      "stop_loss_pct": 0.08,
+      "take_profit_pct": 0.16
+    },
+    "description": "Antonacci dual momentum \u2014 combine absolute momentum (positive 6-month return) with a long-term trend filter (price above the 200-day SMA). Goes to cash in downtrends; captures sustained trends in equities/ETFs while avoiding bear markets.",
+    "entry_conditions": [
+      "CLOSE > SMA(200) AND LAG_RETURN(\"SELF\", 126, \"1d\") > 0.0"
+    ],
+    "exit_conditions": [
+      "CLOSE < SMA(200)"
+    ],
+    "expected_holding_period": "20-90 days",
+    "expected_trade_frequency": "1-2 trades/month",
+    "market_regimes": [
+      "trending_up",
+      "trending_up_strong",
+      "trending_up_weak",
+      "ranging_low_vol"
+    ],
+    "metadata": {
+      "direction": "long",
+      "interval": "1d"
+    },
+    "name": "Dual Momentum Trend Long",
+    "required_indicators": [
+      "SMA:200"
+    ],
+    "risk_reward_ratio": 2.0,
+    "strategy_type": "trend_following"
+  },
+  {
+    "default_parameters": {
+      "hold_period_max": 120,
+      "momentum_lookback_days": 252,
+      "position_size_atr_multiplier": 1.0,
+      "risk_per_trade_pct": 0.01,
+      "sizing_method": "volatility",
+      "sma_period": 200,
+      "stop_loss_pct": 0.07,
+      "take_profit_pct": 0.15
+    },
+    "description": "Time-series momentum (managed-futures style) \u2014 go long when an instrument is in a confirmed 12-month uptrend (positive 252-day return) and above its 200-day SMA. Applied to indices/commodities/broad ETFs where per-symbol trend coverage is thin.",
+    "entry_conditions": [
+      "CLOSE > SMA(200) AND LAG_RETURN(\"SELF\", 252, \"1d\") > 0.0"
+    ],
+    "exit_conditions": [
+      "CLOSE < SMA(100)"
+    ],
+    "expected_holding_period": "30-120 days",
+    "expected_trade_frequency": "1-2 trades/month",
+    "market_regimes": [
+      "trending_up",
+      "trending_up_strong",
+      "trending_up_weak",
+      "ranging_low_vol",
+      "ranging"
+    ],
+    "metadata": {
+      "best_symbols": [
+        "SPX500",
+        "NSDQ100",
+        "DJ30",
+        "GER40",
+        "UK100",
+        "GOLD",
+        "SILVER",
+        "SPY",
+        "QQQ",
+        "DIA",
+        "VTI"
+      ],
+      "direction": "long",
+      "interval": "1d"
+    },
+    "name": "Cross-Asset Trend Follow Long",
+    "required_indicators": [
+      "SMA:200",
+      "SMA:100"
+    ],
+    "risk_reward_ratio": 2.0,
+    "strategy_type": "trend_following"
   }
 ]
