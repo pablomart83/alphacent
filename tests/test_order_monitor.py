@@ -58,8 +58,27 @@ def _setup_two_query_mock(mock_session, pending_orders=None, submitted_orders=No
     mock_session.query.side_effect = query_side_effect
 
 
+def _setup_single_query_mock(mock_session, candidates):
+    """cancel_stale_orders does ONE query: query(OrderORM).filter(...).all().
+
+    (The old two-query pending/submitted design was collapsed into a single
+    market-hours-aware PENDING query — see OrderMonitor.cancel_stale_orders.)
+    """
+    mock_session.query.return_value.filter.return_value.all.return_value = candidates
+
+
 class TestOrderMonitorCancellation:
     """Test order cancellation functionality in OrderMonitor (Task 6.5.4)."""
+
+    @pytest.fixture(autouse=True)
+    def _force_market_open(self):
+        """cancel_stale_orders is market-hours-aware: orders submitted outside market
+        hours get a 72h grace instead of the standard timeout. Force "market open" so
+        these age-based tests are deterministic (otherwise staleness depends on whether
+        `now - submitted_at` happens to land in market hours when the suite runs)."""
+        with patch("src.data.market_hours_manager.get_market_hours_manager") as m:
+            m.return_value.is_market_open.return_value = True
+            yield
 
     def test_cancel_stale_orders_no_stale_orders(self, order_monitor, mock_database):
         """Test cancel_stale_orders when no stale orders exist."""
@@ -90,7 +109,7 @@ class TestOrderMonitorCancellation:
 
         mock_session = Mock()
         mock_database.get_session.return_value = mock_session
-        _setup_two_query_mock(mock_session, [], [stale_order])
+        _setup_single_query_mock(mock_session, [stale_order])
         mock_etoro_client.cancel_order.return_value = True
 
         result = order_monitor.cancel_stale_orders(max_age_hours=24)
@@ -145,7 +164,7 @@ class TestOrderMonitorCancellation:
 
         mock_session = Mock()
         mock_database.get_session.return_value = mock_session
-        _setup_two_query_mock(mock_session, [], [stale_order])
+        _setup_single_query_mock(mock_session, [stale_order])
         mock_etoro_client.cancel_order.side_effect = EToroAPIError("API error")
 
         result = order_monitor.cancel_stale_orders(max_age_hours=24)
@@ -172,7 +191,7 @@ class TestOrderMonitorCancellation:
 
         mock_session = Mock()
         mock_database.get_session.return_value = mock_session
-        _setup_two_query_mock(mock_session, [], [stale_order])
+        _setup_single_query_mock(mock_session, [stale_order])
         mock_etoro_client.cancel_order.return_value = False
 
         result = order_monitor.cancel_stale_orders(max_age_hours=24)
@@ -211,7 +230,7 @@ class TestOrderMonitorCancellation:
 
         mock_session = Mock()
         mock_database.get_session.return_value = mock_session
-        _setup_two_query_mock(mock_session, [stale_pending], [stale_submitted])
+        _setup_single_query_mock(mock_session, [stale_submitted, stale_pending])
         mock_etoro_client.cancel_order.return_value = True
 
         result = order_monitor.cancel_stale_orders(max_age_hours=24)
@@ -240,7 +259,7 @@ class TestOrderMonitorCancellation:
 
         mock_session = Mock()
         mock_database.get_session.return_value = mock_session
-        _setup_two_query_mock(mock_session, [], [order])
+        _setup_single_query_mock(mock_session, [order])
         mock_etoro_client.cancel_order.return_value = True
 
         result = order_monitor.cancel_stale_orders(max_age_hours=8)
@@ -265,7 +284,7 @@ class TestOrderMonitorCancellation:
         assert result["error"] == "Database error"
         mock_session.rollback.assert_called_once()
 
-    def test_run_monitoring_cycle_includes_cancellation(self, order_monitor, mock_database):
+    def test_run_monitoring_cycle_includes_cancellation(self, order_monitor, mock_etoro_client, mock_database):
         """Test that run_monitoring_cycle includes stale order cancellation."""
         mock_session = Mock()
         mock_database.get_session.return_value = mock_session
@@ -274,6 +293,10 @@ class TestOrderMonitorCancellation:
         mock_query.filter.return_value.all.return_value = []
         mock_query.filter_by.return_value.first.return_value = None
         mock_session.query.return_value = mock_query
+
+        # run_monitoring_cycle now also syncs positions — give the eToro client
+        # a list-returning stub so the sync phase has nothing to iterate.
+        mock_etoro_client.get_positions.return_value = []
 
         result = order_monitor.run_monitoring_cycle()
 

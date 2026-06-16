@@ -3,6 +3,11 @@ Unit tests for pending order duplicate prevention in signal coordination.
 
 Tests the _coordinate_signals method to ensure it properly filters signals
 when strategies already have pending orders for the same symbol/side.
+
+NOTE (2026-06-16): _coordinate_signals returns a 4-tuple
+(coordinated_results, total_signals_per_strategy, template_dup_rejected,
+template_dup_rejected_symbols). These tests assert on the first element
+(coordinated_results) via `coordinated, *_ = ...`.
 """
 
 import pytest
@@ -28,7 +33,7 @@ def sample_strategy():
         id="test_strategy_auto",
         name="Test Strategy",
         description="Test strategy for unit tests",
-        status=StrategyStatus.DEMO,
+        status=StrategyStatus.PAPER,
         symbols=["SPY"],
         allocation_percent=10.0,
         risk_params=RiskConfig(
@@ -68,57 +73,51 @@ def test_coordinate_signals_filters_pending_orders(mock_components, sample_strat
         status=OrderStatus.PENDING,
         submitted_at=datetime.now()
     )
-    
-    # Prepare batch results with one signal
+
     batch_results = {
         "test_strategy_auto": [sample_signal]
     }
-    
-    # Prepare strategy map
     strategy_map = {
         "test_strategy_auto": (sample_strategy, Mock())
     }
-    
-    # Call _coordinate_signals with pending order
-    result = mock_components._coordinate_signals(
+
+    coordinated, *_ = mock_components._coordinate_signals(
         batch_results=batch_results,
         strategy_map=strategy_map,
         existing_positions=[],
         pending_orders=[pending_order]
     )
-    
-    # Assert signal was filtered
-    assert len(result) == 0, "Signal should be filtered due to pending order"
+
+    assert len(coordinated) == 0, "Signal should be filtered due to pending order"
 
 
 def test_coordinate_signals_allows_different_strategy_pending_orders(mock_components, sample_signal):
     """Test that signals are allowed when pending order is from different strategy."""
-    # Create strategies
     strategy_1 = Strategy(
         id="test_strategy_auto",
         name="Strategy 1",
         description="Test strategy 1",
-        status=StrategyStatus.DEMO,
+        status=StrategyStatus.PAPER,
         symbols=["SPY"],
         allocation_percent=10.0,
         risk_params=RiskConfig(stop_loss_pct=0.02, take_profit_pct=0.05, max_position_size_pct=0.05),
         rules={"entry": [], "exit": []},
         created_at=datetime.now()
     )
-    
+
     strategy_2 = Strategy(
         id="test_strategy_auto_2",
         name="Strategy 2",
         description="Test strategy 2",
-        status=StrategyStatus.DEMO,
+        status=StrategyStatus.PAPER,
         symbols=["SPY"],
         allocation_percent=10.0,
         risk_params=RiskConfig(stop_loss_pct=0.02, take_profit_pct=0.05, max_position_size_pct=0.05),
         rules={"entry": [], "exit": []},
         created_at=datetime.now()
     )
-    
-    # Create a pending order for strategy_2
+
+    # Pending order belongs to strategy_2, signal is for strategy_1.
     pending_order = OrderORM(
         id="order_1",
         strategy_id="test_strategy_auto_2",
@@ -129,8 +128,7 @@ def test_coordinate_signals_allows_different_strategy_pending_orders(mock_compon
         status=OrderStatus.PENDING,
         submitted_at=datetime.now()
     )
-    
-    # Create signal for strategy_1
+
     signal_1 = TradingSignal(
         strategy_id="test_strategy_auto",
         symbol="SPY",
@@ -140,34 +138,28 @@ def test_coordinate_signals_allows_different_strategy_pending_orders(mock_compon
         indicators={},
         generated_at=datetime.now()
     )
-    
-    # Prepare batch results
+
     batch_results = {
         "test_strategy_auto": [signal_1]
     }
-    
-    # Prepare strategy map
     strategy_map = {
         "test_strategy_auto": (strategy_1, Mock()),
         "test_strategy_auto_2": (strategy_2, Mock())
     }
-    
-    # Call _coordinate_signals
-    result = mock_components._coordinate_signals(
+
+    coordinated, *_ = mock_components._coordinate_signals(
         batch_results=batch_results,
         strategy_map=strategy_map,
         existing_positions=[],
         pending_orders=[pending_order]
     )
-    
-    # Assert signal was NOT filtered (different strategy)
-    assert "test_strategy_auto" in result, "Signal should be allowed (different strategy has pending order)"
-    assert len(result["test_strategy_auto"]) == 1
+
+    assert "test_strategy_auto" in coordinated, "Signal should be allowed (different strategy has pending order)"
+    assert len(coordinated["test_strategy_auto"]) == 1
 
 
 def test_coordinate_signals_filters_submitted_orders(mock_components, sample_strategy, sample_signal):
     """Test that signals are filtered when strategy has SUBMITTED orders."""
-    # Create a submitted order (not just pending)
     submitted_order = OrderORM(
         id="order_1",
         strategy_id="test_strategy_auto",
@@ -178,32 +170,35 @@ def test_coordinate_signals_filters_submitted_orders(mock_components, sample_str
         status=OrderStatus.PENDING,
         submitted_at=datetime.now()
     )
-    
-    # Prepare batch results
+
     batch_results = {
         "test_strategy_auto": [sample_signal]
     }
-    
-    # Prepare strategy map
     strategy_map = {
         "test_strategy_auto": (sample_strategy, Mock())
     }
-    
-    # Call _coordinate_signals
-    result = mock_components._coordinate_signals(
+
+    coordinated, *_ = mock_components._coordinate_signals(
         batch_results=batch_results,
         strategy_map=strategy_map,
         existing_positions=[],
         pending_orders=[submitted_order]
     )
-    
-    # Assert signal was filtered
-    assert len(result) == 0, "Signal should be filtered due to submitted order"
+
+    assert len(coordinated) == 0, "Signal should be filtered due to submitted order"
 
 
-def test_coordinate_signals_allows_filled_orders(mock_components, sample_strategy, sample_signal):
-    """Test that signals are allowed when order is already FILLED."""
-    # Create a filled order (should not block new signals)
+def test_coordinate_signals_filters_recently_filled_orders(mock_components, sample_strategy, sample_signal):
+    """A RECENTLY filled order blocks a duplicate new entry for the same
+    (strategy, symbol, side).
+
+    Behaviour change (verified 2026-06-16): _coordinate_signals now treats PENDING,
+    recently-FILLED and recently-FAILED orders as blocking. The recency window is the
+    CALLER's responsibility (it only passes recently-filled orders); _coordinate_signals
+    blocks on any FILLED order it is given. This closes the gap between a fill and the
+    position-sync creating the Position row, during which the existing-positions check
+    alone would miss the just-opened exposure and allow a duplicate entry.
+    """
     filled_order = OrderORM(
         id="order_1",
         strategy_id="test_strategy_auto",
@@ -215,33 +210,26 @@ def test_coordinate_signals_allows_filled_orders(mock_components, sample_strateg
         submitted_at=datetime.now(),
         filled_at=datetime.now()
     )
-    
-    # Prepare batch results
+
     batch_results = {
         "test_strategy_auto": [sample_signal]
     }
-    
-    # Prepare strategy map
     strategy_map = {
         "test_strategy_auto": (sample_strategy, Mock())
     }
-    
-    # Call _coordinate_signals
-    result = mock_components._coordinate_signals(
+
+    coordinated, *_ = mock_components._coordinate_signals(
         batch_results=batch_results,
         strategy_map=strategy_map,
         existing_positions=[],
         pending_orders=[filled_order]
     )
-    
-    # Assert signal was NOT filtered (filled order doesn't block)
-    assert "test_strategy_auto" in result, "Signal should be allowed (order is filled)"
-    assert len(result["test_strategy_auto"]) == 1
+
+    assert len(coordinated) == 0, "Signal should be filtered due to a recently-filled duplicate order"
 
 
 def test_coordinate_signals_allows_opposite_direction(mock_components, sample_strategy):
     """Test that signals are allowed for opposite direction even with pending order."""
-    # Create a pending BUY order
     pending_order = OrderORM(
         id="order_1",
         strategy_id="test_strategy_auto",
@@ -252,8 +240,7 @@ def test_coordinate_signals_allows_opposite_direction(mock_components, sample_st
         status=OrderStatus.PENDING,
         submitted_at=datetime.now()
     )
-    
-    # Create a SHORT signal (opposite direction)
+
     short_signal = TradingSignal(
         strategy_id="test_strategy_auto",
         symbol="SPY",
@@ -263,58 +250,51 @@ def test_coordinate_signals_allows_opposite_direction(mock_components, sample_st
         indicators={},
         generated_at=datetime.now()
     )
-    
-    # Prepare batch results
+
     batch_results = {
         "test_strategy_auto": [short_signal]
     }
-    
-    # Prepare strategy map
     strategy_map = {
         "test_strategy_auto": (sample_strategy, Mock())
     }
-    
-    # Call _coordinate_signals
-    result = mock_components._coordinate_signals(
+
+    coordinated, *_ = mock_components._coordinate_signals(
         batch_results=batch_results,
         strategy_map=strategy_map,
         existing_positions=[],
         pending_orders=[pending_order]
     )
-    
-    # Assert signal was NOT filtered (opposite direction)
-    assert "test_strategy_auto" in result, "Signal should be allowed (opposite direction)"
-    assert len(result["test_strategy_auto"]) == 1
+
+    assert "test_strategy_auto" in coordinated, "Signal should be allowed (opposite direction)"
+    assert len(coordinated["test_strategy_auto"]) == 1
 
 
 def test_coordinate_signals_filters_multiple_strategies_with_pending_orders(mock_components):
     """Test that multiple strategies with pending orders are all filtered correctly."""
-    # Create two strategies
     strategy_1 = Strategy(
         id="test_strategy_auto",
         name="Strategy 1",
         description="Test strategy 1",
-        status=StrategyStatus.DEMO,
+        status=StrategyStatus.PAPER,
         symbols=["SPY"],
         allocation_percent=10.0,
         risk_params=RiskConfig(stop_loss_pct=0.02, take_profit_pct=0.05, max_position_size_pct=0.05),
         rules={"entry": [], "exit": []},
         created_at=datetime.now()
     )
-    
+
     strategy_2 = Strategy(
         id="test_strategy_auto_2",
         name="Strategy 2",
         description="Test strategy 2",
-        status=StrategyStatus.DEMO,
+        status=StrategyStatus.PAPER,
         symbols=["SPY"],
         allocation_percent=10.0,
         risk_params=RiskConfig(stop_loss_pct=0.02, take_profit_pct=0.05, max_position_size_pct=0.05),
         rules={"entry": [], "exit": []},
         created_at=datetime.now()
     )
-    
-    # Create pending orders for both strategies
+
     pending_order_1 = OrderORM(
         id="order_1",
         strategy_id="test_strategy_auto",
@@ -325,7 +305,7 @@ def test_coordinate_signals_filters_multiple_strategies_with_pending_orders(mock
         status=OrderStatus.PENDING,
         submitted_at=datetime.now()
     )
-    
+
     pending_order_2 = OrderORM(
         id="order_2",
         strategy_id="test_strategy_auto_2",
@@ -336,8 +316,7 @@ def test_coordinate_signals_filters_multiple_strategies_with_pending_orders(mock
         status=OrderStatus.PENDING,
         submitted_at=datetime.now()
     )
-    
-    # Create signals for both strategies
+
     signal_1 = TradingSignal(
         strategy_id="test_strategy_auto",
         symbol="SPY",
@@ -347,7 +326,7 @@ def test_coordinate_signals_filters_multiple_strategies_with_pending_orders(mock
         indicators={},
         generated_at=datetime.now()
     )
-    
+
     signal_2 = TradingSignal(
         strategy_id="test_strategy_auto_2",
         symbol="SPY",
@@ -357,34 +336,28 @@ def test_coordinate_signals_filters_multiple_strategies_with_pending_orders(mock
         indicators={},
         generated_at=datetime.now()
     )
-    
-    # Prepare batch results
+
     batch_results = {
         "test_strategy_auto": [signal_1],
         "test_strategy_auto_2": [signal_2]
     }
-    
-    # Prepare strategy map
     strategy_map = {
         "test_strategy_auto": (strategy_1, Mock()),
         "test_strategy_auto_2": (strategy_2, Mock())
     }
-    
-    # Call _coordinate_signals
-    result = mock_components._coordinate_signals(
+
+    coordinated, *_ = mock_components._coordinate_signals(
         batch_results=batch_results,
         strategy_map=strategy_map,
         existing_positions=[],
         pending_orders=[pending_order_1, pending_order_2]
     )
-    
-    # Assert both signals were filtered
-    assert len(result) == 0, "Both signals should be filtered due to pending orders"
+
+    assert len(coordinated) == 0, "Both signals should be filtered due to pending orders"
 
 
 def test_coordinate_signals_allows_different_symbols(mock_components, sample_strategy):
     """Test that signals for different symbols are allowed even with pending orders."""
-    # Create a pending order for SPY
     pending_order = OrderORM(
         id="order_1",
         strategy_id="test_strategy_auto",
@@ -395,8 +368,7 @@ def test_coordinate_signals_allows_different_symbols(mock_components, sample_str
         status=OrderStatus.PENDING,
         submitted_at=datetime.now()
     )
-    
-    # Create a signal for QQQ (different symbol)
+
     qqq_signal = TradingSignal(
         strategy_id="test_strategy_auto",
         symbol="QQQ",
@@ -406,29 +378,20 @@ def test_coordinate_signals_allows_different_symbols(mock_components, sample_str
         indicators={},
         generated_at=datetime.now()
     )
-    
-    # Prepare batch results
+
     batch_results = {
         "test_strategy_auto": [qqq_signal]
     }
-    
-    # Prepare strategy map
     strategy_map = {
         "test_strategy_auto": (sample_strategy, Mock())
     }
-    
-    # Call _coordinate_signals
-    result = mock_components._coordinate_signals(
+
+    coordinated, *_ = mock_components._coordinate_signals(
         batch_results=batch_results,
         strategy_map=strategy_map,
         existing_positions=[],
         pending_orders=[pending_order]
     )
-    
-    # Assert signal was NOT filtered (different symbol)
-    assert "test_strategy_auto" in result, "Signal should be allowed (different symbol)"
-    assert len(result["test_strategy_auto"]) == 1
 
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    assert "test_strategy_auto" in coordinated, "Signal should be allowed (different symbol)"
+    assert len(coordinated["test_strategy_auto"]) == 1
