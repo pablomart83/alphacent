@@ -54,6 +54,20 @@ _RE_RANK_IN_UNIVERSE = re.compile(
     r'(\[[^\]]+\])'            # universe list as-is
     r'\s*,\s*(\d+)\s*,\s*(\d+)\s*\)'
 )
+# Short-term reversal (#5, Lehmann): bottom-N by short-window return.
+# RANK_IN_UNIVERSE\( cannot match "RANK_IN_UNIVERSE_BOTTOM(" because the '_'
+# follows the prefix where the regex demands '(', so the two never collide.
+_RE_RANK_BOTTOM = re.compile(
+    r'RANK_IN_UNIVERSE_BOTTOM\(\s*"([A-Za-z0-9_]+)"\s*,\s*'
+    r'(\[[^\]]+\])'
+    r'\s*,\s*(\d+)\s*,\s*(\d+)\s*\)'
+)
+# Low-volatility factor (#3, Frazzini-Pedersen): bottom-N by realized vol.
+_RE_RANK_LOW_VOL = re.compile(
+    r'RANK_LOW_VOL\(\s*"([A-Za-z0-9_]+)"\s*,\s*'
+    r'(\[[^\]]+\])'
+    r'\s*,\s*(\d+)\s*,\s*(\d+)\s*\)'
+)
 
 
 def _universe_hash(universe: List[str]) -> str:
@@ -68,8 +82,8 @@ def _universe_hash(universe: List[str]) -> str:
 
 
 def extract_cross_asset_references(conditions: List[str]) -> Tuple[
-    List[Tuple[str, int, str]],            # LAG_RETURN refs: (symbol, bars, interval)
-    List[Tuple[str, List[str], int, int]]  # RANK_IN_UNIVERSE refs: (self_sym, universe, window, top_n)
+    List[Tuple[str, int, str]],                  # LAG_RETURN refs: (symbol, bars, interval)
+    List[Tuple[str, str, List[str], int, int]]   # rank refs: (kind, self_sym, universe, window, n)
 ]:
     """Scan entry+exit condition strings for cross-asset primitive references.
 
@@ -77,35 +91,52 @@ def extract_cross_asset_references(conditions: List[str]) -> Tuple[
         conditions: list of DSL condition strings
 
     Returns:
-        Tuple of (lag_return_refs, rank_in_universe_refs). Each ref is a tuple
-        of parsed parameters. Returns empty lists if no cross-asset refs
-        found (most non-crypto templates).
+        Tuple of (lag_return_refs, rank_refs). Each rank ref is tagged with a
+        `kind` discriminator so the three rank primitives share one extraction
+        + wiring path while computing different Series:
+          - 'top'    → RANK_IN_UNIVERSE        (top-N by return, momentum)
+          - 'bottom' → RANK_IN_UNIVERSE_BOTTOM (bottom-N by return, reversal)
+          - 'lowvol' → RANK_LOW_VOL            (bottom-N by realized vol, low-vol)
+        Returns empty lists if no cross-asset refs found (most templates).
     """
+    import json
     lag_refs = []
     rank_refs = []
+
+    def _parse_rank(match, kind: str):
+        self_sym, uni_str, window_str, n_str = (
+            match.group(1), match.group(2), match.group(3), match.group(4)
+        )
+        try:
+            universe = json.loads(uni_str)
+        except Exception as e:
+            logger.warning(f"Cross-asset: failed to parse universe '{uni_str}': {e}")
+            return None
+        if not isinstance(universe, list):
+            return None
+        universe = [str(s) for s in universe]
+        return (kind, self_sym, universe, int(window_str), int(n_str))
+
     for cond in conditions:
         for match in _RE_LAG_RETURN.finditer(cond):
             sym, bars_str, interval = match.group(1), match.group(2), match.group(3)
             ref = (sym, int(bars_str), interval)
             if ref not in lag_refs:
                 lag_refs.append(ref)
+        # Order matters only for de-dup; the regexes are mutually exclusive
+        # (RANK_IN_UNIVERSE\( never matches RANK_IN_UNIVERSE_BOTTOM(...) — see
+        # the regex note above), so a condition contributes each ref once.
         for match in _RE_RANK_IN_UNIVERSE.finditer(cond):
-            self_sym, uni_str, window_str, topn_str = (
-                match.group(1), match.group(2), match.group(3), match.group(4)
-            )
-            # Parse universe list. The grammar guarantees it's a JSON-compatible
-            # string like ["BTC","ETH",...], so json.loads works.
-            import json
-            try:
-                universe = json.loads(uni_str)
-            except Exception as e:
-                logger.warning(f"Cross-asset: failed to parse universe '{uni_str}': {e}")
-                continue
-            if not isinstance(universe, list):
-                continue
-            universe = [str(s) for s in universe]
-            ref = (self_sym, universe, int(window_str), int(topn_str))
-            if ref not in rank_refs:
+            ref = _parse_rank(match, 'top')
+            if ref and ref not in rank_refs:
+                rank_refs.append(ref)
+        for match in _RE_RANK_BOTTOM.finditer(cond):
+            ref = _parse_rank(match, 'bottom')
+            if ref and ref not in rank_refs:
+                rank_refs.append(ref)
+        for match in _RE_RANK_LOW_VOL.finditer(cond):
+            ref = _parse_rank(match, 'lowvol')
+            if ref and ref not in rank_refs:
                 rank_refs.append(ref)
     return lag_refs, rank_refs
 
@@ -133,8 +164,8 @@ def collect_required_cross_asset_symbols(
         if sym == primary_symbol or sym == "SELF":
             continue
         required.setdefault(interval, set()).add(sym)
-    for _self_sym, universe, _window, _topn in rank_refs:
-        # Rank always uses daily bars.
+    for _kind, _self_sym, universe, _window, _n in rank_refs:
+        # All rank primitives use daily bars.
         day_set = required.setdefault("1d", set())
         for s in universe:
             if s != primary_symbol:
@@ -241,6 +272,95 @@ def compute_rank_in_universe_series(
     return aligned
 
 
+def _clean_close(df: pd.DataFrame) -> pd.Series:
+    """tz-naive, de-duplicated, ascending close series — shared by rank computes."""
+    d = df.copy()
+    if hasattr(d.index, 'tz') and d.index.tz is not None:
+        d.index = d.index.tz_localize(None)
+    d = d[~d.index.duplicated(keep='last')].sort_index()
+    return d['close']
+
+
+def compute_short_term_reversal_series(
+    self_symbol: str,
+    universe_daily_data: Dict[str, pd.DataFrame],
+    window_days: int,
+    bottom_n: int,
+    primary_index: pd.DatetimeIndex,
+) -> pd.Series:
+    """Boolean Series: True on bars where self_symbol is in the BOTTOM-N of the
+    universe by window_days return (the recent losers).
+
+    Short-term reversal factor (Lehmann 1990) — buy the laggards, which tend to
+    mean-revert. Direct mirror of compute_rank_in_universe_series with the rank
+    flipped to ascending (rank 1 = lowest/most-negative return).
+    """
+    if self_symbol not in universe_daily_data:
+        logger.warning(
+            f"Cross-asset REVERSAL: self_symbol {self_symbol} not in universe "
+            f"data — returning all-False"
+        )
+        return pd.Series(False, index=primary_index)
+
+    returns_by_sym: Dict[str, pd.Series] = {}
+    for sym, df in universe_daily_data.items():
+        if 'close' not in df.columns or df.empty:
+            continue
+        close = _clean_close(df)
+        returns_by_sym[sym] = (close - close.shift(window_days)) / close.shift(window_days)
+
+    if self_symbol not in returns_by_sym:
+        return pd.Series(False, index=primary_index)
+
+    ret_df = pd.DataFrame(returns_by_sym)
+    # ascending=True → rank 1 is the lowest (most negative) return = biggest loser.
+    ranks = ret_df.rank(axis=1, ascending=True, method='min')
+    self_in_bottom = (ranks[self_symbol] <= bottom_n).fillna(False)
+    aligned = self_in_bottom.reindex(primary_index, method='ffill').fillna(False).astype(bool)
+    return aligned
+
+
+def compute_low_vol_rank_series(
+    self_symbol: str,
+    universe_daily_data: Dict[str, pd.DataFrame],
+    window_days: int,
+    bottom_n: int,
+    primary_index: pd.DatetimeIndex,
+) -> pd.Series:
+    """Boolean Series: True on bars where self_symbol is among the BOTTOM-N
+    lowest realized-volatility names of the universe.
+
+    Low-volatility factor (Frazzini-Pedersen, betting-against-beta) — the
+    lowest-vol names earn higher risk-adjusted returns. Realized vol is the
+    rolling std of daily simple returns over window_days; ranked ascending
+    (rank 1 = calmest).
+    """
+    if self_symbol not in universe_daily_data:
+        logger.warning(
+            f"Cross-asset LOW_VOL: self_symbol {self_symbol} not in universe "
+            f"data — returning all-False"
+        )
+        return pd.Series(False, index=primary_index)
+
+    vol_by_sym: Dict[str, pd.Series] = {}
+    for sym, df in universe_daily_data.items():
+        if 'close' not in df.columns or df.empty:
+            continue
+        close = _clean_close(df)
+        rets = close.pct_change()
+        vol_by_sym[sym] = rets.rolling(window_days).std()
+
+    if self_symbol not in vol_by_sym:
+        return pd.Series(False, index=primary_index)
+
+    vol_df = pd.DataFrame(vol_by_sym)
+    # ascending=True → rank 1 is the lowest realized vol = calmest name.
+    ranks = vol_df.rank(axis=1, ascending=True, method='min')
+    self_in_bottom = (ranks[self_symbol] <= bottom_n).fillna(False)
+    aligned = self_in_bottom.reindex(primary_index, method='ffill').fillna(False).astype(bool)
+    return aligned
+
+
 def compute_cross_asset_indicators(
     conditions: List[str],
     primary_symbol: str,
@@ -317,12 +437,24 @@ def compute_cross_asset_indicators(
             # Fail-closed: NaN series means comparisons resolve to False.
             out[key] = pd.Series(float('nan'), index=primary_index)
 
-    # ── RANK_IN_UNIVERSE primitives ──────────────────────────────────
-    for self_sym, universe, window_days, top_n in rank_refs:
+    # ── RANK_* universe primitives (top / bottom-reversal / low-vol) ──
+    # kind → (key_prefix, compute_fn). All three share the daily-data fetch and
+    # SELF-resolution; only the per-bar Series computation differs. The key
+    # prefix MUST equal the codegen prefix in trading_dsl.INDICATOR_MAPPING or
+    # the eval'd rule silently looks up a missing key (→ 0 trades).
+    _RANK_DISPATCH = {
+        'top':    ('RANK_IN_UNIVERSE',        compute_rank_in_universe_series),
+        'bottom': ('RANK_IN_UNIVERSE_BOTTOM', compute_short_term_reversal_series),
+        'lowvol': ('RANK_LOW_VOL',            compute_low_vol_rank_series),
+    }
+    for kind, self_sym, universe, window_days, top_n in rank_refs:
+        prefix, compute_fn = _RANK_DISPATCH.get(
+            kind, ('RANK_IN_UNIVERSE', compute_rank_in_universe_series)
+        )
         # Substitute SELF with the strategy's primary symbol.
         resolved_self = primary_symbol if self_sym == "SELF" else self_sym
         uni_tag = _universe_hash(universe)
-        key = f'RANK_IN_UNIVERSE__{self_sym}__{uni_tag}__{window_days}__{top_n}'
+        key = f'{prefix}__{self_sym}__{uni_tag}__{window_days}__{top_n}'
         try:
             # Fetch daily data for every symbol in universe (including the
             # resolved SELF — the ranking requires it).
@@ -334,31 +466,31 @@ def compute_cross_asset_indicators(
                 df = data_fetcher(actual_sym, start, end, "1d")
                 if df is None or df.empty:
                     logger.debug(
-                        f"Cross-asset RANK: no daily data for {actual_sym} — excluded"
+                        f"Cross-asset RANK[{kind}]: no daily data for {actual_sym} — excluded"
                     )
                     continue
                 universe_data[actual_sym] = df
             if resolved_self not in universe_data:
                 logger.warning(
-                    f"Cross-asset RANK: primary symbol {resolved_self} has no "
+                    f"Cross-asset RANK[{kind}]: primary symbol {resolved_self} has no "
                     f"daily data — key={key} will be all-False"
                 )
                 out[key] = pd.Series(False, index=primary_index)
                 continue
-            series = compute_rank_in_universe_series(
+            series = compute_fn(
                 resolved_self, universe_data, window_days, top_n, primary_index
             )
             # Store as int-coerceable (True=1, False=0) so DSL comparisons
             # like `RANK_IN_UNIVERSE(...) > 0` resolve correctly.
             out[key] = series
             logger.info(
-                f"Cross-asset RANK_IN_UNIVERSE computed: key={key} "
+                f"Cross-asset {prefix} computed: key={key} "
                 f"universe_size={len(universe_data)} primary_bars={len(primary_index)} "
                 f"true_bars={int(series.sum())}"
             )
         except Exception as e:
             logger.error(
-                f"Cross-asset RANK_IN_UNIVERSE failed for self={self_sym} "
+                f"Cross-asset {prefix} failed for self={self_sym} "
                 f"universe={universe}: {e}", exc_info=True
             )
             # Fail-closed: all-False means entries won't fire.

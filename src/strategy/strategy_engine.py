@@ -2774,10 +2774,25 @@ class StrategyEngine:
             has_rsi_gt = bool(re.search(r'rsi[_\s]*\d*\s*(?:is\s+)?(?:above|>)\s*\d+', condition_lower))
             has_rsi_lt = bool(re.search(r'rsi[_\s]*\d*\s*(?:is\s+)?(?:below|<)\s*\d+', condition_lower))
             is_rsi_range_filter = has_rsi_gt and has_rsi_lt
-            
+
             if is_rsi_range_filter:
                 continue  # Skip validation for momentum range filters
-            
+
+            # Momentum-awareness (2026-06-16): same latent bug as the codegen-path
+            # validate_rule_semantics — an `RSI < X` ENTRY alongside a trend /
+            # breakout / momentum component is a blow-off CEILING filter, not an
+            # oversold trigger. Don't flag it as a bad oversold threshold (which
+            # would set is_valid=False and drop the whole momentum template).
+            has_momentum_component = bool(re.search(
+                r'donchian|crosses_above|adx|macd|lag_return'
+                r'|rank_in_universe|rank_low_vol|keltner_upper|high_n|high_\d+'
+                r'|(?:close|high|price|ema\(\d+\)|sma\(\d+\))\s*>\s*'
+                r'(?:sma|ema|donchian_upper|vwap|keltner_upper|bb_upper|upper_band|high_n|high_\d+)',
+                condition_lower
+            ))
+            if has_momentum_component:
+                continue  # Skip validation: RSI<X is a filter, not the entry trigger
+
             # Pattern: "RSI_14 is below X" or "RSI_14 < X"
             rsi_below_match = re.search(r'rsi[_\s]*\d*\s*(?:is\s+)?(?:below|<)\s*(\d+)', condition_lower)
             if rsi_below_match:
@@ -4772,12 +4787,38 @@ class StrategyEngine:
                 has_rsi_gt = bool(re.search(r'RSI\(\d+\)\s*>', rule_text, re.IGNORECASE))
                 has_rsi_lt = bool(re.search(r'RSI\(\d+\)\s*<', rule_text, re.IGNORECASE))
                 is_rsi_range_filter = has_rsi_gt and has_rsi_lt
-                
+
+                # Momentum-awareness (2026-06-16): an `RSI(N) < X` ENTRY is only an
+                # oversold (mean-reversion) signal when RSI is the entry TRIGGER.
+                # When the same condition also carries a trend / breakout / momentum
+                # component, the `RSI < X` is a blow-off CEILING filter ("ride the
+                # breakout only while not yet overbought"), NOT an oversold entry —
+                # applying the oversold cap silently drops the rule (entries go
+                # all-False → 0 trades, no error). This was the latent bug that made
+                # momentum templates use an RSI range as a workaround. Treat any
+                # bullish trend/breakout/momentum sibling (or an RSI lower bound) as
+                # proof the RSI<X is a filter, not the trigger.
+                has_momentum_component = bool(re.search(
+                    r'DONCHIAN'                       # breakout channel
+                    r'|CROSSES_ABOVE'                 # crossover breakout
+                    r'|ADX'                           # trend strength
+                    r'|MACD'                          # momentum
+                    r'|LAG_RETURN'                    # absolute / time-series momentum
+                    r'|RANK_IN_UNIVERSE|RANK_LOW_VOL' # cross-sectional rank factors
+                    r'|KELTNER_UPPER'                 # ATR-channel breakout
+                    r'|HIGH_N|HIGH_\d+'               # new-high breakout
+                    # price above a trend / breakout line (CLOSE > SMA(200), EMA(20) > EMA(50), ...)
+                    r'|(?:CLOSE|HIGH|PRICE|EMA\(\d+\)|SMA\(\d+\))\s*>\s*'
+                    r'(?:SMA|EMA|DONCHIAN_UPPER|VWAP|KELTNER_UPPER|BB_UPPER|UPPER_BAND|HIGH_N|HIGH_\d+)',
+                    rule_text, re.IGNORECASE
+                ))
+
                 if is_entry:
                     # ENTRY conditions: RSI < X means oversold entry (threshold should be low)
                     # RSI > X in an entry is a momentum filter (e.g., "only enter when RSI > 40")
                     # — this is valid and should NOT be checked against exit thresholds
-                    if '<' in rule_text and not is_rsi_range_filter:
+                    if ('<' in rule_text and not is_rsi_range_filter
+                            and not has_momentum_component):
                         match = re.search(r'RSI\(\d+\)\s*<\s*(\d+)', rule_text, re.IGNORECASE)
                         if match:
                             threshold = int(match.group(1))

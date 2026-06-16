@@ -171,3 +171,120 @@
     - WMT
   research_citation: Jegadeesh & Titman (1993), JF — Returns to Buying Winners and Selling Losers
   author: alphacent-edge-2026-06-16
+- seq: 304
+  name: Short-Term Reversal Long
+  description: Lehmann (1990) short-term reversal — go long the biggest 5-day losers within a
+    liquid mega-cap universe (bottom-8 by 5-day return) while the name is still in a long-term
+    uptrend (above SMA200), i.e. buy the pullback, not the falling knife. The relative-weakness
+    rank is the edge; oversold names in an uptrend mean-revert. Uses the RANK_IN_UNIVERSE_BOTTOM
+    DSL primitive (computed identically in backtest + live by cross_asset_primitives).
+  strategy_type: mean_reversion
+  market_regimes:
+  - trending_up
+  - trending_up_strong
+  - trending_up_weak
+  - ranging_low_vol
+  - ranging
+  entry_conditions:
+  - RANK_IN_UNIVERSE_BOTTOM("SELF", ["AAPL","MSFT","GOOGL","AMZN","NVDA","META","AVGO","TSLA","JPM","V","MA","UNH","LLY","JNJ","XOM","CVX","HD","COST","PG","WMT"], 5, 8) > 0 AND CLOSE > SMA(100)
+  exit_conditions:
+  - CLOSE > SMA(20) OR RSI(14) > 70
+  required_indicators:
+  - SMA:100
+  - SMA:20
+  - RSI
+  default_parameters:
+    reversal_window_days: 5
+    reversal_bottom_n: 8
+    sma_period: 100
+    rsi_period: 14
+    stop_loss_pct: 0.06
+    take_profit_pct: 0.10
+    hold_period_max: 15
+  expected_trade_frequency: 4-8 trades/month
+  expected_holding_period: 2-10 days
+  risk_reward_ratio: 1.67
+  metadata:
+    direction: long
+    cross_sectional_rank: true
+    best_symbols:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - NVDA
+    - META
+    - AVGO
+    - TSLA
+    - JPM
+    - V
+    - MA
+    - UNH
+    - LLY
+    - JNJ
+    - XOM
+    - CVX
+    - HD
+    - COST
+    - PG
+    - WMT
+  research_citation: Lehmann (1990), QJE — Fads, Martingales, and Market Efficiency (short-term reversal)
+  author: alphacent-edge-2026-06-16
+- seq: 305
+  name: Low Volatility Factor Long
+  description: Low-volatility / betting-against-beta factor (Frazzini & Pedersen 2014) — go long
+    the calmest names (bottom-5 by 60-day realized volatility) of a liquid large-cap universe
+    while in a confirmed long-term uptrend (above SMA200). The low-vol anomaly — low-risk names
+    deliver higher risk-adjusted returns — is the edge; the SMA200 filter avoids holding a
+    low-vol name that is quietly grinding down. Uses the RANK_LOW_VOL DSL primitive (computed in
+    backtest + live by cross_asset_primitives).
+  strategy_type: trend_following
+  market_regimes:
+  - trending_up
+  - trending_up_strong
+  - trending_up_weak
+  - ranging_low_vol
+  - ranging
+  entry_conditions:
+  - RANK_LOW_VOL("SELF", ["PG","KO","JNJ","WMT","COST","PEP","MCD","UNH","HD","V","MA","MSFT","AAPL","JPM","XOM","CVX","LLY","ABBV","MRK","VZ"], 60, 5) > 0 AND CLOSE > SMA(200)
+  exit_conditions:
+  - CLOSE < SMA(100)
+  required_indicators:
+  - SMA:200
+  - SMA:100
+  default_parameters:
+    vol_window_days: 60
+    vol_bottom_n: 5
+    sma_period: 200
+    stop_loss_pct: 0.06
+    take_profit_pct: 0.12
+    hold_period_max: 120
+  expected_trade_frequency: 1-2 trades/month
+  expected_holding_period: 20-90 days
+  risk_reward_ratio: 2.0
+  metadata:
+    direction: long
+    cross_sectional_rank: true
+    best_symbols:
+    - PG
+    - KO
+    - JNJ
+    - WMT
+    - COST
+    - PEP
+    - MCD
+    - UNH
+    - HD
+    - V
+    - MA
+    - MSFT
+    - AAPL
+    - JPM
+    - XOM
+    - CVX
+    - LLY
+    - ABBV
+    - MRK
+    - VZ
+  research_citation: Frazzini & Pedersen (2014), JFE — Betting Against Beta (low-volatility factor)
+  author: alphacent-edge-2026-06-16

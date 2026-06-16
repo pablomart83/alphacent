@@ -297,7 +297,23 @@ INDICATOR_MAPPING = {
     #   Key format: RANK_IN_UNIVERSE__<SELF_OR_SYMBOL>__<UNIVERSE_HASH>__<WINDOW>__<TOPN>
     #   We hash the universe list so keys are stable across orderings but
     #   distinguish genuinely different universes.
-    'RANK_IN_UNIVERSE': lambda params: _rank_in_universe_key(params),
+    'RANK_IN_UNIVERSE': lambda params: _rank_key(params, 'RANK_IN_UNIVERSE'),
+
+    # RANK_IN_UNIVERSE_BOTTOM(SELF_OR_SYMBOL, UNIVERSE_LIST, WINDOW_DAYS, BOTTOM_N):
+    #   Short-term reversal (Lehmann 1990) — True when SELF_OR_SYMBOL is in the
+    #   BOTTOM BOTTOM_N of UNIVERSE_LIST by WINDOW_DAYS-day return (the recent
+    #   losers, which tend to bounce). Long-the-laggards mirror of
+    #   RANK_IN_UNIVERSE. Same arg shape and key layout, distinct prefix so the
+    #   computed Series key matches the codegen lookup exactly.
+    #   Key format: RANK_IN_UNIVERSE_BOTTOM__<SELF_OR_SYMBOL>__<UNIVERSE_HASH>__<WINDOW>__<BOTTOM_N>
+    'RANK_IN_UNIVERSE_BOTTOM': lambda params: _rank_key(params, 'RANK_IN_UNIVERSE_BOTTOM'),
+
+    # RANK_LOW_VOL(SELF_OR_SYMBOL, UNIVERSE_LIST, WINDOW_DAYS, BOTTOM_N):
+    #   Low-volatility factor (Frazzini-Pedersen) — True when SELF_OR_SYMBOL is
+    #   among the BOTTOM_N lowest realized-vol names of UNIVERSE_LIST over a
+    #   WINDOW_DAYS rolling window of daily returns. Long-the-calmest.
+    #   Key format: RANK_LOW_VOL__<SELF_OR_SYMBOL>__<UNIVERSE_HASH>__<WINDOW>__<BOTTOM_N>
+    'RANK_LOW_VOL': lambda params: _rank_key(params, 'RANK_LOW_VOL'),
 
     # ───── On-chain primitives (Sprint 4 S4.1, 2026-05-02) ─────
     # ONCHAIN(METRIC_NAME, LOOKBACK_DAYS):
@@ -317,11 +333,18 @@ INDICATOR_MAPPING = {
 }
 
 
-def _rank_in_universe_key(params) -> str:
+def _rank_key(params, prefix: str = 'RANK_IN_UNIVERSE') -> str:
     """
-    Build a deterministic key for RANK_IN_UNIVERSE calls.
+    Build a deterministic key for the RANK_* universe primitives.
 
-    params = [self_or_symbol, universe_list, window_days, top_n]
+    Shared by RANK_IN_UNIVERSE (top-N by return), RANK_IN_UNIVERSE_BOTTOM
+    (bottom-N by return, short-term reversal) and RANK_LOW_VOL (bottom-N by
+    realized vol, low-vol factor). All three take the same arg shape, so they
+    share one key builder; the `prefix` is what distinguishes the computed
+    Series so the codegen lookup string matches the cross_asset_primitives
+    output key exactly.
+
+    params = [self_or_symbol, universe_list, window_days, n]
     universe_list is a list of strings (from DSL SYMBOL_LIST token).
     We sort it for order-independence and use the first 8 chars of the
     sorted-joined-hashed string as the universe tag.
@@ -329,7 +352,7 @@ def _rank_in_universe_key(params) -> str:
     import hashlib
     if len(params) < 4:
         raise ValueError(
-            f"RANK_IN_UNIVERSE requires 4 args (self_or_symbol, universe, window, top_n), "
+            f"{prefix} requires 4 args (self_or_symbol, universe, window, n), "
             f"got {len(params)}: {params}"
         )
     self_sym = params[0]
@@ -338,7 +361,12 @@ def _rank_in_universe_key(params) -> str:
     top_n = int(params[3])
     uni_sorted = sorted(str(s) for s in universe)
     uni_tag = hashlib.md5(','.join(uni_sorted).encode()).hexdigest()[:8]
-    return f'RANK_IN_UNIVERSE__{self_sym}__{uni_tag}__{window}__{top_n}'
+    return f'{prefix}__{self_sym}__{uni_tag}__{window}__{top_n}'
+
+
+def _rank_in_universe_key(params) -> str:
+    """Back-compat shim — RANK_IN_UNIVERSE delegates to the shared key builder."""
+    return _rank_key(params, 'RANK_IN_UNIVERSE')
 
 
 # Price field mapping

@@ -9002,5 +9002,133 @@
     ],
     "risk_reward_ratio": 2.0,
     "strategy_type": "trend_following"
+  },
+  {
+    "default_parameters": {
+      "hold_period_max": 15,
+      "position_size_atr_multiplier": 1.0,
+      "reversal_bottom_n": 8,
+      "reversal_window_days": 5,
+      "risk_per_trade_pct": 0.01,
+      "rsi_period": 14,
+      "sizing_method": "volatility",
+      "sma_period": 100,
+      "stop_loss_pct": 0.06,
+      "take_profit_pct": 0.1
+    },
+    "description": "Lehmann (1990) short-term reversal \u2014 go long the biggest 5-day losers within a liquid mega-cap universe (bottom-8 by 5-day return) while the name is still in a long-term uptrend (above SMA200), i.e. buy the pullback, not the falling knife. The relative-weakness rank is the edge; oversold names in an uptrend mean-revert. Uses the RANK_IN_UNIVERSE_BOTTOM DSL primitive (computed identically in backtest + live by cross_asset_primitives).",
+    "entry_conditions": [
+      "RANK_IN_UNIVERSE_BOTTOM(\"SELF\", [\"AAPL\",\"MSFT\",\"GOOGL\",\"AMZN\",\"NVDA\",\"META\",\"AVGO\",\"TSLA\",\"JPM\",\"V\",\"MA\",\"UNH\",\"LLY\",\"JNJ\",\"XOM\",\"CVX\",\"HD\",\"COST\",\"PG\",\"WMT\"], 5, 8) > 0 AND CLOSE > SMA(100)"
+    ],
+    "exit_conditions": [
+      "CLOSE > SMA(20) OR RSI(14) > 70"
+    ],
+    "expected_holding_period": "2-10 days",
+    "expected_trade_frequency": "4-8 trades/month",
+    "market_regimes": [
+      "trending_up",
+      "trending_up_strong",
+      "trending_up_weak",
+      "ranging_low_vol",
+      "ranging"
+    ],
+    "metadata": {
+      "best_symbols": [
+        "AAPL",
+        "MSFT",
+        "GOOGL",
+        "AMZN",
+        "NVDA",
+        "META",
+        "AVGO",
+        "TSLA",
+        "JPM",
+        "V",
+        "MA",
+        "UNH",
+        "LLY",
+        "JNJ",
+        "XOM",
+        "CVX",
+        "HD",
+        "COST",
+        "PG",
+        "WMT"
+      ],
+      "cross_sectional_rank": true,
+      "direction": "long",
+      "interval": "1d"
+    },
+    "name": "Short-Term Reversal Long",
+    "required_indicators": [
+      "SMA:100",
+      "SMA:20",
+      "RSI"
+    ],
+    "risk_reward_ratio": 1.67,
+    "strategy_type": "mean_reversion"
+  },
+  {
+    "default_parameters": {
+      "hold_period_max": 120,
+      "position_size_atr_multiplier": 1.0,
+      "risk_per_trade_pct": 0.01,
+      "sizing_method": "volatility",
+      "sma_period": 200,
+      "stop_loss_pct": 0.06,
+      "take_profit_pct": 0.12,
+      "vol_bottom_n": 5,
+      "vol_window_days": 60
+    },
+    "description": "Low-volatility / betting-against-beta factor (Frazzini & Pedersen 2014) \u2014 go long the calmest names (bottom-5 by 60-day realized volatility) of a liquid large-cap universe while in a confirmed long-term uptrend (above SMA200). The low-vol anomaly \u2014 low-risk names deliver higher risk-adjusted returns \u2014 is the edge; the SMA200 filter avoids holding a low-vol name that is quietly grinding down. Uses the RANK_LOW_VOL DSL primitive (computed in backtest + live by cross_asset_primitives).",
+    "entry_conditions": [
+      "RANK_LOW_VOL(\"SELF\", [\"PG\",\"KO\",\"JNJ\",\"WMT\",\"COST\",\"PEP\",\"MCD\",\"UNH\",\"HD\",\"V\",\"MA\",\"MSFT\",\"AAPL\",\"JPM\",\"XOM\",\"CVX\",\"LLY\",\"ABBV\",\"MRK\",\"VZ\"], 60, 5) > 0 AND CLOSE > SMA(200)"
+    ],
+    "exit_conditions": [
+      "CLOSE < SMA(100)"
+    ],
+    "expected_holding_period": "20-90 days",
+    "expected_trade_frequency": "1-2 trades/month",
+    "market_regimes": [
+      "trending_up",
+      "trending_up_strong",
+      "trending_up_weak",
+      "ranging_low_vol",
+      "ranging"
+    ],
+    "metadata": {
+      "best_symbols": [
+        "PG",
+        "KO",
+        "JNJ",
+        "WMT",
+        "COST",
+        "PEP",
+        "MCD",
+        "UNH",
+        "HD",
+        "V",
+        "MA",
+        "MSFT",
+        "AAPL",
+        "JPM",
+        "XOM",
+        "CVX",
+        "LLY",
+        "ABBV",
+        "MRK",
+        "VZ"
+      ],
+      "cross_sectional_rank": true,
+      "direction": "long",
+      "interval": "1d"
+    },
+    "name": "Low Volatility Factor Long",
+    "required_indicators": [
+      "SMA:200",
+      "SMA:100"
+    ],
+    "risk_reward_ratio": 2.0,
+    "strategy_type": "trend_following"
   }
 ]
