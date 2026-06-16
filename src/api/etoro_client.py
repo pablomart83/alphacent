@@ -345,31 +345,34 @@ class EToroAPIClient:
             # Check for errors
             if response.status_code >= 400:
                 error_msg = f"API request failed: {response.status_code}"
-                try:
-                    error_data = response.json()
-                    error_msg = f"{error_msg} - {error_data.get('message', 'Unknown error')}"
-                    logger.error(f"{error_msg}, Response: {error_data}")
-                except (ValueError, requests.exceptions.JSONDecodeError):
-                    # Non-JSON error body — fall back to raw text
-                    logger.error(f"{error_msg}, Response: {response.text}")
-                # 404 on an order/position endpoint is distinct: the entity
-                # is gone server-side. Raise a typed exception so callers
-                # can handle it (mark CANCELLED + stop polling) rather than
-                # retrying forever. Detect by status code + endpoint path
-                # pattern so we don't mis-classify a 404 on a symbol lookup.
-                #
-                # Also covers the cancel endpoint (/market-cancel-orders/).
-                # A 404 on cancel means eToro doesn't recognise the order ID
-                # on the cancel route — this does NOT mean the order is dead.
-                # The order may be queued for market open (legitimately PENDING).
-                # Callers MUST NOT transition to CANCELLED on this exception;
-                # they should leave the row as-is and let order_monitor's
-                # status-poll establish ground truth.
-                if response.status_code == 404 and (
+                # A 404 on an order/position/cancel endpoint is an EXPECTED state
+                # ("entity gone server-side" — rejected/expired/never-accepted
+                # order), not a failure. order_monitor handles it (marks the local
+                # row CANCELLED and stops polling), so log it at INFO to keep
+                # errors.log signal-rich. Saturation-rejected demo orders produce
+                # a steady stream of these; logging them as ERROR drowned real
+                # errors (133+ entries). Any other >=400 stays ERROR.
+                is_expected_404 = response.status_code == 404 and (
                     "/orders/" in endpoint
                     or "/positions/" in endpoint
                     or "/market-cancel-orders/" in endpoint
-                ):
+                )
+                _log = logger.info if is_expected_404 else logger.error
+                try:
+                    error_data = response.json()
+                    error_msg = f"{error_msg} - {error_data.get('message', 'Unknown error')}"
+                    _log(f"{error_msg}, Response: {error_data}")
+                except (ValueError, requests.exceptions.JSONDecodeError):
+                    # Non-JSON error body — fall back to raw text
+                    _log(f"{error_msg}, Response: {response.text}")
+                # Raise a typed exception so callers can handle it (mark CANCELLED
+                # + stop polling) rather than retrying forever. Detect by status
+                # code + endpoint path so we don't mis-classify a 404 on a symbol
+                # lookup. The cancel endpoint is included, but a 404 there does NOT
+                # mean the order is dead (may be queued for market open) — callers
+                # MUST NOT transition to CANCELLED on the cancel route; they leave
+                # the row as-is and let order_monitor's status-poll establish truth.
+                if is_expected_404:
                     raise EToroOrderNotFoundError(error_msg)
                 raise EToroAPIError(error_msg)
 

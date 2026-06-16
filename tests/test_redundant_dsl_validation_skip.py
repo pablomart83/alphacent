@@ -103,18 +103,23 @@ class TestRedundantDSLValidationSkip:
 
         manager.strategy_engine.validate_strategy_signals.assert_not_called()
 
-    def test_walk_forward_validated_uses_existing_backtest_results(self, manager):
-        """Walk-forward validated strategies should use their existing backtest results."""
+    def test_walk_forward_validated_reuses_wf_results_and_runs_expost_sanity(self, manager):
+        """WF-validated strategies must REUSE their WF out-of-sample results for the
+        GATING metrics (not re-derive them), but still run exactly one 730d ex-post
+        sanity backtest (Sprint 5 F2, 2026-05-02 — double out-of-sample / Deflated
+        Sharpe). The ex-post result is stamped onto metadata as `expost_730d_*` and
+        must NOT overwrite `backtest_results` (which stays the WF result)."""
         strategy = MockStrategy("WF-Validated-BB", walk_forward_validated=True)
         stats = {"proposals_backtested": 0, "errors": []}
 
         result = manager._backtest_proposals([strategy], stats)
 
-        # Should NOT run a new backtest
-        manager.strategy_engine.backtest_strategy.assert_not_called()
-        
-        # Should use the existing results
+        # Gating result is the WF result, untouched by the ex-post sanity run.
         assert result[0].backtest_results.sharpe_ratio == 0.5
+        # Exactly one backtest call — the ex-post 730d sanity, not a re-gate.
+        assert manager.strategy_engine.backtest_strategy.call_count == 1
+        # The ex-post metrics are stamped onto metadata for the lenient activation veto.
+        assert "expost_730d_sharpe" in result[0].metadata
 
     def test_non_walk_forward_runs_rule_validation(self, manager):
         """Non-walk-forward strategies should still go through rule validation."""

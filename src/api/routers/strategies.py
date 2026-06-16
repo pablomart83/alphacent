@@ -61,20 +61,28 @@ _cycle_lock_acquired_at: float = 0.0
 _MAX_CYCLE_DURATION_S = 1800  # 30 min — far beyond a normal cycle (WF included)
 
 
-def _acquire_cycle_lock(timeout: float = 30) -> bool:
+def _acquire_cycle_lock(timeout: float = 30) -> str:
     """Acquire the cycle lock, self-healing an abandoned/wedged lock.
 
-    Returns True if acquired. On timeout, if the current holder thread is dead
-    or has held the lock past _MAX_CYCLE_DURATION_S (a genuine wedge — no
-    legitimate cycle runs that long), force-release and retry once. A plain
-    threading.Lock has no owner concept, so release() from another thread is
-    valid.
+    Returns one of:
+      - 'acquired' — the caller holds the lock and must run + release it.
+      - 'busy'     — another cycle is legitimately running (holder alive, held
+                     for < _MAX_CYCLE_DURATION_S). This is NOT an error; the
+                     caller should skip quietly. The lock is the single source
+                     of truth for "a cycle is running" — the callers' is_alive()
+                     pre-checks are best-effort and race, so contention here is
+                     normal and expected, not a failure.
+
+    On timeout, if the current holder thread is dead or has held the lock past
+    _MAX_CYCLE_DURATION_S (a genuine wedge — no legitimate cycle runs that long),
+    force-release and retry once → 'acquired'. A plain threading.Lock has no
+    owner concept, so release() from another thread is valid.
     """
     global _cycle_lock_holder, _cycle_lock_acquired_at
     if _db_cycle_lock.acquire(timeout=timeout):
         _cycle_lock_holder = _threading.current_thread()
         _cycle_lock_acquired_at = _cyclelock_time.time()
-        return True
+        return 'acquired'
 
     holder = _cycle_lock_holder
     held_for = (_cyclelock_time.time() - _cycle_lock_acquired_at) if _cycle_lock_acquired_at else 0.0
@@ -92,8 +100,10 @@ def _acquire_cycle_lock(timeout: float = 30) -> bool:
         if _db_cycle_lock.acquire(timeout=5):
             _cycle_lock_holder = _threading.current_thread()
             _cycle_lock_acquired_at = _cyclelock_time.time()
-            return True
-    return False
+            return 'acquired'
+        return 'busy'
+    # Healthy cycle is running and hasn't wedged — a normal concurrent-trigger skip.
+    return 'busy'
 
 
 def _make_serializable(obj):
@@ -141,9 +151,26 @@ def launch_autonomous_cycle_thread(cycle_id: str, filters: Optional[Dict] = None
             f.write(f"Thread started for {cycle_id} at {datetime.now().isoformat()}\n")
         try:
             logger.info(f"Cycle {cycle_id}: acquiring DB lock...")
-            acquired = _acquire_cycle_lock(timeout=30)
-            if not acquired:
-                raise RuntimeError("Could not acquire DB lock — scheduler may be stuck")
+            lock_status = _acquire_cycle_lock(timeout=30)
+            if lock_status == 'busy':
+                # Another cycle is legitimately running. The is_alive() pre-checks
+                # in the callers race against thread startup/teardown, so two
+                # triggers can both reach here; the lock serialises them. This is a
+                # normal skip, NOT a failure — log INFO, emit an info event, and
+                # return WITHOUT touching the lock (we never acquired it).
+                logger.info(
+                    f"Cycle {cycle_id}: skipped — another autonomous cycle is already "
+                    f"running (holder={getattr(_cycle_lock_holder, 'name', '?')})"
+                )
+                try:
+                    from src.core.monitoring_service import emit_service_event
+                    emit_service_event(
+                        "autonomous_cycle",
+                        f"Cycle {cycle_id} skipped — already running", "info"
+                    )
+                except Exception:
+                    pass
+                return
             logger.info(f"Cycle {cycle_id}: DB lock acquired")
             try:
                 logger.info(f"Background thread started for cycle {cycle_id}")
