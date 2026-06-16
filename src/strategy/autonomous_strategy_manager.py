@@ -887,7 +887,14 @@ class AutonomousStrategyManager:
                 short_exp = 0.0
                 position_details = []
                 try:
-                    if open_positions and account_balance > 0:
+                    # Guard on EQUITY, not free balance: when the account is fully
+                    # deployed (balance=$0, all capital in open positions) the exposure
+                    # calc must still run — otherwise the cycle summary falsely reports
+                    # 0.0% long / 0.0% short and the directional-balance observability
+                    # goes blind exactly when the book is most concentrated. The
+                    # denominator below already uses (account_equity or account_balance).
+                    _exposure_basis = account_equity or account_balance or 0
+                    if open_positions and _exposure_basis > 0:
                         for p in open_positions:
                             # Use invested_amount if available (more reliable than qty × price
                             # because eToro stores qty in units for stocks but sometimes in
@@ -903,7 +910,7 @@ class AutonomousStrategyManager:
                                 # Cap at 5% of account balance (max allocation per strategy)
                                 # to prevent 195%+ phantom exposure from qty-in-dollars CFDs.
                                 raw_value = abs((p.quantity or 0) * (p.current_price or p.entry_price or 0))
-                                max_reasonable = account_balance * 0.05  # 5% max per position
+                                max_reasonable = (account_equity or account_balance) * 0.05  # 5% max per position
                                 if raw_value > max_reasonable:
                                     # Likely a CFD where qty is dollars — use qty as the value
                                     pos_value = abs(p.quantity or 0)
@@ -940,7 +947,7 @@ class AutonomousStrategyManager:
                                 'strategy': strat_name,
                             })
                 except Exception as exp_err:
-                    logger.debug(f"Could not calculate exposure: {exp_err}")
+                    logger.warning(f"Could not calculate portfolio exposure for cycle summary: {exp_err}")
 
                 cl.log_portfolio_state(
                     positions_count=open_pos_count,
