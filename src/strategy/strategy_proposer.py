@@ -2275,6 +2275,31 @@ class StrategyProposer:
             # a weak train period doesn't invalidate strong OOS performance.
             validated_strategies = []
             _decision_rows = []  # Batched writes to signal_decisions (analytics)
+            # Option A regime-hedge slot (2026-06-16): in trending_up* regimes the SHORT
+            # WF tightening (below) rejects ~100% of shorts, leaving the book with ZERO
+            # short exposure. Uptrend-SPECIFIC short templates (exhaustion / parabolic /
+            # BB squeeze / EMA rejection / MACD divergence / volume climax — those whose
+            # market_regimes include a trending_up variant) are the DESIGNED hedge and are
+            # already exempt from the regime filter, the conviction regime-fit floor and
+            # the min_trades floor. The WF tightening was the one place the hedge exemption
+            # was NOT applied — so the hedge could never validate. Exempt up to
+            # `max_uptrend_hedge_shorts` of them per cycle (bounded hedge, not a directional
+            # short book). MC bootstrap, the (test-train)<=1.5 consistency gate and the
+            # signal-time C3 trend-consistency gate ALL still apply — this is not a bypass.
+            _uptrend_hedge_count = 0
+            _max_uptrend_hedge = 3
+            try:
+                from pathlib import Path as _HPath
+                import yaml as _hyaml
+                _hp = _HPath("config/autonomous_trading.yaml")
+                if _hp.exists():
+                    with open(_hp) as _hf:
+                        _hc = _hyaml.safe_load(_hf) or {}
+                    _max_uptrend_hedge = int(
+                        _hc.get('backtest', {}).get('walk_forward', {}).get('max_uptrend_hedge_shorts', 3)
+                    )
+            except Exception:
+                _max_uptrend_hedge = 3
             for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
                 if s.id not in mc_passed_ids:
                     _decision_rows.append({
@@ -2375,13 +2400,40 @@ class StrategyProposer:
                 # itself is short-appropriate, so no extra penalty is warranted).
                 is_short = isinstance(direction, str) and direction.lower() == 'short'
                 _regime_str_wf = market_regime.value if hasattr(market_regime, 'value') else str(market_regime)
-                _short_tightening_active = is_short and _regime_str_wf.startswith('trending_up')
+
+                # Regime-hedge exemption (Option A, 2026-06-16): is this a designated
+                # uptrend-hedge short — a SHORT template whose own market_regimes include a
+                # trending_up variant (exhaustion/parabolic/BB-squeeze/EMA-rejection/MACD-
+                # divergence/volume-climax)? Same detection used by the regime filter,
+                # conviction regime-fit and the min_trades floor. The hedge is relaxed off
+                # the SHORT tightening for up to _max_uptrend_hedge slots per cycle.
+                _is_uptrend_hedge_short = False
+                if is_short and _regime_str_wf.startswith('trending_up'):
+                    try:
+                        _tu_regimes = {'trending_up', 'trending_up_weak', 'trending_up_strong'}
+                        _tn = (s.metadata or {}).get('template_name', '')
+                        if _tn:
+                            _lt = next((t for t in self.template_library.templates if t.name == _tn), None)
+                            if _lt:
+                                _ltr = set(
+                                    r.value if hasattr(r, 'value') else str(r)
+                                    for r in (getattr(_lt, 'market_regimes', None) or [])
+                                )
+                                if _ltr & _tu_regimes:
+                                    _is_uptrend_hedge_short = True
+                    except Exception:
+                        _is_uptrend_hedge_short = False
+                _hedge_relax = _is_uptrend_hedge_short and (_uptrend_hedge_count < _max_uptrend_hedge)
+
+                _short_tightening_active = (
+                    is_short and _regime_str_wf.startswith('trending_up') and not _hedge_relax
+                )
                 if is_short:
                     if _short_tightening_active:
                         min_sharpe = min_sharpe + 0.3
                         short_min_trades = 4
                     else:
-                        # Non-uptrend regime: shorts are regime-appropriate — standard bars.
+                        # Non-uptrend regime OR a relaxed uptrend-hedge short — standard bars.
                         short_min_trades = 4
                 else:
                     short_min_trades = 3
@@ -2406,6 +2458,7 @@ class StrategyProposer:
                 }
 
                 # Primary path: both train and test above threshold
+                _n_validated_before = len(validated_strategies)
                 if ts > min_sharpe and tes > min_sharpe and test_return >= min_return and test_win_rate >= min_win_rate:
                     # Consistency gate on primary path: if test Sharpe is more than 1.5 points
                     # above train Sharpe, the test period was regime-lucky — reject even if both
@@ -2463,6 +2516,17 @@ class StrategyProposer:
                     _decision_rows.append({**_row_base, "stage": "wf_rejected", "decision": "rejected",
                                            "score": tes,
                                            "reason": f"below_thresholds (train={ts:.2f} test={tes:.2f} ret={test_return:.2%} wr={test_win_rate:.2%})"})
+
+                # Regime-hedge slot accounting (Option A): if a relaxed uptrend-hedge short
+                # actually validated this iteration, consume a hedge slot so the relaxation
+                # is bounded to _max_uptrend_hedge per cycle.
+                if _hedge_relax and len(validated_strategies) > _n_validated_before:
+                    _uptrend_hedge_count += 1
+                    logger.info(
+                        f"  Regime-hedge slot used ({_uptrend_hedge_count}/{_max_uptrend_hedge}): "
+                        f"{s.name} validated on relaxed SHORT bar (uptrend exhaustion hedge; "
+                        f"MC + consistency + C3 still enforced)"
+                    )
 
             # Batch-write all WF decisions (non-fatal on error)
             try:
