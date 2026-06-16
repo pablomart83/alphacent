@@ -1554,6 +1554,50 @@ class TradingScheduler:
                                 except Exception:
                                     signal.metadata['market_regime'] = 'unknown'
 
+                        # ── Demo min-order floor re-application (PAPER) ───────────────
+                        # validate_signal floor-bumps the size to the demo minimum, but the
+                        # regime multiplier (e.g. 0.8x in ranging) and the post-regime
+                        # symbol-concentration recheck above run AFTER that bump with no
+                        # re-floor. A flat-sized paper order ($1000) can therefore be shaved
+                        # to ~$800 and then HARD-REJECTED by order_executor's min check,
+                        # logged at ERROR every cycle (observed: CAT 16x/day — validated at
+                        # $1000, regime-downscaled to ~$800, rejected). In PAPER the regime
+                        # downscale must never push a tradeable order below the floor: bump
+                        # back to the floor when symbol headroom + balance allow, otherwise
+                        # skip cleanly (symbol budget genuinely exhausted — not a tradeable
+                        # size, and an expected condition, not an ERROR).
+                        _demo_min_floor = float(getattr(self._order_executor, '_min_position_size', 1000.0) or 1000.0)
+                        if 0 < validation_result.position_size < _demo_min_floor:
+                            _acct_eq_floor = getattr(account_info, 'equity', None) or getattr(account_info, 'balance', 0) or 0
+                            _avail_bal_floor = getattr(account_info, 'balance', 0) or 0
+                            try:
+                                from src.models.orm import PositionORM as _PosORMfloor
+                                _exist_floor = session.query(_PosORMfloor.invested_amount).filter(
+                                    _PosORMfloor.symbol == _sig_sym,
+                                    _PosORMfloor.closed_at.is_(None),
+                                ).all()
+                                _exist_total_floor = sum((r.invested_amount or 0) for r in _exist_floor)
+                            except Exception:
+                                _exist_total_floor = 0.0
+                            _sym_headroom_floor = max(0.0, _acct_eq_floor * 0.05 - _exist_total_floor)
+                            if _sym_headroom_floor >= _demo_min_floor and _avail_bal_floor >= _demo_min_floor:
+                                logger.info(
+                                    f"Demo min floor re-applied: {_sig_sym} "
+                                    f"${validation_result.position_size:.0f} → ${_demo_min_floor:.0f} "
+                                    f"(regime/concentration downscale must not breach the tradeable "
+                                    f"minimum; symbol headroom=${_sym_headroom_floor:.0f})"
+                                )
+                                validation_result.position_size = _demo_min_floor
+                            else:
+                                logger.info(
+                                    f"Skipping {_sig_sym} {_sig_dir} demo entry: sized "
+                                    f"${validation_result.position_size:.0f} < demo min "
+                                    f"${_demo_min_floor:.0f} after regime/concentration adjustment "
+                                    f"and symbol budget exhausted (headroom=${_sym_headroom_floor:.0f}, "
+                                    f"bal=${_avail_bal_floor:.0f}) — skipping cleanly"
+                                )
+                                continue
+
                         # Execute validated signal through order executor
                         try:
                             order = self._order_executor.execute_signal(
@@ -1662,13 +1706,25 @@ class TradingScheduler:
                             # Track cumulative allocation
                             cumulative_allocated += validation_result.position_size
 
-                            # ── Phase 2: Live fill routing ────────────────────────────────
-                            # If a live_strategies row exists for this (strategy, symbol) AND
-                            # live_trading.enabled is True in config, fire a real fill.
-                            # HARD GATE: both conditions must be true. Fail-open on any error.
+                            # ── Phase 2: Live fill routing — DISABLED (2026-06-16 PM-3) ──
+                            # This nested live-fill route is SUPERSEDED by the dedicated
+                            # independent live pass (the get_all_live_approvals loop later in
+                            # this cycle), which is the single live-entry route. This legacy
+                            # path can never fire — it only runs for strategies iterated in
+                            # the DEMO loop (status PAPER/BACKTESTED, see the status.in_()
+                            # filter at the top of the cycle), but every live (template,symbol)
+                            # pair has status='LIVE' and so is never iterated here, meaning
+                            # get_live_approval() always returns None. It also used an inferior
+                            # conviction gate (YAML default only — no per-pair conviction_min,
+                            # no alpha_edge branch). It is permanently disabled via the flag
+                            # below so a future change to the DEMO-loop filter cannot silently
+                            # resurrect the worse path. Physical removal is a follow-up cleanup
+                            # (kept inert here to minimise blast radius on the live hot path).
+                            _LIVE_NESTED_ROUTE_ENABLED = False
                             from src.models.enums import SignalAction as _SignalActionLive
                             if (
-                                signal.action in [_SignalActionLive.ENTER_LONG, _SignalActionLive.ENTER_SHORT]
+                                _LIVE_NESTED_ROUTE_ENABLED
+                                and signal.action in [_SignalActionLive.ENTER_LONG, _SignalActionLive.ENTER_SHORT]
                                 and self._live_order_executor is not None
                             ):
                                 try:
