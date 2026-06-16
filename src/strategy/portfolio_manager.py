@@ -1133,7 +1133,17 @@ class PortfolioManager:
         # Relax min_trades for SHORT strategies — they fire less often in ranging/low-vol
         if strategy_direction == 'SHORT' and min_trades_required > 2:
             min_trades_required = max(2, min_trades_required - 1)
-        
+
+        # Was this strategy validated by the cross-sectional factor path (not the
+        # per-symbol price backtest)? If so, the per-symbol trade-count floor below
+        # does not apply the same way (see bypass).
+        _fv_meta = (getattr(strategy, 'metadata', None) or {})
+        _fv_orm = (getattr(strategy, 'strategy_metadata', None) or {})
+        _is_factor_validated = (
+            _fv_meta.get('validated_by') == 'factor_validation'
+            or _fv_orm.get('validated_by') == 'factor_validation'
+        )
+
         if backtest_results.total_trades < min_trades_required:
             # Sharpe exception: high-conviction strategies (test Sharpe ≥ 2.0) with ≥ 3 trades
             # pass even if below the min_trades threshold. Mirrors the WF Sharpe exception so
@@ -1159,6 +1169,24 @@ class PortfolioManager:
                     f"min_trades bypass (family-cross-validated, score={cv_score:.2%}): "
                     f"{strategy.name} trades={backtest_results.total_trades} < "
                     f"{min_trades_required} — accepted on family evidence"
+                )
+            elif _is_factor_validated and backtest_results.total_trades >= 2:
+                # Factor-validated AE (2026-06-16): the edge is confirmed
+                # CROSS-SECTIONALLY (factor spread across the universe — gates 1-3 of
+                # validate_alpha_edge_factor), not by per-symbol trade count. Here
+                # total_trades = qualifying quarters where the factor fired on this
+                # symbol; a low-frequency fundamental factor firing 2-3x in the lookback
+                # is normal and must NOT be re-gated by the technical-strategy min_trades
+                # floor (built for DSL price backtests). Same class as the P1 regime-fit
+                # fix — a technical gate mis-applied to a fundamental strategy. PAPER-stage
+                # activation is for data collection; the graduation gate still enforces the
+                # live min_trades floor before any real capital. Floor of 2 = statistical
+                # minimum (gate1 already required ≥4 quarters of data).
+                logger.info(
+                    f"min_trades bypass (factor-validated AE, score="
+                    f"{(getattr(strategy, 'metadata', None) or {}).get('factor_score', 'n/a')}): "
+                    f"{strategy.name} qualifying_quarters={backtest_results.total_trades} < "
+                    f"{min_trades_required} — accepted on cross-sectional factor evidence"
                 )
             else:
                 reason = (
