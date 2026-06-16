@@ -30,6 +30,7 @@ TESTS = [
     ("Multi-Month High Momentum", ["NVDA", "AAPL", "MSFT", "AVGO"]),
     ("Dual Momentum Trend Long", ["MSFT", "AAPL", "SPY", "QQQ"]),
     ("Cross-Asset Trend Follow Long", ["SPX500", "NSDQ100", "GOLD", "SPY"]),
+    ("Cross-Sectional Momentum Long", ["NVDA", "AVGO", "META", "AAPL"]),
 ]
 
 end = datetime.now()
