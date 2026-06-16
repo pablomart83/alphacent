@@ -1055,3 +1055,53 @@
     - GS
     - JPM
     - BAC
+- seq: 306
+  name: Forex Carry Trend
+  description: Harvest the interest-rate differential between a forex pair's two currencies.
+    Go long when the central-bank rate spread (base - quote) is meaningfully positive and the
+    price is in an uptrend; go short when the spread is meaningfully negative and price is in a
+    downtrend. The carry+trend overlay collects the differential while the trend filter avoids
+    carry-crash drawdowns. Rate spreads come from FRED central-bank policy-rate series
+    (get_carry_rates live / get_historical_carry in backtest) — no FMP fundamentals needed.
+  strategy_type: trend_following
+  market_regimes:
+  - trending_up
+  - trending_up_weak
+  - trending_down
+  - ranging
+  - ranging_low_vol
+  - ranging_high_vol
+  entry_conditions:
+  - Interest-rate differential (base - quote) >= +0.5pp AND price > SMA(50) for LONG
+  - Interest-rate differential (base - quote) <= -0.5pp AND price < SMA(50) for SHORT
+  exit_conditions:
+  - Carry differential decays toward zero (|spread| < 0.1pp)
+  - Price trend reverses (crosses SMA(50) against the position)
+  - Stop loss 2% / take profit 5%
+  required_indicators:
+  - SMA:50
+  default_parameters:
+    sma_period: 50
+    carry_entry_threshold: 0.5
+    carry_exit_threshold: 0.1
+    stop_loss_pct: 0.02
+    take_profit_pct: 0.05
+    hold_period_max: 90
+  expected_trade_frequency: 1-3 trades/month
+  expected_holding_period: 10-90 days
+  risk_reward_ratio: 2.5
+  metadata:
+    direction: long
+    strategy_category: alpha_edge
+    alpha_edge_type: forex_carry
+    alpha_edge_bypass: true
+    requires_fundamental_data: false
+    best_symbols:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - AUDUSD
+    - USDCAD
+    - USDCHF
+  research_citation: Koijen, Moskowitz, Pedersen & Vrugt (2018), JFE — Carry
+  author: alphacent-edge-2026-06-16

@@ -4678,6 +4678,17 @@ Generate a CORRECTED strategy that addresses all errors:"""
                             continue
                         # Accruals quality: use composite_score (lower = better for shorts)
                         ae_score = ranker.get('composite_score', 50.0) if ranker else 50.0
+                    elif 'carry' in ae_type:
+                        # Forex carry: only forex pairs are eligible (the rate-differential
+                        # edge is currency-specific). Prefer the pairs we have FRED rate
+                        # coverage for (best_symbols); score by realized trend strength so
+                        # the carry+trend overlay gets pairs that actually trend.
+                        if asset_class != 'forex':
+                            continue
+                        if sym in best_syms:
+                            ae_score += 80
+                        else:
+                            ae_score += (1 - vol) * 20
                     else:
                         if asset_class in ('crypto', 'forex', 'commodity', 'index'):
                             continue

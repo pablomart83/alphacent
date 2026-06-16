@@ -6461,6 +6461,8 @@ class StrategyEngine:
             return 'share_buyback'
         elif 'end-of-month' in template_name or 'end_of_month' in template_name or 'month-end' in template_name:
             return 'end_of_month_momentum'
+        elif 'carry' in template_name:
+            return 'forex_carry'
         elif 'pairs' in template_name and 'trading' in template_name:
             return 'pairs_trading'
         elif 'dividend' in template_name or 'aristocrat' in template_name:
@@ -7205,8 +7207,14 @@ class StrategyEngine:
                     win_rate=0.0, total_trades=0, avg_win=0.0, avg_loss=0.0,
                     sortino_ratio=0.0
                 )
-        
-        # Alpha Edge fundamental templates require equity symbols (stocks/ETFs)
+
+        # Forex carry templates use FRED central-bank rate differentials, not FMP
+        # fundamentals. Route them to the dedicated carry backtest which fetches
+        # historical rate spreads + price data (the WF-capable analog of the live
+        # handler). Must run BEFORE the quarterly-data fetch/reject below.
+        if template_type == 'forex_carry':
+            return self._backtest_forex_carry(strategy, symbol, start, end)
+
         asset_class = self._get_asset_class(symbol)
         EQUITY_ONLY_AE_TYPES = {
             'earnings_momentum', 'earnings_miss_momentum_short', 'dividend_aristocrat',
@@ -8735,6 +8743,129 @@ class StrategyEngine:
                     in_trade = False
         return trades
     
+    def _backtest_forex_carry(self, strategy: Strategy, symbol: str,
+                              start: datetime, end: datetime) -> BacktestResults:
+        """Backtest a Forex Carry strategy using historical FRED rate differentials.
+
+        Carry + trend overlay: hold the pair in the direction of a meaningfully
+        positive (long) / negative (short) interest-rate differential, confirmed
+        by the price trend, to harvest the differential while avoiding carry-crash
+        drawdowns. WF sees the same edge the live handler fires on.
+        """
+        try:
+            market_data = self.market_data.get_historical_data(symbol=symbol, start=start, end=end)
+            if not market_data or len(market_data) < 60:
+                logger.warning(f"[ForexCarryBacktest] insufficient price data for {symbol}")
+                return BacktestResults(
+                    total_return=0.0, sharpe_ratio=0.0, max_drawdown=0.0,
+                    win_rate=0.0, total_trades=0, avg_win=0.0, avg_loss=0.0,
+                    sortino_ratio=0.0)
+            df = pd.DataFrame([{
+                "timestamp": md.timestamp, "open": md.open, "high": md.high,
+                "low": md.low, "close": md.close, "volume": md.volume
+            } for md in market_data])
+            df.set_index("timestamp", inplace=True)
+            df.sort_index(inplace=True)
+        except Exception as e:
+            logger.error(f"[ForexCarryBacktest] price fetch failed for {symbol}: {e}")
+            return BacktestResults(
+                total_return=0.0, sharpe_ratio=0.0, max_drawdown=0.0,
+                win_rate=0.0, total_trades=0, avg_win=0.0, avg_loss=0.0,
+                sortino_ratio=0.0)
+
+        carry_series = None
+        if self.market_analyzer is not None:
+            try:
+                carry_series = self.market_analyzer.get_historical_carry(symbol)
+            except Exception as e:
+                logger.warning(f"[ForexCarryBacktest] historical carry fetch failed for {symbol}: {e}")
+        if carry_series is None or len(carry_series) == 0:
+            logger.warning(
+                f"[ForexCarryBacktest] no historical carry for {symbol} — "
+                f"0 trades (no price-proxy fallback; carry needs the rate spread)"
+            )
+            return BacktestResults(
+                total_return=0.0, sharpe_ratio=0.0, max_drawdown=0.0,
+                win_rate=0.0, total_trades=0, avg_win=0.0, avg_loss=0.0,
+                sortino_ratio=0.0)
+
+        params = self._resolve_alpha_edge_params(strategy)
+        trades = self._simulate_forex_carry_trades(df, carry_series, params, strategy)
+        if trades:
+            logger.info(f"[ForexCarryBacktest] {strategy.name} on {symbol}: {len(trades)} trades")
+        else:
+            logger.warning(f"[ForexCarryBacktest] {strategy.name} on {symbol}: 0 trades")
+        return self._calculate_alpha_edge_backtest_results(trades, df)
+
+    def _simulate_forex_carry_trades(self, df: pd.DataFrame, carry_series,
+                                     params: Dict, strategy: Strategy = None) -> List[Dict]:
+        """Simulate carry+trend trades from a daily rate-differential series.
+
+        Long when carry >= +entry_threshold AND price > SMA (uptrend confirms a
+        positive-carry hold); short when carry <= -entry_threshold AND price <
+        SMA. Exit on stop/target, hold-cap, trend reversal, or carry decaying
+        toward zero (the differential — i.e. the edge — has gone).
+        """
+        trades: List[Dict] = []
+        close = df['close']
+        sma_period = int(params.get('sma_period', 50))
+        carry_entry = float(params.get('carry_entry_threshold', 0.5))   # pct points
+        carry_exit = float(params.get('carry_exit_threshold', 0.1))
+        stop_loss = float(params.get('stop_loss_pct', 0.02))
+        take_profit = float(params.get('take_profit_pct', 0.05))
+        hold_max = int(params.get('hold_period_max', 90))
+
+        if len(df) < sma_period + 2:
+            return trades
+
+        sma = close.rolling(window=sma_period).mean()
+        carry = carry_series.reindex(df.index, method='ffill')
+
+        in_trade = False
+        direction = None
+        entry_price = 0.0
+        entry_idx = 0
+
+        for i in range(sma_period + 1, len(df)):
+            if pd.isna(sma.iloc[i]) or pd.isna(carry.iloc[i]):
+                continue
+            c = float(carry.iloc[i])
+            px = float(close.iloc[i])
+            ma = float(sma.iloc[i])
+
+            if not in_trade:
+                if c >= carry_entry and px > ma:
+                    in_trade, direction, entry_price, entry_idx = True, 'long', px, i
+                elif c <= -carry_entry and px < ma:
+                    in_trade, direction, entry_price, entry_idx = True, 'short', px, i
+                continue
+
+            pnl_pct = (px - entry_price) / entry_price if direction == 'long' \
+                else (entry_price - px) / entry_price
+            days_held = i - entry_idx
+            exit_reason = None
+            if pnl_pct <= -stop_loss:
+                exit_reason = "stop_loss"
+            elif pnl_pct >= take_profit:
+                exit_reason = "take_profit"
+            elif days_held >= hold_max:
+                exit_reason = "hold_max"
+            elif direction == 'long' and (px < ma or c < carry_exit):
+                exit_reason = "carry_or_trend_exit"
+            elif direction == 'short' and (px > ma or c > -carry_exit):
+                exit_reason = "carry_or_trend_exit"
+
+            if exit_reason:
+                trades.append({
+                    "entry_price": entry_price, "exit_price": px,
+                    "pnl_pct": pnl_pct, "days_held": days_held, "exit_reason": exit_reason,
+                    "direction": direction,
+                    "entry_date": str(df.index[entry_idx].date()) if hasattr(df.index[entry_idx], 'date') else str(df.index[entry_idx]),
+                    "exit_date": str(df.index[i].date()) if hasattr(df.index[i], 'date') else str(df.index[i]),
+                })
+                in_trade, direction = False, None
+        return trades
+
     def _simulate_end_of_month_momentum_trades(self, df: pd.DataFrame, params: Dict) -> List[Dict]:
         """Simulate End-of-Month Momentum trades: enter in last 3 trading days of month when price > SMA(20) and RSI > 40."""
         trades = []
@@ -9812,6 +9943,12 @@ class StrategyEngine:
             return self._handle_end_of_month_momentum(
                 strategy, symbol, data,
                 alpha_edge_config.get('end_of_month_momentum', {}),
+                has_open_position, open_position
+            )
+        elif template_type == 'forex_carry':
+            return self._handle_forex_carry(
+                strategy, symbol, data,
+                alpha_edge_config.get('forex_carry', {}),
                 has_open_position, open_position
             )
         elif template_type == 'pairs_trading':
@@ -11055,6 +11192,99 @@ class StrategyEngine:
             indicators={"price": current_price, "sma_20": sma_20, "rsi": current_rsi},
             metadata={"signal_engine": "alpha_edge_fundamental", "template_type": "end_of_month_momentum",
                       "day_of_month": today_day, "strategy_name": strategy.name}
+        )
+    
+    def _handle_forex_carry(
+        self, strategy: Strategy, symbol: str, data: pd.DataFrame,
+        carry_config: Dict[str, Any], has_open_position: bool, open_position
+    ) -> Optional[TradingSignal]:
+        """
+        Forex Carry: hold a pair in the direction of its central-bank interest-rate
+        differential (long when the rate spread is meaningfully positive, short when
+        negative), confirmed by the price trend, to harvest the differential. Exit
+        on stop, trend reversal, or carry decaying toward zero. Live snapshot of the
+        rate spread comes from MarketStatisticsAnalyzer.get_carry_rates(); the
+        backtest uses get_historical_carry() so WF sees the identical edge.
+        """
+        from src.models.enums import SignalAction, PositionSide
+
+        sma_period = carry_config.get('sma_period', 50)
+        carry_entry = carry_config.get('carry_entry_threshold', 0.5)  # pct points
+        carry_exit = carry_config.get('carry_exit_threshold', 0.1)
+        stop_loss = carry_config.get('stop_loss_pct', 0.02)
+        take_profit = carry_config.get('take_profit_pct', 0.05)
+
+        if len(data) < sma_period + 1:
+            return None
+
+        # Current rate differential for this pair (fail-closed if unavailable).
+        carry_diff = None
+        if self.market_analyzer is not None:
+            try:
+                carry_data = self.market_analyzer.get_carry_rates()
+                carry_diff = (carry_data.get('carry', {}) or {}).get(symbol)
+            except Exception as e:
+                logger.debug(f"Forex carry: could not fetch carry rate for {symbol}: {e}")
+        if carry_diff is None:
+            logger.debug(f"Forex carry: no carry differential for {symbol} — skip")
+            return None
+
+        current_price = float(data['close'].iloc[-1])
+        sma = float(data['close'].rolling(window=sma_period).mean().iloc[-1])
+        if pd.isna(sma):
+            return None
+
+        # EXIT LOGIC — direction-aware (position side drives the P&L sign).
+        if has_open_position and open_position:
+            is_short = getattr(open_position, 'side', None) == PositionSide.SHORT
+            entry_price = open_position.entry_price or current_price
+            pnl_pct = ((entry_price - current_price) / entry_price) if is_short \
+                else ((current_price - entry_price) / entry_price)
+            exit_reason = None
+            if pnl_pct <= -stop_loss:
+                exit_reason = f"Stop loss: {pnl_pct:.1%}"
+            elif pnl_pct >= take_profit:
+                exit_reason = f"Take profit: {pnl_pct:.1%}"
+            elif is_short and (current_price > sma or carry_diff > -carry_exit):
+                exit_reason = "Trend reversal / carry decayed"
+            elif (not is_short) and (current_price < sma or carry_diff < carry_exit):
+                exit_reason = "Trend reversal / carry decayed"
+            if exit_reason:
+                exit_action = SignalAction.EXIT_SHORT if is_short else SignalAction.EXIT_LONG
+                logger.info(f"Alpha Edge Forex Carry EXIT for {symbol}: {exit_reason}")
+                return TradingSignal(
+                    strategy_id=strategy.id, symbol=symbol, action=exit_action,
+                    confidence=0.80, reasoning=f"Forex carry exit: {exit_reason}",
+                    generated_at=datetime.now(),
+                    indicators={"price": current_price, "sma": sma, "carry_diff": carry_diff},
+                    metadata={"signal_engine": "alpha_edge_fundamental", "template_type": "forex_carry",
+                              "exit_reason": exit_reason, "pnl_pct": pnl_pct}
+                )
+
+        if has_open_position:
+            return None
+
+        # ENTRY LOGIC: carry sign + trend confirmation.
+        action = None
+        if carry_diff >= carry_entry and current_price > sma:
+            action = SignalAction.ENTER_LONG
+        elif carry_diff <= -carry_entry and current_price < sma:
+            action = SignalAction.ENTER_SHORT
+        if action is None:
+            return None
+
+        direction = 'long' if action == SignalAction.ENTER_LONG else 'short'
+        confidence = min(1.0, 0.55 + min(abs(carry_diff), 5.0) * 0.05)
+        reasoning = (f"Forex carry {direction.upper()} for {symbol}: rate differential "
+                     f"{carry_diff:+.2f}pp, price {current_price:.4f} "
+                     f"{'>' if direction == 'long' else '<'} SMA({sma_period}) {sma:.4f}")
+        logger.info(f"Alpha Edge Forex Carry ENTRY for {symbol}: {reasoning}")
+        return TradingSignal(
+            strategy_id=strategy.id, symbol=symbol, action=action,
+            confidence=confidence, reasoning=reasoning, generated_at=datetime.now(),
+            indicators={"price": current_price, "sma": sma, "carry_diff": carry_diff},
+            metadata={"signal_engine": "alpha_edge_fundamental", "template_type": "forex_carry",
+                      "direction": direction, "carry_diff": carry_diff, "strategy_name": strategy.name}
         )
     
     def _generate_signal_for_symbol(

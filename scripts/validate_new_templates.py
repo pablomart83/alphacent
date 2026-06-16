@@ -33,6 +33,7 @@ TESTS = [
     ("Cross-Sectional Momentum Long", ["NVDA", "AVGO", "META", "AAPL"]),
     ("Short-Term Reversal Long", ["NVDA", "AAPL", "MSFT", "META", "TSLA"]),
     ("Low Volatility Factor Long", ["PG", "KO", "JNJ", "COST", "MSFT"]),
+    ("Forex Carry Trend", ["EURUSD", "USDJPY", "GBPUSD", "AUDUSD", "USDCAD"]),
 ]
 
 end = datetime.now()
@@ -61,7 +62,12 @@ for tname, symbols in TESTS:
             metadata=dict(t.metadata or {}),
         )
         try:
-            r = engine.backtest_strategy(strat, start, end, interval="1d")
+            if (t.metadata or {}).get("strategy_category") == "alpha_edge":
+                # Alpha Edge templates (e.g. forex carry) use the fundamental/macro
+                # backtest path, not the DSL/vectorbt path.
+                r = engine.backtest_alpha_edge_strategy(strat, start, end)
+            else:
+                r = engine.backtest_strategy(strat, start, end, interval="1d")
             print(f"  {sym:8} trades={r.total_trades:3}  sharpe={r.sharpe_ratio:+.2f}  "
                   f"ret={r.total_return:+.1%}  wr={r.win_rate:.0%}")
         except Exception as e:

@@ -1030,17 +1030,23 @@ class MarketStatisticsAnalyzer:
         }
     
     # FRED series IDs for central bank policy rates
-    # Used for forex carry bias calculation
-    # Using OECD immediate rates series (IRSTCB01xxM156N) for consistency,
-    # with FEDFUNDS and ECBDFR as primary for USD/EUR (more timely updates)
+    # Used for forex carry bias (conviction) and the Forex Carry alpha-edge template.
+    # USD/EUR use the timely policy series (FEDFUNDS / ECB deposit facility). The
+    # OECD "immediate rates" series (IRSTCB01xxM156N) were DISCONTINUED for GBP/AUD
+    # (FRED returns empty since ~2023), which silently zeroed their carry bias and
+    # produced 0 carry trades. Those currencies now use the maintained 3-month
+    # interbank series (IR3TIB01xxM156N) — a close, still-updated proxy for the
+    # policy rate. CHF moved to the same maintained series for consistency. JPY/CAD
+    # remain on IRSTCB01 (still updating; left unchanged to preserve existing
+    # conviction-bias values).
     CENTRAL_BANK_RATES = {
         'USD': 'FEDFUNDS',          # Federal Reserve effective rate (monthly)
-        'EUR': 'ECBDFR',            # ECB deposit facility rate
-        'GBP': 'IRSTCB01GBM156N',  # BOE rate via OECD (monthly)
+        'EUR': 'ECBDFR',            # ECB deposit facility rate (daily)
+        'GBP': 'IR3TIB01GBM156N',  # GBP 3-month interbank (OECD, maintained)
         'JPY': 'IRSTCB01JPM156N',  # BOJ policy rate via OECD (monthly)
-        'AUD': 'IRSTCB01AUM156N',  # RBA cash rate via OECD (monthly)
+        'AUD': 'IR3TIB01AUM156N',  # AUD 3-month interbank (OECD, maintained)
         'CAD': 'IRSTCB01CAM156N',  # BOC overnight rate via OECD (monthly)
-        'CHF': 'IRSTCB01CHM156N',  # SNB target rate via OECD (monthly)
+        'CHF': 'IR3TIB01CHM156N',  # CHF 3-month interbank (OECD, maintained)
     }
 
     # Map forex pair symbols to (base_currency, quote_currency)
@@ -1187,6 +1193,79 @@ class MarketStatisticsAnalyzer:
             logger.info(f"Carry differentials: {carry_str}")
 
         return result
+
+    def get_historical_carry(self, pair: str) -> Optional["pd.Series"]:
+        """Daily history of the carry differential (base_rate - quote_rate) for a
+        forex pair, for use in backtests / walk-forward.
+
+        Central-bank policy rates are step functions that only change at policy
+        meetings, so the monthly FRED series are forward-filled to a daily index.
+        This is the backtest-capable analog of get_carry_rates() (which returns
+        only the current snapshot) and lets WF see the SAME carry edge the live
+        handler fires on — no price-proxy stand-in.
+
+        Args:
+            pair: forex pair symbol (e.g. "EURUSD"). Must be in FOREX_PAIR_CURRENCIES.
+
+        Returns:
+            pd.Series indexed by daily date, value = base_rate - quote_rate in
+            percentage points (positive = long-carry). None when FRED is disabled,
+            the pair is unknown, or a leg's rate history is unavailable.
+        """
+        if pair not in self.FOREX_PAIR_CURRENCIES:
+            logger.debug(f"get_historical_carry: {pair} not a known carry pair")
+            return None
+        if not self.fred_enabled:
+            logger.debug("get_historical_carry: FRED disabled")
+            return None
+
+        cache_key = f"hist_carry_{pair}"
+        cached = self._get_cached(cache_key, 86400)  # 24h — rates move at most monthly
+        if cached is not None:
+            return cached
+
+        base_ccy, quote_ccy = self.FOREX_PAIR_CURRENCIES[pair]
+
+        def _fetch_rate_series(ccy: str) -> Optional["pd.Series"]:
+            series_id = self.CENTRAL_BANK_RATES.get(ccy)
+            if not series_id:
+                return None
+            try:
+                # Wide window so any WF split lands inside the history.
+                s = self.fred_client.get_series(
+                    series_id, observation_start=datetime(2015, 1, 1)
+                )
+                if s is None or s.empty:
+                    return None
+                s = s.dropna()
+                s.index = pd.to_datetime(s.index)
+                return s.sort_index()
+            except Exception as e:
+                logger.debug(f"get_historical_carry: failed {ccy} ({series_id}): {e}")
+                return None
+
+        base_s = _fetch_rate_series(base_ccy)
+        quote_s = _fetch_rate_series(quote_ccy)
+        if base_s is None or quote_s is None or base_s.empty or quote_s.empty:
+            logger.info(f"get_historical_carry: insufficient rate history for {pair}")
+            return None
+
+        # Build a daily index spanning both legs and forward-fill the monthly
+        # policy rates onto it, then take the differential.
+        start = min(base_s.index.min(), quote_s.index.min())
+        end = max(base_s.index.max(), quote_s.index.max())
+        daily_idx = pd.date_range(start=start, end=end, freq="D")
+        base_d = base_s.reindex(daily_idx, method="ffill")
+        quote_d = quote_s.reindex(daily_idx, method="ffill")
+        carry = (base_d - quote_d).dropna()
+        carry.name = f"carry_{pair}"
+
+        self._set_cached(cache_key, carry)
+        logger.info(
+            f"Historical carry for {pair} ({base_ccy}-{quote_ccy}): "
+            f"{len(carry)} daily points, latest={carry.iloc[-1]:+.2f}%"
+        )
+        return carry
     
     def clear_cache(self):
         """Clear all cached data. Useful for testing or forcing fresh data fetch."""
