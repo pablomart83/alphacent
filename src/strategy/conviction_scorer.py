@@ -559,6 +559,21 @@ class ConvictionScorer:
 
         Strong match: 20, Neutral: 12, Weak: 5 (never 0 — WF already validated)
         """
+        # Alpha Edge fundamental strategies derive their edge from fundamentals,
+        # NOT technical-regime alignment. Scoring them on the DSL technical-regime
+        # map structurally floors mean_reversion/value/quality-typed AE templates at
+        # 5.0 in trending regimes — the exact analog of the carry/crypto denominator
+        # mismatch removed from the AE path on 2026-06-12. An FCF-value AE and an
+        # earnings-momentum AE should not get opposite regime scores for the same
+        # regime when neither's edge is technical. Give AE a neutral, regime-agnostic
+        # score so the component neither rewards nor penalises an axis it can't play.
+        is_alpha_edge = bool(
+            strategy.metadata and isinstance(strategy.metadata, dict)
+            and strategy.metadata.get('strategy_category') == 'alpha_edge'
+        )
+        if is_alpha_edge:
+            return 12.0
+
         if not self.market_analyzer:
             return 10.0  # Neutral when we can't detect regime
 

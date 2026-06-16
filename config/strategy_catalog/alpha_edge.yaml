@@ -475,6 +475,10 @@
   name: Share Buyback Momentum
   description: Enter LONG when a company is actively buying back shares (negative shares_change_percent).
     Companies reducing share count tend to outperform due to EPS accretion and management confidence signal.
+  enabled: false
+  disabled_reason: FMP shares_outstanding 0% coverage on current plan (scripts/ae_field_coverage.py
+    2026-06-16) — buyback signal can never be detected, backtest produces 0 trades and factor
+    validation has no field to screen on. Re-enable if FMP plan adds shares_outstanding history.
   strategy_type: momentum
   market_regimes:
   - trending_up
@@ -780,6 +784,10 @@
   name: Shareholder Yield Long
   description: Long stocks with highest total shareholder yield (dividends + buybacks + debt paydown).
     Meb Faber's approach — companies returning the most capital to shareholders tend to outperform.
+  enabled: false
+  disabled_reason: Depends on shares_outstanding for the buyback component (0% FMP coverage,
+    scripts/ae_field_coverage.py 2026-06-16) — shareholder-yield cannot be computed, 0-trade backtest.
+    Re-enable if FMP plan adds shares_outstanding history.
   strategy_type: mean_reversion
   market_regimes:
   - trending_up

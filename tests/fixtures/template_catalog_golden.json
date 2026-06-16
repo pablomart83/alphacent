@@ -2843,54 +2843,6 @@
   },
   {
     "default_parameters": {
-      "hold_period_max": 60,
-      "min_buyback_pct": 0.01,
-      "min_eps": 0.0,
-      "position_size_atr_multiplier": 1.0,
-      "profit_target": 0.1,
-      "risk_per_trade_pct": 0.01,
-      "rsi_max_entry": 60,
-      "sizing_method": "volatility",
-      "stop_loss_pct": 0.05
-    },
-    "description": "Enter LONG when a company is actively buying back shares (negative shares_change_percent). Companies reducing share count tend to outperform due to EPS accretion and management confidence signal.",
-    "entry_conditions": [
-      "Shares outstanding decreased > 1% YoY",
-      "Positive earnings (EPS > 0)",
-      "RSI < 60 (not overbought)"
-    ],
-    "exit_conditions": [
-      "Share count increases (dilution)",
-      "Profit target 10%",
-      "Stop loss 5%",
-      "Max hold 60 days"
-    ],
-    "expected_holding_period": "20-60 days",
-    "expected_trade_frequency": "1-2 trades/month",
-    "market_regimes": [
-      "trending_up",
-      "trending_up_weak",
-      "ranging",
-      "ranging_low_vol",
-      "ranging_high_vol"
-    ],
-    "metadata": {
-      "alpha_edge_bypass": true,
-      "alpha_edge_type": "share_buyback",
-      "direction": "long",
-      "interval": "1d",
-      "requires_fundamental_data": true,
-      "strategy_category": "alpha_edge"
-    },
-    "name": "Share Buyback Momentum",
-    "required_indicators": [
-      "RSI"
-    ],
-    "risk_reward_ratio": 2.0,
-    "strategy_type": "momentum"
-  },
-  {
-    "default_parameters": {
       "hold_period_max": 90,
       "max_accruals": 0.05,
       "min_f_score": 6,
@@ -3225,55 +3177,6 @@
     ],
     "risk_reward_ratio": 2.0,
     "strategy_type": "momentum"
-  },
-  {
-    "default_parameters": {
-      "hold_period_max": 90,
-      "min_f_score": 5,
-      "min_shareholder_yield": 0.04,
-      "position_size_atr_multiplier": 1.0,
-      "profit_target": 0.12,
-      "rebalance_frequency_days": 30,
-      "risk_per_trade_pct": 0.01,
-      "sizing_method": "volatility",
-      "stop_loss_pct": 0.08
-    },
-    "description": "Long stocks with highest total shareholder yield (dividends + buybacks + debt paydown). Meb Faber's approach \u2014 companies returning the most capital to shareholders tend to outperform.",
-    "entry_conditions": [
-      "Total shareholder yield (div + buyback + debt paydown) in top 20% of universe",
-      "Positive free cash flow",
-      "Piotroski F-Score >= 5"
-    ],
-    "exit_conditions": [
-      "Shareholder yield drops below median",
-      "FCF turns negative",
-      "Monthly rebalance",
-      "Stop loss 8%"
-    ],
-    "expected_holding_period": "30-90 days",
-    "expected_trade_frequency": "2-4 trades/month",
-    "market_regimes": [
-      "trending_up",
-      "trending_up_weak",
-      "trending_down_weak",
-      "ranging",
-      "ranging_low_vol",
-      "ranging_high_vol"
-    ],
-    "metadata": {
-      "alpha_edge_bypass": true,
-      "alpha_edge_type": "shareholder_yield",
-      "direction": "long",
-      "interval": "1d",
-      "requires_fundamental_data": true,
-      "strategy_category": "alpha_edge"
-    },
-    "name": "Shareholder Yield Long",
-    "required_indicators": [
-      "SMA:50"
-    ],
-    "risk_reward_ratio": 2.0,
-    "strategy_type": "mean_reversion"
   },
   {
     "default_parameters": {

@@ -59,6 +59,7 @@ class TemplateSpec(BaseModel):
     # First-class provenance / lifecycle (Phase 3) — replaces REMOVE_TEMPLATES hack.
     enabled: bool = True
     deprecated_by: Optional[str] = None
+    disabled_reason: Optional[str] = None
     research_citation: Optional[str] = None
     author: Optional[str] = None
 
