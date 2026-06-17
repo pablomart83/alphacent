@@ -2405,6 +2405,25 @@ class MonitoringService:
         except Exception as e:
             logger.warning(f"  signal_decisions prune failed (non-critical): {e}")
 
+        # 1c. Backfill LIVE execution slippage from eToro ground truth (Option B).
+        # Production close paths journal exits with the close-decision price and never
+        # capture eToro's actual executed close rate, so exit_slippage was 100% NULL.
+        # This off-hot-path reconcile pulls eToro's real executed rates and captures
+        # true exit slippage (drift-guarded). LIVE only; fail-safe (never blocks sync).
+        try:
+            from src.analytics.execution_cost_backfill import backfill_live_execution_costs
+            _bf = backfill_live_execution_costs(apply=True, log=logger)
+            if _bf.get("exit_slip_set") or _bf.get("entry_slip_set"):
+                logger.info(
+                    f"  Execution-cost backfill: exit_slip_set={_bf['exit_slip_set']} "
+                    f"entry_slip_set={_bf['entry_slip_set']} "
+                    f"drift_null={_bf['exit_slip_drift_null']}"
+                )
+            else:
+                logger.info("  Execution-cost backfill: no new closed LIVE trades to reconcile")
+        except Exception as e:
+            logger.warning(f"  Execution-cost backfill failed (non-critical): {e}")
+
         # 2. Update performance feedback from trade journal
         try:
             from src.analytics.trade_journal import TradeJournal
