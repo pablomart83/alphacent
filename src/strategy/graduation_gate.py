@@ -502,6 +502,35 @@ def get_aggregated_paper_stats(
     }
 
 
+def _get_paper_flat_size() -> float:
+    """Configured PAPER flat position size ($/trade), cached 5 min.
+
+    The graduation alpha-vs-benchmark gate expresses paper P&L as a return on
+    notional; notional = trades × flat_size. This MUST track the live config
+    (paper_trading.flat_position_size). It was hardcoded at $5,000 and went stale
+    when the flat size was cut to $1,000 (2026-06-15) — understating paper return
+    5× and spuriously failing the −5% alpha gate in up markets (e.g. a qualifying
+    SPY pair: 0.56% computed vs 2.78% real). Read from config, default $1,000.
+    """
+    try:
+        import time as _time
+        import yaml as _y
+        from pathlib import Path as _P
+        _cache = getattr(_get_paper_flat_size, "_cache", None)
+        if _cache and (_time.time() - _cache[0]) < 300:
+            return _cache[1]
+        val = 1000.0
+        _p = _P("config/autonomous_trading.yaml")
+        if _p.exists():
+            with open(_p, "r") as _f:
+                _c = _y.safe_load(_f) or {}
+            val = float(_c.get("paper_trading", {}).get("flat_position_size", 1000.0) or 1000.0)
+        _get_paper_flat_size._cache = (_time.time(), val)
+        return val
+    except Exception:
+        return 1000.0
+
+
 def is_qualified(
     paper_stats: Dict[str, Any],
     wf_sharpe: Optional[float],
@@ -630,8 +659,11 @@ def is_qualified(
     # Improvement 4: Alpha vs benchmark gate.
     # Reject if strategy underperformed SPY by more than 5% — clearly no alpha.
     if benchmark_return is not None and pnl is not None and trades > 0:
-        # paper_return_pct: total P&L as a fraction of notional ($5K per trade)
-        notional = trades * 5000.0
+        # paper_return_pct: total P&L as a fraction of notional (flat size per trade).
+        # Flat size is read from config (paper_trading.flat_position_size) — NOT
+        # hardcoded — so this gate tracks the actual paper sizing (was a stale $5K
+        # that understated return 5× after the 2026-06-15 cut to $1K).
+        notional = trades * _get_paper_flat_size()
         paper_return_pct = pnl / notional if notional > 0 else None
         if paper_return_pct is not None:
             alpha = paper_return_pct - benchmark_return
