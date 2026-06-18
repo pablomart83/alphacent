@@ -1929,11 +1929,20 @@ async def get_approaching_graduation(
                     MIN(tj.entry_time)                                  AS first_trade,
                     MAX(tj.entry_time)                                  AS last_trade,
                     COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions
+                -- LEFT JOIN + trade_metadata template recovery: a pair's history must
+                -- survive deletion of old strategy versions (BACKTESTED TTL). An INNER
+                -- JOIN dropped ~63% of demo trades (orphaned deleted-version rows), so
+                -- the approaching list undercounted trades. Mirror get_graduation_queue.
                 FROM trade_journal tj
-                JOIN strategies s ON s.id = tj.strategy_id
+                LEFT JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
                   AND tj.account_type = 'demo'
                   AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
+                  AND COALESCE(
+                        s.strategy_metadata->>'template_name',
+                        REGEXP_REPLACE(s.name, ' V[0-9]+$', ''),
+                        tj.trade_metadata->>'template_name'
+                      ) IS NOT NULL
                 GROUP BY template_name, tj.symbol
                 HAVING COUNT(*) >= :min_trades
                 ORDER BY trades DESC

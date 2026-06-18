@@ -473,14 +473,15 @@ def get_aggregated_paper_stats(
                 )                                                       AS win_rate_pct,
                 ROUND(COALESCE(SUM(tj.pnl), 0)::numeric, 2)            AS total_pnl
             FROM trade_journal tj
-            JOIN strategies s ON s.id = tj.strategy_id
+            LEFT JOIN strategies s ON s.id = tj.strategy_id
             WHERE tj.pnl IS NOT NULL
               AND tj.account_type = 'demo'
                   AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
               AND tj.symbol = :sym
               AND COALESCE(
                     s.strategy_metadata->>'template_name',
-                    REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                    REGEXP_REPLACE(s.name, ' V[0-9]+$', ''),
+                    tj.trade_metadata->>'template_name'
                   ) = :tname
         """),
         {"tname": template_name, "sym": symbol},
@@ -752,7 +753,8 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 SELECT
                     COALESCE(
                         s.strategy_metadata->>'template_name',
-                        REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                        REGEXP_REPLACE(s.name, ' V[0-9]+$', ''),
+                        tj.trade_metadata->>'template_name'
                     )                                                   AS template_name,
                     tj.symbol,
                     COUNT(*)                                            AS trades,
@@ -770,11 +772,25 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     ROUND(COALESCE(AVG(tj.pnl), 0)::numeric, 4)        AS avg_pnl,
                     COUNT(DISTINCT tj.strategy_id)                      AS strategy_versions,
                     MIN(tj.entry_time)                                  AS first_trade_at
+                -- LEFT JOIN (not INNER): a (template, symbol) pair's trade history
+                -- must survive deletion of old strategy VERSIONS. The BACKTESTED TTL
+                -- deletes stale strategy rows, but their trade_journal rows persist —
+                -- and the graduation gate is DESIGNED to count them across versions
+                -- (see this function's docstring). An INNER JOIN silently dropped every
+                -- orphaned-version trade (~63% of demo trades on 2026-06-18), so a pair
+                -- that traded 18× across 3 versions could show as 5. We LEFT JOIN and
+                -- recover the template from trade_metadata (verified 100% consistent with
+                -- the strategies form) so deleted-version trades aggregate to their pair.
                 FROM trade_journal tj
-                JOIN strategies s ON s.id = tj.strategy_id
+                LEFT JOIN strategies s ON s.id = tj.strategy_id
                 WHERE tj.pnl IS NOT NULL
                   AND tj.account_type = 'demo'
                   AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
+                  AND COALESCE(
+                        s.strategy_metadata->>'template_name',
+                        REGEXP_REPLACE(s.name, ' V[0-9]+$', ''),
+                        tj.trade_metadata->>'template_name'
+                      ) IS NOT NULL
                 GROUP BY template_name, tj.symbol
                 HAVING COUNT(*) >= :min_trades
             ),
@@ -1017,17 +1033,18 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     SELECT
                         COALESCE(
                             s.strategy_metadata->>'template_name',
-                            REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                            REGEXP_REPLACE(s.name, ' V[0-9]+$', ''),
+                            tj.trade_metadata->>'template_name'
                         )   AS template_name,
                         tj.symbol,
                         tj.pnl
                     FROM trade_journal tj
-                    JOIN strategies s ON s.id = tj.strategy_id
+                    LEFT JOIN strategies s ON s.id = tj.strategy_id
                     WHERE tj.pnl IS NOT NULL
                       AND tj.account_type = 'demo'
                   AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
                       AND (
-                          COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
+                          COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', ''), tj.trade_metadata->>'template_name'),
                           tj.symbol
                       ) = ANY(
                           SELECT (tname, sym)
