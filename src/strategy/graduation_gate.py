@@ -1568,7 +1568,19 @@ def get_live_strategies(session: Session) -> List[Dict[str, Any]]:
                             d["last_signal_detail"] = f"Blocked: {reason[:40]} {age_str}"
                     elif last_sd.stage == "gate_blocked":
                         d["last_signal_status"] = "gate_blocked"
-                        d["last_signal_detail"] = f"Gate blocked {age_str}"
+                        # Surface the ACTUAL block reason (was a bare "Gate blocked")
+                        # so the CIO can see WHY without digging into signal_decisions —
+                        # e.g. "Position would exceed max position size limit of 15.0%"
+                        # (per-symbol concentration cap), conviction, VIX/trend gate, etc.
+                        _gb_reason = (last_sd.reason or "").strip()
+                        for _pfx in ("validate_signal: ", "validate_signal "):
+                            if _gb_reason.lower().startswith(_pfx.lower()):
+                                _gb_reason = _gb_reason[len(_pfx):].strip()
+                                break
+                        if _gb_reason:
+                            d["last_signal_detail"] = f"Gate blocked: {_gb_reason[:110]} ({age_str})"
+                        else:
+                            d["last_signal_detail"] = f"Gate blocked {age_str}"
                     elif last_sd.stage == "signal_emitted":
                         d["last_signal_status"] = "signal_emitted"
                         d["last_signal_detail"] = f"Signal emitted {age_str}"
