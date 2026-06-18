@@ -616,7 +616,21 @@ def is_qualified(
                 f"{WR_CI_FLOOR_TOLERANCE:.0%}; insufficient confidence the edge is real)"
             )
 
-    if wf_sharpe and wf_sharpe > 0 and sharpe is not None:
+    if sharpe is None:
+        reasons.append("paper_sharpe not computable (no trades with variance)")
+    elif not wf_sharpe or wf_sharpe <= 0:
+        # FAIL-CLOSED (2026-06-18): no usable WF Sharpe → we cannot validate the
+        # paper-vs-WF qualification ratio, so we do NOT promote on real capital.
+        # Previously a missing wf_sharpe silently SKIPPED the ratio gate (the pair
+        # passed un-checked). The queue applies a per-template best-WF fallback
+        # BEFORE this, so this only fires when neither the pair nor any sibling of
+        # its template has a WF Sharpe at all — in which case the WF edge is
+        # unestablished and the pair must not graduate.
+        reasons.append(
+            "wf_sharpe unavailable/<=0 — cannot validate paper-vs-WF qualification "
+            "ratio (fail-closed; WF edge unestablished)"
+        )
+    else:
         ratio = sharpe / wf_sharpe
         # Fix 1: regime-adjusted max ratio cap.
         effective_max_ratio = _precomputed_max_ratio if _precomputed_max_ratio is not None else _get_regime_adjusted_max_ratio()
@@ -633,15 +647,16 @@ def is_qualified(
                 f"regime-adjusted cap={effective_max_ratio:.1f}×)"
             )
 
-        # Improvement 7: log structural bias warning when comparing flat-$5K paper
-        # Sharpe vs vol-scaled WF Sharpe. Informational only — no gate change.
+        # Improvement 7: structural-bias note — paper Sharpe is per-trade on the flat
+        # paper size; wf_sharpe is vectorbt's vol-scaled per-bar figure, so the ratio
+        # is not strictly apples-to-apples. Informational only — the proper fix
+        # (consistent, cost-net Sharpe basis + one threshold re-baseline) is bundled
+        # with the F1/F2 cost recalibration.
         logger.debug(
-            f"Note: paper_sharpe={sharpe:.2f} computed on flat $5K positions; "
-            f"wf_sharpe={wf_sharpe:.2f} computed on vol-scaled positions — "
-            f"qualification ratio {ratio:.2f} has structural bias"
+            f"Note: paper_sharpe={sharpe:.2f} (per-trade, flat paper size) vs "
+            f"wf_sharpe={wf_sharpe:.2f} (vol-scaled) — qualification ratio "
+            f"{ratio:.2f} has known structural bias"
         )
-    elif sharpe is None:
-        reasons.append("paper_sharpe not computable (no trades with variance)")
 
     # Improvement 3 — REMOVED (2026-06-18). The WF-Sharpe confidence-interval gate
     # (reject if `wf_sharpe - 1.96*sqrt((1 + 0.5*S^2)/n) <= 0`) was DEAD: it depends
@@ -794,16 +809,30 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 GROUP BY template_name, tj.symbol
                 HAVING COUNT(*) >= :min_trades
             ),
+            -- Representative SURVIVING strategy per (template, symbol), taken from the
+            -- strategies table (NOT via trade_journal). The old version joined through
+            -- trade_journal, so it could only pick a rep that had its OWN trades — but a
+            -- re-proposed / retired-from-live pair's surviving version usually has NO new
+            -- trades yet (all history is under now-deleted versions). That left such a
+            -- pair with no representative and silently dropped it from the queue, so e.g.
+            -- GOOGL (retired from live; 19 trades of aggregate history; a surviving
+            -- BACKTESTED version with 0 trades of its own) could NEVER re-graduate even
+            -- when fresh paper stats supported it. Selecting the rep from `strategies`
+            -- (most-recent surviving version of that template holding that symbol) fixes
+            -- re-graduation. symbols is unnested so multi-symbol strategies represent each
+            -- of their symbols. retired-from-LIVE pairs are excluded later via active_live
+            -- (retired_at IS NULL) — a retired live pair's source strategy reverts to
+            -- PAPER/BACKTESTED (see live.retire_live_strategy) so it IS eligible here.
             latest_strategy AS (
                 SELECT DISTINCT ON (
                     COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
-                    tj.symbol
+                    sym.symbol
                 )
                     COALESCE(
                         s.strategy_metadata->>'template_name',
                         REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
                     )                                                   AS template_name,
-                    tj.symbol,
+                    sym.symbol                                          AS symbol,
                     s.id                                                AS strategy_id,
                     s.name                                              AS strategy_name,
                     COALESCE(
@@ -821,16 +850,15 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                         (s.strategy_metadata->>'walk_forward_sharpe')::float
                     )                                                   AS wf_sharpe,
                     (s.strategy_metadata->>'wf_test_trades')::int       AS wf_test_trades
-                FROM trade_journal tj
-                JOIN strategies s ON s.id = tj.strategy_id
-                WHERE tj.pnl IS NOT NULL
-                  AND tj.account_type = 'demo'
-                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
+                FROM strategies s
+                CROSS JOIN LATERAL jsonb_array_elements_text(
+                    CASE WHEN jsonb_typeof(s.symbols::jsonb) = 'array'
+                         THEN s.symbols::jsonb ELSE '[]'::jsonb END
+                ) AS sym(symbol)
+                WHERE s.status IN ('PAPER', 'BACKTESTED', 'LIVE')
                 ORDER BY
                     COALESCE(s.strategy_metadata->>'template_name', REGEXP_REPLACE(s.name, ' V[0-9]+$', '')),
-                    tj.symbol,
-                    CASE WHEN s.symbols::jsonb->0 = to_jsonb(tj.symbol::text)
-                         THEN 0 ELSE 1 END ASC,
+                    sym.symbol,
                     s.created_at DESC
             )
             SELECT
@@ -925,7 +953,13 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                 text("""
                     SELECT
                         start_date,
-                        (MAX(close) - MIN(close)) / NULLIF(MIN(close), 0) AS spy_return
+                        -- PERIOD return (last close - first close)/first close over the
+                        -- window, NOT peak-to-trough (MAX-MIN)/MIN. The old range form
+                        -- overstated the benchmark (range >= |return|), making the alpha
+                        -- gate reject pairs that did not actually underperform SPY.
+                        ( (array_agg(close ORDER BY date DESC))[1]
+                          - (array_agg(close ORDER BY date ASC))[1] )
+                        / NULLIF((array_agg(close ORDER BY date ASC))[1], 0) AS spy_return
                     FROM (
                         SELECT
                             unnest(ARRAY[:dates]::date[]) AS start_date
@@ -1082,7 +1116,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
 
         alpha_vs_spy: Optional[float] = None
         if benchmark_return is not None and paper_stats["paper_total_pnl"] is not None and paper_stats["paper_trades"] > 0:
-            notional = paper_stats["paper_trades"] * 5000.0
+            notional = paper_stats["paper_trades"] * _get_paper_flat_size()
             paper_return_pct = paper_stats["paper_total_pnl"] / notional if notional > 0 else None
             if paper_return_pct is not None:
                 alpha_vs_spy = round(paper_return_pct - benchmark_return, 4)
