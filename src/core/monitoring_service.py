@@ -32,6 +32,39 @@ from src.models.database import Database
 logger = logging.getLogger(__name__)
 
 
+def should_demote_on_health(
+    health_score,
+    n_closed: int,
+    *,
+    is_paper: bool,
+    total_realized: float = 0.0,
+    total_invested: float = 0.0,
+    paper_min_trades: int = 15,
+    live_min_trades: int = 5,
+    catastrophic_loss_pct: float = 0.15,
+):
+    """Decide whether a health=0 strategy should be demoted, and whether the
+    trigger was a catastrophic-loss fast-kill below the normal trade floor.
+
+    PAPER's job is a complete, unbiased graduation sample, not capital
+    preservation — so a normal small-sample drawdown must NOT demote a paper
+    strategy (forward-P&L test 2026-06-18: negative-first-5 pairs recovered to
+    +$19.91/trade, 67%). PAPER therefore requires the graduation `min_trades`
+    before a health=0 demote, EXCEPT a catastrophic realized loss which fast-kills
+    at any sample size. LIVE keeps the aggressive 5-trade bar (real capital).
+
+    Returns (should_demote: bool, catastrophic_fast_kill: bool).
+    """
+    if health_score is None or health_score != 0:
+        return False, False
+    catastrophic = (
+        total_invested > 0 and total_realized < -(total_invested * catastrophic_loss_pct)
+    )
+    min_trades = paper_min_trades if is_paper else live_min_trades
+    should = (n_closed >= min_trades) or catastrophic
+    return should, (catastrophic and n_closed < min_trades)
+
+
 class MonitoringService:
     """
     Background service for monitoring orders and positions.
@@ -4880,6 +4913,32 @@ class MonitoringService:
                     pos_data = strat_positions.get(strat_orm.id, {'closed': [], 'open': []})
                     closed = pos_data['closed']
                     open_pos = pos_data['open']
+                    # PAPER health-demote relaxation (2026-06-18). In PAPER the goal is a
+                    # COMPLETE, UNBIASED graduation sample, not capital preservation —
+                    # demoting a paper strategy on a small-sample drawdown both biases the
+                    # sample and cuts strategies that recover. Forward-P&L test (2026-06-18):
+                    # pairs with NEGATIVE first-5 expectancy (the would-be-demoted ones)
+                    # went on to +$19.91/trade and recovered 67% of the time, vs the
+                    # positive-start control which mean-reverted to a negative median.
+                    # So: gate the expectancy penalty + the health=0 demote behind the
+                    # graduation min_trades for PAPER, with a catastrophic-loss fast-kill
+                    # exception. LIVE keeps the aggressive 5-trade bar (real capital,
+                    # CIO-managed). The TSL/TP -> BACKTESTED oscillation is unaffected.
+                    is_paper = (strat_orm.status == StrategyStatus.PAPER)
+                    _paper_health_min_trades = 15
+                    _catastrophic_loss_pct = 0.15
+                    try:
+                        import yaml as _hy
+                        from pathlib import Path as _HP
+                        _hp = _HP("config/autonomous_trading.yaml")
+                        if _hp.exists():
+                            with open(_hp) as _hf:
+                                _hc = _hy.safe_load(_hf) or {}
+                            _pt = _hc.get("paper_trading", {}) or {}
+                            _paper_health_min_trades = int((_pt.get("graduation_gate", {}) or {}).get("min_trades", 15))
+                            _catastrophic_loss_pct = float((_pt.get("health", {}) or {}).get("catastrophic_loss_pct", 0.15))
+                    except Exception:
+                        pass
                     
                     total_realized = sum(p.realized_pnl or 0 for p in closed)
                     total_unrealized = sum(p.unrealized_pnl or 0 for p in open_pos)
@@ -4984,10 +5043,18 @@ class MonitoringService:
                             details['avg_win'] = round(avg_win, 2)
                             details['avg_loss'] = round(avg_loss, 2)
                             
-                            if expectancy > 0:
-                                score += 1
-                            elif expectancy < 0:
-                                score -= 1
+                            # Expectancy penalty: only let it move the score once the sample
+                            # is meaningful. On a small sample a positively-skewed trend
+                            # strategy normally shows negative early expectancy (small losses
+                            # precede the fat-tail wins); penalising it here cuts recovering
+                            # strategies (see 2026-06-18 forward-P&L test). PAPER gates at the
+                            # graduation min_trades; LIVE keeps the 5-trade bar.
+                            _exp_score_min = _paper_health_min_trades if is_paper else 5
+                            if n_closed >= _exp_score_min:
+                                if expectancy > 0:
+                                    score += 1
+                                elif expectancy < 0:
+                                    score -= 1
                     
                     # Clamp (None = no data, skip scoring)
                     if score is not None:
@@ -5009,14 +5076,27 @@ class MonitoringService:
                     flag_modified(strat_orm, 'strategy_metadata')
                     result["scores_updated"] += 1
                     
-                    # Retire if score 0 (None = no data, don't retire)
-                    # Also require minimum 5 closed trades before retirement to prevent
-                    # premature retirement on a single bad trade.
-                    min_trades_for_retirement = 5
-                    if health_score is not None and health_score == 0 and n_closed >= min_trades_for_retirement:
+                    # Retire if score 0 (None = no data, don't retire).
+                    # PAPER: require the graduation min_trades before demoting (see
+                    # should_demote_on_health); a normal small-sample drawdown is not
+                    # benched, but a catastrophic realized loss still fast-kills. LIVE
+                    # keeps the aggressive 5-trade bar (real capital).
+                    _demote_now, _catastrophic_fast_kill = should_demote_on_health(
+                        health_score, n_closed,
+                        is_paper=is_paper,
+                        total_realized=total_realized,
+                        total_invested=total_invested,
+                        paper_min_trades=_paper_health_min_trades,
+                        live_min_trades=5,
+                        catastrophic_loss_pct=_catastrophic_loss_pct,
+                    )
+                    if _demote_now:
                         retirement_reason = (
                             f"Health score 0: P&L ${total_pnl:,.2f}, "
                             f"{n_closed} closed, {n_open} open"
+                            + (f" [CATASTROPHIC: realized ${total_realized:,.2f} "
+                               f"< -{_catastrophic_loss_pct:.0%} of ${total_invested:,.0f}]"
+                               if _catastrophic_fast_kill else "")
                         )
                         if 'expectancy' in details:
                             retirement_reason += f", expectancy ${details['expectancy']:,.2f}"
