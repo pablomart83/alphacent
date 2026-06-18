@@ -642,19 +642,18 @@ def is_qualified(
     elif sharpe is None:
         reasons.append("paper_sharpe not computable (no trades with variance)")
 
-    # Improvement 3: WF Sharpe confidence interval gate.
-    # Reject if the lower 95% CI of the WF Sharpe is <= 0 — the WF test period
-    # may not have enough trades to establish statistical significance.
-    if wf_sharpe is not None and wf_sharpe > 0 and wf_test_trades is not None and wf_test_trades > 1:
-        wf_sharpe_lower_ci = wf_sharpe - 1.96 * math.sqrt(
-            (1 + 0.5 * wf_sharpe ** 2) / wf_test_trades
-        )
-        if wf_sharpe_lower_ci <= 0:
-            reasons.append(
-                f"wf_sharpe_lower_ci={wf_sharpe_lower_ci:.3f} <= 0 "
-                f"(wf_sharpe={wf_sharpe:.2f} not statistically significant "
-                f"with only {wf_test_trades} WF test trades)"
-            )
+    # Improvement 3 — REMOVED (2026-06-18). The WF-Sharpe confidence-interval gate
+    # (reject if `wf_sharpe - 1.96*sqrt((1 + 0.5*S^2)/n) <= 0`) was DEAD: it depends
+    # on `wf_test_trades`, which is populated in 0/328 strategies, so it never fired.
+    # It was also redundant with — and statistically WEAKER than — the upstream
+    # WF-acceptance guards a pair has already passed before reaching graduation:
+    #   (a) the Monte-Carlo bootstrap (p5 Sharpe >= 0.0 over 1000 resamples), a
+    #       distribution-free significance test, vs this Lo(2002) closed form which
+    #       assumes IID-normal returns (violated by skewed/fat-tailed trade P&L); and
+    #       (b) the WF min-test-trade requirements (>=4 test trades / het gate).
+    # Removed rather than wired so a real-money promotion path carries no dead,
+    # weaker-duplicate safety theater. `wf_test_trades` is better surfaced as
+    # informational metadata on the CIO graduation card than re-added as a hard gate.
 
     # Improvement 4: Alpha vs benchmark gate.
     # Reject if strategy underperformed SPY by more than 5% — clearly no alpha.
