@@ -68,6 +68,19 @@ REJECTION_COOLDOWN_DAYS = 14
 WR_CI_CONFIDENCE = 0.90          # confidence level for the win-rate lower bound
 WR_CI_FLOOR_TOLERANCE = 0.10     # allowed gap below the type floor for the lower bound
 
+# ── Regime-robustness gate (2026-06-19) ───────────────────────────────────────
+# Replaces the (removed) paper/WF ratio cap's nominal purpose — "don't graduate a
+# strategy whose edge only exists in the current regime." Evidence-based: it does
+# NOT reject on absence of cross-regime data (which would wrongly block legitimate
+# trend specialists during a long uptrend). It rejects only when a pair has
+# DEMONSTRATED a losing edge in a market-regime family it has actually traded
+# enough to judge — i.e. real proof the edge does not generalise across regimes.
+# Becomes increasingly protective as the book experiences corrections / ranging /
+# down regimes; near-inert today because the demo book has traded almost entirely
+# in trending_up (by design — that is the regime since April).
+REGIME_MIN_SAMPLE = 8            # min trades in a regime family before we judge it
+REGIME_LOSS_TOLERANCE = 0.0      # family is a "loser" when total_pnl < -tolerance
+
 # Override constants from YAML if graduation_gate section exists.
 # This means Settings page changes take effect immediately (the PUT endpoint
 # also patches the in-memory constants directly, but this covers the startup
@@ -94,6 +107,10 @@ try:
             WR_CI_CONFIDENCE = float(_gg["wr_ci_confidence"])
         if "wr_ci_floor_tolerance" in _gg:
             WR_CI_FLOOR_TOLERANCE = float(_gg["wr_ci_floor_tolerance"])
+        if "regime_min_sample" in _gg:
+            REGIME_MIN_SAMPLE = int(_gg["regime_min_sample"])
+        if "regime_loss_tolerance" in _gg:
+            REGIME_LOSS_TOLERANCE = float(_gg["regime_loss_tolerance"])
 except Exception:
     pass  # Fall back to hardcoded defaults — never crash at import time
 
@@ -532,6 +549,87 @@ def _get_paper_flat_size() -> float:
         return 1000.0
 
 
+def _regime_family(raw: Optional[str]) -> Optional[str]:
+    """Map a granular market_regime string to a coarse regime FAMILY.
+
+    Families: 'trending_up', 'trending_down', 'ranging', 'high_vol'. Returns None
+    for missing/unrecognised labels (excluded from the regime gate — we never
+    judge a regime we can't attribute).
+    """
+    if not raw:
+        return None
+    r = str(raw).strip().lower()
+    if not r:
+        return None
+    if r.startswith("trending_up") or r == "trending_up":
+        return "trending_up"
+    if r.startswith("trending_down"):
+        return "trending_down"
+    if r.startswith("ranging") or r.startswith("neutral"):
+        return "ranging"
+    if "high_vol" in r or r.startswith("volatile"):
+        return "high_vol"
+    return None
+
+
+def load_regime_breakdown(
+    session, pairs: List[tuple]
+) -> Dict[tuple, Dict[str, Dict[str, float]]]:
+    """Per-(template, symbol) demo-trade P&L bucketed by regime FAMILY.
+
+    Returns {(template_name, symbol): {family: {"trades": int, "total_pnl": float}}}.
+    One bulk query for the whole candidate set. Used by the regime-robustness gate
+    (see is_qualified). Unrecognised/NULL regimes are excluded. Returns {} on error
+    so the gate degrades to a no-op rather than breaking the queue.
+    """
+    out: Dict[tuple, Dict[str, Dict[str, float]]] = {}
+    if not pairs:
+        return out
+    from sqlalchemy import text
+    try:
+        rows = session.execute(
+            text("""
+                SELECT
+                    COALESCE(
+                        s.strategy_metadata->>'template_name',
+                        REGEXP_REPLACE(s.name, ' V[0-9]+$', ''),
+                        tj.trade_metadata->>'template_name'
+                    )                                                   AS template_name,
+                    tj.symbol                                           AS symbol,
+                    tj.market_regime                                    AS market_regime,
+                    COUNT(*)                                            AS trades,
+                    COALESCE(SUM(tj.pnl), 0)                            AS total_pnl
+                FROM trade_journal tj
+                LEFT JOIN strategies s ON s.id = tj.strategy_id
+                WHERE tj.pnl IS NOT NULL
+                  AND tj.account_type = 'demo'
+                  AND (tj.exit_reason IS NULL OR tj.exit_reason != 'etoro_closed')
+                GROUP BY template_name, tj.symbol, tj.market_regime
+            """),
+        ).fetchall()
+    except Exception as e:
+        logger.debug(f"load_regime_breakdown failed (non-fatal): {e}")
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        return out
+
+    pair_set = set(pairs)
+    for r in rows:
+        key = (r.template_name, r.symbol)
+        if key not in pair_set:
+            continue
+        fam = _regime_family(r.market_regime)
+        if fam is None:
+            continue
+        bucket = out.setdefault(key, {})
+        agg = bucket.setdefault(fam, {"trades": 0, "total_pnl": 0.0})
+        agg["trades"] += int(r.trades)
+        agg["total_pnl"] += float(r.total_pnl)
+    return out
+
+
 def is_qualified(
     paper_stats: Dict[str, Any],
     wf_sharpe: Optional[float],
@@ -542,6 +640,7 @@ def is_qualified(
     n_trials: Optional[int] = None,
     _precomputed_max_ratio: Optional[float] = None,
     _precomputed_min_avg_pnl: Optional[float] = None,
+    regime_breakdown: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> tuple[bool, List[str]]:
     """
     Check whether a (strategy, symbol) pair meets graduation criteria.
@@ -562,6 +661,12 @@ def is_qualified(
         benchmark_return: SPY return over the paper period — used for alpha gate (improvement 4)
         n_trials: Number of distinct (template, symbol) pairs proposed in last 90d — used for DSR (improvement 5)
         _precomputed_max_ratio: accepted for call-site compatibility; unused since the ratio gate was removed.
+        regime_breakdown: Optional {regime_family: {"trades", "total_pnl"}} for this
+            pair's demo trades. When provided, the regime-robustness gate rejects a
+            pair that has DEMONSTRATED a losing edge (net-negative over >= REGIME_MIN_SAMPLE
+            trades) in any regime family — i.e. proof the edge does not generalise across
+            regimes ("graduating the regime, not the strategy"). Evidence-based: never
+            rejects on absence of cross-regime data. None → gate skipped.
     """
     reasons = []
 
@@ -646,9 +751,10 @@ def is_qualified(
         #    two ~15-trade Sharpe point estimates is dominated by sampling noise and
         #    regime non-stationarity.
         #
-        # The residual "regime-luck" concern is being handled properly by a
-        # regime-conditional WF check (does the edge hold outside the current
-        # regime?) at the RESEARCH stage — the correct guard, not a noisy ratio.
+        # The residual "regime-luck" concern is handled by the regime-robustness
+        # gate below (reject only on DEMONSTRATED net-negative performance in a
+        # regime family the pair has traded enough to judge) — the proper guard,
+        # using realized cross-regime evidence rather than a noisy ratio.
         # Paper-confirms-edge stays enforced by paper_pnl>0 + win-rate floor +
         # Wilson LB; small-sample luck by min_trades + Wilson LB + DSR.
         #
@@ -709,6 +815,26 @@ def is_qualified(
                 f"(paper_sharpe={sharpe:.2f} not statistically significant "
                 f"after {n_trials} trials)"
             )
+
+    # Regime-robustness gate (2026-06-19) — the proper replacement for the removed
+    # paper/WF ratio cap's "don't graduate the regime" concern. Reject only on
+    # DEMONSTRATED regime-dependence: a regime family the pair has traded enough to
+    # judge (>= REGIME_MIN_SAMPLE trades) in which it is a net LOSER. This is direct
+    # live evidence the edge does not generalise across regimes. We never reject on
+    # ABSENCE of cross-regime data (that would wrongly block trend specialists that
+    # have only traded in trends). The WF OOS train/test split already provides the
+    # historical multi-regime check; this adds the realized-trade cross-regime
+    # confirmation that is the whole point of the PAPER stage.
+    if regime_breakdown:
+        for fam, agg in regime_breakdown.items():
+            fam_trades = int(agg.get("trades", 0) or 0)
+            fam_pnl = float(agg.get("total_pnl", 0.0) or 0.0)
+            if fam_trades >= REGIME_MIN_SAMPLE and fam_pnl < -REGIME_LOSS_TOLERANCE:
+                reasons.append(
+                    f"regime_dependent: net-negative in '{fam}' regime "
+                    f"(${fam_pnl:.0f} over {fam_trades} trades) — edge does not hold "
+                    f"across regimes (graduating the regime, not the strategy)"
+                )
 
     return len(reasons) == 0, reasons
 
@@ -1037,6 +1163,11 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
     # every call. With 66 candidates that's 66 file reads = ~4s of I/O.
     _min_avg_pnl = _get_min_avg_pnl_per_trade()
 
+    # Regime-robustness gate input: per-(template, symbol) demo P&L bucketed by
+    # regime family, one bulk query for the whole candidate set.
+    _candidate_pairs = [(r.template_name, r.symbol) for r in candidates_raw]
+    regime_breakdown_by_pair = load_regime_breakdown(session, _candidate_pairs)
+
     # ── Pass 1: qualify candidates (no P&L series needed yet) ──
     qualified_candidates = []
     for row in candidates_raw:
@@ -1085,6 +1216,7 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
             n_trials=n_trials_global,
             _precomputed_max_ratio=_effective_max_ratio,
             _precomputed_min_avg_pnl=_min_avg_pnl,
+            regime_breakdown=regime_breakdown_by_pair.get(pair),
         )
         if qualified:
             qualified_candidates.append((row, paper_stats, wf_sharpe, wf_test_trades, benchmark_return))

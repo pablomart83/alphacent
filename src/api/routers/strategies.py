@@ -1990,6 +1990,12 @@ async def get_approaching_graduation(
         from src.strategy.wf_ledger import load_wf_ledger
         wf_by_pair = load_wf_ledger(session)
 
+        # Regime-robustness gate input (same as get_graduation_queue) — keeps this
+        # view's verdict identical to the real queue.
+        from src.strategy.graduation_gate import load_regime_breakdown
+        _approach_pairs = [(r.template_name, r.symbol) for r in rows]
+        regime_breakdown_by_pair = load_regime_breakdown(session, _approach_pairs)
+
         # Compute regime-adjusted max ratio ONCE per request — calling
         # _get_regime_adjusted_max_ratio() per candidate would hit the market
         # data manager 20 times and make the endpoint very slow.
@@ -2085,7 +2091,8 @@ async def get_approaching_graduation(
                 "paper_total_pnl": total_pnl,
             }
             _qualified, _reasons = is_qualified(
-                _paper_stats, wf_sharpe, interval=_pair_interval, strategy_type=_strat_type
+                _paper_stats, wf_sharpe, interval=_pair_interval, strategy_type=_strat_type,
+                regime_breakdown=regime_breakdown_by_pair.get((tname, sym)),
             )
             if _qualified:
                 continue  # fully qualified — it belongs in the graduation queue, not here
