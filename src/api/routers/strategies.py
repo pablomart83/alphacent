@@ -1904,14 +1904,19 @@ async def get_approaching_graduation(
 
         # --- Aggregate trade_journal by (template_name, symbol) ---
         # We join strategies to get template_name from strategy_metadata.
-        # COALESCE: prefer strategy_metadata->>'template_name', fall back to
-        # strategy name (strips the version suffix " V1", " V2" etc.).
+        # COALESCE: prefer strategy_metadata->>'template_name', then strategy name
+        # (strips the version suffix " V1", " V2" …), then trade_metadata->>'template_name'
+        # so trades from TTL-deleted versions still attribute to their real pair
+        # (mirrors get_graduation_queue; without the trade_metadata fallback in the
+        # SELECT, orphaned-version trades grouped under a NULL template and could
+        # never match a WF source → spurious "wf_sharpe unavailable").
         rows = session.execute(
             text("""
                 SELECT
                     COALESCE(
                         s.strategy_metadata->>'template_name',
-                        REGEXP_REPLACE(s.name, ' V[0-9]+$', '')
+                        REGEXP_REPLACE(s.name, ' V[0-9]+$', ''),
+                        tj.trade_metadata->>'template_name'
                     )                                                   AS template_name,
                     tj.symbol,
                     COUNT(*)                                            AS trades,
@@ -1977,6 +1982,14 @@ async def get_approaching_graduation(
         ).fetchall()
         wf_by_template = {r.template_name: float(r.best_wf_sharpe or 0) for r in wf_rows}
 
+        # Durable per-(template, symbol) WF ledger (2026-06-19). Survives strategy
+        # version deletion, so a pair whose WF edge WAS established is not shown as
+        # "wf_sharpe unavailable" after the TTL deletes its WF-carrying versions.
+        # Resolution mirrors get_graduation_queue: pair-level ledger first, then the
+        # template-max fallback — keeping this view and the real queue in agreement.
+        from src.strategy.wf_ledger import load_wf_ledger
+        wf_by_pair = load_wf_ledger(session)
+
         # Compute regime-adjusted max ratio ONCE per request — calling
         # _get_regime_adjusted_max_ratio() per candidate would hit the market
         # data manager 20 times and make the endpoint very slow.
@@ -2035,7 +2048,7 @@ async def get_approaching_graduation(
             sharpe = float(row.sharpe) if row.sharpe is not None else 0.0
             win_rate = float(row.win_rate_pct) / 100.0 if row.win_rate_pct is not None else 0.0
             total_pnl = float(row.total_pnl) if row.total_pnl is not None else 0.0
-            wf_sharpe = wf_by_template.get(tname, 0.0)
+            wf_sharpe = wf_by_pair.get((tname, sym), 0.0) or wf_by_template.get(tname, 0.0)
 
             # Skip pairs that have already crossed ALL thresholds — they should
             # be in the graduation queue (we excluded them above, but belt+braces).
