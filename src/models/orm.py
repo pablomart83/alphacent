@@ -1322,3 +1322,70 @@ class LiveStrategyORM(Base):
             "live_sharpe": self.live_sharpe,
             "is_active": self.retired_at is None,
         }
+
+
+class WfValidationLedgerORM(Base):
+    """Durable walk-forward validation record per (template_name, symbol).
+
+    WHY THIS EXISTS
+    ---------------
+    The walk-forward (WF) test Sharpe is the baseline "true edge" estimate the
+    graduation gate divides paper Sharpe by (the qualification ratio). It is
+    written into `strategies.strategy_metadata` JSON at proposal/validation time
+    — but that JSON dies with the strategy row when the BACKTESTED TTL deletes a
+    stale version. The graduation gate recovers the WF Sharpe per template from
+    the surviving sibling versions (`best_wf_by_template`), but that value
+    collapses to 0 when *every* surviving version of a template simultaneously
+    lacks a `wf_test_sharpe` (e.g. all WF-carrying versions were TTL-deleted and
+    the re-proposed versions have not re-validated yet). When that happens the
+    graduation gate fail-closes a pair whose WF edge WAS established — the same
+    class of bug as the trade-history loss fixed in commit `1a373bd` (metadata
+    not surviving version deletion).
+
+    This table persists the WF Sharpe at the (template, symbol) level so it
+    survives version deletion. It is upserted whenever a (template, symbol)
+    passes walk-forward (see `src/strategy/wf_ledger.record_wf_validation`) and
+    is NEVER pruned by a TTL — a pair that established a WF edge keeps that fact
+    permanently. The graduation gate reads it as a recovery source for the WF
+    Sharpe, between the current representative version's JSON (freshest) and the
+    template-level `best_wf_by_template` fallback (coarsest).
+
+    Stored value semantics: `wf_test_sharpe` is the MOST RECENT validated test
+    Sharpe (re-validation updates it, so the ledger tracks the current edge and
+    self-heals). `best_wf_test_sharpe` is the max ever observed, kept for
+    diagnostics. Both are recorded only for passes with a positive test Sharpe.
+    """
+    __tablename__ = "wf_validation_ledger"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    template_name = Column(String(200), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+
+    # Most-recent validated WF test Sharpe (self-heals on re-validation)
+    wf_test_sharpe = Column(Float, nullable=False)
+    wf_test_trades = Column(Integer, nullable=True)
+    # Max WF test Sharpe ever observed for this pair (diagnostics)
+    best_wf_test_sharpe = Column(Float, nullable=True)
+
+    first_validated_at = Column(DateTime, nullable=False, default=datetime.now)
+    last_validated_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    validation_count = Column(Integer, nullable=False, default=1)
+    source = Column(String(40), nullable=True)  # 'proposer' | 'backfill_strategies'
+
+    __table_args__ = (
+        UniqueConstraint('template_name', 'symbol', name='uq_wf_ledger_template_symbol'),
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "template_name": self.template_name,
+            "symbol": self.symbol,
+            "wf_test_sharpe": self.wf_test_sharpe,
+            "wf_test_trades": self.wf_test_trades,
+            "best_wf_test_sharpe": self.best_wf_test_sharpe,
+            "first_validated_at": self.first_validated_at.isoformat() if self.first_validated_at else None,
+            "last_validated_at": self.last_validated_at.isoformat() if self.last_validated_at else None,
+            "validation_count": self.validation_count,
+            "source": self.source,
+        }

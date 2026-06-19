@@ -919,6 +919,22 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
                     best_wf_by_template[r.template_name] = v
     except Exception:
         pass
+
+    # ── Bulk query 1b: durable per-(template, symbol) WF Sharpe ledger ──
+    # The two sources above (representative version JSON + best_wf_by_template)
+    # both read from the `strategies` table, so they BOTH collapse to 0 when the
+    # BACKTESTED TTL deletes every WF-carrying version of a template before the
+    # re-proposed versions re-validate. That transiently fail-closes a pair whose
+    # WF edge WAS established. The wf_validation_ledger persists the WF Sharpe per
+    # (template, symbol) with no TTL (written on every WF pass), so it survives
+    # version deletion and is the most specific recovery source. Same class of
+    # fix as the trade-history loss (commit 1a373bd).
+    wf_by_pair: Dict[tuple, float] = {}
+    try:
+        from src.strategy.wf_ledger import load_wf_ledger
+        wf_by_pair = load_wf_ledger(session)
+    except Exception as _wf_ledger_err:
+        logger.debug(f"WF ledger load failed (non-fatal): {_wf_ledger_err}")
     n_trials_global: Optional[int] = None
     try:
         _n_trials_row = session.execute(
@@ -1033,6 +1049,18 @@ def get_graduation_queue(session: Session) -> List[Dict[str, Any]]:
 
         wf_sharpe: Optional[float] = float(row.wf_sharpe) if row.wf_sharpe is not None else None
         wf_test_trades: Optional[int] = int(row.wf_test_trades) if row.wf_test_trades is not None else None
+
+        # WF Sharpe recovery order (most specific/current → coarsest):
+        #   1. row.wf_sharpe — current representative version's metadata JSON (freshest)
+        #   2. wf_by_pair — durable (template, symbol) ledger (survives version deletion)
+        #   3. best_wf_by_template — template-level max across surviving versions
+        # The ledger sits between the two so an established pair recovers its OWN
+        # WF Sharpe even after every surviving version of its template lost the
+        # metadata, rather than fail-closing or borrowing a sibling-symbol value.
+        if not wf_sharpe:
+            ledger_wf = wf_by_pair.get((row.template_name, row.symbol), 0.0)
+            if ledger_wf and ledger_wf > 0:
+                wf_sharpe = ledger_wf
 
         best_template_wf = best_wf_by_template.get(row.template_name, 0.0)
         if best_template_wf > 0 and not wf_sharpe:

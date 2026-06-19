@@ -2041,6 +2041,30 @@ class StrategyProposer:
                             'timestamp': datetime.now().isoformat(),
                         }
                         self._save_wf_validated_to_disk()
+                        # Durable WF-Sharpe persistence (2026-06-19): the JSON
+                        # cache above has a 14-day TTL and the strategy_metadata
+                        # copy dies with the version on TTL deletion. Persist the
+                        # established WF edge to the wf_validation_ledger table
+                        # (no TTL, keyed by (template, symbol)) so the graduation
+                        # gate can recover it after version churn and never
+                        # transiently fail-closes an established pair. Recorded
+                        # for every symbol the strategy validated on, not just the
+                        # primary. Fire-and-forget; never breaks the WF loop.
+                        try:
+                            from src.strategy.wf_ledger import record_wf_validation
+                            _ledger_syms = list(strategy.symbols) if strategy.symbols else (
+                                [primary_symbol] if primary_symbol else []
+                            )
+                            for _sym in _ledger_syms:
+                                record_wf_validation(
+                                    template_name,
+                                    _sym,
+                                    test_sharpe,
+                                    wf_test_trades=test_trades,
+                                    source="proposer",
+                                )
+                        except Exception:
+                            pass
                     else:
                         # WF failed — persist to disk so it survives restarts
                         self._save_wf_failed_to_disk()
