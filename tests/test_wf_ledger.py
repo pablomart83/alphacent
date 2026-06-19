@@ -1,13 +1,15 @@
 """Tests for the durable WF-validation ledger (2026-06-19).
 
 The ledger persists the walk-forward test Sharpe per (template, symbol) so it
-survives BACKTESTED-TTL deletion of the strategy versions that carried it. This
-prevents the graduation gate from transiently fail-closing a pair whose WF edge
-WAS established when every surviving version of its template momentarily lacks a
-wf_test_sharpe (deleted + not-yet-re-validated).
+survives BACKTESTED-TTL deletion of the strategy versions that carried it.
 
-Same class of fix as the trade-history loss (commit 1a373bd): metadata recovered
-from a store that outlives version deletion.
+NOTE: the paper/WF qualification-ratio graduation gate was removed (same day,
+after this ledger shipped) because it compared incompatible Sharpe bases and was
+redundant with the upstream WF acceptance + activation min_sharpe=1.0 + MC
+bootstrap. The ledger therefore no longer feeds a hard gate — it now supplies the
+WF value for INFORMATIONAL paper-vs-WF divergence on the CIO graduation card
+(and is the substrate for the planned regime-conditional WF check). The
+record/load/backfill behaviour below is still the durable store for that value.
 """
 from contextlib import contextmanager
 from unittest.mock import Mock, patch
@@ -116,26 +118,26 @@ def test_load_empty_when_no_rows(db_session):
     assert wf_ledger.load_wf_ledger(db_session) == {}
 
 
-# ── end-to-end intent: recovery feeds the qualification gate ─────────────────
+# ── end-to-end intent: WF availability is no longer a graduation gate ─────────
+# As of 2026-06-19 the paper/WF qualification-ratio gate was removed (broken basis
+# + redundant with upstream WF acceptance, activation min_sharpe=1.0 and MC). The
+# ledger now serves the WF value for INFORMATIONAL display, not gating — so WF
+# presence/absence must NOT change the qualification verdict.
 
 _GOOD = dict(paper_trades=20, paper_sharpe=2.0, paper_win_rate=0.60, paper_total_pnl=800.0)
 
 
-def test_recovered_wf_sharpe_lets_established_pair_qualify():
-    """The whole point: a pair with no current-version WF Sharpe but a ledger
-    entry recovers it and qualifies, instead of fail-closing."""
-    # Simulate the gate's recovery order: row.wf_sharpe missing, template max 0,
-    # ledger supplies the established value.
-    wf_by_pair = {("Trend X", "XLK"): 1.5}
-    recovered = wf_by_pair.get(("Trend X", "XLK"), 0.0) or None
-    ok, reasons = is_qualified(_GOOD, recovered, interval="4h", strategy_type="trend_following")
+def test_wf_present_does_not_block_strong_pair():
+    """A strong paper pair qualifies regardless of how large the paper/WF ratio is
+    (the old max-ratio cap that rejected this is gone)."""
+    # paper 2.0 vs wf 0.4 = 5× — would have been rejected by the old cap.
+    ok, reasons = is_qualified(_GOOD, 0.4, interval="4h", strategy_type="trend_following")
     assert ok is True, reasons
 
 
-def test_without_ledger_established_pair_fails_closed():
-    """Control: no ledger entry and no other WF source → fail-closed (the bug)."""
-    wf_by_pair = {}
-    recovered = wf_by_pair.get(("Trend X", "XLK"), 0.0) or None
-    ok, reasons = is_qualified(_GOOD, recovered, interval="4h", strategy_type="trend_following")
-    assert ok is False
-    assert any("wf_sharpe" in r and "fail-closed" in r for r in reasons)
+def test_wf_absent_no_longer_fails_closed():
+    """Control: with no WF value at all, a strong paper pair still qualifies — the
+    fail-closed-on-missing-WF behaviour was removed with the ratio gate."""
+    ok, reasons = is_qualified(_GOOD, None, interval="4h", strategy_type="trend_following")
+    assert ok is True, reasons
+    assert not any("wf_sharpe" in r for r in reasons)

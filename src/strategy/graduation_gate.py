@@ -551,12 +551,17 @@ def is_qualified(
 
     Args:
         paper_stats: Dict with paper_trades, paper_sharpe, paper_win_rate, paper_total_pnl
-        wf_sharpe: Walk-forward Sharpe from the representative strategy
+        wf_sharpe: Walk-forward Sharpe from the representative strategy. As of
+            2026-06-19 this is NO LONGER a gate input — the paper/WF qualification-
+            ratio gate was removed (broken basis + redundant with the upstream WF
+            acceptance, activation min_sharpe=1.0 and MC bootstrap). It is retained
+            only so the queue can surface the paper-vs-WF divergence informationally.
         interval: Strategy interval ('1d', '4h', '1h') for interval-aware min_trades
         strategy_type: Strategy type string for type-aware win rate floor (Fix 2)
-        wf_test_trades: Number of WF test-period trades — used for Sharpe CI gate (improvement 3)
+        wf_test_trades: Number of WF test-period trades (informational; the WF-CI gate was removed)
         benchmark_return: SPY return over the paper period — used for alpha gate (improvement 4)
         n_trials: Number of distinct (template, symbol) pairs proposed in last 90d — used for DSR (improvement 5)
+        _precomputed_max_ratio: accepted for call-site compatibility; unused since the ratio gate was removed.
     """
     reasons = []
 
@@ -618,45 +623,44 @@ def is_qualified(
 
     if sharpe is None:
         reasons.append("paper_sharpe not computable (no trades with variance)")
-    elif not wf_sharpe or wf_sharpe <= 0:
-        # FAIL-CLOSED (2026-06-18): no usable WF Sharpe → we cannot validate the
-        # paper-vs-WF qualification ratio, so we do NOT promote on real capital.
-        # Previously a missing wf_sharpe silently SKIPPED the ratio gate (the pair
-        # passed un-checked). The queue applies a per-template best-WF fallback
-        # BEFORE this, so this only fires when neither the pair nor any sibling of
-        # its template has a WF Sharpe at all — in which case the WF edge is
-        # unestablished and the pair must not graduate.
-        reasons.append(
-            "wf_sharpe unavailable/<=0 — cannot validate paper-vs-WF qualification "
-            "ratio (fail-closed; WF edge unestablished)"
-        )
     else:
-        ratio = sharpe / wf_sharpe
-        # Fix 1: regime-adjusted max ratio cap.
-        effective_max_ratio = _precomputed_max_ratio if _precomputed_max_ratio is not None else _get_regime_adjusted_max_ratio()
-        if ratio < MIN_QUALIFICATION_RATIO:
-            reasons.append(
-                f"qualification_ratio={ratio:.2f} < {MIN_QUALIFICATION_RATIO} "
-                f"(paper_sharpe={sharpe:.2f}, wf_sharpe={wf_sharpe:.2f})"
+        # QUALIFICATION-RATIO GATE REMOVED (2026-06-19).
+        # The paper/WF ratio gate (min 0.6×, regime-adjusted max ~2–3.5×) was
+        # removed — both bounds — because it was structurally broken AND redundant:
+        #
+        #  - Broken basis: it divided a PER-TRADE √252 paper Sharpe by vectorbt's
+        #    PER-BAR vol-scaled WF Sharpe (annualized √441 for a 4H stock, and over
+        #    ALL bars incl. flat ones). Those are incompatible estimators, so the
+        #    ratio ran ~3× high by construction and the cap rejected strong-paper
+        #    pairs (e.g. AMD 6.01/1.62=3.71×, SPY 4.90/1.16=4.22×) on an artifact.
+        #  - Redundant where it was right: the "is there a real, validated edge"
+        #    question is already enforced UPSTREAM and more correctly — WF
+        #    acceptance (OOS train/test) + the activation min_sharpe=1.0 ABSOLUTE
+        #    bar on the robust WF estimate + the MC bootstrap (p5≥0, computed on the
+        #    consistent per-trade frequency-annualized basis). A pair cannot reach
+        #    PAPER without clearing those, so it already has a validated ≥1.0 WF edge.
+        #  - Blind where it was unique: the ratio ignores the ABSOLUTE WF level, so
+        #    it cannot tell "strong WF + strong paper" (graduate) from "weak WF +
+        #    lucky paper" (block) — and the weak-WF case is already stopped by the
+        #    min_sharpe=1.0 activation bar. Even on a corrected basis, thresholding
+        #    two ~15-trade Sharpe point estimates is dominated by sampling noise and
+        #    regime non-stationarity.
+        #
+        # The residual "regime-luck" concern is being handled properly by a
+        # regime-conditional WF check (does the edge hold outside the current
+        # regime?) at the RESEARCH stage — the correct guard, not a noisy ratio.
+        # Paper-confirms-edge stays enforced by paper_pnl>0 + win-rate floor +
+        # Wilson LB; small-sample luck by min_trades + Wilson LB + DSR.
+        #
+        # wf_sharpe is retained as an INFORMATIONAL divergence signal on the CIO
+        # graduation card (see the queue's `qualification_ratio` output field), not
+        # a hard gate. `_precomputed_max_ratio` is accepted for call-site compat.
+        if wf_sharpe and wf_sharpe > 0:
+            logger.debug(
+                f"paper_sharpe={sharpe:.2f} vs wf_sharpe={wf_sharpe:.2f} "
+                f"(divergence {sharpe / wf_sharpe:.2f}×) — informational only; "
+                f"paper/WF qualification-ratio gate removed 2026-06-19"
             )
-        elif ratio > effective_max_ratio:
-            reasons.append(
-                f"qualification_ratio={ratio:.2f} > {effective_max_ratio:.1f} "
-                f"(paper_sharpe={sharpe:.2f} is {ratio:.1f}× wf_sharpe={wf_sharpe:.2f} "
-                f"— paper period was regime-lucky, not a genuine edge confirmation; "
-                f"regime-adjusted cap={effective_max_ratio:.1f}×)"
-            )
-
-        # Improvement 7: structural-bias note — paper Sharpe is per-trade on the flat
-        # paper size; wf_sharpe is vectorbt's vol-scaled per-bar figure, so the ratio
-        # is not strictly apples-to-apples. Informational only — the proper fix
-        # (consistent, cost-net Sharpe basis + one threshold re-baseline) is bundled
-        # with the F1/F2 cost recalibration.
-        logger.debug(
-            f"Note: paper_sharpe={sharpe:.2f} (per-trade, flat paper size) vs "
-            f"wf_sharpe={wf_sharpe:.2f} (vol-scaled) — qualification ratio "
-            f"{ratio:.2f} has known structural bias"
-        )
 
     # Improvement 3 — REMOVED (2026-06-18). The WF-Sharpe confidence-interval gate
     # (reject if `wf_sharpe - 1.96*sqrt((1 + 0.5*S^2)/n) <= 0`) was DEAD: it depends
