@@ -6,6 +6,24 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-20 (Opus 4.8) — CRYPTO PIPELINE end-to-end audit + revamp R1–R8. All deployed live, healthy, pushed. Commits `7efadc2`→`40e83a7`. Audit: `CRYPTO_PIPELINE_AUDIT_2026-06-20.md`.**
+
+**Headline finding (verified live DB/logs):** crypto book was DARK — 0 crypto strategies in any status, last crypto order 2026-05-25. Root cause was a validation ARTIFACT (the crypto analog of the √252 class): crypto WF validated on 1–4 trades/window with per-bar flat-bar-inclusive Sharpes inflated to 2.5–5; equity-calibrated gates (consistency≤1.5, per-bar overfit quorum, unreachable 4/6 family quorum) then rejected on that noise. Data/costs/annualization/24-7 handling/risk caps were all VERIFIED CORRECT (not the bug).
+
+**Fixes shipped (all crypto-only branches; equity path byte-for-byte unchanged):**
+- **R1+R3** (`strategy_proposer` acceptance loop): crypto now gates on a per-trade, COST-NET, frequency-annualized Sharpe (`_per_trade_net_sharpe`, pooled across rolling windows) + positive cost-net expectancy; consistency gate applied to that bounded metric. Per-bar `overfitted` AND `het` (rolling trade count, itself per-bar-filtered) bypassed for crypto — they were the artifact carriers.
+- **R2** (`autonomous_trading.yaml` asset_class_windows, EC2-authoritative/gitignored): crypto WF test windows lengthened — 1h 45→90, 4h 60→120, 1d 90→180, longhorizon 180→365 (within the ~2.7yr Binance history; rolling-WF auto-fits).
+- **R4** (`strategy_proposer`): family cross-validation ("B-5") — force the whole `family_universe` to be proposed together so the 4/6 quorum can form (was 5/6 `not_proposed` every time → 14/14 dead); family clears-bar now uses the same per-trade cost-net metric.
+- **R5** (`market_data_manager`): crypto 1d freshness SLA 30h→48h (daily-bar age measured from open; 30h false-flagged stale most of each day). Intraday crypto stays tight.
+- **R7**: ran `scripts/clear_crypto_wf_cache.py` (removed 21 failed + 4 validated crypto cache entries) so the funnel re-evaluates fresh.
+- **R8a**: MC bootstrap annualizes crypto on 365 (was 252). **R6**: verified the min-hold guard already exists+sound (`strategy_engine.py:5651`) — no action. **R8b**: yaml `symbols:` block is read by the config/UI endpoint (NOT dead) — left as-is.
+
+**LIVE-VERIFIED** (3 forced cycles via a transient schedule slot, since removed/restored to slot_1-only): every crypto rejection is now an HONEST verdict — `crypto_negative_net_expectancy (−1.6% to −2.5% cost-net/trade)`, `mc_bootstrap_filtered`, or `crypto_no_per_trade_sharpe (0 trades)`. The `het=False overfitted=True` artifact reason is **fully eliminated**. R2 windows confirmed live (180/90, 365/180).
+
+**KEY QUANT TAKEAWAY / OPEN ITEM:** the funnel is now economics-driven. It currently says the sampled crypto mean-reversion/dip templates (Hourly ATR Snap, Daily SMA Snap Back, Capitulation, Deep Dip, Crash Recovery, BB Band Walk) have GENUINELY NEGATIVE cost-net edge at eToro's 1.5% round-trip → correctly rejected. So the empty book was PART artifact (now fixed) and PART real-edge deficit. **Still PENDING live confirmation:** (a) R4 family quorum — needs a cycle where a `requires_cross_validation` template (BTC Follower 4H/Daily, Cross-Sectional Momentum) is regime-eligible/scored (none appeared in the 3 verify cycles); (b) whether the TREND/momentum crypto templates (Golden Cross, 21W MA, Vol-Compression, BTC-follower) — which survive costs far better than high-freq mean-reversion — produce positive cost-net edge and activate. Watch next daily 12:15 cycle: `grep "Crypto WF PASS (per-trade net)\|Family cross-validation quorum" logs/strategy.log` + crypto rows in `signal_decisions` stage='wf_validated'. **NOT-done by design:** rejection_blacklist (~73 crypto combos) left to self-heal (14d cooldown + R4a bypass); could clear if faster recovery wanted (CIO call).
+
+---
+
 **SESSION 2026-06-18 (Opus 4.8) — END-TO-END LIVE + GRADUATION audit & fixes. All deployed live, healthy, pushed. Commits `90f2c48`→`1d78a4d`.** Worked the live path then the graduation pipeline end-to-end. Rollup:
 
 1. **Live-path audit (deliverables earlier in this file).** Reconciliation DB⟷eToro clean (8 live positions, all match); G-44 validate_signal IS wired on live; TSL healthy; book is 100% long tech/semis, net-negative ex-PANW (CIO/portfolio item, PARKED — downstream of low graduation throughput, not a risk-mgmt bug).
