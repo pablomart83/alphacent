@@ -375,7 +375,13 @@ class MarketDataManager:
         ("1d", "stock_etf_index"): 48,    # allows 2 closed weekdays
         ("1d", "forex"):           48,
         ("1d", "commodity"):       48,
-        ("1d", "crypto"):          30,    # 24/7 — shouldn't lag
+        ("1d", "crypto"):          48,    # daily bar published once/day at 00:00 UTC;
+                                          # the latest *closed* daily bar is legitimately
+                                          # up to ~48h old before the next one closes
+                                          # (age is measured from bar open). 30h here
+                                          # false-flagged crypto-daily as stale most of
+                                          # the day (audit 2026-06-20 §C6). Intraday
+                                          # crypto (1h/4h below) stays tight — 24/7.
         ("4h", "stock_etf_index"): 30,    # 4H bar during RTH
         ("4h", "forex"):           12,
         ("4h", "commodity"):       30,

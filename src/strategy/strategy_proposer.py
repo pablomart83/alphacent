@@ -2306,11 +2306,13 @@ class StrategyProposer:
             MC_MIN_TRADES_FOR_BOOTSTRAP = MC_DEFAULT_MIN_TRADES
 
             _MC_HEAVY_TAIL: set = set()
+            _MC_CRYPTO_SET: set = set()
             try:
                 from src.core.tradeable_instruments import (
                     DEMO_ALLOWED_CRYPTO as _MC_CRYPTO,
                     DEMO_ALLOWED_COMMODITIES as _MC_COMMOD,
                 )
+                _MC_CRYPTO_SET = set(_MC_CRYPTO)
                 _MC_HEAVY_TAIL = set(_MC_CRYPTO) | set(_MC_COMMOD)
             except Exception:
                 pass
@@ -2414,7 +2416,11 @@ class StrategyProposer:
                                 test_window_days = span_days
                     except Exception:
                         pass
-                    trades_per_year = (n_trades / test_window_days) * 252
+                    # 24/7 crypto annualizes on a 365-day year; everything else 252
+                    # (audit 2026-06-20 §C8 — keep MC consistent with the WF Sharpe
+                    # basis, which already uses 365 for crypto).
+                    _mc_year_days = 365.0 if _sym_mc in _MC_CRYPTO_SET else 252.0
+                    trades_per_year = (n_trades / test_window_days) * _mc_year_days
                     annualization_factor = _np_mc.sqrt(max(trades_per_year, 1.0))
                     bootstrap_sharpes = []
                     for _ in range(MC_ITERATIONS):
