@@ -2465,6 +2465,10 @@
     - AVAX
     - LINK
     - DOT
+    - XRP
+    - ADA
+    - LTC
+    - BCH
     btc_leader: true
     btc_leader_interval: 1d
     btc_leader_bars: 3
@@ -2473,8 +2477,8 @@
     min_rpt_override: 0.02
 - seq: 250
   name: Crypto Cross-Sectional Momentum
-  description: Rank 6-coin universe by 14-day return (RANK_IN_UNIVERSE native); enter LONG on coins in
-    top-3 with volume > 1.5x 20-day avg. Captures rotation into outperforming alts. Hold 5-10 days, vol-scale
+  description: Rank 10-coin universe by 14-day return (RANK_IN_UNIVERSE native); enter LONG on coins in
+    top-4 with volume > 1.5x 20-day avg. Captures rotation into outperforming alts. Hold 5-10 days, vol-scale
     sizing.
   strategy_type: momentum
   market_regimes:
@@ -2485,8 +2489,8 @@
   - ranging_low_vol
   - ranging_high_vol
   entry_conditions:
-  - CLOSE > SMA(20) AND RSI(14) > 55 AND VOLUME > VOLUME_MA(20) * 1.5 AND RANK_IN_UNIVERSE("SELF", ["BTC","ETH","SOL","AVAX","LINK","DOT"],
-    14, 3) > 0
+  - CLOSE > SMA(20) AND RSI(14) > 55 AND VOLUME > VOLUME_MA(20) * 1.5 AND RANK_IN_UNIVERSE("SELF", ["BTC","ETH","SOL","AVAX","LINK","DOT","XRP","ADA","LTC","BCH"],
+    14, 4) > 0
   exit_conditions:
   - CLOSE < SMA(20) OR RSI(14) < 45
   required_indicators:
@@ -2497,7 +2501,7 @@
     stop_loss_pct: 0.06
     take_profit_pct: 0.14
     rank_window_days: 14
-    rank_top_n: 3
+    rank_top_n: 4
     hold_days: 7
   expected_trade_frequency: 1-3 trades/week
   expected_holding_period: 5-10 days
@@ -2515,9 +2519,13 @@
     - AVAX
     - LINK
     - DOT
+    - XRP
+    - ADA
+    - LTC
+    - BCH
     cross_sectional_rank: true
     rank_window_days: 14
-    rank_top_n: 3
+    rank_top_n: 4
     rank_metric: return
     rank_universe:
     - BTC
@@ -2526,6 +2534,10 @@
     - AVAX
     - LINK
     - DOT
+    - XRP
+    - ADA
+    - LTC
+    - BCH
     min_rpt_override: 0.02
 - seq: 251
   name: Crypto Donchian Breakout Daily

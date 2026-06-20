@@ -368,10 +368,14 @@ crypto:
   - { symbol: AVAX, etoro_id: 100085, sector: Crypto }
   - { symbol: LINK, etoro_id: 100040, sector: Crypto }
   - { symbol: DOT, etoro_id: 100037, sector: Crypto }
-  # Still disabled — wider spreads, lower liquidity, or crowded narrative
-  # making intraday impractical at our cost level:
-  # - { symbol: XRP, etoro_id: 100003, sector: Crypto }
-  # - { symbol: ADA, etoro_id: 100017, sector: Crypto }
+  # 2026-06-20 (crypto revamp, CIO-approved): universe widened 6 → 10 liquid
+  # majors for cross-sectional momentum breadth. Crypto edge on eToro is
+  # low-frequency trend/momentum across a basket; 6 coins barely supports a
+  # cross-sectional factor. All four are top-15 by liquidity with Binance
+  # OHLC coverage and tradeable on eToro.
+  - { symbol: XRP, etoro_id: 100003, sector: Crypto }
+  - { symbol: ADA, etoro_id: 100017, sector: Crypto }
+  - { symbol: LTC, etoro_id: 100005, sector: Crypto }
+  - { symbol: BCH, etoro_id: 100002, sector: Crypto }
+  # Still disabled — wider spreads / lower liquidity:
   # - { symbol: NEAR, etoro_id: 100337, sector: Crypto }
-  # - { symbol: LTC, etoro_id: 100005, sector: Crypto }
-  # - { symbol: BCH, etoro_id: 100002, sector: Crypto }

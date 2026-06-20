@@ -115,6 +115,65 @@ def _passes_crypto_fee_floor(t: StrategyTemplate) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Crypto cost-STYLE / horizon policy (2026-06-20 crypto revamp).
+#
+# eToro Diamond crypto = 0.75%/side = ~1.5% round-trip. At that cost only
+# LOW-FREQUENCY, LARGE-MOVE strategies can amortize the fee. The live cycle on
+# 2026-06-20 proved the high-frequency mean-reversion catalog is structurally
+# negative-EV here: every sampled mean-reversion/dip/capitulation template
+# returned −1.5% to −10% cost-net per trade. Crypto's robust documented edge is
+# TREND/MOMENTUM (Liu & Tsyvinski 2021; Liu/Tsyvinski/Wu 2022), held for weeks.
+#
+# Policy: a crypto_optimized template survives load only if it is
+#   trend_following / momentum / breakout  AND  holds >= 24h (min expected hold).
+# This drops (a) mean-reversion / volatility-fade (wrong style for trend-
+# dominated crypto) and (b) sub-day scalps (can't clear the cost floor),
+# regardless of bar interval. Non-crypto templates are untouched.
+# ---------------------------------------------------------------------------
+import re as _re
+
+_CRYPTO_VIABLE_STYLES = {"trend_following", "momentum", "breakout"}
+_CRYPTO_MIN_HOLD_HOURS = 24.0
+
+
+def _min_hold_hours(t: StrategyTemplate) -> Optional[float]:
+    """Lower-bound expected holding period in hours, parsed from the authored
+    `expected_holding_period` string (e.g. '4-24 hours', '2-7 days', '30-120
+    days'). Returns None when unparseable."""
+    s = (getattr(t, "expected_holding_period", "") or "").lower()
+    m = _re.search(r"(\d+(?:\.\d+)?)", s)
+    if not m:
+        return None
+    val = float(m.group(1))
+    if "hour" in s:
+        return val
+    if "day" in s:
+        return val * 24.0
+    if "week" in s:
+        return val * 168.0
+    if "month" in s:
+        return val * 720.0
+    return None
+
+
+def _passes_crypto_cost_style(t: StrategyTemplate) -> bool:
+    md = t.metadata or {}
+    if md.get("crypto_optimized") is not True:
+        return True  # non-crypto templates untouched
+    try:
+        stype = (t.strategy_type.value if hasattr(t.strategy_type, "value")
+                 else str(t.strategy_type)).lower()
+    except Exception:
+        stype = ""
+    if stype not in _CRYPTO_VIABLE_STYLES:
+        return False  # mean-reversion / volatility-fade: wrong style for crypto
+    mh = _min_hold_hours(t)
+    if mh is not None and mh < _CRYPTO_MIN_HOLD_HOURS:
+        return False  # sub-day scalp: cannot amortize ~1.5% round-trip
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Loader
 # ---------------------------------------------------------------------------
 def _read_specs(catalog_dir: Path) -> List[TemplateSpec]:
@@ -160,6 +219,8 @@ def load_catalog() -> tuple:
             continue
         template = spec.to_template()  # __post_init__ applies NormalizationPolicy
         if not _passes_crypto_fee_floor(template):  # crypto fee-floor policy
+            continue
+        if not _passes_crypto_cost_style(template):  # crypto cost-style/horizon policy
             continue
         templates.append(template)
     return tuple(templates)

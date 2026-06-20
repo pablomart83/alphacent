@@ -164,6 +164,27 @@ class OrderExecutor:
                 # Fail-open on gate-check error
                 logger.debug(f"VIX gate check skipped for {normalized_symbol}: {_vix_err}")
 
+        # C-CRYPTO (2026-06-20 crypto revamp): BTC-trend gate for crypto longs.
+        # Crypto is dominated by BTC beta — buying any coin into a BTC downtrend
+        # fights the tape and is the #1 way a long-only crypto trend book loses.
+        # Block crypto ENTER_LONG when BTC daily close < SMA(50). LIVE only
+        # (PAPER keeps collecting data per the RESEARCH→PAPER→LIVE lifecycle);
+        # crypto-only; fail-open on any data error.
+        if signal.action == SignalAction.ENTER_LONG and account_type == 'live':
+            try:
+                btc_gate_reason = self._check_btc_trend_gate(normalized_symbol)
+                if btc_gate_reason:
+                    self._log_decision(signal, normalized_symbol, stage="gate_blocked",
+                                       decision="blocked", reason=f"btc_trend_gate: {btc_gate_reason}")
+                    raise OrderExecutionError(
+                        f"BTC-trend gate blocked crypto LONG entry for {normalized_symbol}: "
+                        f"{btc_gate_reason}. Signal discarded."
+                    )
+            except OrderExecutionError:
+                raise
+            except Exception as _btc_err:
+                logger.debug(f"BTC-trend gate skipped for {normalized_symbol}: {_btc_err}")
+
         # Trend-consistency gates (2026-05-01 TSLA audit):
         # Prevent SHORT entries into downtrend exhaustion / LONG entries into
         # downtrends where the signal is almost certainly fighting the stock's
@@ -545,6 +566,55 @@ class OrderExecutor:
             )
         except Exception:  # silent-ok: decision-log analytics is fire-and-forget; must never affect execution
             pass  # silent-ok
+
+    def _check_btc_trend_gate(self, symbol: str) -> Optional[str]:
+        """Block crypto LONG entries when BTC is in a clear downtrend.
+
+        Crypto is dominated by BTC beta; a long-only crypto trend book should
+        not open new longs (in any coin) while BTC itself is below its trend.
+        Gate fires when BTC daily close < SMA(50). Crypto-only (non-crypto
+        returns None); 15-min TTL cache; fail-open via None on any data error.
+
+        Returns a short reason string when the gate should block, else None.
+        """
+        import time as _t
+        _u = (symbol or "").upper()
+        # Scope to crypto only.
+        try:
+            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+            if _u not in set(DEMO_ALLOWED_CRYPTO):
+                return None
+        except Exception:
+            if not any(c in _u for c in ("BTC", "ETH", "SOL", "AVAX", "LINK", "DOT", "XRP", "ADA", "LTC", "BCH")):
+                return None
+
+        now = _t.time()
+        cache = getattr(self, '_btc_trend_cache', None)
+        if cache and (now - cache[0] < 900):  # 15-min TTL — BTC daily trend is slow
+            return cache[1]
+
+        from datetime import datetime, timedelta
+        from src.data.market_data_manager import get_market_data_manager
+
+        mdm = get_market_data_manager()
+        if mdm is None:
+            return None
+
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        btc_bars = mdm.get_historical_data(symbol="BTC", start=start_date, end=end_date, interval="1d")
+        closes = [b.close for b in (btc_bars or []) if getattr(b, 'close', None)]
+        if len(closes) < 50:
+            self._btc_trend_cache = (now, None)  # insufficient data — fail-open
+            return None
+
+        sma50 = sum(closes[-50:]) / 50.0
+        btc_now = closes[-1]
+        reason = None
+        if btc_now < sma50:
+            reason = f"BTC downtrend (close {btc_now:,.0f} < SMA50 {sma50:,.0f})"
+        self._btc_trend_cache = (now, reason)
+        return reason
 
     def _check_vix_entry_gate(self, symbol: str) -> Optional[str]:
         """Block LONG entries during VIX spike windows.

@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
-"""Clear ONLY crypto entries from WF caches so next cycle re-tests them.
+"""Clear ONLY crypto entries from the WF caches AND the re-proposal blacklists
+so the next cycle re-tests them from scratch.
 
 Use after:
 - DSL grammar changes
 - Template code changes (entry/exit condition rewrites)
-- Crypto-relevant config changes (though the schema-version mechanism in
-  _apply_wf_schema_version_check should also handle config changes)
+- WF / acceptance / cost-model changes (e.g. the 2026-06-20 per-trade cost-net
+  crypto gate) — the rejection blacklist accumulated during the prior (artifact)
+  regime would otherwise block the most-active crypto templates from being
+  re-proposed, so clearing the WF cache alone can't force a fresh re-test.
+- Crypto-relevant config changes.
 
-Preserves stock/etf/forex/index/commodity cache entries.
-Safe to re-run.
+Clears crypto entries from BOTH:
+  - the WF result caches (.wf_validated_combos / .wf_failed_cache), and
+  - the proposal blocklists (.rejection_blacklist / .zero_trade_blacklist),
+    which exclude (template, symbol) combos from the proposer's scoring loop.
 
-JSON shape (as of 2026-05-02):
-    {
-      "entries": [
-        {"template": "Crypto Weekly Trend Follow", "symbol": "BTC", "result": [...], "cached_at": ...},
-        ...
-      ]
-    }
+Preserves all stock/etf/forex/index/commodity entries.
+Safe to re-run. Restart the service after running so the in-memory copies reload.
 
-History: the previous version of this script looked up `entry["key"][1]` which
-didn't match the real layout (template/symbol are top-level fields, not a key
-array). The script ran but always removed 0 entries, silently. Fixed 2026-05-02.
+JSON shape (all four files): {"entries": [{"template": ..., "symbol": ..., ...}, ...]}
 """
 import json
 from pathlib import Path
@@ -33,6 +32,8 @@ CRYPTO_SYMBOLS = {
 FILES = [
     "config/.wf_validated_combos.json",
     "config/.wf_failed_cache.json",
+    "config/.rejection_blacklist.json",
+    "config/.zero_trade_blacklist.json",
 ]
 
 

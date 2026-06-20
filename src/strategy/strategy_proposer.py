@@ -2903,7 +2903,14 @@ class StrategyProposer:
 
                 FAMILY_MIN_SHARPE_CRITERION = 0.3
                 FAMILY_MIN_RETURN_CRITERION = 0.0  # net return > 0
-                FAMILY_MIN_PCT = 4.0 / 6.0
+                # Majority of the basket must show positive cost-net edge — a
+                # simple-majority bar (>=50%) is the right "this is a real basket
+                # factor, not one lucky coin" test and is stable across universe
+                # sizes. (Was 4/6=0.667 for the old 6-coin family; with the
+                # 2026-06-20 expansion to a 10-coin universe, 0.667 would demand
+                # 7/10 — too strict for a top-N rotation where only a subset is
+                # ever held. 50% majority across a 10-coin basket = >=5 cleared.)
+                FAMILY_MIN_PCT = 0.5
 
                 # Group WF results by template for templates that request
                 # cross-validation. Each family entry: {

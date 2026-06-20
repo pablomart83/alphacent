@@ -67,9 +67,10 @@ logger = logging.getLogger(__name__)
 
 BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
 
-# Explicit symbol map — display → Binance pair. We only trade 6 crypto
-# symbols; listing them explicitly catches unknown-symbol requests at
-# the boundary instead of returning 400 from Binance at runtime.
+# Explicit symbol map — display → Binance pair. Listing them explicitly catches
+# unknown-symbol requests at the boundary instead of returning 400 from Binance
+# at runtime. Expanded 2026-06-20 (crypto revamp) from 6 → 10 liquid majors for
+# cross-sectional momentum breadth (CIO-approved universe expansion).
 SYMBOL_MAP: Dict[str, str] = {
     "BTC": "BTCUSDT",
     "ETH": "ETHUSDT",
@@ -77,6 +78,10 @@ SYMBOL_MAP: Dict[str, str] = {
     "AVAX": "AVAXUSDT",
     "LINK": "LINKUSDT",
     "DOT": "DOTUSDT",
+    "XRP": "XRPUSDT",
+    "ADA": "ADAUSDT",
+    "LTC": "LTCUSDT",
+    "BCH": "BCHUSDT",
 }
 
 # Intervals Binance supports that we care about. Binance also supports
