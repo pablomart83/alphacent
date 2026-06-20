@@ -126,11 +126,82 @@ class StrategyProposer:
         # restart. Single source of truth for which (train, test) window
         # each strategy gets. See _select_wf_window().
         self._wf_asset_class_windows: Dict[str, Dict[str, int]] = {}
-        self._wf_long_horizon_templates: set = set()
+        # Seed with code defaults so factor/rank templates get long-horizon WF
+        # even if the YAML window block fails to load; _load_wf_window_config
+        # merges any YAML-configured names on top.
+        self._wf_long_horizon_templates: set = set(self._LOW_FREQUENCY_TEMPLATE_DEFAULTS)
         self._wf_fallback_train_days: int = 365
         self._wf_fallback_test_days: int = 180
         self._load_wf_window_config()
         logger.info(f"StrategyProposer initialized with {len(self._trading_symbols)} trading symbols, {len(self._wf_validated)} validated combos")
+
+    # ── Low-frequency / long-horizon walk-forward classification (2026-06-20) ──
+    # Factor and rank-based templates trade INFREQUENTLY by construction (a
+    # cross-sectional rank strategy only trades a symbol when it's in the top-N;
+    # a monthly/rotation factor rebalances ~monthly). On the standard 180d WF test
+    # window they produce 2-6 trades and get rejected with has_enough_trades=False
+    # — BEFORE their edge is ever assessed (tv=True, tev=True, overfitted=False).
+    # That is the root cause of the book's single-factor (momentum) monoculture:
+    # only high-frequency momentum/breakout templates clear the trade-count bar.
+    #
+    # Fix: route these to a LONG-HORIZON WF window (multi-year) so they accumulate
+    # a statistically meaningful sample AT THEIR NATURAL CADENCE. The trade-count
+    # floor is NOT lowered (that would validate noise) — the longer window makes the
+    # existing floor reachable with real statistical power, and as a bonus the longer
+    # OOS test period spans more regimes. Membership is detected by (in order):
+    #   1. explicit YAML `backtest.walk_forward.long_horizon_templates`,
+    #   2. these code defaults (the known factor/rank templates), and
+    #   3. a structural signal: DSL rules referencing a RANK_* cross-sectional
+    #      primitive, or an alpha_edge_type that rebalances monthly/quarterly.
+    _LOW_FREQUENCY_TEMPLATE_DEFAULTS = frozenset({
+        "Low Volatility Factor Long",
+        "Cross-Sectional Momentum Long",
+        "Short-Term Reversal Long",
+        "Dual Momentum Trend Long",
+        "Cross-Asset Trend Follow Long",
+    })
+    _LOW_FREQUENCY_ALPHA_EDGE_TYPES = frozenset({
+        "end_of_month_momentum",
+        "sector_rotation",
+        "sector_rotation_short",
+        "forex_carry",
+        "dividend_capture",
+    })
+    # Code fallback window for any *_longhorizon key not present in the YAML
+    # asset_class_windows block. The standard non_crypto_1d window is already
+    # train=730/test=365, yet cross-sectional factors still produce <8 trades in a
+    # 365d test (a symbol is only top-N a few times/year). They need a multi-YEAR
+    # test window to reach the 8-trade statistical floor at their natural cadence;
+    # ~2y test → ~8-16 entries. Established large-cap factor universes have the
+    # daily depth; newer IPOs get truncated by the engine (correct — can't validate
+    # a factor on a symbol with <2y of history).
+    _LONGHORIZON_WINDOW_FALLBACK = {"train": 1095, "test": 730}
+
+    def _is_low_frequency_template(self, strategy) -> bool:
+        """True when a strategy should use the LONG-HORIZON WF window.
+
+        Detection order: explicit long-horizon set (YAML ∪ code defaults) →
+        alpha_edge_type monthly/quarterly → DSL rules referencing RANK_* (a
+        cross-sectional basket primitive). Fail-open to False (standard window).
+        """
+        try:
+            meta = (getattr(strategy, 'metadata', None) or {})
+            tmpl = meta.get('template_name', '') or ''
+            if tmpl in self._wf_long_horizon_templates or tmpl in self._LOW_FREQUENCY_TEMPLATE_DEFAULTS:
+                return True
+            ae_type = (meta.get('alpha_edge_type') or '').lower()
+            if ae_type in self._LOW_FREQUENCY_ALPHA_EDGE_TYPES:
+                return True
+            # Structural: a cross-sectional RANK_* primitive in the DSL rules means
+            # per-symbol trades are rare by construction (only when ranked top-N).
+            rules = getattr(strategy, 'rules', None)
+            if rules:
+                import json as _json
+                if 'RANK_' in _json.dumps(rules):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def _load_wf_window_config(self) -> None:
         """Load the asset_class_windows + long_horizon_templates block from
@@ -180,6 +251,9 @@ class StrategyProposer:
             lh = wf_cfg.get('long_horizon_templates') or []
             if isinstance(lh, list):
                 self._wf_long_horizon_templates = {str(x) for x in lh}
+            # Merge code defaults so the factor/rank templates get long-horizon
+            # treatment even without an explicit YAML entry (YAML can still extend).
+            self._wf_long_horizon_templates |= set(self._LOW_FREQUENCY_TEMPLATE_DEFAULTS)
             logger.info(
                 f"WF window config loaded: {len(self._wf_asset_class_windows)} asset-class keys, "
                 f"{len(self._wf_long_horizon_templates)} long-horizon templates, "
@@ -236,11 +310,12 @@ class StrategyProposer:
             interval = str(interval).lower()
             # Resolve template name for long-horizon check
             template_name = meta.get('template_name', '') or ''
+            is_low_freq = self._is_low_frequency_template(strategy)
             # Key selection
             key: Optional[str] = None
             if is_crypto:
                 if interval == '1d':
-                    if template_name in self._wf_long_horizon_templates:
+                    if template_name in self._wf_long_horizon_templates or is_low_freq:
                         key = 'crypto_1d_longhorizon'
                     else:
                         key = 'crypto_1d'
@@ -250,12 +325,19 @@ class StrategyProposer:
                     key = 'crypto_1h'
             else:
                 if interval == '1d':
-                    key = 'non_crypto_1d'
+                    # Low-frequency factor/rank templates need a multi-year window
+                    # to accumulate a statistically meaningful trade sample. Daily
+                    # non-crypto data has the depth; 4h/1h are bounded by Yahoo's
+                    # ~7-month 1h cap so long-horizon only helps 1d.
+                    key = 'non_crypto_1d_longhorizon' if is_low_freq else 'non_crypto_1d'
                 elif interval == '4h':
                     key = 'non_crypto_4h'
                 elif interval == '1h':
                     key = 'non_crypto_1h'
             window = self._wf_asset_class_windows.get(key) if key else None
+            # Code fallback for *_longhorizon keys not present in YAML config.
+            if window is None and key and key.endswith('_longhorizon'):
+                window = self._LONGHORIZON_WINDOW_FALLBACK
             if window is not None:
                 train_days = int(window['train'])
                 test_days = int(window['test'])
