@@ -1016,7 +1016,18 @@ class RiskManager:
             # per symbol before blocking. At 10% ($48K) we allow ~8 strategies per
             # symbol, matching the G-46 MAX_PER_SYMBOL_PER_TIMEFRAME=8 limit.
             # Capital preservation is irrelevant on demo capital; breadth is the goal.
-            _symbol_cap_ps = equity * 0.10
+            #
+            # 2026-06-19: made configurable (`paper_trading.symbol_cap_pct`, default
+            # 0.10) so it can be raised IN TANDEM with
+            # max_positions_per_symbol_per_timeframe — the two are coupled (this
+            # capital cap allows ~ cap_pct·equity / flat_size strategies per symbol;
+            # if it's lower than the position cap it becomes the binding constraint).
+            _symbol_cap_pct = 0.10
+            try:
+                _symbol_cap_pct = float(_cfg_ps.get("paper_trading", {}).get("symbol_cap_pct", 0.10) or 0.10)
+            except Exception:
+                _symbol_cap_pct = 0.10
+            _symbol_cap_ps = equity * _symbol_cap_pct
             try:
                 from src.models.database import get_database as _gdb_ps
                 from src.models.orm import PositionORM as _PosORM_ps, OrderORM as _OrdORM_ps

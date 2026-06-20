@@ -3377,7 +3377,20 @@ class TradingScheduler:
         # Raising to 8 doubles the breadth of paper data per symbol per timeframe,
         # which directly accelerates graduation pipeline fill.
         # LIVE equivalent (4) is enforced separately in the live pass duplicate guard.
+        #
+        # 2026-06-19: made configurable so the demo-capacity lever is user-owned
+        # (Settings/YAML) without a code deploy — `paper_trading.max_positions_per_symbol_per_timeframe`,
+        # default 8. NOTE: raising this is coupled with the per-symbol CAPITAL cap in
+        # risk_manager (`_symbol_cap_ps = equity * 0.10`, ~8 strategies @ $1K on
+        # ~$470K demo equity). To get real extra breadth, raise BOTH — otherwise the
+        # capital cap becomes the binding constraint and this raise is a no-op.
         MAX_PER_SYMBOL_PER_TIMEFRAME = 8
+        try:
+            import yaml as _yaml_cap
+            _cap_cfg = (yaml.safe_load(open('config/autonomous_trading.yaml')) or {}).get('paper_trading', {})
+            MAX_PER_SYMBOL_PER_TIMEFRAME = int(_cap_cfg.get('max_positions_per_symbol_per_timeframe', 8) or 8)
+        except Exception:
+            MAX_PER_SYMBOL_PER_TIMEFRAME = 8
         
         # Correlation analyzer disabled — same-symbol dedup handles concentration risk.
         # The pairwise correlation calculations were running hundreds of times per cycle

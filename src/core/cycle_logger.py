@@ -365,7 +365,7 @@ class CycleLogger:
         if rejection_reasons:
             for reason, count in sorted(rejection_reasons.items(), key=lambda x: -x[1]):
                 self._write(f"    filtered: {reason} (x{count})")
-        self._write(f"  [ORDERS] {orders_submitted} submitted, {orders_filled} filled")
+        self._write(f"  [ORDERS] {orders_submitted} submitted this cycle, {orders_filled} confirmed filled since last cycle")
 
     def log_order_detail(self, symbol: str, side: str, quantity: float, price: float,
                          strategy_name: str = "", status: str = "", slippage: float = 0):

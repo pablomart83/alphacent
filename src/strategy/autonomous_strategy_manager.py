@@ -957,11 +957,44 @@ class AutonomousStrategyManager:
                     position_details=position_details,
                 )
 
+                # Orders fill ASYNCHRONOUSLY: an order submitted this cycle is
+                # confirmed FILLED by order_monitor (60s sync) only AFTER this
+                # summary is written, so reporting in-cycle fills always showed a
+                # misleading 0. Instead report orders CONFIRMED filled since the
+                # previous cycle (i.e. last interval's submissions that landed).
+                orders_filled_recent = 0
+                try:
+                    from datetime import timedelta as _td
+                    from src.models.database import get_database as _get_db
+                    from src.models.orm import OrderORM as _OrdORM, AutonomousCycleRunORM as _CycRun
+                    from src.models.enums import OrderStatus as _OS
+                    with _get_db().session_scope() as _fs:
+                        # Previous cycle = most recent run started before ~2 min ago
+                        # (excludes the current run, which just started).
+                        _prev = (
+                            _fs.query(_CycRun.started_at)
+                            .filter(_CycRun.started_at < datetime.now() - _td(minutes=2))
+                            .order_by(_CycRun.started_at.desc())
+                            .first()
+                        )
+                        _since = _prev[0] if _prev and _prev[0] else datetime.now() - _td(hours=1)
+                        orders_filled_recent = (
+                            _fs.query(_OrdORM)
+                            .filter(
+                                _OrdORM.status == _OS.FILLED,
+                                _OrdORM.submitted_at >= _since,
+                            )
+                            .count()
+                        )
+                except Exception as _fill_err:
+                    logger.debug(f"Could not reconcile recent fills for cycle summary: {_fill_err}")
+
                 cl.log_signals(
                     generated=locals().get('signals_raw', signals_generated),
                     coordinated=signals_generated,
                     rejected=locals().get('signals_raw', signals_generated) - signals_generated,
                     orders_submitted=orders_submitted,
+                    orders_filled=orders_filled_recent,
                 )
 
                 for err in stats.get("errors", []):

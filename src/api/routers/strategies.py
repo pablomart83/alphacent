@@ -4512,17 +4512,19 @@ async def get_size_estimate(
         tp_pct = float(risk_params.get('take_profit_pct', 0.15))
 
         signal = TradingSignal(
-            id=str(_uuid.uuid4()),
             strategy_id=strategy_id,
             symbol=symbol,
             action=SignalAction.ENTER_LONG,
             confidence=0.95,
-            price=0.0,
-            stop_loss_pct=sl_pct,
-            take_profit_pct=tp_pct,
+            reasoning="Synthetic signal for CIO live-size preview",
+            generated_at=datetime.now(),
             metadata={
                 'template_name': meta.get('template_name', strategy_orm.name),
                 'conviction_score': meta.get('conviction_score', 80),
+                # Sizing reads SL/TP from metadata (risk_manager Step 4 / heat cap),
+                # NOT from top-level fields — TradingSignal has no sl/tp/price/id attrs.
+                'stop_loss_pct': sl_pct,
+                'take_profit_pct': tp_pct,
             },
         )
 
