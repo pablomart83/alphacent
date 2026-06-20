@@ -1194,6 +1194,11 @@ class StrategyProposer:
     def _per_trade_net_sharpe(self, results, symbol: str, interval: str = '1d') -> Optional[Dict[str, float]]:
         """Per-trade, COST-NET, frequency-annualized Sharpe from a BacktestResults.
 
+        `results` may be a single BacktestResults OR a list of them (the rolling
+        WF windows). When a list is given, trades are POOLED across windows (the
+        rolling crypto windows are non-overlapping, so this is the fullest honest
+        sample) and the window spans are summed for the frequency annualization.
+
         The vectorbt per-bar Sharpe is flat-bar-inclusive; on a sparse crypto
         equity curve it inflates to 3-5 on 1-4 trades (CRYPTO_PIPELINE_AUDIT
         2026-06-20 §C1). This computes the Sharpe over the *realized trades*,
@@ -1211,32 +1216,45 @@ class StrategyProposer:
             from src.strategy.cost_model import round_trip_cost_pct as _rtc_fn
         except Exception:
             return None
-        trades_list = getattr(results, 'trades', None)
-        if trades_list is None:
-            return None
-        # Normalize to a list of per-trade fractional returns (vectorbt 'Return').
-        if hasattr(trades_list, 'to_dict'):
-            try:
-                trades_list = trades_list.to_dict('records') if not trades_list.empty else []
-            except Exception:
-                trades_list = []
+        results_list = results if isinstance(results, list) else [results]
         rets: List[float] = []
-        for t in trades_list:
-            if isinstance(t, dict):
-                r = t.get('Return')
-                if r is None:
-                    r = t.get('return')
-                if r is None:
-                    r = t.get('pnl_pct')
-            else:
-                r = getattr(t, 'Return', None)
-                if r is None:
-                    r = getattr(t, 'pnl_pct', None)
-            if r is not None:
+        total_window_days = 0.0
+        for _res in results_list:
+            if _res is None:
+                continue
+            trades_list = getattr(_res, 'trades', None)
+            if trades_list is None:
+                continue
+            if hasattr(trades_list, 'to_dict'):
                 try:
-                    rets.append(float(r))
-                except (TypeError, ValueError):
-                    pass
+                    trades_list = trades_list.to_dict('records') if not trades_list.empty else []
+                except Exception:
+                    trades_list = []
+            _had_trade = False
+            for t in trades_list:
+                if isinstance(t, dict):
+                    r = t.get('Return')
+                    if r is None:
+                        r = t.get('return')
+                    if r is None:
+                        r = t.get('pnl_pct')
+                else:
+                    r = getattr(t, 'Return', None)
+                    if r is None:
+                        r = getattr(t, 'pnl_pct', None)
+                if r is not None:
+                    try:
+                        rets.append(float(r))
+                        _had_trade = True
+                    except (TypeError, ValueError):
+                        pass
+            # Sum the window span for annualization.
+            try:
+                period = getattr(_res, 'backtest_period', None)
+                if period and period[0] and period[1]:
+                    total_window_days += max((period[1] - period[0]).days, 0)
+            except Exception:
+                pass
         n = len(rets)
         if n < self._CRYPTO_MIN_TRADES_FOR_SHARPE:
             return None
@@ -1250,21 +1268,32 @@ class StrategyProposer:
         std = float(arr.std(ddof=1)) if n > 1 else 0.0
         if std <= 1e-9:
             return None  # zero dispersion -> Sharpe undefined / meaningless
-        # Frequency annualization from the ACTUAL test window (24/7 -> 365d),
+        # Frequency annualization from the ACTUAL pooled window span (24/7 -> 365d),
         # matching the MC bootstrap's per-trade-frequency approach.
-        window_days = 0.0
-        try:
-            period = getattr(results, 'backtest_period', None)
-            if period and period[0] and period[1]:
-                window_days = max((period[1] - period[0]).days, 0)
-        except Exception:
-            window_days = 0.0
-        if window_days < 1:
-            window_days = 365.0  # conservative fallback
-        trades_per_year = (n / window_days) * 365.0
+        if total_window_days < 1:
+            total_window_days = 365.0  # conservative fallback
+        trades_per_year = (n / total_window_days) * 365.0
         ann = float(_np.sqrt(max(trades_per_year, 1.0)))
         sharpe = (mean_net / std) * ann
         return {'sharpe': float(sharpe), 'n_trades': n, 'mean_net': mean_net, 'ann': ann}
+
+    def _crypto_wf_results_for_sharpe(self, wf: Dict[str, Any], kind: str = 'test') -> Any:
+        """Return the BacktestResults to feed _per_trade_net_sharpe for crypto.
+
+        Prefers POOLING across all rolling-WF windows (fullest non-overlapping
+        sample); falls back to the single canonical window when rolling data is
+        absent. `kind` is 'test' or 'train'.
+        """
+        key = 'test_results' if kind == 'test' else 'train_results'
+        rw = wf.get('rolling_windows') if isinstance(wf, dict) else None
+        if rw:
+            pooled = [
+                w['wf'].get(key) for w in rw
+                if w.get('wf') and w['wf'].get(key) is not None
+            ]
+            if pooled:
+                return pooled
+        return wf.get(key) if isinstance(wf, dict) else None
 
     def _get_direction_aware_thresholds(self, direction: str, market_regime) -> Dict[str, float]:
         """
@@ -2517,11 +2546,14 @@ class StrategyProposer:
                     continue  # Filtered by Monte Carlo bootstrap
                 if wf is None:
                     continue  # Loaded from 4-tuple disk cache — no wf_results dict
-                # Per-bar overfit (ov) is a known crypto artifact (audit 2026-06-20
-                # §C4 — driven by 1-4 trade per-bar Sharpes). For crypto the
-                # per-trade consistency gate in the crypto branch below replaces it.
-                # Equity still requires `not ov`.
-                if not (tv and tev and het and (_is_crypto_accept or not ov)):
+                # Per-bar overfit (ov) AND the rolling per-bar trade count (het) are
+                # both crypto artifacts (audit 2026-06-20 §C1/§C4): het sums trades
+                # only over windows that passed the per-bar overfit+sharpe filter, so
+                # the artifact indirectly starves the trade count and blocks the honest
+                # branch. For crypto, require only valid Sharpe numerics here; the
+                # per-trade acceptance branch below enforces the real trade-count floor
+                # (>=3 actual trades) and the honest cost-net gate. Equity unchanged.
+                if not (tv and tev and (_is_crypto_accept or (het and not ov))):
                     _decision_rows.append({
                         "stage": "wf_rejected", "decision": "rejected",
                         "strategy_id": s.id, "template": (s.metadata or {}).get('template_name') or s.name,
@@ -2673,8 +2705,8 @@ class StrategyProposer:
                 # metric, so it no longer rejects on the per-bar artifact (§C2).
                 # Equity strategies fall through to the paths below unchanged.
                 if _is_crypto_accept:
-                    _ptt = self._per_trade_net_sharpe(wf.get('test_results'), _csym, _cintv)
-                    _ptr = self._per_trade_net_sharpe(wf.get('train_results'), _csym, _cintv)
+                    _ptt = self._per_trade_net_sharpe(self._crypto_wf_results_for_sharpe(wf, 'test'), _csym, _cintv)
+                    _ptr = self._per_trade_net_sharpe(self._crypto_wf_results_for_sharpe(wf, 'train'), _csym, _cintv)
                     _crow = dict(_row_base)
                     _crow['metadata'] = {
                         **_row_base['metadata'],
@@ -2930,7 +2962,7 @@ class StrategyProposer:
                         # clears-bar uses the same per-trade, cost-net metric as the
                         # single-symbol crypto gate, plus positive cost-net expectancy.
                         _fam_intv = str((s.metadata or {}).get('interval', '1d') if s.metadata else '1d').lower()
-                        _pt_fam = self._per_trade_net_sharpe(test_results, sym, _fam_intv)
+                        _pt_fam = self._per_trade_net_sharpe(self._crypto_wf_results_for_sharpe(wf, 'test'), sym, _fam_intv)
                         clears = (
                             bool(tv) and bool(tev)
                             and _pt_fam is not None
