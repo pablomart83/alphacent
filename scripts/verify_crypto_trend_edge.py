@@ -25,11 +25,8 @@ from src.strategy.strategy_proposer import StrategyProposer
 from src.strategy.template_catalog import load_catalog
 
 TEMPLATES = [
-    "Crypto Vol-Managed Trend",
-    "Crypto BTC Relative Strength",
-    "Crypto Time-Series Momentum",
-    "Crypto Dominance Rotation Alt Long",
-    "Crypto 21W MA Trend Follow",
+    "Crypto Funding-Filtered Trend",
+    "Crypto Capitulation Funding Re-Entry",
 ]
 SYMBOLS = ["BTC", "ETH", "SOL"]
 

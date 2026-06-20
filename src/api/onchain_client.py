@@ -57,9 +57,16 @@ logger = logging.getLogger(__name__)
 SUPPORTED_METRICS = frozenset([
     "btc_dominance",         # BTC market-cap share, 0..1
     "btc_dominance_change",  # 7d ABSOLUTE change in btc_dominance (e.g. -0.01 = -1pp)
+    "btc_funding_rate",      # BTC perp funding rate, daily mean (positioning/leverage sentiment)
     "stablecoin_supply",     # Aggregate USDT+USDC market cap in USD
     "stablecoin_supply_pct", # 7d % change in stablecoin supply
 ])
+
+# Binance USD-M futures funding-rate history (public, no auth). Funding accrues
+# 3x/day; we aggregate to a daily mean as the positioning/leverage sentiment
+# signal for the long-only crypto book (extreme positive = crowded leveraged
+# longs / froth; negative = capitulation). Signal-only — we cannot trade the carry.
+BINANCE_FUNDING_URL = "https://fapi.binance.com/fapi/v1/fundingRate"
 
 
 # Cache TTL: 24 hours. On-chain regime signals move slowly; stale-by-a-day
@@ -218,6 +225,7 @@ def get_metric(metric: str, end: datetime, lookback_days: int) -> pd.Series:
     _WIDEST_FETCH = {
         "btc_dominance": 365,
         "btc_dominance_change": 365,
+        "btc_funding_rate": 730,           # 2y — covers the longhorizon WF test window
         "stablecoin_supply": 1095,         # 3y — enough for any WF window
         "stablecoin_supply_pct": 1095,
     }
@@ -233,6 +241,8 @@ def get_metric(metric: str, end: datetime, lookback_days: int) -> pd.Series:
         # shifts. Mirrors the stablecoin_supply_pct derivation pattern.
         raw = _fetch_btc_dominance(end, widest + 7)
         series = raw.diff(periods=7).dropna()
+    elif m == "btc_funding_rate":
+        series = _fetch_btc_funding_rate(end, widest)
     elif m == "stablecoin_supply":
         series = _fetch_stablecoin_supply(end, widest)
     elif m == "stablecoin_supply_pct":
@@ -358,6 +368,65 @@ def _fetch_btc_dominance(end: datetime, lookback_days: int) -> pd.Series:
     df["date"] = pd.to_datetime(df["date"])
     series = df.set_index("date")["dominance"].sort_index()
     return series
+
+
+def _fetch_btc_funding_rate(end: datetime, lookback_days: int) -> pd.Series:
+    """BTC perpetual funding rate (BTCUSDT, USD-M futures), aggregated to a daily mean.
+
+    Binance funding accrues every 8h; we average the day's rates into one daily
+    value as a positioning/leverage sentiment signal (extreme positive = crowded
+    leveraged longs/froth → caution; negative = capitulation → potential bottom).
+    Paginates backward from `end` (1000 rows/page). Public, no auth. Returns a
+    daily pd.Series of fractional rates (e.g. 0.0001 = 1bp per 8h funding).
+    Signal-only — eToro retail cannot trade the carry.
+    """
+    end_naive = end.replace(tzinfo=None) if end.tzinfo else end
+    start_naive = end_naive - timedelta(days=int(lookback_days))
+    start_ms = int(start_naive.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    end_ms = int(end_naive.replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+    rows = []
+    cursor = start_ms
+    guard = 0
+    while cursor < end_ms and guard < 50:
+        guard += 1
+        try:
+            resp = requests.get(
+                BINANCE_FUNDING_URL,
+                params={"symbol": "BTCUSDT", "startTime": cursor, "endTime": end_ms, "limit": 1000},
+                timeout=REQUEST_TIMEOUT_SEC,
+            )
+        except requests.RequestException as e:
+            raise OnChainAPIError(f"Binance funding request failed: {e}") from e
+        if resp.status_code >= 400:
+            raise OnChainAPIError(f"Binance funding HTTP {resp.status_code}: {resp.text[:200]}")
+        try:
+            payload = resp.json()
+        except ValueError as e:
+            raise OnChainAPIError(f"Binance funding non-JSON: {e}") from e
+        if not isinstance(payload, list) or not payload:
+            break
+        for r in payload:
+            ft = r.get("fundingTime")
+            fr = r.get("fundingRate")
+            if ft is None or fr is None:
+                continue
+            try:
+                dt = datetime.utcfromtimestamp(int(ft) / 1000).date()
+                rows.append((dt, float(fr)))
+            except (ValueError, TypeError):
+                continue
+        last_ft = payload[-1].get("fundingTime")
+        if last_ft is None or len(payload) < 1000:
+            break
+        cursor = int(last_ft) + 1
+
+    if not rows:
+        raise OnChainAPIError("Binance funding returned no usable rows")
+
+    series = pd.DataFrame(rows, columns=["date", "funding"]).groupby("date")["funding"].mean()
+    series.index = pd.to_datetime(series.index)
+    return series.sort_index()
 
 
 def _fetch_stablecoin_supply(end: datetime, lookback_days: int) -> pd.Series:

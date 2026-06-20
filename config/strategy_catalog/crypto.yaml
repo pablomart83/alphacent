@@ -2911,3 +2911,74 @@
     interval: 1d
     low_frequency: true
     min_rpt_override: 0.025
+- seq: 262
+  name: Crypto Funding-Filtered Trend
+  description: 'Trend entry that avoids leveraged froth — long when daily close crosses above SMA(50)
+    with ADX confirming AND BTC perp funding is NOT extreme-positive (ONCHAIN btc_funding_rate < 4bp/8h).
+    Extreme positive funding = crowded leveraged longs prone to a liquidation flush; standing aside there
+    targets our worst loss pattern (buying the top of a leverage blow-off). Exit on trend break.'
+  strategy_type: trend_following
+  market_regimes:
+  - trending_up
+  - trending_up_weak
+  - trending_up_strong
+  - ranging
+  - ranging_low_vol
+  entry_conditions:
+  - CLOSE CROSSES_ABOVE SMA(50) AND ADX(14) > 20 AND ONCHAIN("btc_funding_rate", 1) < 0.0004
+  exit_conditions:
+  - CLOSE < SMA(50) OR ADX(14) < 15
+  required_indicators:
+  - SMA:50
+  - ADX
+  default_parameters:
+    sma_period: 50
+    adx_period: 14
+    stop_loss_pct: 0.08
+    take_profit_pct: 0.22
+  expected_trade_frequency: 1-3 trades/month per symbol
+  expected_holding_period: 10-60 days
+  risk_reward_ratio: 2.75
+  metadata:
+    direction: long
+    crypto_optimized: true
+    skip_param_override: true
+    interval: 1d
+    leader_symbol: BTC
+    min_rpt_override: 0.02
+- seq: 263
+  name: Crypto Capitulation Funding Re-Entry
+  description: 'Re-enter on a trend turn after a leverage washout — long when daily close crosses above
+    SMA(20) with RSI recovering AND BTC perp funding is negative (ONCHAIN btc_funding_rate < 0), i.e.
+    shorts are crowded / longs have capitulated. Negative funding clusters near local bottoms; pairing
+    it with a confirmed turn-up avoids catching a falling knife. Exit on trend loss or overbought.'
+  strategy_type: momentum
+  market_regimes:
+  - trending_up
+  - trending_up_weak
+  - ranging
+  - ranging_low_vol
+  - ranging_high_vol
+  - trending_down_weak
+  entry_conditions:
+  - CLOSE CROSSES_ABOVE SMA(20) AND RSI(14) > 45 AND ONCHAIN("btc_funding_rate", 1) < 0.0
+  exit_conditions:
+  - CLOSE < SMA(20) OR RSI(14) > 70
+  required_indicators:
+  - SMA:20
+  - RSI
+  default_parameters:
+    sma_period: 20
+    rsi_period: 14
+    stop_loss_pct: 0.08
+    take_profit_pct: 0.2
+  expected_trade_frequency: 1-4 trades/quarter per symbol
+  expected_holding_period: 5-30 days
+  risk_reward_ratio: 2.5
+  metadata:
+    direction: long
+    crypto_optimized: true
+    skip_param_override: true
+    interval: 1d
+    leader_symbol: BTC
+    min_rpt_override: 0.02

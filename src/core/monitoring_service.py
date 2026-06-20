@@ -182,6 +182,14 @@ class MonitoringService:
         # Time-based exit check (daily — alongside fundamental exits)
         self._last_time_based_exit_check: float = 0
 
+        # Crypto BTC-regime risk-off exit check (every 30 min). Force-exits LIVE
+        # crypto longs when BTC is in a downtrend (BTC daily < SMA50) — a long-only
+        # crypto book must not ride alts down through a BTC breakdown. LIVE-only:
+        # PAPER positions play out naturally so the graduation sample stays unbiased.
+        self._last_crypto_regime_exit_check: float = 0
+        self._crypto_regime_exit_interval: float = 1800
+        self._btc_trend_cache: tuple = (0.0, None)  # (ts, is_downtrend|None)
+
         # Zombie exit check (every 6 hours)
         self._last_zombie_check: float = 0
         
@@ -734,6 +742,19 @@ class MonitoringService:
                 self._last_fundamental_check = now
             except Exception as e:
                 logger.error(f"Error checking fundamental exits: {e}")
+
+        # Crypto BTC-regime risk-off exit (every 30 min, LIVE crypto only).
+        # Independent of the autonomous-cycle guard — capital protection must run
+        # even mid-cycle. Cheap: one BTC daily fetch (cached 15 min) + a scoped query.
+        if now - self._last_crypto_regime_exit_check >= self._crypto_regime_exit_interval:
+            try:
+                regime_results = self._check_crypto_regime_exits()
+                flagged = regime_results.get("flagged", 0)
+                if flagged > 0:
+                    logger.info(f"Crypto regime exits: {flagged} LIVE crypto positions flagged for closure (BTC downtrend)")
+                self._last_crypto_regime_exit_check = now
+            except Exception as e:
+                logger.error(f"Error checking crypto regime exits: {e}")
         
         # Cleanup stale orders (daily - alongside fundamental check)
         if not _cycle_active and now - self._last_stale_order_check >= self._fundamental_check_interval:
@@ -4231,6 +4252,99 @@ class MonitoringService:
         except Exception as e:
             logger.warning(f"Could not load fundamental monitoring config: {e}")
             return {}
+
+    def _is_btc_downtrend(self) -> Optional[bool]:
+        """True if BTC daily close < SMA(50) (downtrend), False if at/above, None on
+        data error. Cached 15 min — BTC daily trend moves slowly. Same definition as
+        the order_executor BTC-trend entry gate, so entries and exits agree."""
+        import time as _t
+        now = _t.time()
+        ts, cached = self._btc_trend_cache
+        if cached is not None and (now - ts < 900):
+            return cached
+        try:
+            from datetime import datetime, timedelta
+            end = datetime.now()
+            bars = self.market_data.get_historical_data(
+                "BTC", end - timedelta(days=90), end, interval="1d"
+            )
+            closes = [b.close for b in (bars or []) if getattr(b, "close", None)]
+            if len(closes) < 50:
+                self._btc_trend_cache = (now, None)
+                return None
+            sma50 = sum(closes[-50:]) / 50.0
+            result = closes[-1] < sma50
+            self._btc_trend_cache = (now, result)
+            return result
+        except Exception as e:
+            logger.debug(f"BTC downtrend check failed: {e}")
+            self._btc_trend_cache = (now, None)
+            return None
+
+    def _check_crypto_regime_exits(self) -> Dict:
+        """Force-exit LIVE crypto longs when BTC is in a downtrend (BTC daily < SMA50).
+
+        Rationale: crypto is dominated by BTC beta; a long-only crypto book that
+        keeps alt longs open through a BTC breakdown rides the whole complex down.
+        This is the symmetric partner of the BTC-trend ENTRY gate (order_executor):
+        don't open crypto longs in a BTC downtrend, and don't HOLD them either.
+
+        LIVE-only by design (capital preservation). PAPER positions are left to play
+        out via their own SL/exit conditions so the graduation sample is not biased
+        by artificially truncating losers. Flags via pending_closure (same mechanism
+        as fundamental/zombie exits); the close pipeline executes it.
+
+        Fresh dedicated session (FIX-04 pattern) so a per-position error can't poison
+        the shared monitoring session.
+        """
+        is_downtrend = self._is_btc_downtrend()
+        if is_downtrend is not True:
+            # Not a downtrend, or data unavailable (fail-open — never force exits on a
+            # data error). No action.
+            return {"checked": 0, "flagged": 0}
+
+        try:
+            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+            crypto_set = set(DEMO_ALLOWED_CRYPTO)
+        except Exception:
+            return {"checked": 0, "flagged": 0}
+
+        session = self.db.get_session()
+        checked = 0
+        flagged = 0
+        try:
+            from src.models.orm import PositionORM
+            open_positions = session.query(PositionORM).filter(
+                PositionORM.closed_at.is_(None),
+                PositionORM.pending_closure == False,
+                PositionORM.account_type == 'live',
+            ).all()
+            for pos in open_positions:
+                sym = (pos.symbol or "").upper()
+                if sym not in crypto_set:
+                    continue
+                checked += 1
+                pos.pending_closure = True
+                pos.closure_reason = (
+                    "Crypto regime exit: BTC in downtrend (daily close < SMA50) — "
+                    "risk-off on long-only crypto book"
+                )[:500]
+                flagged += 1
+                logger.info(
+                    f"Crypto regime exit: flagging LIVE {sym} for closure "
+                    f"(BTC downtrend; position {pos.id})"
+                )
+            session.commit()
+            return {"checked": checked, "flagged": flagged}
+        except Exception as e:
+            logger.error(f"Error in crypto regime exit check: {e}", exc_info=True)
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            return {"checked": checked, "flagged": flagged, "error": str(e)[:120]}
+        finally:
+            session.close()
 
     def _check_fundamental_exits(self) -> Dict:
         """
