@@ -2783,7 +2783,7 @@
   - ranging
   - ranging_low_vol
   entry_conditions:
-  - CLOSE CROSSES_ABOVE SMA(50) AND RSI(14) > 50 AND ONCHAIN("btc_dominance", 7) < 0.55
+  - CLOSE CROSSES_ABOVE SMA(50) AND RSI(14) > 50 AND ONCHAIN("btc_dominance_change", 7) < -0.01
   exit_conditions:
   - CLOSE < SMA(50) OR RSI(14) > 75
   required_indicators:
@@ -2801,4 +2801,113 @@
     skip_param_override: true
     low_frequency: true
     interval: 1d
+    min_rpt_override: 0.025
+- seq: 259
+  name: Crypto Vol-Managed Trend
+  description: 'Volatility-managed trend entry — long when daily close crosses above SMA(50) with ADX
+    confirming trend AND short-term ATR is NOT in a blow-out vs medium-term (ATR(14) < 1.3x ATR(50)),
+    so we ride trends but stand aside during liquidation/volatility spikes. Volatility management is the
+    documented mitigant for crypto-momentum crashes (Financial Markets & Portfolio Mgmt 2025-26). Exit
+    on trend break or ADX collapse.'
+  strategy_type: trend_following
+  market_regimes:
+  - trending_up
+  - trending_up_weak
+  - trending_up_strong
+  - ranging
+  - ranging_low_vol
+  entry_conditions:
+  - CLOSE CROSSES_ABOVE SMA(50) AND ADX(14) > 20 AND ATR(14) < ATR(50) * 1.3
+  exit_conditions:
+  - CLOSE < SMA(50) OR ADX(14) < 15
+  required_indicators:
+  - SMA:50
+  - ADX
+  - ATR:14
+  - ATR:50
+  default_parameters:
+    sma_period: 50
+    adx_period: 14
+    adx_entry: 20
+    adx_exit: 15
+    stop_loss_pct: 0.08
+    take_profit_pct: 0.22
+  expected_trade_frequency: 1-3 trades/month per symbol
+  expected_holding_period: 10-60 days
+  risk_reward_ratio: 2.75
+  metadata:
+    direction: long
+    crypto_optimized: true
+    skip_param_override: true
+    interval: 1d
+    min_rpt_override: 0.02
+- seq: 260
+  name: Crypto BTC Relative Strength
+  description: 'Dual momentum — long an alt only when it is in its own uptrend (above SMA(50)) AND outperforming
+    BTC over the prior 30 daily bars (relative strength via LAG_RETURN). Matches the 2026 high-BTC-dominance
+    regime where capital is selective and only the strongest alts participate. Exit when the alt loses
+    its trend OR stops beating BTC (relative-strength reversal).'
+  strategy_type: momentum
+  market_regimes:
+  - trending_up
+  - trending_up_weak
+  - trending_up_strong
+  - ranging
+  - ranging_low_vol
+  - ranging_high_vol
+  entry_conditions:
+  - CLOSE > SMA(50) AND RSI(14) > 50 AND LAG_RETURN("SELF", 30, "1d") > LAG_RETURN("BTC", 30, "1d")
+  exit_conditions:
+  - CLOSE < SMA(50) OR LAG_RETURN("SELF", 14, "1d") < LAG_RETURN("BTC", 14, "1d")
+  required_indicators:
+  - SMA:50
+  - RSI
+  default_parameters:
+    stop_loss_pct: 0.06
+    take_profit_pct: 0.15
+  expected_trade_frequency: 2-5 trades/month per symbol
+  expected_holding_period: 5-30 days
+  risk_reward_ratio: 2.5
+  metadata:
+    direction: long
+    crypto_optimized: true
+    skip_param_override: true
+    interval: 1d
+    leader_symbol: BTC
+    min_rpt_override: 0.02
+- seq: 261
+  name: Crypto Time-Series Momentum
+  description: 'Absolute (time-series) momentum — the canonical managed-futures trend signal applied to
+    crypto. Long when price is above its long MA AND both the 90-day and 30-day trailing returns are
+    positive (multi-horizon trend agreement). Exit when the medium MA breaks or 30-day momentum turns
+    negative. Low frequency, holds weeks; vol-scaled at the sizing layer.'
+  strategy_type: momentum
+  market_regimes:
+  - trending_up
+  - trending_up_weak
+  - trending_up_strong
+  - ranging
+  - ranging_low_vol
+  entry_conditions:
+  - CLOSE > SMA(100) AND PRICE_CHANGE_PCT(90) > 0 AND PRICE_CHANGE_PCT(30) > 0
+  exit_conditions:
+  - CLOSE < SMA(50) OR PRICE_CHANGE_PCT(30) < 0
+  required_indicators:
+  - SMA:100
+  - SMA:50
+  - Price Change %:90
+  - Price Change %:30
+  default_parameters:
+    stop_loss_pct: 0.1
+    take_profit_pct: 0.3
+    hold_period_max: 120
+  expected_trade_frequency: 1-3 trades/quarter per symbol
+  expected_holding_period: 20-90 days
+  risk_reward_ratio: 3.0
+  metadata:
+    direction: long
+    crypto_optimized: true
+    skip_param_override: true
+    interval: 1d
+    low_frequency: true
     min_rpt_override: 0.025

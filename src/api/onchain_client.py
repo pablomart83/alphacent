@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 # here + one fetch function. Keeps the surface area auditable.
 SUPPORTED_METRICS = frozenset([
     "btc_dominance",         # BTC market-cap share, 0..1
+    "btc_dominance_change",  # 7d ABSOLUTE change in btc_dominance (e.g. -0.01 = -1pp)
     "stablecoin_supply",     # Aggregate USDT+USDC market cap in USD
     "stablecoin_supply_pct", # 7d % change in stablecoin supply
 ])
@@ -216,6 +217,7 @@ def get_metric(metric: str, end: datetime, lookback_days: int) -> pd.Series:
     # We fetch max(caller_requested, CEILING) so we never shrink the cache.
     _WIDEST_FETCH = {
         "btc_dominance": 365,
+        "btc_dominance_change": 365,
         "stablecoin_supply": 1095,         # 3y — enough for any WF window
         "stablecoin_supply_pct": 1095,
     }
@@ -223,6 +225,14 @@ def get_metric(metric: str, end: datetime, lookback_days: int) -> pd.Series:
 
     if m == "btc_dominance":
         series = _fetch_btc_dominance(end, widest)
+    elif m == "btc_dominance_change":
+        # Derived: 7-day ABSOLUTE change of BTC dominance (0..1 units), so a
+        # 1-percentage-point drop over 7 days reads as -0.01. Lets templates
+        # express "dominance falling" (rotation into alts) rather than an
+        # absolute level that goes stale as the structural dominance regime
+        # shifts. Mirrors the stablecoin_supply_pct derivation pattern.
+        raw = _fetch_btc_dominance(end, widest + 7)
+        series = raw.diff(periods=7).dropna()
     elif m == "stablecoin_supply":
         series = _fetch_stablecoin_supply(end, widest)
     elif m == "stablecoin_supply_pct":

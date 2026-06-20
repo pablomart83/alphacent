@@ -25,15 +25,13 @@ from src.strategy.strategy_proposer import StrategyProposer
 from src.strategy.template_catalog import load_catalog
 
 TEMPLATES = [
-    "Crypto Golden Cross",
-    "Crypto Weekly Trend Follow",
+    "Crypto Vol-Managed Trend",
+    "Crypto BTC Relative Strength",
+    "Crypto Time-Series Momentum",
+    "Crypto Dominance Rotation Alt Long",
     "Crypto 21W MA Trend Follow",
-    "Crypto Vol-Compression Momentum",
-    "Crypto Donchian Breakout Daily",
-    "Crypto BTC Follower Daily",
-    "Crypto Weekly Momentum Long",
 ]
-SYMBOLS = ["BTC", "ETH"]
+SYMBOLS = ["BTC", "ETH", "SOL"]
 
 cfg = Configuration()
 cr = cfg.load_credentials(TradingMode.DEMO)
