@@ -6,6 +6,21 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-20 (Opus 4.8) — PART 2: CRYPTO STRATEGY REVAMP (CIO-approved). Deployed live, healthy, pushed. Commits `f1c50af`,`bd3ea0c`.** After the R1-R8 validator fixes (PART 1, below) made the funnel honest, a crypto-only cycle proved the catalog ITSELF was the problem: every sampled high-frequency mean-reversion template returned −1.5% to −10% cost-net/trade at eToro's 1.5% round-trip. Pivoted to crypto's real documented edge (trend/momentum):
+
+- **Catalog cost-style policy** (`template_catalog._passes_crypto_cost_style`): only trend_following/momentum/breakout holding ≥24h survive load → **90→27 crypto templates** (12 trend/8 breakout/7 momentum). Drops mean-reversion/volatility + sub-day scalps.
+- **Universe 6→10** (XRP/ADA/LTC/BCH added; binance SYMBOL_MAP + symbols.yaml; all backfilled). Family/cross-sectional `family_universe` + RANK universe widened to 10; cross-sectional top-N 3→4; family quorum 4/6 → **50% majority**.
+- **BTC-trend signal gate** (`order_executor._check_btc_trend_gate`, LIVE-only, crypto-only, fail-open): blocks crypto LONG when BTC daily < SMA(50). A long-only crypto trend book must be flat in a BTC downtrend.
+- **`scripts/clear_crypto_wf_cache.py`** extended to also clear rejection/zero-trade blacklists (ran it: cleared 73 rejection + 23 zero-trade crypto entries — this was why a crypto-only cycle proposed only 1 strategy: 7 key templates were blacklist-blocked).
+
+**PROOF the edge is real** (`scripts/verify_crypto_trend_edge.py`, production rolling-WF + honest gate over full 2023-26 history): **21W MA × ETH = +5.85%/trade (Sharpe 0.94), Weekly Trend × ETH = +2.35%/trade PASS**; negative-edge templates (Donchian −6%, Vol-Compression) correctly FAIL; Golden Cross/BTC-Follower flagged too-few-trades (ultra-low-freq, need cross-sectional pooling). Gate DISCRIMINATES — not all-pass, not all-fail.
+
+**CURRENT STATE (correct, not a bug):** BTC is −14% (63.5k vs SMA50 72.7k) → trending_down → the trend-only catalog proposes 0 crypto = **system correctly sits flat in a BTC bear** (vs the old catalog buying dips into −10%/trade losses). Crypto trend strategies will propose/validate/activate when BTC turns up; the proven-edge ones (21W MA/Weekly Trend on ETH, cross-sectional rotation across 10 coins) are the live candidates. **NEXT: watch the first BTC-uptrend cycle for crypto `wf_validated`/activation; verify R4 family quorum fires when a cross-sectional template is regime-eligible.** Reachable-on-eToro edge is long-only trend/momentum only — carry/basis/vol/stat-arb need derivatives eToro retail lacks (documented in the strategic analysis).
+
+---
+
+## ⚡ PART 1 — VALIDATOR FIXES (R1–R8)
+
 **SESSION 2026-06-20 (Opus 4.8) — CRYPTO PIPELINE end-to-end audit + revamp R1–R8. All deployed live, healthy, pushed. Commits `7efadc2`→`40e83a7`. Audit: `CRYPTO_PIPELINE_AUDIT_2026-06-20.md`.**
 
 **Headline finding (verified live DB/logs):** crypto book was DARK — 0 crypto strategies in any status, last crypto order 2026-05-25. Root cause was a validation ARTIFACT (the crypto analog of the √252 class): crypto WF validated on 1–4 trades/window with per-bar flat-bar-inclusive Sharpes inflated to 2.5–5; equity-calibrated gates (consistency≤1.5, per-bar overfit quorum, unreachable 4/6 family quorum) then rejected on that noise. Data/costs/annualization/24-7 handling/risk caps were all VERIFIED CORRECT (not the bug).
