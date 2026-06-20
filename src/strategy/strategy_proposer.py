@@ -1187,6 +1187,85 @@ class StrategyProposer:
         except Exception as e:
             logger.debug(f"Could not save market stats to disk: {e}")
 
+    # Minimum realized trades required to form an honest per-trade Sharpe.
+    # Below this, dispersion is meaningless and the statistic is not trusted.
+    _CRYPTO_MIN_TRADES_FOR_SHARPE = 3
+
+    def _per_trade_net_sharpe(self, results, symbol: str, interval: str = '1d') -> Optional[Dict[str, float]]:
+        """Per-trade, COST-NET, frequency-annualized Sharpe from a BacktestResults.
+
+        The vectorbt per-bar Sharpe is flat-bar-inclusive; on a sparse crypto
+        equity curve it inflates to 3-5 on 1-4 trades (CRYPTO_PIPELINE_AUDIT
+        2026-06-20 §C1). This computes the Sharpe over the *realized trades*,
+        net of the eToro round-trip transaction cost, annualized by the
+        strategy's actual trade frequency (24/7 -> 365d). It cannot be faked by
+        flat bars and is on the same per-trade basis as the MC bootstrap.
+
+        Returns {'sharpe','n_trades','mean_net','ann'} or None when there are
+        too few trades or zero dispersion (no honest Sharpe is possible).
+        """
+        if results is None:
+            return None
+        try:
+            import numpy as _np
+            from src.strategy.cost_model import round_trip_cost_pct as _rtc_fn
+        except Exception:
+            return None
+        trades_list = getattr(results, 'trades', None)
+        if trades_list is None:
+            return None
+        # Normalize to a list of per-trade fractional returns (vectorbt 'Return').
+        if hasattr(trades_list, 'to_dict'):
+            try:
+                trades_list = trades_list.to_dict('records') if not trades_list.empty else []
+            except Exception:
+                trades_list = []
+        rets: List[float] = []
+        for t in trades_list:
+            if isinstance(t, dict):
+                r = t.get('Return')
+                if r is None:
+                    r = t.get('return')
+                if r is None:
+                    r = t.get('pnl_pct')
+            else:
+                r = getattr(t, 'Return', None)
+                if r is None:
+                    r = getattr(t, 'pnl_pct', None)
+            if r is not None:
+                try:
+                    rets.append(float(r))
+                except (TypeError, ValueError):
+                    pass
+        n = len(rets)
+        if n < self._CRYPTO_MIN_TRADES_FOR_SHARPE:
+            return None
+        # Cost-net each trade by the round-trip transaction cost (fractional).
+        try:
+            rtc = float(_rtc_fn(symbol, interval))
+        except Exception:
+            rtc = 0.0
+        arr = _np.array(rets, dtype=float) - rtc
+        mean_net = float(arr.mean())
+        std = float(arr.std(ddof=1)) if n > 1 else 0.0
+        if std <= 1e-9:
+            return None  # zero dispersion -> Sharpe undefined / meaningless
+        # Frequency annualization from the ACTUAL test window (24/7 -> 365d),
+        # matching the MC bootstrap's per-trade-frequency approach.
+        window_days = 0.0
+        try:
+            period = getattr(results, 'backtest_period', None)
+            if period and period[0] and period[1]:
+                window_days = max((period[1] - period[0]).days, 0)
+        except Exception:
+            window_days = 0.0
+        if window_days < 1:
+            window_days = 365.0  # conservative fallback
+        trades_per_year = (n / window_days) * 365.0
+        ann = float(_np.sqrt(max(trades_per_year, 1.0)))
+        sharpe = (mean_net / std) * ann
+        return {'sharpe': float(sharpe), 'n_trades': n, 'mean_net': mean_net, 'ann': ann}
+
     def _get_direction_aware_thresholds(self, direction: str, market_regime) -> Dict[str, float]:
         """
         Get walk-forward validation thresholds adjusted for strategy direction and market regime.
@@ -2406,7 +2485,19 @@ class StrategyProposer:
                     )
             except Exception:
                 _max_uptrend_hedge = 3
+            # Crypto symbol set for the per-trade cost-net acceptance branch (R1/R3).
+            _crypto_set_accept: set = set()
+            try:
+                from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO as _DAC_ACCEPT
+                _crypto_set_accept = set(_DAC_ACCEPT)
+            except Exception:
+                _crypto_set_accept = set()
             for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
+                # Per-strategy crypto detection (used by the pre-gate and the
+                # crypto per-trade acceptance branch below).
+                _csym = (s.symbols[0].upper() if getattr(s, 'symbols', None) else '')
+                _is_crypto_accept = _csym in _crypto_set_accept
+                _cintv = str((s.metadata or {}).get('interval', '1d') if getattr(s, 'metadata', None) else '1d').lower()
                 if s.id not in mc_passed_ids:
                     _decision_rows.append({
                         "stage": "wf_rejected", "decision": "rejected",
@@ -2420,7 +2511,11 @@ class StrategyProposer:
                     continue  # Filtered by Monte Carlo bootstrap
                 if wf is None:
                     continue  # Loaded from 4-tuple disk cache — no wf_results dict
-                if not (tv and tev and het and not ov):
+                # Per-bar overfit (ov) is a known crypto artifact (audit 2026-06-20
+                # §C4 — driven by 1-4 trade per-bar Sharpes). For crypto the
+                # per-trade consistency gate in the crypto branch below replaces it.
+                # Equity still requires `not ov`.
+                if not (tv and tev and het and (_is_crypto_accept or not ov)):
                     _decision_rows.append({
                         "stage": "wf_rejected", "decision": "rejected",
                         "strategy_id": s.id, "template": (s.metadata or {}).get('template_name') or s.name,
@@ -2562,6 +2657,72 @@ class StrategyProposer:
                         "edge_ratio": _er,
                     },
                 }
+
+                # === CRYPTO acceptance on the honest per-trade cost-net Sharpe ===
+                # (CRYPTO_PIPELINE_AUDIT 2026-06-20 §R1/R3). The per-bar Sharpe
+                # (ts/tes) is retained for observability only; the gate uses a
+                # per-trade, cost-net, frequency-annualized Sharpe that cannot be
+                # inflated by flat bars, plus an explicit positive net-expectancy
+                # (economic) bar. The consistency check is applied to THIS bounded
+                # metric, so it no longer rejects on the per-bar artifact (§C2).
+                # Equity strategies fall through to the paths below unchanged.
+                if _is_crypto_accept:
+                    _ptt = self._per_trade_net_sharpe(wf.get('test_results'), _csym, _cintv)
+                    _ptr = self._per_trade_net_sharpe(wf.get('train_results'), _csym, _cintv)
+                    _crow = dict(_row_base)
+                    _crow['metadata'] = {
+                        **_row_base['metadata'],
+                        'pt_test_sharpe': (_ptt['sharpe'] if _ptt else None),
+                        'pt_train_sharpe': (_ptr['sharpe'] if _ptr else None),
+                        'pt_mean_net': (_ptt['mean_net'] if _ptt else None),
+                        'pt_n_trades': (_ptt['n_trades'] if _ptt else 0),
+                        'per_bar_test_sharpe': tes,
+                        'per_bar_train_sharpe': ts,
+                    }
+                    if _ptt is None:
+                        _decision_rows.append({**_crow, "stage": "wf_rejected", "decision": "rejected",
+                            "score": tes,
+                            "reason": f"crypto_no_per_trade_sharpe (test_trades={test_trades} — insufficient/zero-dispersion)"})
+                    else:
+                        pt_test = _ptt['sharpe']
+                        pt_train = _ptr['sharpe'] if _ptr is not None else None
+                        net_exp = _ptt['mean_net']
+                        # Consistency on the honest metric: a large test>>train gap is
+                        # regime luck UNLESS train itself already clears the bar.
+                        _spread_ok = (pt_train is None) or ((pt_test - pt_train) <= 1.5) or (pt_train >= min_sharpe)
+                        _train_ok = (pt_train is None) or (pt_train >= -0.5)
+                        if net_exp <= 0:
+                            _decision_rows.append({**_crow, "stage": "wf_rejected", "decision": "rejected",
+                                "score": pt_test,
+                                "reason": f"crypto_negative_net_expectancy (mean_net/trade={net_exp:.3%})"})
+                        elif test_win_rate < min_win_rate:
+                            _decision_rows.append({**_crow, "stage": "wf_rejected", "decision": "rejected",
+                                "score": pt_test,
+                                "reason": f"crypto_below_win_rate (wr={test_win_rate:.2%} < {min_win_rate:.2%})"})
+                        elif pt_test < min_sharpe:
+                            _decision_rows.append({**_crow, "stage": "wf_rejected", "decision": "rejected",
+                                "score": pt_test,
+                                "reason": f"crypto_below_sharpe (pt_test={pt_test:.2f} < {min_sharpe:.2f})"})
+                        elif not _train_ok:
+                            _decision_rows.append({**_crow, "stage": "wf_rejected", "decision": "rejected",
+                                "score": pt_test,
+                                "reason": f"crypto_train_disaster (pt_train={pt_train:.2f} < -0.5)"})
+                        elif not _spread_ok:
+                            _decision_rows.append({**_crow, "stage": "wf_rejected", "decision": "rejected",
+                                "score": pt_test,
+                                "reason": f"crypto_consistency (pt_test={pt_test:.2f} pt_train={pt_train:.2f} diff>1.5, train below bar)"})
+                        else:
+                            validated_strategies.append((s, wf))
+                            _decision_rows.append({**_crow, "stage": "wf_validated", "decision": "accepted",
+                                "score": pt_test,
+                                "reason": f"crypto_per_trade_net (pt_test={pt_test:.2f} net_exp/trade={net_exp:.3%} n={_ptt['n_trades']})"})
+                            logger.info(
+                                f"  Crypto WF PASS (per-trade net): {s.name} "
+                                f"pt_test={pt_test:.2f} pt_train={'NA' if pt_train is None else f'{pt_train:.2f}'} "
+                                f"net_exp/trade={net_exp:.3%} n={_ptt['n_trades']} "
+                                f"(per-bar test={tes:.2f} — observability only)"
+                            )
+                    continue
 
                 # Primary path: both train and test above threshold
                 _n_validated_before = len(validated_strategies)
@@ -2757,23 +2918,28 @@ class StrategyProposer:
                         test_results = wf.get('test_results')
                         test_return = float(test_results.total_return) if test_results else 0.0
                         test_trades = int(test_results.total_trades) if test_results else 0
-                        # Minimal bar: valid numerics, positive net return,
-                        # Sharpe above family criterion, at least 2 trades
-                        # (statistical floor — one trade is not a sample).
+                        # Minimal bar on the HONEST per-trade cost-net Sharpe (R1/R4b,
+                        # audit 2026-06-20): the per-bar Sharpe (tes) and the per-bar
+                        # overfit flag (ov) are crypto artifacts (§C1/§C4). The family
+                        # clears-bar uses the same per-trade, cost-net metric as the
+                        # single-symbol crypto gate, plus positive cost-net expectancy.
+                        _fam_intv = str((s.metadata or {}).get('interval', '1d') if s.metadata else '1d').lower()
+                        _pt_fam = self._per_trade_net_sharpe(test_results, sym, _fam_intv)
                         clears = (
-                            bool(tv) and bool(tev) and not bool(ov)
-                            and float(tes) > FAMILY_MIN_SHARPE_CRITERION
-                            and test_return > FAMILY_MIN_RETURN_CRITERION
+                            bool(tv) and bool(tev)
+                            and _pt_fam is not None
+                            and _pt_fam['sharpe'] > FAMILY_MIN_SHARPE_CRITERION
+                            and _pt_fam['mean_net'] > FAMILY_MIN_RETURN_CRITERION
                             and test_trades >= 2
                         )
                         clears_minimal_bar_by_sym[sym] = clears
                         breakdown[sym] = {
                             'status': 'cleared' if clears else 'failed_minimal_bar',
-                            'train_sharpe': float(ts) if tv else None,
-                            'test_sharpe': float(tes) if tev else None,
+                            'pt_test_sharpe': (round(_pt_fam['sharpe'], 3) if _pt_fam else None),
+                            'pt_mean_net': (round(_pt_fam['mean_net'], 5) if _pt_fam else None),
+                            'per_bar_test_sharpe': float(tes) if tev else None,
                             'test_return': test_return,
                             'test_trades': test_trades,
-                            'overfitted': bool(ov),
                         }
 
                     cleared_count = sum(1 for v in clears_minimal_bar_by_sym.values() if v)
@@ -6435,6 +6601,34 @@ Generate a CORRECTED strategy that addresses all errors:"""
         NO_SHORT_ASSET_CLASSES = {"crypto"}
         assignments = [(t, s) for t, s in assignments
                        if not (_get_direction(t) == 'short' and self._get_asset_class(s) in NO_SHORT_ASSET_CLASSES)]
+
+        # === Family cross-validation quorum guarantee (R4, audit 2026-06-20 §C3) ===
+        # requires_cross_validation templates are accepted at FAMILY level
+        # (>=4/6 of family_universe must clear). That quorum can only form if ALL
+        # family members are walk-forward'd in the SAME cycle — but the round-robin
+        # emits ~1 member/cycle, so 14/14 family rejections had 5/6 'not_proposed'
+        # and the rescue was structurally dead. Force every family_universe member
+        # (tradeable, not already picked) into this cycle whenever the template is
+        # viable at all (>=1 member scored a pair).
+        _symbols_upper = {s.upper() for s in symbols}
+        _family_added = 0
+        for tmpl in active_templates:
+            md = tmpl.metadata or {}
+            if not md.get('requires_cross_validation'):
+                continue
+            universe = [str(u).upper() for u in (md.get('family_universe') or [])]
+            if not universe or not template_ranked.get(tmpl.name):
+                continue
+            for sym in universe:
+                if sym not in _symbols_upper or (tmpl.name, sym) in picked_combos:
+                    continue
+                _assign(tmpl, sym)
+                _family_added += 1
+        if _family_added:
+            logger.info(
+                f"Family cross-validation quorum: force-added {_family_added} family "
+                f"member(s) so requires_cross_validation universes are evaluated together"
+            )
 
         # Final logging
         fl = sum(1 for t, _ in assignments if _get_direction(t) == 'long' and not _is_alpha_edge(t))
