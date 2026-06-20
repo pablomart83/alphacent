@@ -6,6 +6,19 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-20 (Opus 4.8) — PART 3: RESEARCH-DRIVEN EDGES + RISK-OFF EXIT + FUNDING SIGNAL. Deployed, healthy, pushed. Commits `81ce036`,`d45ced0`.** After an online review of 2026 crypto-quant literature + current dynamics (BTC dominance ~58-63% 4yr high, "altcoin rotation selective not gone"; volatility-management is the documented momentum-crash mitigant):
+
+- **New templates** (catalog 27→32, all trend/momentum, cost-viable): **Vol-Managed Trend** (entry gated on ATR(14)<1.3×ATR(50) — stand aside in liquidation spikes), **BTC Relative Strength** (dual momentum — alt must beat BTC over 30d via `LAG_RETURN("SELF")>LAG_RETURN("BTC")`), **Time-Series Momentum** (canonical multi-horizon TSMOM — proof: ETH +2.44%/trade Sharpe 0.49), **Funding-Filtered Trend** (skip entries when BTC funding >4bp/8h = froth), **Capitulation Funding Re-Entry** (re-enter trend-turn when funding<0 = washout).
+- **Dominance Rotation fix**: was DEAD (checked absolute `btc_dominance<0.55` but dominance is 0.58-0.63). Added derived `btc_dominance_change` onchain metric (7d Δ); now fires on dominance *falling* ≥1pp/7d — regime-adaptive.
+- **NEW onchain metrics** (`src/api/onchain_client.py`): `btc_dominance_change` (CoinGecko-derived) + `btc_funding_rate` (Binance public funding history, daily mean, 2y, backtestable). Funding = leveraged-positioning sentiment; signal-only (can't trade carry on eToro).
+- **BTC RISK-OFF EXIT overlay** (`monitoring_service._check_crypto_regime_exits`): symmetric to the entry gate — force-exits LIVE crypto longs when BTC<SMA50; LIVE-only (PAPER unbiased), 30-min cadence, fail-open, `pending_closure` pipeline. **No-op today (0 live crypto) but correctly armed (BTC IS in downtrend).**
+
+**Proof tooling:** `scripts/verify_crypto_trend_edge.py` (production rolling-WF + honest gate on any template×symbol set), `scripts/verify_crypto_catalog.py` (surviving-template list). Gate verified DISCRIMINATING (TSMOM/21W-MA on ETH pass; negative-edge fail; rare-event templates flagged too-few-trades).
+
+**STILL OPEN (flagged, not built):** paid on-chain data (MVRV/NUPL/exchange-netflows — needs Glassnode/CryptoQuant subscription, CIO cost call); open-interest signal (Binance OI history only ~30d on free tier → not backtestable, live-only); 52-week-high breakout + cross-sectional breadth filter (incremental). Venue ceiling unchanged: carry/basis/vol/stat-arb need perps/options/shorting eToro lacks.
+
+---
+
 **SESSION 2026-06-20 (Opus 4.8) — PART 2: CRYPTO STRATEGY REVAMP (CIO-approved). Deployed live, healthy, pushed. Commits `f1c50af`,`bd3ea0c`.** After the R1-R8 validator fixes (PART 1, below) made the funnel honest, a crypto-only cycle proved the catalog ITSELF was the problem: every sampled high-frequency mean-reversion template returned −1.5% to −10% cost-net/trade at eToro's 1.5% round-trip. Pivoted to crypto's real documented edge (trend/momentum):
 
 - **Catalog cost-style policy** (`template_catalog._passes_crypto_cost_style`): only trend_following/momentum/breakout holding ≥24h survive load → **90→27 crypto templates** (12 trend/8 breakout/7 momentum). Drops mean-reversion/volatility + sub-day scalps.
