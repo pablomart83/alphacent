@@ -5978,6 +5978,41 @@ Generate a CORRECTED strategy that addresses all errors:"""
         
         return base_score
 
+    def _cross_sectional_universe(self, template) -> Optional[set]:
+        """Universe-membership set for a cross-sectional RANK_* template, else None.
+
+        A cross-sectional rank template (RANK_IN_UNIVERSE / _BOTTOM / RANK_LOW_VOL)
+        ranks SELF *within a fixed universe* baked into its rule. It can therefore
+        only trade symbols that ARE members of that universe — if SELF is not a
+        member, the rank primitive can never place it top-N, the indicator is
+        all-False, and the strategy produces 0 trades (root cause of the rank
+        factors' 0% conversion, 2026-06-20). Returns the uppercased member set so
+        the proposer can restrict these templates to their own universe; None for
+        ordinary (non-cross-sectional) templates. Cached per template name.
+        """
+        cache = getattr(self, '_xsec_universe_cache', None)
+        if cache is None:
+            cache = {}
+            self._xsec_universe_cache = cache
+        tname = getattr(template, 'name', '') or ''
+        if tname in cache:
+            return cache[tname]
+        universe_set: Optional[set] = None
+        try:
+            from src.strategy.cross_asset_primitives import extract_cross_asset_references
+            conds = (list(getattr(template, 'entry_conditions', []) or []) +
+                     list(getattr(template, 'exit_conditions', []) or []))
+            _lag, rank_refs = extract_cross_asset_references(conds)
+            if rank_refs:
+                uni = set()
+                for _kind, _self_sym, universe, _w, _n in rank_refs:
+                    uni |= {str(s).upper() for s in universe}
+                universe_set = uni or None
+        except Exception:
+            universe_set = None
+        cache[tname] = universe_set
+        return universe_set
+
     def _match_templates_to_symbols(
         self,
         templates_for_cycle: List[StrategyTemplate],
@@ -6093,6 +6128,15 @@ Generate a CORRECTED strategy that addresses all errors:"""
                     template.metadata.get('interval', '') == '1h'
                 ) and not template.metadata.get('interval_4h', False))
                 if _tmpl_is_1h and symbol.upper() in _NO_1H_SYMBOLS:
+                    continue
+
+                # Cross-sectional RANK_* templates can only trade UNIVERSE MEMBERS.
+                # The rank primitive ranks SELF within its fixed universe; a non-member
+                # SELF is never top-N → indicator all-False → 0 trades. Restrict these
+                # templates to their own universe so each member's per-symbol backtest
+                # is a valid timing strategy ("hold X while it's a top-N name").
+                _xsec_universe = self._cross_sectional_universe(template)
+                if _xsec_universe is not None and symbol.upper() not in _xsec_universe:
                     continue
 
                 base_score = self._score_symbol_for_template(

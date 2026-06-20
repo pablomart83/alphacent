@@ -83,3 +83,51 @@ def test_longhorizon_window_spans_more_than_standard():
     hi = p._select_wf_window(_strat(name="Price Momentum Breakout", rules={"x": "y"}), datetime(2026, 6, 20))
     # low-freq total span > standard total span
     assert (lo[0] + lo[1]) > (hi[0] + hi[1])
+
+
+# ── cross-sectional universe constraint (2026-06-20) ─────────────────────────
+# RANK_* templates can only trade symbols that ARE members of their ranked
+# universe; the proposer must not assign them out-of-universe symbols (else the
+# rank primitive is all-False → 0 trades). _cross_sectional_universe returns the
+# membership set so the matcher can restrict candidates.
+
+def test_cross_sectional_universe_parsed_from_rule():
+    p = _make_proposer()
+    t = SimpleNamespace(
+        name="Low Volatility Factor Long",
+        entry_conditions=['RANK_LOW_VOL("SELF", ["PG","KO","JNJ"], 60, 5) > 0 AND CLOSE > SMA(200)'],
+        exit_conditions=[],
+    )
+    uni = p._cross_sectional_universe(t)
+    assert uni == {"PG", "KO", "JNJ"}
+
+
+def test_cross_sectional_universe_bottom_and_top():
+    p = _make_proposer()
+    rev = SimpleNamespace(name="Short-Term Reversal Long",
+                          entry_conditions=['RANK_IN_UNIVERSE_BOTTOM("SELF", ["AAPL","MSFT"], 5, 8) > 0'],
+                          exit_conditions=[])
+    mom = SimpleNamespace(name="Cross-Sectional Momentum Long",
+                          entry_conditions=['RANK_IN_UNIVERSE("SELF", ["AAPL","NVDA"], 126, 8) > 0'],
+                          exit_conditions=[])
+    assert p._cross_sectional_universe(rev) == {"AAPL", "MSFT"}
+    assert p._cross_sectional_universe(mom) == {"AAPL", "NVDA"}
+
+
+def test_non_cross_sectional_template_returns_none():
+    p = _make_proposer()
+    t = SimpleNamespace(name="Price Momentum Breakout",
+                        entry_conditions=["CLOSE > SMA(20) AND RSI(14) > 50"],
+                        exit_conditions=["CLOSE < SMA(20)"])
+    assert p._cross_sectional_universe(t) is None
+
+
+def test_universe_membership_decides_proposal_eligibility():
+    """The guard logic: member symbol allowed, non-member skipped."""
+    p = _make_proposer()
+    t = SimpleNamespace(name="Low Volatility Factor Long",
+                        entry_conditions=['RANK_LOW_VOL("SELF", ["PG","KO","JNJ"], 60, 5) > 0'],
+                        exit_conditions=[])
+    uni = p._cross_sectional_universe(t)
+    assert "PG" in uni            # member → would be proposed
+    assert "WFC" not in uni       # non-member (the 0-trade case) → skipped
