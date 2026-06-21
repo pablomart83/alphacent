@@ -1010,6 +1010,19 @@ class RiskManager:
             except Exception:
                 _flat_size = 1000.0
 
+            # Leveraged-ETF paper haircut (2026-06-21 SOXL analysis): a 3x ETF with
+            # a (correctly) wider leveraged stop must NOT carry full flat notional,
+            # or a stop-out costs ~2x a normal name. Halve paper size for leveraged
+            # ETFs — mirrors the LIVE FIX-03 0.5x in order_executor so paper data is
+            # representative of how the pair is sized live (graduation isn't fed a
+            # mis-sized record). Bounds dollar risk while keeping the wider stop.
+            try:
+                from src.risk.sl_caps import is_leveraged_etf as _is_lev_paper
+                if _is_lev_paper((signal.symbol or "").split(":")[0]):
+                    _flat_size *= 0.5
+            except Exception:
+                pass
+
             # Apply symbol concentration cap (hard limit — still enforced for paper)
             # G-47: raised from 5% to 10% of equity for PAPER.
             # At 5% of $479K equity the cap was $24K — allowing only ~4 strategies

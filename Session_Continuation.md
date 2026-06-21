@@ -6,6 +6,28 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-21 (Opus 4.8) — SOXL / LEVERAGED-ETF trading-edge fix (CIO-approved). Deployed live, healthy, pushed.**
+
+Analysed SOXL (3x leveraged semis, graduated LIVE) end-to-end vs live+demo+backtest data. **The edge is real and large but we were bleeding it on churn + plain-ETF risk handling.** Verified findings:
+- **P&L by holding period (demo+live):** <1d hold = 69 trades, 22% win, **−$2,831**; 1-3d = +$939; 3-7d = 23 trades, 78% win, **+$7,118**; >7d = 6 trades, 83% win, **+$4,877**. The entire edge is in ≥3d trend holds; sub-day trading is a pure loss bucket.
+- **MAE/MFE (last 60 demo):** avg favorable +10.2% vs avg realized −0.67% — we gave back essentially the whole move.
+- **Live:** one 8-day hold made +46%/$927; the rest were quick re-entries that churned or stopped at −12.6%.
+- **Root causes (code-verified):** (1) `is_leveraged_etf`/`sl_caps` existed but the **proposal/backtest SL clamp hard-capped SL at 12% for everything**, while LIVE allowed the 20% leveraged cap → WF validated a DIFFERENT (tight-stop) strategy than we trade; on a 3x (~6-10% daily ATR) 12% is <1.5x ATR = guaranteed noise-stopout (the `Max loss exceeded: -12% (2x SL of 6%)` cluster). (2) **No vol/leverage-aware sizing in PAPER** — flat $2,000 on a 3x. (3) **No anti-churn** — 4H templates re-entered and whipsawed.
+
+**Changes shipped (generalizable to all leveraged ETFs — SOXL/TQQQ/SPXL/SOXS/… via `src.risk.sl_caps.is_leveraged_etf`):**
+- **`strategy_proposer.py` — leverage-aware SL/TP clamp:** leveraged ETFs now clamp SL to 8–20% (matches the live `sl_caps` 0.20 cap) and TP to 12–45%, so backtest/WF/paper validate the SAME wide-stop strategy live trades. Non-leveraged unchanged (1.5–12% / 3–30%).
+- **`risk_manager.py` — PAPER leveraged-ETF size haircut (×0.5):** mirrors the LIVE FIX-03 0.5x so a wider (correct) stop doesn't carry full notional and paper data is representative for graduation. Dollar risk bounded.
+- **`strategy_proposer.py` — anti-churn (daily-only):** leveraged ETFs are skipped on 1h/4h templates at match time (`_is_leveraged_etf_symbol`); they trade only daily trend/momentum. Directly removes the −$2,831 sub-day bucket. (Module helper added, fail-safe.)
+- **LIVE SOXL pair (DB, CIO-approved):** widened `live_strategies.sl_pct` 6%→15% and `tp_pct` 15%→35% for both SOXL rows (within the 20% cap) — fixes the live whipsaw on the existing graduated pair (read fresh by the live pass, no restart). The monitoring "2× SL" catastrophic guard now scales off the correct wide stop (~30% not 12%).
+
+**VERIFIED live:** SOXL/TQQQ/SOXS → leveraged (20% cap, wide-stop branch, daily-only); SPY/QQQ/AAPL → normal. WF cache is param-keyed so SOXL/TQQQ auto-revalidate at the new stops on next proposal (no manual clear).
+
+**FLAGGED / NOT done (judgment calls):**
+- **Cross-asset-signal template** (long SOXL gated on SOXX>50DSMA + SOXX momentum>0 + SPY>100DSMA + vol-ceiling — the user's reference edge): needs **new cross-symbol DSL primitives** (the DSL can't reference another symbol's SMA today; `LAG_RETURN`/`RANK` exist but not cross-symbol SMA). Higher-effort follow-up; the existing daily trend templates (EMA/SMA/ADX Trend — the top SOXL earners) + the risk fixes above capture most of the proven edge now.
+- **SOXL daily re-graduation:** the live pair is on the 4H template (now stop-widened). Cleaner long-term is to re-graduate SOXL on a DAILY trend template (anti-churn already blocks new 4H leveraged pairs). Left for CIO — the 4H live pair is net-positive (+$868) and now has leverage-appropriate stops.
+
+---
+
 **SESSION 2026-06-21 (Opus 4.8) — DATA-PIPELINE RELIABILITY: FMP 429 burst fix + SPY 1h weekend false-alarm. Deployed live, healthy, verified, pushed.**
 
 Two data-source error classes from the logs, both root-caused and fixed:

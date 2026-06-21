@@ -20,6 +20,16 @@ from src.utils.symbol_mapper import DAILY_ONLY_SYMBOLS as _DAILY_ONLY_SYMBOLS, N
 logger = logging.getLogger(__name__)
 
 
+def _is_leveraged_etf_symbol(symbol: str) -> bool:
+    """Fail-safe wrapper around the canonical leveraged-ETF check (src.risk.sl_caps).
+    Returns False on any import/lookup error so a missing module never blocks proposals."""
+    try:
+        from src.risk.sl_caps import is_leveraged_etf
+        return is_leveraged_etf((symbol or "").split(":")[0])
+    except Exception:
+        return False
+
+
 class DataQuality(str, Enum):
     """Data quality classifications based on available days (for 2-year lookback)."""
     EXCELLENT = "excellent"  # 600+ days (~2 years)
@@ -1514,9 +1524,25 @@ class StrategyProposer:
                 f"SL={sl:.3%}, TP={tp:.3%}"
             )
 
-        # Clamp to sane bounds
-        sl = max(0.015, min(sl, 0.12))   # 1.5% – 12%
-        tp = max(0.03, min(tp, 0.30))    # 3% – 30%
+        # Clamp to sane bounds — leverage-aware (2026-06-21 SOXL analysis).
+        # Leveraged ETFs (SOXL/TQQQ/…) need a WIDER stop: at ~6-10% daily ATR a 12%
+        # cap is <1.5x ATR → guaranteed noise-stopout. Our live+demo data showed the
+        # <1d hold bucket lost -$2,831 while ≥3d holds made +$12k — the edge needs
+        # room to breathe. LIVE already allows the 20% leveraged cap (src.risk.sl_caps);
+        # the proposal/backtest clamp MUST match so WF validates the SAME strategy we
+        # trade live (the "backtest, WF, paper and live see the same edge" rule).
+        # Dollar risk is bounded by the leveraged-ETF size haircut, NOT a tight stop.
+        try:
+            from src.risk.sl_caps import is_leveraged_etf as _is_lev_clamp
+            _is_lev = bool(symbols and _is_lev_clamp(symbols[0]))
+        except Exception:
+            _is_lev = False
+        if _is_lev:
+            sl = max(0.08, min(sl, 0.20))   # leveraged ETF: 8% – 20% (matches live cap)
+            tp = max(0.12, min(tp, 0.45))   # wider TP to keep R:R on big 3x moves
+        else:
+            sl = max(0.015, min(sl, 0.12))   # 1.5% – 12%
+            tp = max(0.03, min(tp, 0.30))    # 3% – 30%
 
         # Ensure TP > SL (at least 2:1 reward-to-risk)
         if tp < sl * 2.0:
@@ -6330,6 +6356,16 @@ Generate a CORRECTED strategy that addresses all errors:"""
                     template.metadata.get('intraday') or template.metadata.get('interval_4h')
                 ))
                 if _tmpl_is_intraday and symbol.upper() in _DAILY_ONLY_SYMBOLS:
+                    continue
+
+                # Leveraged ETFs (SOXL/TQQQ/…) are DAILY-ONLY (2026-06-21 SOXL analysis).
+                # Sub-day trading of 3x ETFs is structurally value-destroying: our
+                # live+demo data showed the <1d holding bucket lost -$2,831 (22% win)
+                # via whipsaw/noise-stopouts, while ≥3d holds made +$12k (78-83% win).
+                # Daily-rebalance leverage decay + a wide (correct) stop only pay off
+                # on multi-day trend holds. Block leveraged ETFs on 1h/4h templates;
+                # they trade only on daily-interval trend/momentum templates.
+                if _tmpl_is_intraday and _is_leveraged_etf_symbol(symbol):
                     continue
 
                 # Skip no-1H-data symbols (OIL, COPPER) for 1H-only templates.
