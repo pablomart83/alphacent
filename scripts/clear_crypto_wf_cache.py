@@ -22,12 +22,26 @@ Safe to re-run. Restart the service after running so the in-memory copies reload
 JSON shape (all four files): {"entries": [{"template": ..., "symbol": ..., ...}, ...]}
 """
 import json
+import sys
 from pathlib import Path
 
-CRYPTO_SYMBOLS = {
-    'BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'DOT',
-    'ADA', 'XRP', 'MATIC', 'DOGE',
-}
+# Ensure the repo root is importable regardless of invocation cwd (running
+# `python scripts/foo.py` puts scripts/ on sys.path[0], not the repo root).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# Authoritative crypto universe. Derive from tradeable_instruments so this never
+# drifts from the live universe (the old hardcoded set still had MATIC/DOGE and was
+# missing the LTC/BCH/ADA/XRP added in the 2026-06-20 universe expansion — which would
+# have silently left wrong-cost WF entries for those coins behind). Falls back to a
+# static set only if the import fails.
+try:
+    from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO
+    CRYPTO_SYMBOLS = {s.upper() for s in DEMO_ALLOWED_CRYPTO}
+except Exception:
+    CRYPTO_SYMBOLS = {
+        'BTC', 'ETH', 'SOL', 'AVAX', 'LINK', 'DOT',
+        'ADA', 'XRP', 'LTC', 'BCH',
+    }
 
 FILES = [
     "config/.wf_validated_combos.json",

@@ -217,12 +217,12 @@ Account tier: Diamond ($100K-$250K balance). These are the real costs baked into
 | Asset | Commission | Spread | Overnight (LONG) | Overnight (SHORT) |
 |---|---|---|---|---|
 | Stock/ETF (non-leveraged BUY) | $0 | $0 (market spread only, no eToro markup) | **$0** | CFD: 6.4% + SOFR ≈ 10%/yr |
-| Crypto (Diamond, $100K-$250K) | **0.75% per position** | $0 | $0 (non-leveraged) | CFD: varies |
+| Crypto (Diamond, $100K-$250K) | **0.3% per position** | $0 | $0 (non-leveraged) | CFD: varies |
 | Forex (always CFD) | $0 | ~1 pip (EURUSD ≈ 10 bps) | Variable by pair | Variable |
 | Index (CFD) | $0 | Varies (~15 bps SPX500) | ~0.015%/day | ~0.015%/day |
 | Commodity (CFD) | $0 | Varies | ~0.02%/day | ~0.02%/day |
 
-**Critical:** Non-leveraged stock/ETF BUY positions have **zero overnight fee and zero spread markup**. The only real cost is market impact (slippage ~2 bps). Crypto round-trip is 1.5% (0.75% open + 0.75% close). These are reflected in `config/autonomous_trading.yaml` `backtest.transaction_costs`.
+**Critical:** Non-leveraged stock/ETF BUY positions have **zero overnight fee and zero spread markup**. The only real cost is market impact (slippage ~2 bps). Crypto round-trip is **0.6% commission (0.3% open + 0.3% close)**, ~0.7–0.8% incl. slippage. (Account-holder-confirmed Diamond crypto rate, 2026-06-20: **0.3%/side**, NOT the 0.75%/side previously modelled. eToro's *public* crypto rate is 1%/side; the Diamond/account rate is 0.3%/side — trust the account holder.) These are reflected in `config/autonomous_trading.yaml` `backtest.transaction_costs`.
 
 **Do not add phantom costs** to stock/ETF LONG backtests. The old values (15 bps spread, 7.3% annualised overnight) were wrong and have been corrected.
 

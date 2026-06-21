@@ -98,13 +98,15 @@ class TemplateSpec(BaseModel):
 # ---------------------------------------------------------------------------
 # Catalog-level policy (post-normalization culling)
 # ---------------------------------------------------------------------------
-# Crypto fee-floor policy: eToro crypto round-trip ~3% (1% commission/side + spread
-# + slippage). A template whose EFFECTIVE take-profit is below this floor is
-# deterministically negative-EV and is dropped at load. This used to be the inline
-# ``_MIN_CRYPTO_TP`` filter in StrategyTemplateLibrary.__init__; it now lives here as
-# a named, documented catalog policy applied AFTER normalization (floors first, then
-# this gate decides survival).
-_MIN_CRYPTO_TP = 0.06
+# Crypto fee-floor policy: eToro Diamond crypto round-trip ~0.7–0.8% (0.3% commission/side
+# + slippage; account-holder-confirmed 2026-06-20, was wrongly modelled at 0.75%/side =
+# 1.5% RT). A template whose EFFECTIVE take-profit is below this floor is deterministically
+# negative-EV and is dropped at load. This used to be the inline ``_MIN_CRYPTO_TP`` filter
+# in StrategyTemplateLibrary.__init__; it now lives here as a named, documented catalog
+# policy applied AFTER normalization (floors first, then this gate decides survival).
+# At ~0.8% round-trip a 3% TP clears the cost ~3.75× — so the floor is 0.03 (was 0.06 at
+# the wrong 1.5% cost).
+_MIN_CRYPTO_TP = 0.03
 
 
 def _passes_crypto_fee_floor(t: StrategyTemplate) -> bool:
@@ -115,29 +117,38 @@ def _passes_crypto_fee_floor(t: StrategyTemplate) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Crypto cost-STYLE / horizon policy (2026-06-20 crypto revamp).
+# Crypto cost-STYLE / horizon policy (2026-06-20 crypto revamp; RE-BASELINED
+# 2026-06-20 PM after the cost correction).
 #
-# eToro Diamond crypto = 0.75%/side = ~1.5% round-trip. At that cost only
-# LOW-FREQUENCY, LARGE-MOVE strategies can amortize the fee. The live cycle on
-# 2026-06-20 proved the high-frequency mean-reversion catalog is structurally
-# negative-EV here: every sampled mean-reversion/dip/capitulation template
-# returned −1.5% to −10% cost-net per trade. Crypto's robust documented edge is
-# TREND/MOMENTUM (Liu & Tsyvinski 2021; Liu/Tsyvinski/Wu 2022), held for weeks.
+# eToro Diamond crypto = 0.3%/side = ~0.7–0.8% round-trip (account-holder-confirmed;
+# previously WRONGLY modelled at 0.75%/side = 1.5% RT). The original cull here was
+# calibrated to that wrong 1.5% cost and aggressively dropped ~62 of 95 crypto
+# templates — almost all mean-reversion and all sub-day horizons. At the TRUE ~0.8%
+# round-trip the high-frequency / mean-reversion space is far more viable, so this
+# filter is now a LIGHT plausibility screen; the HONEST per-trade cost-net WF gate
+# (`strategy_proposer._per_trade_net_sharpe`, which reads the corrected
+# `round_trip_cost_pct`) does the real economic culling. Do NOT hand-pick winners
+# here — let the gate decide.
 #
-# Policy: a crypto_optimized template survives load only if it is
-#   trend_following / momentum / breakout  AND  holds >= 24h (min expected hold).
-# This drops (a) mean-reversion / volatility-fade (wrong style for trend-
-# dominated crypto) and (b) sub-day scalps (can't clear the cost floor),
-# regardless of bar interval. Non-crypto templates are untouched.
+# Policy (relaxed):
+#   - trend_following / momentum / breakout: survive if min expected hold >= 8h
+#     (was 24h — the 24h floor existed only because high-freq churn lost to 1.5%).
+#   - mean_reversion / volatility: survive if take-profit >= 5% AND min hold >= 8h
+#     (was: blanket-dropped except a deep-capitulation TP>=20%/hold>=7d carve-out).
+#     A 5% target clears the ~0.8% round-trip ~6×; the honest gate then decides
+#     whether the realised per-trade edge actually covers cost.
+# Sub-day scalps with tiny TPs (< 5% MR / < 3% any) still fall out via the hold
+# floor + fee floor. Non-crypto templates are untouched.
 # ---------------------------------------------------------------------------
 import re as _re
 
 _CRYPTO_VIABLE_STYLES = {"trend_following", "momentum", "breakout"}
-_CRYPTO_MIN_HOLD_HOURS = 24.0
-# Deep-capitulation mean-reversion carve-out: a big-target, rare trade that can
-# clear the ~1.5% round-trip (the one long-only edge in a crypto bear).
-_CRYPTO_MR_MIN_TP = 0.20          # >= 20% take-profit
-_CRYPTO_MR_MIN_HOLD_HOURS = 168.0  # >= 7-day hold (low frequency)
+_CRYPTO_MIN_HOLD_HOURS = 8.0
+# Mean-reversion / volatility re-admission (was a deep-capitulation-only carve-out at
+# the wrong 1.5% cost). At ~0.8% RT, ordinary swing mean-reversion with a >=5% target
+# and a >=8h hold can clear cost — let it through and let the honest gate judge it.
+_CRYPTO_MR_MIN_TP = 0.05           # >= 5% take-profit
+_CRYPTO_MR_MIN_HOLD_HOURS = 8.0    # >= 8h hold (drop the old 7-day floor)
 
 
 def _min_hold_hours(t: StrategyTemplate) -> Optional[float]:
@@ -171,16 +182,15 @@ def _passes_crypto_cost_style(t: StrategyTemplate) -> bool:
         stype = ""
     mh = _min_hold_hours(t)
     if stype in _CRYPTO_VIABLE_STYLES:
-        # Trend/momentum/breakout: must hold >= 24h to amortize the round-trip.
+        # Trend/momentum/breakout: must hold >= 8h to amortize the ~0.8% round-trip.
         if mh is not None and mh < _CRYPTO_MIN_HOLD_HOURS:
             return False
         return True
-    # Mean-reversion / volatility-fade is the WRONG style for trend-dominated
-    # crypto at high cost — high-frequency dip-scalping is a proven cost-loser
-    # (-1.5% to -10%/trade). BUT a DEEP, LOW-FREQUENCY, LARGE-TARGET capitulation
-    # buy can clear the ~1.5% round-trip BECAUSE the captured move is big and the
-    # trade is rare — this is the one long-only edge available in a crypto bear
-    # (buy the washout). Re-admit ONLY that case: TP >= 20% AND hold >= 7 days.
+    # Mean-reversion / volatility-fade: at the TRUE ~0.8% round-trip (not the old wrong
+    # 1.5%) ordinary swing mean-reversion is no longer structurally dead. Re-admit it
+    # when the target is big enough to clear cost with margin (TP >= 5%) and the hold is
+    # long enough to avoid pure churn (>= 8h). The honest per-trade cost-net WF gate then
+    # decides whether the realised edge actually survives cost — we no longer hand-pick.
     tp = float((t.default_parameters or {}).get("take_profit_pct", 0) or 0)
     if tp >= _CRYPTO_MR_MIN_TP and mh is not None and mh >= _CRYPTO_MR_MIN_HOLD_HOURS:
         return True

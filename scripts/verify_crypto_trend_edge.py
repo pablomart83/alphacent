@@ -10,7 +10,7 @@ quantities the live crypto acceptance gate uses.
 Read-only (no DB writes, no orders). Run on EC2 via the venv:
     /home/ubuntu/alphacent/venv/bin/python3 scripts/verify_crypto_trend_edge.py
 """
-import os, sys
+import os, sys, argparse
 _S = os.path.dirname(os.path.abspath(__file__)); _W = os.path.dirname(_S)
 if _W not in sys.path:
     sys.path.insert(0, _W)
@@ -24,11 +24,33 @@ from src.strategy.strategy_engine import StrategyEngine
 from src.strategy.strategy_proposer import StrategyProposer
 from src.strategy.template_catalog import load_catalog
 
-TEMPLATES = [
-    "Crypto Deep Dip Accumulation",
-    "Crypto Capitulation Funding Re-Entry",
+# Default sample spans (a) proven low-frequency trend/momentum and (b) a sample of
+# the mean-reversion / intraday templates RE-ADMITTED by the 2026-06-20 PM cost
+# re-baseline (crypto round-trip 1.5% -> ~0.7-0.8%). Override with --templates/--symbols.
+_DEFAULT_TEMPLATES = [
+    # proven / low-frequency trend & momentum
+    "Crypto 21W MA Trend Follow",
+    "Crypto Weekly Trend Follow",
+    "Crypto Time-Series Momentum",
+    "Crypto MACD Trend",
+    "Crypto Vol-Managed Trend",
+    # re-admitted mean-reversion / volatility (previously culled at the wrong 1.5% cost)
+    "Crypto Daily SMA Snap Back",
+    "Crypto Daily Oversold Bounce",
+    "Crypto Daily BB Lower Bounce",
+    "Crypto RSI Dip Buy",
+    "Crypto BB Mean Reversion",
+    "4H Crypto BB Band Walk",
+    "Crypto BB Squeeze Breakout",
 ]
-SYMBOLS = ["BTC", "ETH", "SOL", "AVAX"]
+_DEFAULT_SYMBOLS = ["BTC", "ETH", "SOL", "AVAX"]
+
+_ap = argparse.ArgumentParser(description=__doc__)
+_ap.add_argument("--templates", help="comma-separated template names (default: built-in trend+re-admitted-MR sample)")
+_ap.add_argument("--symbols", help="comma-separated symbols (default: BTC,ETH,SOL,AVAX)")
+_args = _ap.parse_args()
+TEMPLATES = [s.strip() for s in _args.templates.split(",")] if _args.templates else list(_DEFAULT_TEMPLATES)
+SYMBOLS = [s.strip().upper() for s in _args.symbols.split(",")] if _args.symbols else list(_DEFAULT_SYMBOLS)
 
 cfg = Configuration()
 cr = cfg.load_credentials(TradingMode.DEMO)
