@@ -81,7 +81,7 @@ class RateLimiter:
     - With token bucket at 5/s: calls spread evenly, 300/min fully utilized
     """
 
-    def __init__(self, max_calls: int, period_seconds: int = 86400):
+    def __init__(self, max_calls: int, period_seconds: int = 86400, burst_seconds: float = 1.0):
         self.max_calls = max_calls
         self.period_seconds = period_seconds
         self.calls = []
@@ -92,9 +92,30 @@ class RateLimiter:
         # Token bucket: refill at max_calls/period_seconds per second
         # e.g. 300/60 = 5 tokens/sec
         self._tokens_per_sec = max_calls / max(period_seconds, 1)
-        self._bucket_tokens = float(max_calls)  # Start full
+        # Burst capacity — root-cause fix (2026-06-21 FMP 429 storms).
+        # The bucket used to hold the ENTIRE per-period budget (_bucket_max =
+        # max_calls) and start FULL, so after any idle gap a cycle could fire up
+        # to `max_calls` requests in the first instant (the cache warmer drives
+        # ~8 concurrent threads). FMP enforces a per-second/burst cap well below
+        # the per-minute budget, so those bursts returned 429 (observed: ~10-15
+        # calls in 1-2s tripping it while the 300/min budget was nowhere near
+        # exhausted), which then activated the circuit breaker and starved
+        # fundamentals for 60s. Cap the bucket to a small burst window so calls
+        # are paced at ~tokens_per_sec (the advertised rate) instead of arriving
+        # all at once. The rolling-window check still enforces the full per-period
+        # budget; this only governs instantaneous burstiness.
+        #
+        # Only pace when the limiter is HIGH-FREQUENCY (per-minute style). For
+        # long-period budgets (e.g. per-DAY limits) per-second pacing is
+        # meaningless — one token every few hours would be absurd and the rolling
+        # window is the real control — so there we keep the full-budget bucket.
+        # Threshold: >= ~1 call / 10s (0.1 tokens/sec) ⇒ pacing matters.
+        if self._tokens_per_sec >= 0.1:
+            self._bucket_max = max(1.0, self._tokens_per_sec * max(burst_seconds, 0.0))
+        else:
+            self._bucket_max = float(max_calls)
+        self._bucket_tokens = self._bucket_max  # start at burst cap, NOT the full budget
         self._bucket_last_refill = time.time()
-        self._bucket_max = float(max_calls)
 
     def _refill_bucket(self) -> None:
         """Refill token bucket based on elapsed time. Must be called under lock."""

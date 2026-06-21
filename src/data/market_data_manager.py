@@ -993,6 +993,23 @@ class MarketDataManager:
         except Exception as e:
             logger.warning(f"eToro API (last-resort) error for {db_symbol}: {e}")
 
+        # Market-closed window is an EXPECTED empty result, not an outage.
+        # e.g. SPY 1h "today→today" gap-fill on a weekend: equities don't trade
+        # weekends, so Yahoo/FMP/eToro all legitimately return 0 bars. Raising +
+        # ERROR-logging here produced a recurring false "all sources failed" alarm
+        # (observed: SPY 1h, Sundays only — SPY is the benchmark fetched every
+        # cycle by the regime/MQS analytics). Gated on (a) a RECENT window
+        # (current gap-fill, not a historical backfill) and (b) the market
+        # actually being closed for the symbol's asset class, so genuine weekday
+        # outages still surface as errors.
+        if self._is_recent_market_closed_window(db_symbol, start, end):
+            logger.info(
+                f"No {interval} bars for {db_symbol} {start.date()}→{end.date()} — "
+                f"market closed for the requested window (expected, not an outage); "
+                f"returning empty. Cached history through the last close is unaffected."
+            )
+            return []
+
         # All sources (DB cache → Yahoo → FMP → eToro) failed — this is the single
         # genuine, actionable error. The caller logs/handles the raised ValueError;
         # we do NOT serve stale data here (that would silently mask a real outage).
@@ -1002,6 +1019,38 @@ class MarketDataManager:
         )
         raise ValueError(f"Failed to fetch historical data for {db_symbol} from all sources")
     
+    def _is_recent_market_closed_window(self, symbol: str, start, end) -> bool:
+        """True when a RECENT historical request falls in a market-closed period
+        (weekend/holiday) for the symbol's asset class, making an empty result
+        EXPECTED rather than an outage.
+
+        Suppresses the false "all sources failed" error for current intraday
+        gap-fills when the market is closed (e.g. SPY 1h on a weekend). Fail-safe:
+        returns False on any uncertainty so genuine outages still surface.
+
+        Conditions (ALL must hold):
+          - the requested window END is recent (within 3 days of now) — i.e. a
+            current top-up, not a historical backfill of an old period;
+          - the symbol is NOT an always-on class (crypto/forex trade ~24/7, so a
+            closed market never applies to them);
+          - the market is currently CLOSED for the symbol's (equity-like) schedule.
+        """
+        try:
+            now = datetime.utcnow()
+            end_naive = end.replace(tzinfo=None) if getattr(end, "tzinfo", None) else end
+            if (now - end_naive) > timedelta(days=3):
+                return False
+            sym = (symbol or "").upper()
+            from src.core.tradeable_instruments import DEMO_ALLOWED_CRYPTO, DEMO_ALLOWED_FOREX
+            if sym in set(DEMO_ALLOWED_CRYPTO) or sym in set(DEMO_ALLOWED_FOREX):
+                return False  # 24/7 classes are never "market-closed"
+            from src.data.market_hours_manager import get_market_hours_manager, AssetClass
+            # Equities/ETFs/indices on eToro follow the 24/5 STOCK schedule —
+            # closed only on weekends/holidays, exactly the case we suppress.
+            return not get_market_hours_manager().is_market_open(AssetClass.STOCK, symbol=sym)
+        except Exception:
+            return False  # fail-safe: never suppress a genuine failure on uncertainty
+
     def _validate_and_return_historical_data(
         self,
         valid_data: List[MarketData],
