@@ -315,6 +315,32 @@ INDICATOR_MAPPING = {
     #   Key format: RANK_LOW_VOL__<SELF_OR_SYMBOL>__<UNIVERSE_HASH>__<WINDOW>__<BOTTOM_N>
     'RANK_LOW_VOL': lambda params: _rank_key(params, 'RANK_LOW_VOL'),
 
+    # ───── Cross-symbol indicator primitives (Sprint, 2026-06-21) ─────
+    # The real missing capability vs LAG_RETURN/RANK: reference ANOTHER symbol's
+    # SMA / price, not just its return. Enables "trade the noisy instrument, signal
+    # off the clean underlying" — long SOXL when SOXX > SMA(50) and SPY > SMA(100).
+    # Computed identically in backtest and live by cross_asset_primitives, on DAILY
+    # bars of the external symbol, reindexed/ffilled to the primary's bar index
+    # (same alignment convention as RANK_IN_UNIVERSE).
+    #
+    # The SYMBOL arg accepts a literal ticker ("SPY", "SOXX"), the "SELF" sentinel
+    # (the strategy's own primary symbol), or the "UNDERLYING" sentinel (the
+    # leveraged ETF's clean underlying via src.risk.sl_caps.underlying_of). The key
+    # keeps the literal sentinel string so codegen and compute agree on the lookup;
+    # resolution to a real ticker happens only at fetch time.
+    #
+    # EXT_SMA(SYMBOL, PERIOD): the PERIOD-day SMA of SYMBOL's daily close.
+    #   Key format: EXT_SMA__<SYMBOL>__<PERIOD>
+    #   Example: EXT_SMA("SPY", 100) → EXT_SMA__SPY__100
+    'EXT_SMA': lambda params: f'EXT_SMA__{params[0]}__{int(params[1])}',
+
+    # EXT_PRICE(SYMBOL): SYMBOL's daily close, aligned to the primary index.
+    #   Pair with EXT_SMA for a cross-symbol trend gate:
+    #     EXT_PRICE("SOXX") > EXT_SMA("SOXX", 50)
+    #   Key format: EXT_PRICE__<SYMBOL>
+    #   Example: EXT_PRICE("SPY") → EXT_PRICE__SPY
+    'EXT_PRICE': lambda params: f'EXT_PRICE__{params[0]}',
+
     # ───── On-chain primitives (Sprint 4 S4.1, 2026-05-02) ─────
     # ONCHAIN(METRIC_NAME, LOOKBACK_DAYS):
     #   Returns the value of a market-structure metric at each bar.

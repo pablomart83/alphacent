@@ -68,6 +68,15 @@ _RE_RANK_LOW_VOL = re.compile(
     r'(\[[^\]]+\])'
     r'\s*,\s*(\d+)\s*,\s*(\d+)\s*\)'
 )
+# Cross-symbol indicator primitives (2026-06-21): reference another symbol's
+# SMA / price (the gap LAG_RETURN/RANK couldn't fill). The symbol arg may be a
+# literal ticker, "SELF", or "UNDERLYING" (resolved via sl_caps.underlying_of).
+_RE_EXT_SMA = re.compile(
+    r'EXT_SMA\(\s*"([A-Za-z0-9_]+)"\s*,\s*(\d+)\s*\)'
+)
+_RE_EXT_PRICE = re.compile(
+    r'EXT_PRICE\(\s*"([A-Za-z0-9_]+)"\s*\)'
+)
 
 
 def _universe_hash(universe: List[str]) -> str:
@@ -141,6 +150,57 @@ def extract_cross_asset_references(conditions: List[str]) -> Tuple[
     return lag_refs, rank_refs
 
 
+def extract_ext_indicator_references(
+    conditions: List[str],
+) -> List[Tuple[str, str, Optional[int]]]:
+    """Scan condition strings for cross-symbol indicator references (EXT_SMA / EXT_PRICE).
+
+    These are the "reference another symbol's SMA/price" primitives (the gap that
+    LAG_RETURN/RANK could not fill). Kept in a SEPARATE extractor from
+    ``extract_cross_asset_references`` so the existing 2-tuple signature (relied
+    on by the proposer and tests) is unchanged.
+
+    Returns:
+        List of ``(kind, symbol, period)`` refs, de-duplicated, where:
+          - kind 'sma'   → EXT_SMA(symbol, period)   (period is the SMA window int)
+          - kind 'price' → EXT_PRICE(symbol)         (period is None)
+        ``symbol`` is the literal arg as written ("SPY", "SELF", "UNDERLYING").
+    """
+    refs: List[Tuple[str, str, Optional[int]]] = []
+    for cond in conditions:
+        for m in _RE_EXT_SMA.finditer(cond):
+            ref = ('sma', m.group(1), int(m.group(2)))
+            if ref not in refs:
+                refs.append(ref)
+        for m in _RE_EXT_PRICE.finditer(cond):
+            ref = ('price', m.group(1), None)
+            if ref not in refs:
+                refs.append(ref)
+    return refs
+
+
+def resolve_ext_symbol(literal: str, primary_symbol: str) -> Optional[str]:
+    """Resolve an EXT_* symbol arg to a concrete ticker.
+
+    - ``"SELF"``       → the strategy's primary symbol.
+    - ``"UNDERLYING"`` → the leveraged ETF's clean underlying (sl_caps.underlying_of).
+    - any other literal → itself (e.g. "SPY", "SOXX").
+
+    Returns None when "UNDERLYING" is requested for a symbol that has no mapping
+    (a non-leveraged primary) — the caller fails closed (NaN series → no entries).
+    """
+    if literal == "SELF":
+        return primary_symbol
+    if literal == "UNDERLYING":
+        try:
+            from src.risk.sl_caps import underlying_of
+            return underlying_of(primary_symbol)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(f"resolve_ext_symbol: underlying lookup failed for {primary_symbol}: {e}")
+            return None
+    return literal
+
+
 def collect_required_cross_asset_symbols(
     conditions: List[str],
     primary_symbol: str,
@@ -161,15 +221,23 @@ def collect_required_cross_asset_symbols(
     lag_refs, rank_refs = extract_cross_asset_references(conditions)
     required: Dict[str, set] = {}
     for sym, _bars, interval in lag_refs:
-        if sym == primary_symbol or sym == "SELF":
+        resolved = resolve_ext_symbol(sym, primary_symbol)
+        if not resolved or resolved == primary_symbol:
             continue
-        required.setdefault(interval, set()).add(sym)
+        required.setdefault(interval, set()).add(resolved)
     for _kind, _self_sym, universe, _window, _n in rank_refs:
         # All rank primitives use daily bars.
         day_set = required.setdefault("1d", set())
         for s in universe:
             if s != primary_symbol:
                 day_set.add(s)
+    # EXT_SMA / EXT_PRICE — external symbol fetched on DAILY bars. Resolve the
+    # SELF/UNDERLYING sentinels so the prefetch loads the concrete benchmark
+    # (e.g. SOXL → SOXX, TQQQ → QQQ).
+    for _kind, literal, _period in extract_ext_indicator_references(conditions):
+        resolved = resolve_ext_symbol(literal, primary_symbol)
+        if resolved and resolved != primary_symbol:
+            required.setdefault("1d", set()).add(resolved)
     return {k: sorted(list(v)) for k, v in required.items()}
 
 
@@ -361,6 +429,40 @@ def compute_low_vol_rank_series(
     return aligned
 
 
+def compute_ext_aligned_series(
+    leader_df: pd.DataFrame,
+    primary_index: pd.DatetimeIndex,
+    sma_period: Optional[int] = None,
+) -> pd.Series:
+    """Align an external symbol's daily series to the primary's bar index.
+
+    Computes either the raw daily close (``sma_period is None`` → EXT_PRICE) or
+    its rolling SMA (``EXT_SMA``), then reindexes onto ``primary_index`` with
+    forward-fill — the same look-ahead-safe alignment RANK_IN_UNIVERSE uses.
+
+    For a DAILY primary on a same-session benchmark (SOXL/SOXX/SPY all trade the
+    NYSE calendar) this is an exact same-bar alignment, mirroring how the primary
+    symbol's own CLOSE vs SMA is evaluated. Forward-fill covers the rare missing
+    bar and the daily→intraday case (use the latest completed daily value).
+
+    Args:
+        leader_df: external symbol DataFrame with a 'close' column, daily bars.
+        primary_index: DatetimeIndex of the primary symbol's bars.
+        sma_period: SMA window in days; None returns the close itself.
+
+    Returns:
+        pd.Series of floats aligned to primary_index (NaN before warmup).
+    """
+    if 'close' not in leader_df.columns:
+        raise ValueError("leader_df must have 'close' column")
+    close = _clean_close(leader_df)
+    if sma_period is not None:
+        series = close.rolling(int(sma_period)).mean()
+    else:
+        series = close
+    return series.reindex(primary_index, method='ffill')
+
+
 def compute_cross_asset_indicators(
     conditions: List[str],
     primary_symbol: str,
@@ -393,9 +495,10 @@ def compute_cross_asset_indicators(
         series (fail-closed in backtest: entries won't fire without data).
     """
     lag_refs, rank_refs = extract_cross_asset_references(conditions)
+    ext_refs = extract_ext_indicator_references(conditions)
     out: Dict[str, pd.Series] = {}
 
-    if not lag_refs and not rank_refs:
+    if not lag_refs and not rank_refs and not ext_refs:
         return out
 
     if primary_index is None or len(primary_index) == 0:
@@ -410,9 +513,17 @@ def compute_cross_asset_indicators(
 
     # ── LAG_RETURN primitives ─────────────────────────────────────────
     for sym, bars, interval in lag_refs:
-        # Resolve SELF sentinel (rare on LAG_RETURN but legal).
-        target_sym = primary_symbol if sym == "SELF" else sym
+        # Resolve SELF / UNDERLYING sentinels (UNDERLYING lets a leveraged-ETF
+        # template read its clean underlying's return, e.g. SOXX 20-day return).
+        target_sym = resolve_ext_symbol(sym, primary_symbol)
         key = f'LAG_RETURN__{sym}__{bars}__{interval}'
+        if not target_sym:
+            logger.warning(
+                f"Cross-asset LAG_RETURN: could not resolve '{sym}' for "
+                f"primary={primary_symbol} — key={key} all-NaN"
+            )
+            out[key] = pd.Series(float('nan'), index=primary_index)
+            continue
         try:
             leader_df = data_fetcher(target_sym, start, end, interval)
             if leader_df is None or leader_df.empty or 'close' not in leader_df.columns:
@@ -495,5 +606,49 @@ def compute_cross_asset_indicators(
             )
             # Fail-closed: all-False means entries won't fire.
             out[key] = pd.Series(False, index=primary_index)
+
+    # ── EXT_SMA / EXT_PRICE — cross-symbol indicator primitives ───────
+    # Reference another symbol's SMA / price (the gap LAG_RETURN/RANK left). The
+    # key keeps the literal sentinel ("SELF"/"UNDERLYING"/ticker) so it matches
+    # codegen; the SELF/UNDERLYING resolution happens only for the daily fetch.
+    for kind, literal, period in ext_refs:
+        if kind == 'sma':
+            key = f'EXT_SMA__{literal}__{int(period)}'
+        else:
+            key = f'EXT_PRICE__{literal}'
+        resolved = resolve_ext_symbol(literal, primary_symbol)
+        if not resolved:
+            logger.warning(
+                f"Cross-symbol {kind.upper()}: could not resolve '{literal}' for "
+                f"primary={primary_symbol} (no underlying mapping?) — key={key} all-NaN"
+            )
+            out[key] = pd.Series(float('nan'), index=primary_index)
+            continue
+        try:
+            leader_df = data_fetcher(resolved, start, end, "1d")
+            if leader_df is None or leader_df.empty or 'close' not in leader_df.columns:
+                logger.warning(
+                    f"Cross-symbol {kind.upper()} fetch returned empty for "
+                    f"{resolved} (1d) — key={key} all-NaN"
+                )
+                out[key] = pd.Series(float('nan'), index=primary_index)
+                continue
+            series = compute_ext_aligned_series(
+                leader_df, primary_index,
+                sma_period=int(period) if kind == 'sma' else None,
+            )
+            out[key] = series
+            logger.info(
+                f"Cross-symbol {('EXT_SMA' if kind == 'sma' else 'EXT_PRICE')} computed: "
+                f"key={key} resolved={resolved} leader_bars={len(leader_df)} "
+                f"primary_bars={len(primary_index)} non_nan={int(series.notna().sum())}"
+            )
+        except Exception as e:
+            logger.error(
+                f"Cross-symbol {kind.upper()} failed for literal={literal} "
+                f"resolved={resolved}: {e}", exc_info=True
+            )
+            # Fail-closed: NaN series means comparisons resolve to False.
+            out[key] = pd.Series(float('nan'), index=primary_index)
 
     return out

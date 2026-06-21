@@ -6,7 +6,34 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
-**SESSION 2026-06-21 (Opus 4.8) — GENERALIZED the SOXL leveraged-ETF learnings across the book (CIO-approved "all of it"). Deployed live, healthy, pushed.** Items #1-#4 + #6 done; #5 (cross-asset DSL primitive) is the remaining build.
+**SESSION 2026-06-21 (Opus 4.8) — #5 CROSS-ASSET SIGNAL DSL PRIMITIVE shipped ("trade the noisy instrument, signal off the clean underlying"). Deployed live, healthy, lint-clean, proof-run, pushed. The SOXL/leveraged-ETF program (#1-#6) is now COMPLETE.**
+
+The missing capability: the DSL could reference another symbol's RETURN (`LAG_RETURN`/`RANK`) but NOT its SMA/indicator. Now it can.
+
+**Shipped (proper, generalizable — a real DSL primitive seen by backtest=WF=paper=live, NOT a runtime gate):**
+- **`src/strategy/cross_asset_primitives.py` + `trading_dsl.py` — two new cross-symbol primitives:** `EXT_SMA("SYM", N)` (N-day SMA of SYM's daily close) and `EXT_PRICE("SYM")` (SYM's daily close), each fetched on DAILY bars and reindexed/ffilled to the traded symbol's bar index — the SAME look-ahead-safe alignment `RANK_IN_UNIVERSE` already uses (exact same-bar for a daily equity primary; ffill covers missing bars/weekends/daily→intraday). Compose to a cross-symbol trend gate: `EXT_PRICE("SOXX") > EXT_SMA("SOXX", 50)`. External RETURN reuses the existing `LAG_RETURN` (per the design — no new return primitive). Computed identically in both the backtest and signal-gen paths via the existing `_compute_cross_asset_for_strategy` injection (fast-path now also checks `extract_ext_indicator_references`).
+- **Sentinel resolution unified across ALL cross-asset primitives** (`resolve_ext_symbol`): a literal ticker ("SPY"), `"SELF"` (the primary), or **`"UNDERLYING"`** (the leveraged ETF's clean 1x underlying) all resolve at FETCH time; the indicator KEY keeps the literal string so codegen↔compute agree. `LAG_RETURN`/collect-required now resolve `UNDERLYING` too (was SELF-only) — so `LAG_RETURN("UNDERLYING", 20, "1d")` reads the underlying's 20d momentum and the prefetch loads SOXX/QQQ (not a literal "UNDERLYING").
+- **Underlying map** (`src/risk/sl_caps.py` `underlying_of`, next to the canonical `_LEVERAGED_ETF_SET` — single source of truth): SOXL/SOXS→SOXX, TQQQ/SQQQ/QLD→QQQ, UPRO/SPXL/SPXU/SSO→SPY, UDOW/SDOW/DDM→DIA, TNA/TZA/UWM→IWM, TECL/TECS/ROM/USD→XLK, FAS/FAZ→XLF, LABU/LABD→XBI, DFEN→ITA. Every underlying is in `symbols.yaml` so the backtest data path can fetch it.
+- **`src/strategy/dsl_lint.py` — lint now runs CODEGEN** (not just parse+tautology), so an unknown indicator or a malformed cross-symbol arg shape (e.g. `EXT_SMA("SPY")` missing its period) fails at LOAD time instead of silently backtesting 0 trades. Verified safe: all 391 existing catalog conditions generate code cleanly. The catalog's `_lint_dsl` validator inherits this automatically.
+- **NEW template** `config/strategy_catalog/leveraged_etf.yaml` seq 311 — **"Leveraged ETF Trend (Underlying-Signaled)"**: long the 3x ETF when `EXT_PRICE("SPY")>EXT_SMA("SPY",100)` (risk-on) AND `EXT_PRICE("UNDERLYING")>EXT_SMA("UNDERLYING",50)` (underlying uptrend) AND `LAG_RETURN("UNDERLYING",20,"1d")>0` (underlying momentum) AND `ATR(14)/CLOSE<0.12` (SELF vol ceiling). Exit on the underlying losing its 50d trend. Daily, multi-day hold, best_symbols SOXL/TQQQ/UPRO. Inherits the leverage-aware SL/TP clamp + PAPER size haircut already shipped. No skip flags — normal WF/MC/conviction/graduation.
+- **Proof:** `scripts/verify_underlying_signaled_edge.py` (production rolling-WF + cost-net, full history, OUR costs) — see PROOF below.
+
+**PROOF (EC2, rolling-WF test-window cost-net Sharpe, full history):**
+| symbol | A) Underlying-signaled (NEW) | B) ADX Trend (SELF) | B) EMA Trend (SELF) |
+|---|---|---|---|
+| SOXL | **1.13** (9t, ok) | 3.04 (28t, ok) | 2.32 (36t, ok) |
+| TQQQ | **0.83** (7t, ok) | 2.50 (12t, ok) | 0.70 (21t, ok) |
+| UPRO | **0.27** (8t, ok) | 2.46 (5t, ok) | **−0.21 (overfit)** |
+
+**HONEST verdict:** the cross-asset underlying signal is **positive and non-overfit on ALL THREE** leveraged ETFs and is the most *robust/consistent* template (the SELF EMA template is overfit & negative on UPRO), but it does **NOT beat** the already-excellent **ADX Trend Following SELF** template on raw cost-net Sharpe (3.04/2.50/2.46 — the proven top SOXL earner). Its virtue is selectivity (7-9 high-conviction trades vs 28-36) + robustness across the cohort, not peak Sharpe. So: the primitive + underlying-signaled template are sound and now available to the pipeline, but **ADX-SELF daily trend remains the strongest leveraged-ETF edge** — consistent with the prior session's finding. (`diagnose_symbol_edge.py` is a live-trade-journal tool; no before/after delta yet — the new template has not traded.)
+
+**Caches:** no clear needed — the new template has zero prior cache/blacklist entries, and the EXT changes don't alter any existing template's param-keyed WF hash (no existing template uses EXT).
+
+**CRYPTO BTC-GATE UNIFICATION — now UNBLOCKED, recommended, NOT done this session (flagged):** the out-of-band runtime gates (`order_executor._check_btc_trend_gate` LIVE-only; `monitoring_service._check_crypto_regime_exits`) — which the steering explicitly calls an anti-pattern (backtest never sees them) — are now expressible in DSL as `EXT_PRICE("BTC") > EXT_SMA("BTC", 50)` on crypto LONG entries (+ the inverse on exits). The data path is proven (crypto templates already fetch BTC daily via `LAG_RETURN("BTC",…)` in backtest). **Plan when done:** add the EXT-BTC gate to the ~30 crypto LONG templates, REMOVE the two runtime gates, clear crypto WF caches (`scripts/clear_crypto_wf_cache.py`), re-run `verify_crypto_trend_edge.py`. Deferred as its own one-change-deploy-verify cycle (touches live code + many templates + re-proof) — the leveraged-ETF deliverable is self-contained and complete.
+
+---
+
+### Earlier 2026-06-21 — GENERALIZED the SOXL leveraged-ETF learnings across the book (CIO-approved "all of it"). Deployed live, healthy, pushed. Items #1-#4 + #6 done; #5 now also done (above).
 
 After the SOXL leveraged-ETF fix, asked whether the learnings generalize. **They do — verified against the book:**
 - **Book-wide, win-rate rises monotonically with hold** (<1d 34% → >7d 68%, +4.39%/trade). But intraday is NOT broadly bad (4h book-wide is net +$9.6k) — so the daily-only rule is correctly scoped to the high-vol cohort, NOT all intraday.
@@ -21,7 +48,7 @@ After the SOXL leveraged-ETF fix, asked whether the learnings generalize. **They
 - **#4 backtest↔live consistency AUDIT (done, read-only):** `per_symbol` cost overrides ARE read by the backtest (fixed 2026-05-03); vectorbt **simulates SL/TP** (so the clamp fix reaches WF); the two known mismatch classes (crypto cost, leveraged SL clamp) are fixed. Residual flag: graduation snapshots a per-pair `sl_pct` that can drift from current proposer logic (minor).
 - **#6 diagnostic (NEW):** `scripts/diagnose_symbol_edge.py [--symbol X] [--scan]` — hold-period buckets + exit-reason + MAE/MFE capture + book-wide churn-cohort scan. The reusable form of the analysis that cracked SOXL.
 
-**STILL TO DO — #5 cross-asset signal DSL primitive (the big build):** "trade the noisy instrument, signal off the clean underlying" — SOXL←SOXX, TQQQ←QQQ, miners←BTC. Needs a new cross-symbol DSL primitive (the DSL can reference another symbol's RETURN via `LAG_RETURN`/`RANK` but NOT its SMA/indicator). One primitive unlocks underlying-signaled templates for all leveraged ETFs + a market-regime risk-on filter. Flagged, not built.
+**STILL TO DO — #5 cross-asset signal DSL primitive (the big build):** ✅ **DONE** (see the kickoff section at the top of this file — `EXT_SMA`/`EXT_PRICE` + `UNDERLYING` sentinel + underlying map + leveraged-ETF template + proof, shipped 2026-06-21).
 
 ---
 

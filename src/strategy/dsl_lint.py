@@ -56,6 +56,7 @@ def _tautology(condition: str) -> Optional[str]:
 
 
 _parser = None
+_codegen = None
 
 
 def _get_parser():
@@ -64,6 +65,14 @@ def _get_parser():
         from src.strategy.trading_dsl import TradingDSLParser
         _parser = TradingDSLParser()
     return _parser
+
+
+def _get_codegen():
+    global _codegen
+    if _codegen is None:
+        from src.strategy.trading_dsl import DSLCodeGenerator
+        _codegen = DSLCodeGenerator()
+    return _codegen
 
 
 def lint_condition(condition: str) -> Optional[str]:
@@ -76,6 +85,19 @@ def lint_condition(condition: str) -> Optional[str]:
     result = _get_parser().parse(condition)
     if not getattr(result, "success", False):
         return f"unparseable ({getattr(result, 'error', 'unknown error')})"
+    # Codegen catches what the grammar can't: unknown indicator names and
+    # malformed argument shapes (e.g. EXT_SMA("SPY") missing its period, or a
+    # cross-symbol primitive with the wrong arg count). These resolve through
+    # INDICATOR_MAPPING, which only runs at codegen — so a parse-only lint would
+    # pass them and the strategy would fail silently at backtest (0 trades).
+    # Running codegen here turns those into a deploy-time error. Verified safe:
+    # every existing catalog condition generates code cleanly.
+    try:
+        code_result = _get_codegen().generate_code(result.ast)
+    except Exception as e:  # pragma: no cover - defensive
+        return f"codegen raised ({e})"
+    if not getattr(code_result, "success", False):
+        return f"codegen failed ({getattr(code_result, 'error', 'unknown error')})"
     return None
 
 

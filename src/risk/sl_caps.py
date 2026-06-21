@@ -37,6 +37,49 @@ def is_leveraged_etf(symbol: str) -> bool:
     """True if `symbol` is a known leveraged (2x/3x) ETF. Canonical check."""
     return symbol.upper() in _LEVERAGED_ETF_SET
 
+
+# Leveraged-ETF → clean underlying/benchmark map. Single source of truth for the
+# "trade the noisy instrument, signal off the clean underlying" edge: a leveraged
+# ETF is whippy and stop-prone, but its 1x underlying (or the index it tracks) has
+# a clean, tradeable trend. Templates signal off the underlying via the
+# EXT_SMA("UNDERLYING", …) / EXT_PRICE("UNDERLYING") DSL primitives, which resolve
+# this map at compute time (same sentinel pattern as RANK_IN_UNIVERSE's "SELF").
+#
+# Each underlying MUST exist in config/symbols.yaml so the backtest/WF data path
+# can fetch its bars. The inverse (short) leveraged ETFs map to the SAME long
+# underlying — a template that signals off the underlying's trend can long the
+# inverse ETF when the underlying is in a downtrend (left to template direction).
+_LEVERAGED_UNDERLYING = {
+    # 3x / 2x semiconductors → SOXX (iShares Semiconductor)
+    "SOXL": "SOXX", "SOXS": "SOXX",
+    # 3x / 2x Nasdaq-100 → QQQ
+    "TQQQ": "QQQ", "SQQQ": "QQQ", "QLD": "QQQ",
+    # 3x / 2x S&P 500 → SPY
+    "UPRO": "SPY", "SPXL": "SPY", "SPXU": "SPY", "SSO": "SPY",
+    # 3x / 2x Dow → DIA
+    "UDOW": "DIA", "SDOW": "DIA", "DDM": "DIA",
+    # 3x / 2x Russell 2000 → IWM
+    "TNA": "IWM", "TZA": "IWM", "UWM": "IWM",
+    # 3x technology sector → XLK
+    "TECL": "XLK", "TECS": "XLK", "ROM": "XLK", "USD": "XLK",
+    # 3x financials → XLF
+    "FAS": "XLF", "FAZ": "XLF",
+    # 3x biotech → XBI
+    "LABU": "XBI", "LABD": "XBI",
+    # 3x defense/aerospace → ITA
+    "DFEN": "ITA",
+}
+
+
+def underlying_of(symbol: str) -> str | None:
+    """Return the clean underlying/benchmark symbol for a leveraged ETF, or None.
+
+    e.g. ``underlying_of("SOXL") == "SOXX"``, ``underlying_of("AAPL") is None``.
+    Used to resolve the ``"UNDERLYING"`` sentinel in the EXT_* cross-symbol DSL
+    primitives. Single source of truth — do not duplicate this mapping.
+    """
+    return _LEVERAGED_UNDERLYING.get(symbol.upper())
+
 # SL cap fractions (max distance from entry). These are *cap* values — the
 # signal path may pick a lower value based on ATR. Manual writes may go up
 # to but not exceed these.

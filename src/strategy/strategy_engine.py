@@ -27,6 +27,7 @@ from src.strategy.cross_asset_primitives import (
     compute_cross_asset_indicators,
     collect_required_cross_asset_symbols,
     extract_cross_asset_references,
+    extract_ext_indicator_references,
 )
 from src.models import (
     AlphaSource,
@@ -4599,12 +4600,14 @@ class StrategyEngine:
             return {}
         # Fast path: skip the fetcher wiring if there are no cross-asset refs.
         lag_refs, rank_refs = extract_cross_asset_references(conditions)
-        if not lag_refs and not rank_refs:
+        ext_refs = extract_ext_indicator_references(conditions)
+        if not lag_refs and not rank_refs and not ext_refs:
             return {}
 
         logger.info(
             f"Cross-asset primitives detected for {strategy.name}: "
-            f"LAG_RETURN={len(lag_refs)} RANK_IN_UNIVERSE={len(rank_refs)}"
+            f"LAG_RETURN={len(lag_refs)} RANK_IN_UNIVERSE={len(rank_refs)} "
+            f"EXT={len(ext_refs)}"
         )
 
         def _fetcher(sym: str, s: datetime, e: datetime, interval: str) -> Optional[pd.DataFrame]:

@@ -1,0 +1,55 @@
+# AlphaCent strategy catalog — category: leveraged_etf
+# Underlying-signaled leveraged-ETF trend (2026-06-21). The documented edge for 3x
+# ETFs: TRADE the noisy leveraged instrument but take the SIGNAL off its clean 1x
+# underlying + the broad market. A 3x ETF's own price is too whippy to time; the
+# underlying (SOXL←SOXX, TQQQ←QQQ, UPRO←SPY) has a clean, tradeable daily trend.
+#
+# Uses the EXT_SMA / EXT_PRICE cross-symbol DSL primitives (cross_asset_primitives.py)
+# computed IDENTICALLY in backtest, WF, paper and live — no out-of-band runtime gate.
+# "UNDERLYING" resolves per traded symbol via src.risk.sl_caps.underlying_of; "SPY"
+# is the literal market-regime benchmark. Inherits the leverage/vol-aware SL/TP clamp
+# (8-20% / 12-45%) and the PAPER size haircut already shipped this session. Goes
+# through normal WF/MC/conviction/graduation — no skip flags.
+- seq: 311
+  name: Leveraged ETF Trend (Underlying-Signaled)
+  description: Long a leveraged (3x) ETF only when (1) the broad market is risk-on
+    (SPY > its 100-day SMA), (2) the ETF's clean 1x underlying is in an uptrend
+    (underlying > its 50-day SMA) with positive 20-day momentum, and (3) the traded
+    ETF's own realized range is not extreme (ATR(14)/price < 12% — stand aside in
+    liquidation spikes). Signal is taken off the underlying via the EXT_SMA/EXT_PRICE
+    cross-symbol primitives, so the noisy 3x instrument is traded but never used to
+    time entries. Daily interval, multi-day trend hold; exit on the underlying losing
+    its 50-day trend.
+  strategy_type: trend_following
+  market_regimes:
+  - trending_up
+  - trending_up_strong
+  - trending_up_weak
+  - ranging_low_vol
+  entry_conditions:
+  - EXT_PRICE("SPY") > EXT_SMA("SPY", 100) AND EXT_PRICE("UNDERLYING") > EXT_SMA("UNDERLYING", 50) AND LAG_RETURN("UNDERLYING", 20, "1d") > 0 AND ATR(14) / CLOSE < 0.12
+  exit_conditions:
+  - EXT_PRICE("UNDERLYING") < EXT_SMA("UNDERLYING", 50)
+  required_indicators:
+  - ATR
+  default_parameters:
+    market_regime_sma: 100
+    underlying_trend_sma: 50
+    underlying_momentum_days: 20
+    vol_ceiling_atr_pct: 0.12
+    stop_loss_pct: 0.15
+    take_profit_pct: 0.35
+    hold_period_max: 120
+  expected_trade_frequency: 1-3 trades/month
+  expected_holding_period: 10-60 days
+  risk_reward_ratio: 2.33
+  metadata:
+    direction: long
+    best_symbols:
+    - SOXL
+    - TQQQ
+    - UPRO
+  research_citation: 'Leveraged-ETF path-dependency / volatility-drag literature (Avellaneda
+    & Zhang 2010; Cheng & Madhavan 2009) — trade the leveraged instrument, time the entry
+    on the clean underlying trend + broad-market risk-on filter.'
+  author: alphacent-xasset-2026-06-21
