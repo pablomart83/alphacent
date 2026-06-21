@@ -822,6 +822,10 @@ class EToroAPIClient:
             "LTCUSD": 100005,
             "BCH": 100002,
             "BCHUSD": 100002,
+            "XLM": 100020,
+            "XLMUSD": 100020,
+            "HBAR": 100061,
+            "HBARUSD": 100061,
 
             # US Stocks — verified IDs from eToro metadata API
             "AAPL": 1001,

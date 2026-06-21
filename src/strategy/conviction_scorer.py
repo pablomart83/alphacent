@@ -823,6 +823,7 @@ class ConvictionScorer:
                 'BTC': 15.0, 'ETH': 15.0,
                 'SOL': 13.0, 'XRP': 13.0, 'ADA': 11.0,
                 'AVAX': 10.0, 'DOT': 10.0, 'LINK': 10.0, 'LTC': 11.0, 'BCH': 11.0,
+                'XLM': 11.0, 'HBAR': 10.0,
                 'NEAR': 8.0,
             }
             score = CRYPTO_SCORES.get(sym, 9.0)

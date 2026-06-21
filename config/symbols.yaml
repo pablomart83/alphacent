@@ -377,5 +377,13 @@ crypto:
   - { symbol: ADA, etoro_id: 100017, sector: Crypto }
   - { symbol: LTC, etoro_id: 100005, sector: Crypto }
   - { symbol: BCH, etoro_id: 100002, sector: Crypto }
+  # 2026-06-21: universe 10 → 12. XLM (Stellar) and HBAR (Hedera) added as the
+  # cleanest institutional trend names not yet held: both are on the SEC-approved
+  # T. Rowe Price Active Crypto ETF eligible list (June 12 2026), XLM also has CME
+  # futures + sits in the Nasdaq-CME Crypto Index. eToro instrument IDs verified
+  # against the live instrumentsmetadata API (type 10 = crypto). Binance OHLC
+  # coverage confirmed (XLMUSDT 2018+, HBARUSDT). Long-only spot (UK retail).
+  - { symbol: XLM, etoro_id: 100020, sector: Crypto }
+  - { symbol: HBAR, etoro_id: 100061, sector: Crypto }
   # Still disabled — wider spreads / lower liquidity:
   # - { symbol: NEAR, etoro_id: 100337, sector: Crypto }

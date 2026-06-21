@@ -29,6 +29,26 @@ Account holder confirmed the real eToro Diamond crypto commission is **0.3%/side
 
 ---
 
+**SESSION 2026-06-21 (Opus 4.8) — CRYPTO UNIVERSE 10 → 12 (XLM, HBAR added). Deployed live, healthy, backfilled, proof-verified, pushed. (User runs the activation cycle.)**
+
+Researched high-volume, institutionally-traded crypto for additions under our hard constraints (UK retail = long-only spot; must be on eToro for execution + Binance for data). Institutional proxies (all June 2026): the SEC-approved **T. Rowe Price Active Crypto ETF** eligible-15 list (BTC/ETH/SOL/XRP/ADA/AVAX/LTC/DOT/DOGE/HBAR/BCH/LINK/XLM/SHIB/SUI), **CME** futures (SOL/XRP/ADA/LINK/XLM + Nasdaq-CME index), live spot ETFs (incl. DOGE). We already held 10 of the 15. Added the two cleanest institutional TREND names not yet held:
+
+- **XLM (Stellar)** — in the T. Rowe ETF list AND has CME futures AND sits in the Nasdaq-CME Crypto Index (the most institutionally-blessed name we lacked).
+- **HBAR (Hedera)** — T. Rowe eligible, enterprise/institutional narrative.
+- Held back (flagged, not added): **DOGE/SUI** (DOGE meme-noisy, weak trend fit; SUI thin <3yr history) — both already have eToro IDs in `etoro_client.INSTRUMENT_IDS` (DOGE 100043, SUI 100340) if we later want them. **BNB/TRX** (not in the ETF/CME set; BNB eToro-UK availability unclear). **HYPE/SHIB** skipped.
+
+**Wiring (all verified live):** eToro instrument IDs resolved against the LIVE `instrumentsmetadata` API (not guessed): **XLM 100020, HBAR 100061** (type 10 = crypto). Touched:
+- `config/symbols.yaml` crypto: +XLM/+HBAR (etoro_id + sector).
+- `src/api/binance_ohlc.py` `SYMBOL_MAP`: +XLMUSDT/+HBARUSDT.
+- `src/strategy/conviction_scorer.py` `CRYPTO_SCORES`: XLM 11.0, HBAR 10.0 (tiered with LTC/BCH and AVAX/DOT/LINK).
+- `src/api/etoro_client.py` `INSTRUMENT_IDS`: +XLM/XLMUSD/HBAR/HBARUSD (fast-path so order exec doesn't fall to search).
+- `src/utils/symbol_mapper.py` `SYMBOL_ALIASES` + `YAHOO_FINANCE_TICKERS`: +XLM/HBAR (so the Yahoo fallback resolves XLM-USD/HBAR-USD instead of silently fetching the wrong ticker).
+- `config/strategy_catalog/crypto.yaml`: widened the **cross-sectional/family universe 10 → 12** (5 full-universe `family_universe`/`rank_universe` blocks + the inline `RANK_IN_UNIVERSE` list + description). Left the 6-coin BTC-Follower 1H/4H families untouched (intentionally narrower, out of scope). `rank_top_n` kept at 4.
+
+**Backfilled** XLM + HBAR to full **5y depth** across 1d/4h/1h from Binance (`scripts/backfill_crypto_5y.py --symbol`). **PROOF (read-only, production rolling-WF + honest gate, full history):** `21W MA Trend × XLM` PASS (Sharpe 0.48, +2.71%/trade, 19t) and `× HBAR` PASS (0.33, +2.81%, 13t); `Cross-Sectional Momentum × XLM` PASS (0.68, +5.40%, 21t) on the new 12-coin universe — both new coins clear the cost-net bar on the trend templates and the gate discriminates (Weekly/TSMOM fail). The WF caches/blacklists do NOT need clearing for the new coins (no prior entries existed); `clear_crypto_wf_cache.py` already auto-includes them (derives from `DEMO_ALLOWED_CRYPTO`). **NEXT (user): run a cycle** — XLM/HBAR single-name trend strategies and the widened cross-sectional template should propose/validate when BTC turns up.
+
+---
+
 **SESSION 2026-06-20 (Opus 4.8) — PART 3: RESEARCH-DRIVEN EDGES + RISK-OFF EXIT + FUNDING SIGNAL. Deployed, healthy, pushed. Commits `81ce036`,`d45ced0`.** After an online review of 2026 crypto-quant literature + current dynamics (BTC dominance ~58-63% 4yr high, "altcoin rotation selective not gone"; volatility-management is the documented momentum-crash mitigant):
 
 - **New templates** (catalog 27→32, all trend/momentum, cost-viable): **Vol-Managed Trend** (entry gated on ATR(14)<1.3×ATR(50) — stand aside in liquidation spikes), **BTC Relative Strength** (dual momentum — alt must beat BTC over 30d via `LAG_RETURN("SELF")>LAG_RETURN("BTC")`), **Time-Series Momentum** (canonical multi-horizon TSMOM — proof: ETH +2.44%/trade Sharpe 0.49), **Funding-Filtered Trend** (skip entries when BTC funding >4bp/8h = froth), **Capitulation Funding Re-Entry** (re-enter trend-turn when funding<0 = washout).

@@ -23,6 +23,8 @@ SYMBOL_ALIASES: Dict[str, str] = {
     "NEAR": "NEARUSD",
     "LTC": "LTCUSD",
     "BCH": "BCHUSD",
+    "XLM": "XLMUSD",
+    "HBAR": "HBARUSD",
 
     # Forex pairs
     "EUR": "EURUSD",
@@ -51,6 +53,8 @@ YAHOO_FINANCE_TICKERS: Dict[str, str] = {
     "NEAR": "NEAR-USD", "NEARUSD": "NEAR-USD",
     "LTC": "LTC-USD", "LTCUSD": "LTC-USD",
     "BCH": "BCH-USD", "BCHUSD": "BCH-USD",
+    "XLM": "XLM-USD", "XLMUSD": "XLM-USD",
+    "HBAR": "HBAR-USD", "HBARUSD": "HBAR-USD",
 
     # Indices (eToro names -> Yahoo Finance tickers)
     "SPX500": "^GSPC",
