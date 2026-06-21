@@ -30,6 +30,23 @@ def _is_leveraged_etf_symbol(symbol: str) -> bool:
         return False
 
 
+def _is_high_vol_symbol(symbol: str) -> bool:
+    """Fail-safe wrapper around the realized-volatility classifier (src.risk.volatility_classifier).
+    Returns False on any error so missing vol data never changes behaviour."""
+    try:
+        from src.risk.volatility_classifier import is_high_vol
+        return is_high_vol(symbol)
+    except Exception:
+        return False
+
+
+def _is_daily_only_symbol(symbol: str) -> bool:
+    """A symbol should trade DAILY-ONLY (no 1h/4h) when it is a leveraged ETF OR a
+    high-realized-volatility name — both bleed on sub-day churn and earn on multi-day
+    holds (2026-06-21 SOXL/MU analysis)."""
+    return _is_leveraged_etf_symbol(symbol) or _is_high_vol_symbol(symbol)
+
+
 class DataQuality(str, Enum):
     """Data quality classifications based on available days (for 2-year lookback)."""
     EXCELLENT = "excellent"  # 600+ days (~2 years)
@@ -1524,22 +1541,21 @@ class StrategyProposer:
                 f"SL={sl:.3%}, TP={tp:.3%}"
             )
 
-        # Clamp to sane bounds — leverage-aware (2026-06-21 SOXL analysis).
-        # Leveraged ETFs (SOXL/TQQQ/…) need a WIDER stop: at ~6-10% daily ATR a 12%
-        # cap is <1.5x ATR → guaranteed noise-stopout. Our live+demo data showed the
-        # <1d hold bucket lost -$2,831 while ≥3d holds made +$12k — the edge needs
-        # room to breathe. LIVE already allows the 20% leveraged cap (src.risk.sl_caps);
-        # the proposal/backtest clamp MUST match so WF validates the SAME strategy we
-        # trade live (the "backtest, WF, paper and live see the same edge" rule).
-        # Dollar risk is bounded by the leveraged-ETF size haircut, NOT a tight stop.
-        try:
-            from src.risk.sl_caps import is_leveraged_etf as _is_lev_clamp
-            _is_lev = bool(symbols and _is_lev_clamp(symbols[0]))
-        except Exception:
-            _is_lev = False
-        if _is_lev:
+        # Clamp to sane bounds — leverage/volatility-aware (2026-06-21 SOXL→cohort).
+        # Leveraged ETFs and high-vol names need a WIDER stop: at high daily ATR a 12%
+        # cap is <1.5x ATR → noise-stopout (the churn cohort bled ~$11k on <1d holds
+        # while ≥3d holds won big). LIVE allows the 20% leveraged cap (src.risk.sl_caps);
+        # the proposal/backtest clamp MUST match so WF validates the same wide-stop
+        # strategy we trade. Dollar risk is bounded by the size haircut, NOT a tight stop.
+        _sym0 = symbols[0] if symbols else ""
+        if _is_leveraged_etf_symbol(_sym0):
             sl = max(0.08, min(sl, 0.20))   # leveraged ETF: 8% – 20% (matches live cap)
             tp = max(0.12, min(tp, 0.45))   # wider TP to keep R:R on big 3x moves
+        elif _is_high_vol_symbol(_sym0):
+            # High-vol non-leveraged (MU/AMD/semis ~40-85% ann vol): 12% is still too
+            # tight for the top of this cohort. Allow up to 15% so the ATR floor breathes.
+            sl = max(0.05, min(sl, 0.15))
+            tp = max(0.08, min(tp, 0.35))
         else:
             sl = max(0.015, min(sl, 0.12))   # 1.5% – 12%
             tp = max(0.03, min(tp, 0.30))    # 3% – 30%
@@ -6358,14 +6374,17 @@ Generate a CORRECTED strategy that addresses all errors:"""
                 if _tmpl_is_intraday and symbol.upper() in _DAILY_ONLY_SYMBOLS:
                     continue
 
-                # Leveraged ETFs (SOXL/TQQQ/…) are DAILY-ONLY (2026-06-21 SOXL analysis).
-                # Sub-day trading of 3x ETFs is structurally value-destroying: our
-                # live+demo data showed the <1d holding bucket lost -$2,831 (22% win)
-                # via whipsaw/noise-stopouts, while ≥3d holds made +$12k (78-83% win).
-                # Daily-rebalance leverage decay + a wide (correct) stop only pay off
-                # on multi-day trend holds. Block leveraged ETFs on 1h/4h templates;
-                # they trade only on daily-interval trend/momentum templates.
-                if _tmpl_is_intraday and _is_leveraged_etf_symbol(symbol):
+                # Leveraged ETFs AND high-volatility names (semis/miners/high-beta)
+                # are DAILY-ONLY (2026-06-21 SOXL→cohort analysis). Sub-day trading of
+                # high-vol instruments is structurally value-destroying: the churn
+                # cohort (SOXL/MU/AMD/AVGO/SOXX/ARM/SMH/TQQQ/…) bled ~$11k on <1d holds
+                # (22-34% win) while ≥3d holds won 78-83%. Daily-rebalance leverage decay
+                # (ETFs) + a wide stop only pay off on multi-day trend holds. Block these
+                # on 1h/4h templates; they trade only daily trend/momentum. Gate = leverage
+                # OR realized vol >= ~40% annualized (src.risk.volatility_classifier).
+                # NOTE: not a blanket intraday ban — book-wide 4h is net-positive; this is
+                # scoped to the high-vol cohort the data flagged.
+                if _tmpl_is_intraday and _is_daily_only_symbol(symbol):
                     continue
 
                 # Skip no-1H-data symbols (OIL, COPPER) for 1H-only templates.

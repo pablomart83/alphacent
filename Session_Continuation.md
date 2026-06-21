@@ -6,6 +6,25 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-21 (Opus 4.8) — GENERALIZED the SOXL leveraged-ETF learnings across the book (CIO-approved "all of it"). Deployed live, healthy, pushed.** Items #1-#4 + #6 done; #5 (cross-asset DSL primitive) is the remaining build.
+
+After the SOXL leveraged-ETF fix, asked whether the learnings generalize. **They do — verified against the book:**
+- **Book-wide, win-rate rises monotonically with hold** (<1d 34% → >7d 68%, +4.39%/trade). But intraday is NOT broadly bad (4h book-wide is net +$9.6k) — so the daily-only rule is correctly scoped to the high-vol cohort, NOT all intraday.
+- **The SOXL "sub-day bleed / multi-day win" signature recurs across a HIGH-VOLATILITY cohort.** `scripts/diagnose_symbol_edge.py --scan` surfaced **19 names** (SOXL −$2,773, MU −$1,509, AMD −$1,372, AVGO, SOXX, ARM, SMH, TQQQ, ADI, TXN, HUT, …) bleeding **~$11k** on <1d holds while earning strongly on ≥3d holds.
+- **Calibrated vol separator:** annualized realized vol ~40% (≈0.025 daily stdev) cleanly splits the cohort (SOXL 135%, MU 82%, AMD 70%, AVGO 50%, SMH 40%) from normal names (MSFT 32%, AAPL 23%, SPY 14%).
+
+**Shipped (generalize the leveraged-ETF policy to leverage OR high-vol via a new shared classifier):**
+- **`src/risk/volatility_classifier.py` (NEW):** `is_high_vol(symbol)` — reads the daily-stdev (`volatility`) the proposer already persists to `config/.market_stats_cache.json`, threshold 0.025 (≈40% ann), in-process TTL-cached, fail-safe. Companion to `sl_caps.is_leveraged_etf`.
+- **#1 anti-churn (generalized):** `strategy_proposer._is_daily_only_symbol` = leveraged OR high-vol → skipped on 1h/4h templates (daily-only). Removes the cohort's sub-day loss bucket. (Verified: SOXL/MU/AMD/AVGO/ARM/TQQQ daily-only; MSFT/AAPL/SPY/GLD unaffected.)
+- **#2 stops (generalized):** proposal SL/TP clamp now 3-tier — leveraged 8-20%/12-45%, **high-vol 5-15%/8-35%**, normal 1.5-12%/3-30%. So high-vol names (MU/AMD/semis) get ATR room instead of a 12% noise-stop, and backtest matches live.
+- **#3 paper sizing (generalized):** PAPER flat-size ×0.5 haircut now applies to leveraged OR high-vol (was leveraged-only) — representative graduation data, bounded $ risk.
+- **#4 backtest↔live consistency AUDIT (done, read-only):** `per_symbol` cost overrides ARE read by the backtest (fixed 2026-05-03); vectorbt **simulates SL/TP** (so the clamp fix reaches WF); the two known mismatch classes (crypto cost, leveraged SL clamp) are fixed. Residual flag: graduation snapshots a per-pair `sl_pct` that can drift from current proposer logic (minor).
+- **#6 diagnostic (NEW):** `scripts/diagnose_symbol_edge.py [--symbol X] [--scan]` — hold-period buckets + exit-reason + MAE/MFE capture + book-wide churn-cohort scan. The reusable form of the analysis that cracked SOXL.
+
+**STILL TO DO — #5 cross-asset signal DSL primitive (the big build):** "trade the noisy instrument, signal off the clean underlying" — SOXL←SOXX, TQQQ←QQQ, miners←BTC. Needs a new cross-symbol DSL primitive (the DSL can reference another symbol's RETURN via `LAG_RETURN`/`RANK` but NOT its SMA/indicator). One primitive unlocks underlying-signaled templates for all leveraged ETFs + a market-regime risk-on filter. Flagged, not built.
+
+---
+
 **SESSION 2026-06-21 (Opus 4.8) — SOXL / LEVERAGED-ETF trading-edge fix (CIO-approved). Deployed live, healthy, pushed.**
 
 Analysed SOXL (3x leveraged semis, graduated LIVE) end-to-end vs live+demo+backtest data. **The edge is real and large but we were bleeding it on churn + plain-ETF risk handling.** Verified findings:

@@ -1010,15 +1010,16 @@ class RiskManager:
             except Exception:
                 _flat_size = 1000.0
 
-            # Leveraged-ETF paper haircut (2026-06-21 SOXL analysis): a 3x ETF with
-            # a (correctly) wider leveraged stop must NOT carry full flat notional,
-            # or a stop-out costs ~2x a normal name. Halve paper size for leveraged
-            # ETFs — mirrors the LIVE FIX-03 0.5x in order_executor so paper data is
-            # representative of how the pair is sized live (graduation isn't fed a
-            # mis-sized record). Bounds dollar risk while keeping the wider stop.
+            # Leveraged-ETF / high-vol paper haircut (2026-06-21 SOXL→cohort): a 3x ETF
+            # or high-vol name (semis/miners) with a (correctly) wider stop must NOT
+            # carry full flat notional, or a stop-out costs ~2x a normal name. Halve
+            # paper size — mirrors the LIVE FIX-03 0.5x so paper data is representative
+            # of how the pair is sized live (graduation isn't fed a mis-sized record).
             try:
                 from src.risk.sl_caps import is_leveraged_etf as _is_lev_paper
-                if _is_lev_paper((signal.symbol or "").split(":")[0]):
+                from src.risk.volatility_classifier import is_high_vol as _is_hv_paper
+                _ps_sym = (signal.symbol or "").split(":")[0]
+                if _is_lev_paper(_ps_sym) or _is_hv_paper(_ps_sym):
                     _flat_size *= 0.5
             except Exception:
                 pass
