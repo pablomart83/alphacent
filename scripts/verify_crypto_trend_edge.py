@@ -25,10 +25,10 @@ from src.strategy.strategy_proposer import StrategyProposer
 from src.strategy.template_catalog import load_catalog
 
 TEMPLATES = [
-    "Crypto Funding-Filtered Trend",
+    "Crypto Deep Dip Accumulation",
     "Crypto Capitulation Funding Re-Entry",
 ]
-SYMBOLS = ["BTC", "ETH", "SOL"]
+SYMBOLS = ["BTC", "ETH", "SOL", "AVAX"]
 
 cfg = Configuration()
 cr = cfg.load_credentials(TradingMode.DEMO)

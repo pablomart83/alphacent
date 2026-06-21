@@ -134,6 +134,10 @@ import re as _re
 
 _CRYPTO_VIABLE_STYLES = {"trend_following", "momentum", "breakout"}
 _CRYPTO_MIN_HOLD_HOURS = 24.0
+# Deep-capitulation mean-reversion carve-out: a big-target, rare trade that can
+# clear the ~1.5% round-trip (the one long-only edge in a crypto bear).
+_CRYPTO_MR_MIN_TP = 0.20          # >= 20% take-profit
+_CRYPTO_MR_MIN_HOLD_HOURS = 168.0  # >= 7-day hold (low frequency)
 
 
 def _min_hold_hours(t: StrategyTemplate) -> Optional[float]:
@@ -165,12 +169,22 @@ def _passes_crypto_cost_style(t: StrategyTemplate) -> bool:
                  else str(t.strategy_type)).lower()
     except Exception:
         stype = ""
-    if stype not in _CRYPTO_VIABLE_STYLES:
-        return False  # mean-reversion / volatility-fade: wrong style for crypto
     mh = _min_hold_hours(t)
-    if mh is not None and mh < _CRYPTO_MIN_HOLD_HOURS:
-        return False  # sub-day scalp: cannot amortize ~1.5% round-trip
-    return True
+    if stype in _CRYPTO_VIABLE_STYLES:
+        # Trend/momentum/breakout: must hold >= 24h to amortize the round-trip.
+        if mh is not None and mh < _CRYPTO_MIN_HOLD_HOURS:
+            return False
+        return True
+    # Mean-reversion / volatility-fade is the WRONG style for trend-dominated
+    # crypto at high cost — high-frequency dip-scalping is a proven cost-loser
+    # (-1.5% to -10%/trade). BUT a DEEP, LOW-FREQUENCY, LARGE-TARGET capitulation
+    # buy can clear the ~1.5% round-trip BECAUSE the captured move is big and the
+    # trade is rare — this is the one long-only edge available in a crypto bear
+    # (buy the washout). Re-admit ONLY that case: TP >= 20% AND hold >= 7 days.
+    tp = float((t.default_parameters or {}).get("take_profit_pct", 0) or 0)
+    if tp >= _CRYPTO_MR_MIN_TP and mh is not None and mh >= _CRYPTO_MR_MIN_HOLD_HOURS:
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
