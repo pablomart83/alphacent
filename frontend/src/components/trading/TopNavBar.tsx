@@ -3,6 +3,7 @@ import { Bell, Command, HelpCircle, LogOut, Settings as SettingsIcon } from 'luc
 import { Button } from '@/components/primitives'
 import { AccountToggle } from './AccountToggle'
 import { WebSocketIndicator } from './WebSocketIndicator'
+import { MarketStatusHeader } from '@/pages/book/orders/MarketStatusHeader'
 import { useCommandPalette, useNotificationsStore, useUiOverlays } from '@/stores'
 import { useLogout } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
@@ -84,6 +85,13 @@ export function TopNavBar({ liveEnabled = false }: TopNavBarProps) {
           ))}
         </nav>
       </div>
+
+      {/* Live market-session status, between the primary menu and the
+          right-hand controls. Hidden on narrow viewports to avoid crowding. */}
+      <MarketStatusHeader
+        inline
+        className="hidden xl:flex mx-3 min-w-0 shrink"
+      />
 
       <div className="flex items-center gap-2">
         <WebSocketIndicator />

@@ -9,11 +9,23 @@ import { cn } from '@/lib/utils'
 const CLASSES = ['Stocks', 'ETFs', 'Forex', 'Crypto', 'Indices', 'Commodities'] as const
 
 /**
- * A strip at the top of the Pending Orders tab showing which market
- * sessions are open or closed right now. Client-side classifier only —
- * not a trading gate, see `lib/market-hours.ts` for the caveat.
+ * A strip showing which market sessions are open or closed right now.
+ * Client-side classifier only — not a trading gate, see `lib/market-hours.ts`
+ * for the caveat.
+ *
+ * Two presentations:
+ *  - default (`inline=false`): a full-width banner with a bottom border and
+ *    panel background — used at the top of the Pending Orders tab.
+ *  - `inline`: borderless/transparent, for embedding in the top nav bar
+ *    between the primary menu and the right-hand controls.
  */
-export function MarketStatusHeader({ className }: { className?: string }) {
+export function MarketStatusHeader({
+  className,
+  inline = false,
+}: {
+  className?: string
+  inline?: boolean
+}) {
   // Re-classify once per minute so the badges stay current as the session
   // rolls. (Rerender is trivial for 6 small divs.)
   const [, force] = useState(0)
@@ -25,7 +37,10 @@ export function MarketStatusHeader({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        'flex items-center gap-2 px-2 py-1 border-b border-[var(--border-subtle)] bg-[var(--bg-2)] overflow-x-auto',
+        'flex items-center gap-2 overflow-x-auto',
+        inline
+          ? 'gap-3'
+          : 'px-2 py-1 border-b border-[var(--border-subtle)] bg-[var(--bg-2)]',
         className,
       )}
     >
