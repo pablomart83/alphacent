@@ -87,8 +87,19 @@ async def get_data_sync_status():
     try:
         from src.core.monitoring_service import get_monitoring_service
         mon_qu = get_monitoring_service()
-        if mon_qu and hasattr(mon_qu, '_last_quick_update_result'):
-            quick_update = mon_qu._last_quick_update_result
+        if mon_qu and getattr(mon_qu, '_last_quick_update_result', None):
+            # Normalize the in-memory result to the keys the frontend reads.
+            # `_last_quick_update_result` stores timestamp/updated/elapsed_s; the
+            # DataSyncPanel expects last_run/symbols_updated/duration_s — without
+            # this mapping the panel showed "Last run —" whenever the in-memory
+            # result existed (i.e. the normal running case).
+            _qr = mon_qu._last_quick_update_result
+            quick_update = {
+                "last_run": _qr.get("timestamp"),
+                "duration_s": _qr.get("elapsed_s"),
+                "symbols_updated": _qr.get("updated"),
+                "errors": _qr.get("errors", 0),
+            }
     except Exception:
         pass
 
@@ -946,6 +957,20 @@ async def get_monitoring_status():
             "age": _age_str(last_trailing),
             "status": "healthy" if last_trailing and (now - datetime.fromtimestamp(last_trailing)).total_seconds() < mon.trailing_stops_interval * 3 else "stale",
         }
+
+        # Partial exits — separate 5s-class check (same loop cadence as trailing
+        # stops). Heartbeat is `_last_partial_exit_check`. Emitted as its own
+        # `partial_exits` leaf so the Guard › System "Monitoring service" card
+        # (which keys on partial_exits/quick_update/full_sync) resolves it instead
+        # of showing "unknown".
+        last_partial = getattr(mon, '_last_partial_exit_check', 0)
+        result["main_loop"]["partial_exits"] = {
+            "name": "Partial Exits",
+            "interval": f"{mon.trailing_stops_interval}s",
+            "last_run": _ts_iso(last_partial),
+            "age": _age_str(last_partial),
+            "status": "healthy" if last_partial and (now - datetime.fromtimestamp(last_partial)).total_seconds() < mon.trailing_stops_interval * 3 else "stale",
+        }
         
         # Pending closures (every 60s)
         last_closures = getattr(mon, '_last_pending_closure_check', 0)
@@ -978,10 +1003,28 @@ async def get_monitoring_status():
             "errors": quick_result.get("errors", 0) if quick_result else 0,
             "duration_s": quick_result.get("elapsed_s", 0) if quick_result else 0,
         }
+        # Alias under the leaf key the System card keys on (`quick_update`).
+        _q_ts = quick_result.get("timestamp") if quick_result else None
+        result["background"]["quick_update"] = {
+            "name": "Quick Price Update (eToro)",
+            "interval": "10m",
+            "last_run": _q_ts,
+            "age": _age_str(datetime.fromisoformat(_q_ts)) if _q_ts else "never",
+            "status": "healthy" if _q_ts else "unknown",
+            "duration_s": quick_result.get("elapsed_s", 0) if quick_result else None,
+        }
         
         # Full price sync (every 55m)
         last_full_sync = getattr(mon, '_last_price_sync', 0)
         result["background"]["full_price_sync"] = {
+            "name": "Full Price Sync (Yahoo)",
+            "interval": "55m",
+            "last_run": _ts_iso(last_full_sync),
+            "age": _age_str(last_full_sync),
+            "status": "healthy" if last_full_sync and (now - datetime.fromtimestamp(last_full_sync)).total_seconds() < 4200 else "stale",
+        }
+        # Alias under the leaf key the System card keys on (`full_sync`).
+        result["background"]["full_sync"] = {
             "name": "Full Price Sync (Yahoo)",
             "interval": "55m",
             "last_run": _ts_iso(last_full_sync),
