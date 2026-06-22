@@ -818,8 +818,23 @@ def _run_sync_with_logging(mon) -> None:
         }
 
 
+_DB_STATS_CACHE: dict = {"data": None, "ts": 0.0}
+
+
 def _get_db_stats() -> dict:
-    """Get historical price cache DB statistics."""
+    """Get historical price cache DB statistics.
+
+    Cached for 60s. The underlying aggregates (COUNT(*), GROUP BY interval,
+    COUNT(DISTINCT symbol)) full-scan historical_price_cache — ~2.7M rows, ~3.2s
+    per call — and /data/sync/status calls this on every System-tab load and
+    poll. Bar counts move slowly, so a 60s-stale read is fine and keeps the page
+    snappy. (This was the main Guard › System slow-load cause.)
+    """
+    import time as _t
+    _now = _t.time()
+    _cached = _DB_STATS_CACHE.get("data")
+    if _cached is not None and (_now - _DB_STATS_CACHE.get("ts", 0.0)) < 60:
+        return _cached
     try:
         from src.models.database import get_database
         from sqlalchemy import text
@@ -859,7 +874,7 @@ def _get_db_stats() -> dict:
 
             recent_1h = [{"symbol": r[0], "latest": str(r[1])} for r in latest_1h]
 
-            return {
+            _result = {
                 "total_bars": total,
                 "by_interval": by_interval,
                 "unique_symbols": symbols,
@@ -867,6 +882,9 @@ def _get_db_stats() -> dict:
                 "oldest_bar": str(oldest) if oldest else None,
                 "recent_1h_symbols": recent_1h,
             }
+            _DB_STATS_CACHE["data"] = _result
+            _DB_STATS_CACHE["ts"] = _now
+            return _result
     except Exception as e:
         logger.debug(f"Could not get DB stats: {e}")
         return {"error": str(e)}

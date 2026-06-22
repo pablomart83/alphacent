@@ -397,11 +397,13 @@ export function useDataSyncStatus(enabled = true) {
   return useQuery<DataSyncStatusPayload>({
     queryKey: ['data-sync-status'],
     queryFn: () => api.get<DataSyncStatusPayload>('/data/sync/status'),
-    // Fast polling while a sync is running — caller reads `sync_running` and
-    // flips the interval via `refetchInterval` callback.
+    // Fast polling ONLY while a full sync is actively running. (Previously this
+    // also fast-polled whenever `quick_update` was present — but that field is
+    // now always populated, which pinned the poll at 5s permanently and hammered
+    // the heavy db_stats query. Sync progress is the only thing needing 5s.)
     refetchInterval: (query) => {
       const data = query.state.data as DataSyncStatusPayload | undefined
-      return data?.sync_running || data?.quick_update ? 5_000 : 30_000
+      return data?.sync_running ? 5_000 : 30_000
     },
     staleTime: 3_000,
     enabled,
