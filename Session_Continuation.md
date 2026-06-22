@@ -6,6 +6,37 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-22 (Opus 4.8) — TIER-1 LEARN-FROM-TRADES, STEP 1: META-LABEL PROVE-FIRST FOUNDATION shipped (read-only) + HONEST NEGATIVE EDGE FINDING. Deployed read-only, run on live data, pushed (commit `1286cdf`). NOT wired to any live path.**
+
+Built the prove-first foundation for the meta-label filter and ran it against all realized trades BEFORE any inference/enforcement wiring (per the mandated rollout: train → prove (CV) → shadow → enforce). 
+
+**Shipped (Path B, read-only — no hot-path wiring, no restart):**
+- **`src/ml/meta_label_trainer.py`** — per-asset-class meta-label trainer. Single pure `build_feature_row(ctx)` = the train/serve-parity contract (used by both training-from-`trade_journal` and the future serve path); 22 decision-time features (conviction total + 9 conviction-breakdown components + VIX + entry_persistence + direction + strategy_type + regime family + interval + leverage flag + 5 fundamentals). **No leakage** (realized outcomes only build the label, never features). Label = **cost-net profitable** (`pnl_percent/100 − round_trip_cost_pct`, OUR costs, applied uniformly so demo at-quote fills are judged honestly). **Purged + embargoed walk-forward CV** (López de Prado ch.7 — purge train trades whose label window overlaps a test block, plus a count + time embargo). Persists feature spec + train-medians (imputation) + model inside the artifact, version-pinned (`ml1.0.0`) so a stale serve artifact is refused, not silently mis-served. In-memory `MetaLabelModel.predict_proba(ctx)` + `load_model(asset_class)` for the eventual serve path. `MIN_CLASS_SAMPLES=120`, `MIN_MINORITY_SAMPLES=25` → a class with too little data gets no model (disabled by construction).
+- **`scripts/verify_meta_label_edge.py`** — read-only proof: per-asset-class OOS precision/recall/F1/AUC vs base rate, calibration bins, feature importance, and a held-out ECONOMIC backtest (trade-everything vs enforce(P≥.5) vs prob-sized, cost-net) + blocked-vs-passed cohort separation. `--persist` to write `.pkl` (NOT used — no edge to persist).
+
+**HONEST VERDICT — the meta-label model has NO clear OOS edge with the current feature set. Leave it disabled.** Proof run on EC2 against 3,458 closed trades (3,402 demo / 56 live; cost-net labels):
+| asset class | n | base WR | OOS precision | LIFT | AUC | trade-all net | enforce net | blocked vs passed sep |
+|---|---|---|---|---|---|---|---|---|
+| stocks | 2103 | 0.374 | 0.328 | **−0.046** | **0.468** | −0.0009 | −0.0019 | **−0.0025 (filter blocks WINNERS)** |
+| etfs | 953 | 0.370 | 0.347 | −0.023 | 0.515 | +0.0051 | +0.0002 | **−0.0069 (filtering destroys ETF edge)** |
+| commodities | 172 | 0.267 | 0.077 | −0.19 | 0.379 | −0.008 | −0.003 | +0.005 (tiny n) |
+| indices | 140 | 0.350 | 0.333 | −0.017 | 0.452 | −0.001 | +0.005 | +0.007 (tiny n, AUC<0.5 — not credible) |
+| forex | 51 | — | — | — | — | — | — | SKIP (n<120) |
+| crypto | 38 | — | — | — | — | — | — | SKIP (n<120) |
+
+- **Interpretation (quant):** AUC ≤ 0.515 everywhere with adequate data — at/below random. On the two classes with real samples the **would-block cohort realizes BETTER cost-net returns than the passed cohort** (negative separation), i.e. the model would block winners and destroy edge — exactly the "blind filter destroys edge invisibly" failure the brief warns against. Calibration is broken (stocks: predicted-0.55 bin realizes 0.328). Likely cause: the conviction components are ALREADY used as the entry gate, so conditioning on "we chose to trade" leaves little residual signal; what the RF fits is train-base-rate noise that inverse-correlates OOS. Feature density is also moderate — only 65% of trades carry the rich `conviction_breakdown`, 33% have fundamentals (rest imputed to median).
+- **Consequence for the rollout:** there is nothing to shadow yet (no edge), and LIVE-enforce would be locked by the shadow-evidence bar's separation criterion regardless. Do NOT wire enforcement. The infrastructure is sound and ready to re-evaluate as the feature set is enriched and more (esp. LIVE) data accrues.
+
+**RECOMMENDED NEXT (re-prioritised by the negative finding — awaiting CIO direction on scope):**
+1. **Richest untapped feature: entry `price_history`** (persisted in `trade_metadata` per trade) → pre-entry momentum/vol/structure features, with matching serve-side computation. Highest-value experiment to see if edge exists at all before building any shadow/enforce machinery. *(proper build, train/serve parity required — not a quick tweak.)*
+2. **Per-gate observability scoreboard** (build task #5) — extend `signal_decisions` with per-gate seen/passed/blocked + blocked-vs-passed realized forward-edge per account + blocked-signal counterfactual. Independent of the meta-label result and arguably MORE valuable now: it answers "which of our EXISTING gates (conviction, frequency, VIX C1, trend-consistency C3, MQS) help vs hurt." NOT yet measured.
+3. **MAE/MFE → SL/TP recommendation job** (build task #2) and **DSR gate at WF** (build task #3) — both INDEPENDENT of the meta-label edge; valuable regardless (MAE/MFE generalizes the SOXL diagnostic).
+4. The approval rail (`improvement_recommendations` / `template_param_overrides` / filter-state store) + frontend surfacing are the delivery layer for #2–#3; build once those produce outputs.
+
+**NOTE:** the full Tier-1 brief is a multi-sprint program; one-change→deploy→verify discipline + the negative headline finding mean the enforcement/shadow/approval-rail machinery should follow a confirmed-edge or a confirmed gate-scoreboard need, not precede it. Verified current state (all confirmed live this session): ML filter dormant (`signal_filter.py`, 8 generic features, `train_model()` called by no job); 3,458 closed trades; `trade_journal`/`trade_metadata` schema as documented; `signal_decisions`, `live_strategies`, `graduation_approvals` exist; no recommendations/overrides/filter-state tables yet.
+
+---
+
 **SESSION 2026-06-21 (Opus 4.8) — #5 CROSS-ASSET SIGNAL DSL PRIMITIVE shipped ("trade the noisy instrument, signal off the clean underlying"). Deployed live, healthy, lint-clean, proof-run, pushed. The SOXL/leveraged-ETF program (#1-#6) is now COMPLETE.**
 
 The missing capability: the DSL could reference another symbol's RETURN (`LAG_RETURN`/`RANK`) but NOT its SMA/indicator. Now it can.
