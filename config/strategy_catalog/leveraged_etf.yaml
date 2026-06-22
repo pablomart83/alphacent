@@ -45,7 +45,7 @@
   risk_reward_ratio: 2.33
   metadata:
     direction: long
-    best_symbols:
+    fixed_symbols:
     - SOXL
     - TQQQ
     - UPRO
