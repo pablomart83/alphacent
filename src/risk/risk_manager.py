@@ -1078,12 +1078,33 @@ class RiskManager:
                 )
                 return 0.0
 
-            _paper_size = min(_flat_size, _symbol_cap_ps - _existing_exp, available_balance)
+            _headroom_ps = _symbol_cap_ps - _existing_exp
+            _paper_size = min(_flat_size, _headroom_ps, available_balance)
             if _paper_size < MINIMUM_ORDER_SIZE:
-                self._last_sizing_reason = (
-                    f"paper_size_below_minimum (${_paper_size:.0f} < ${MINIMUM_ORDER_SIZE:.0f})"
-                )
-                return 0.0
+                # The leveraged/high-vol ×0.5 paper haircut (flat $1000 → $500)
+                # pulls the size below the $1000 order minimum, which previously
+                # REJECTED the entry — silently blocking the ENTIRE high-vol cohort
+                # (semis/miners/3x ETFs) from PAPER. In an overbought-uptrend market
+                # the shorts that fire are exhaustion shorts on exactly those high-vol
+                # names, so this wiped out the short book (1 short in paper).
+                # PAPER's goal is data BREADTH on demo capital: dropping the entry
+                # yields no graduation data — far worse than a slightly-larger size
+                # (graduation scores % returns, which are size-independent). So if the
+                # symbol cap and balance can still afford the minimum, floor up to it;
+                # only reject when the symbol is genuinely capped or underfunded.
+                if _headroom_ps >= MINIMUM_ORDER_SIZE and available_balance >= MINIMUM_ORDER_SIZE:
+                    logger.info(
+                        f"Paper haircut pulled {signal.symbol} to ${_paper_size:.0f} "
+                        f"< min ${MINIMUM_ORDER_SIZE:.0f} — flooring to minimum "
+                        f"(breadth > representative-sizing on demo)"
+                    )
+                    _paper_size = MINIMUM_ORDER_SIZE
+                else:
+                    self._last_sizing_reason = (
+                        f"paper_size_below_minimum (${_paper_size:.0f} < "
+                        f"${MINIMUM_ORDER_SIZE:.0f}; headroom=${_headroom_ps:.0f})"
+                    )
+                    return 0.0
 
             logger.debug(
                 f"Paper flat sizing: {signal.symbol} → ${_paper_size:.0f} "
