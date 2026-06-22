@@ -2101,10 +2101,16 @@ class TradingScheduler:
                                             # then by strategy+symbol+side. Never match across strategies.
                                             from src.models.enums import OrderSide as OrderSideEnum
                                             pos_side = PositionSide.LONG if order.side == OrderSideEnum.BUY else PositionSide.SHORT
-                                            
-                                            # First: exact match by eToro position ID
+                                            # Account scope — eToro REUSES numeric position IDs across
+                                            # demo/live, and the unique constraint is (etoro_position_id,
+                                            # account_type). Every lookup/guard here must be account-scoped
+                                            # or we both mis-match across accounts and risk a uq violation.
+                                            _fill_acct = getattr(order_orm, 'account_type', None) or 'demo'
+
+                                            # First: exact match by eToro position ID (this account)
                                             existing = session.query(PositionORM).filter(
                                                 PositionORM.etoro_position_id == etoro_position_id,
+                                                PositionORM.account_type == _fill_acct,
                                             ).first()
                                             
                                             if not existing:
@@ -2123,12 +2129,34 @@ class TradingScheduler:
                                                 ).first()
 
                                             if existing:
-                                                existing.etoro_position_id = etoro_position_id
-                                                # Correct strategy_id if position was created by sync
-                                                # before the fill was processed (race condition)
-                                                if existing.strategy_id == "etoro_position":
-                                                    existing.strategy_id = order.strategy_id
-                                                logger.info(f"Updated existing {order.symbol} position (strategy {order.strategy_id[:8]}) with eToro ID {etoro_position_id}")
+                                                # Guard against the uq_positions_etoro_id_account race:
+                                                # if another row in THIS account already holds this eToro
+                                                # id (the order monitor reconciled it between our lookup
+                                                # and now), do NOT reassign — that UPDATE would throw a
+                                                # UniqueViolation and (pre-fix) poison the shared cycle
+                                                # session, cascading to every later signal. Leave the
+                                                # optimistic placeholder for the monitor to clean up.
+                                                _already = None
+                                                if existing.etoro_position_id != etoro_position_id:
+                                                    _already = session.query(PositionORM.id).filter(
+                                                        PositionORM.etoro_position_id == etoro_position_id,
+                                                        PositionORM.account_type == _fill_acct,
+                                                        PositionORM.id != existing.id,
+                                                    ).first()
+                                                if _already:
+                                                    logger.warning(
+                                                        f"eToro position {etoro_position_id} already tracked "
+                                                        f"for {_fill_acct} (row {_already[0][:8]}…) — leaving "
+                                                        f"{order.symbol} placeholder {existing.id[:8]}… for the "
+                                                        f"order monitor to reconcile (skip reassign, avoid uq violation)"
+                                                    )
+                                                else:
+                                                    existing.etoro_position_id = etoro_position_id
+                                                    # Correct strategy_id if position was created by sync
+                                                    # before the fill was processed (race condition)
+                                                    if existing.strategy_id == "etoro_position":
+                                                        existing.strategy_id = order.strategy_id
+                                                    logger.info(f"Updated existing {order.symbol} position (strategy {order.strategy_id[:8]}) with eToro ID {etoro_position_id}")
                                             else:
                                                 import uuid as _uuid
                                                 new_pos = PositionORM(
@@ -2166,10 +2194,27 @@ class TradingScheduler:
 
                                 except Exception as pos_err:
                                     logger.debug(f"Immediate position creation skipped: {pos_err}")
-                                    # Non-critical — order monitor will pick it up
+                                    # Non-critical — order monitor will pick it up. But a failed
+                                    # commit (e.g. the uq_positions_etoro_id_account race with the
+                                    # order monitor) leaves the SHARED cycle session in an aborted
+                                    # state; without this rollback every subsequent signal in the
+                                    # loop fails with "transaction has been rolled back" (the
+                                    # 2026-06-22 GS→FAST→GWW cascade). Roll back so the next signal
+                                    # gets a clean session.
+                                    try:
+                                        session.rollback()
+                                    except Exception:
+                                        pass
 
                         except Exception as e:
                             _emsg = str(e)
+                            # Safety net: any mid-signal DB failure must not leave the
+                            # shared cycle session aborted for the NEXT signal. Roll back
+                            # before doing anything else (no-op when the session is clean).
+                            try:
+                                session.rollback()
+                            except Exception:
+                                pass
                             if "Market closed" in _emsg and "re-fire at next open" in _emsg:
                                 # G-22: market-closed is a deferral, not a failure.
                                 logger.info(f"Signal deferred (market closed): {signal.symbol}")

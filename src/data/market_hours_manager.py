@@ -160,6 +160,27 @@ def _check_etoro_24_5(now_et: datetime) -> bool:
     return True
 
 
+def _check_us_regular_session(now_et: datetime) -> bool:
+    """True only during the REGULAR US cash-equity session: Mon-Fri 09:30-16:00
+    ET (13:00 on early-close days), holidays closed.
+
+    This is distinct from the eToro 24/5 trading window: it models when the
+    DATA PROVIDERS (Yahoo/FMP) actually publish intraday (1h/4h) bars. Outside
+    the regular session there simply are no fresh intraday bars to fetch, so an
+    empty intraday result for an equity is EXPECTED (pre-market / overnight),
+    not a data outage. Used by the market-data layer to decide whether an empty
+    intraday fetch is benign.
+    """
+    if _is_us_holiday(now_et):
+        return False
+    weekday = now_et.weekday()  # Mon=0 … Sun=6
+    if weekday >= 5:  # Sat/Sun
+        return False
+    hhmm = now_et.time()
+    close = time(13, 0) if _is_us_early_close(now_et) else time(16, 0)
+    return time(9, 30) <= hhmm < close
+
+
 def _check_us_extended(now_et: datetime) -> bool:
     """Pre + regular + post US market hours: Mon-Fri 04:00-20:00 ET.
     Closed on holidays. Respects early-close days (1:00 PM ET).
@@ -401,6 +422,19 @@ class MarketHoursManager:
             return True
 
     # --- Helpers ----------------------------------------------------------
+
+    def is_regular_us_session_open(self, check_time: Optional[datetime] = None) -> bool:
+        """True only during the regular US cash-equity session (09:30-16:00 ET,
+        Mon-Fri, holidays closed). Models when Yahoo/FMP publish intraday bars —
+        use this (not is_market_open, which is the eToro 24/5 trading window) to
+        decide whether an empty intraday data fetch is expected. Fail-open=False
+        (treat as closed) so an internal error never masks a genuine outage.
+        """
+        try:
+            return _check_us_regular_session(self._to_et(check_time))
+        except Exception as e:
+            logger.warning(f"is_regular_us_session_open failed: {e} — defaulting to closed")
+            return False
 
     @staticmethod
     def _to_et(check_time: Optional[datetime]) -> datetime:

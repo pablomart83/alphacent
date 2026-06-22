@@ -1002,7 +1002,7 @@ class MarketDataManager:
         # (current gap-fill, not a historical backfill) and (b) the market
         # actually being closed for the symbol's asset class, so genuine weekday
         # outages still surface as errors.
-        if self._is_recent_market_closed_window(db_symbol, start, end):
+        if self._is_recent_market_closed_window(db_symbol, start, end, interval):
             logger.info(
                 f"No {interval} bars for {db_symbol} {start.date()}→{end.date()} — "
                 f"market closed for the requested window (expected, not an outage); "
@@ -1019,7 +1019,7 @@ class MarketDataManager:
         )
         raise ValueError(f"Failed to fetch historical data for {db_symbol} from all sources")
     
-    def _is_recent_market_closed_window(self, symbol: str, start, end) -> bool:
+    def _is_recent_market_closed_window(self, symbol: str, start, end, interval=None) -> bool:
         """True when a RECENT historical request falls in a market-closed period
         (weekend/holiday) for the symbol's asset class, making an empty result
         EXPECTED rather than an outage.
@@ -1034,6 +1034,15 @@ class MarketDataManager:
           - the symbol is NOT an always-on class (crypto/forex trade ~24/7, so a
             closed market never applies to them);
           - the market is currently CLOSED for the symbol's (equity-like) schedule.
+
+        Intraday refinement (2026-06-22): the eToro 24/5 trading window treats
+        weekday pre-market / overnight as "open", but Yahoo/FMP only publish
+        intraday (1h/4h) bars during the REGULAR cash session (09:30-16:00 ET).
+        So a recent INTRADAY equity fetch that returns empty while the regular
+        session is closed (pre-market, overnight, weekend, holiday) is expected,
+        not an outage. This eliminated the recurring pre-market "SPY 1h all
+        sources failed" ERROR (benchmark fetched every cycle by regime/MQS).
+        Daily requests keep the original weekend/holiday-only behavior.
         """
         try:
             now = datetime.utcnow()
@@ -1045,9 +1054,19 @@ class MarketDataManager:
             if sym in set(DEMO_ALLOWED_CRYPTO) or sym in set(DEMO_ALLOWED_FOREX):
                 return False  # 24/7 classes are never "market-closed"
             from src.data.market_hours_manager import get_market_hours_manager, AssetClass
-            # Equities/ETFs/indices on eToro follow the 24/5 STOCK schedule —
-            # closed only on weekends/holidays, exactly the case we suppress.
-            return not get_market_hours_manager().is_market_open(AssetClass.STOCK, symbol=sym)
+            mgr = get_market_hours_manager()
+            # Evaluate market status at the window END (≈ the fetch instant for an
+            # incremental top-up) — principled and deterministically testable.
+            # Weekend/holiday: eToro 24/5 closed → empty is expected for ANY interval.
+            if not mgr.is_market_open(AssetClass.STOCK, check_time=end_naive, symbol=sym):
+                return True
+            # Weekday but outside the regular cash session: intraday providers have
+            # no fresh bars yet (pre-market / overnight). Daily is handled elsewhere
+            # and keeps its original behavior, so scope this to intraday intervals.
+            iv = (interval or "").lower()
+            if iv in ("1h", "2h", "4h") and not mgr.is_regular_us_session_open(end_naive):
+                return True
+            return False
         except Exception:
             return False  # fail-safe: never suppress a genuine failure on uncertainty
 
