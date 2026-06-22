@@ -249,8 +249,22 @@ _fmp_cache_progress: dict = {
 }
 
 
+_FMP_COVERAGE_CACHE: dict = {"data": None, "ts": 0.0}
+
+
 def _compute_fmp_coverage() -> dict:
-    """Compute FMP cache coverage stats from DB."""
+    """Compute FMP cache coverage stats from DB.
+
+    Cached for 60s: the System page polls this every 30s (plus each page load)
+    and coverage barely moves between warms (the warmer runs ~daily). The cache
+    keeps the status endpoint snappy even while a trading cycle holds DB-pool
+    connections.
+    """
+    import time as _t
+    _now = _t.time()
+    _cached = _FMP_COVERAGE_CACHE.get("data")
+    if _cached is not None and (_now - _FMP_COVERAGE_CACHE.get("ts", 0.0)) < 60:
+        return _cached
     try:
         from src.models.database import get_database
         from src.models.orm import FundamentalDataORM
@@ -275,13 +289,16 @@ def _compute_fmp_coverage() -> dict:
             session.close()
 
         last_warm = FMPCacheWarmer.get_last_warm_timestamp()
-        return {
+        _result = {
             "total_symbols": total,
             "fresh_count": fresh_count,
             "any_count": any_count,
             "coverage_pct": round(fresh_count / total * 100, 1) if total > 0 else 0.0,
             "last_warm_at": last_warm.isoformat() if last_warm else None,
         }
+        _FMP_COVERAGE_CACHE["data"] = _result
+        _FMP_COVERAGE_CACHE["ts"] = _now
+        return _result
     except Exception as e:
         logger.warning(f"Could not compute FMP coverage: {e}")
         return {"total_symbols": 0, "fresh_count": 0, "any_count": 0, "coverage_pct": 0.0, "last_warm_at": None}
@@ -297,24 +314,13 @@ async def get_fmp_cache_status():
     thread_alive = _fmp_cache_thread is not None and _fmp_cache_thread.is_alive()
     is_running = thread_alive or _fmp_cache_progress.get("running", False)
 
-    # Derive last_warm_at from DB when in-memory has no completed_at (fresh restart)
-    last_warm_at = _fmp_cache_progress.get("completed_at")
-    if not last_warm_at:
-        try:
-            from src.models.database import get_database
-            from sqlalchemy import text
-            db = get_database()
-            session = db.get_session()
-            try:
-                row = session.execute(text(
-                    "SELECT MAX(fetched_at) FROM fmp_fundamentals"
-                )).fetchone()
-                if row and row[0]:
-                    last_warm_at = row[0].isoformat() + "Z"
-            finally:
-                session.close()
-        except Exception:
-            pass
+    # last_warm_at: prefer this process's in-memory completion, else the
+    # authoritative DB timestamp already resolved by _compute_fmp_coverage
+    # (cache_metadata key "fmp_last_cache_warm" via get_last_warm_timestamp).
+    # Previously this re-queried a nonexistent `fmp_fundamentals` table, always
+    # errored, and the None result CLOBBERED coverage's valid value → the card
+    # showed "Last run —" despite a healthy 95% coverage.
+    last_warm_at = _fmp_cache_progress.get("completed_at") or coverage.get("last_warm_at")
 
     return {
         **_fmp_cache_progress,
