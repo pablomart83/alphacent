@@ -3281,6 +3281,7 @@ class StrategyEngine:
                 primary_index=df.index,
                 start=pd.Timestamp(start).to_pydatetime(),
                 end=pd.Timestamp(end).to_pydatetime(),
+                primary_symbol_override=symbol,
             )
             if cross_asset:
                 indicators.update(cross_asset)
@@ -4569,6 +4570,7 @@ class StrategyEngine:
         primary_index: pd.DatetimeIndex,
         start: Optional[datetime] = None,
         end: Optional[datetime] = None,
+        primary_symbol_override: Optional[str] = None,
     ) -> Dict[str, pd.Series]:
         """Compute cross-asset DSL primitives (LAG_RETURN, RANK_IN_UNIVERSE)
         for a strategy, aligned to its primary symbol's bar index.
@@ -4595,7 +4597,15 @@ class StrategyEngine:
         if strategy.rules:
             conditions.extend(strategy.rules.get("entry_conditions", []) or [])
             conditions.extend(strategy.rules.get("exit_conditions", []) or [])
-        primary_symbol = strategy.symbols[0] if strategy.symbols else None
+        # For multi-symbol watchlists (e.g. fixed_symbols templates), the SELF /
+        # UNDERLYING sentinels must resolve off the symbol CURRENTLY being
+        # evaluated, not strategy.symbols[0]. The caller (signal-gen) passes the
+        # evaluated symbol via primary_symbol_override; backtest runs on
+        # symbols[0] and passes that. Without this, a [SOXL,TQQQ,UPRO] strategy
+        # would resolve UNDERLYING to SOXX for all three (TQQQ/UPRO need QQQ/SPY).
+        primary_symbol = primary_symbol_override or (
+            strategy.symbols[0] if strategy.symbols else None
+        )
         if primary_symbol is None:
             return {}
         # Fast path: skip the fetcher wiring if there are no cross-asset refs.
@@ -11512,6 +11522,7 @@ class StrategyEngine:
             cross_asset = self._compute_cross_asset_for_strategy(
                 strategy=_ca_strategy,
                 primary_index=data.index,
+                primary_symbol_override=symbol,
             )
             if cross_asset:
                 indicators.update(cross_asset)
