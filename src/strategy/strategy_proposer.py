@@ -2531,6 +2531,91 @@ class StrategyProposer:
             if mc_filtered > 0:
                 logger.info(f"Monte Carlo bootstrap: filtered {mc_filtered} strategies as likely noise")
 
+            # ── Deflated Sharpe Ratio gate (Bailey & López de Prado 2014) ──────
+            # Corrects each strategy's OOS (test) Sharpe for MULTIPLE-TESTING bias:
+            # we trial many (template × symbol) combos per cycle, so the best
+            # test-Sharpes are partly selection luck. DSR = P(true Sharpe > 0)
+            # after deflating by the expected max Sharpe of n_trials IID tests,
+            # the sample length, and the return distribution's skew/kurtosis.
+            #
+            # n_trials = combos walk-forward-tested this cycle (the selection set).
+            # Computed for ALL mc-passed strategies and surfaced (s.metadata['wf_dsr'])
+            # beside the MC p5 so it's always visible. It only REJECTS when
+            # `backtest.walk_forward.dsr_gate.enabled` is true (default false —
+            # observe the before/after pass-rate first, then flip the flag).
+            _dsr_cfg = {}
+            try:
+                from pathlib import Path as _DsrPath
+                import yaml as _dsr_yaml
+                _dp = _DsrPath("config/autonomous_trading.yaml")
+                if _dp.exists():
+                    with open(_dp) as _df:
+                        _dsr_cfg = ((_dsr_yaml.safe_load(_df) or {}).get('backtest', {})
+                                    .get('walk_forward', {}).get('dsr_gate', {})) or {}
+            except Exception:
+                _dsr_cfg = {}
+            _dsr_enabled = bool(_dsr_cfg.get('enabled', False))
+            _dsr_min = float(_dsr_cfg.get('min_dsr', 0.90))
+            _dsr_min_trades = int(_dsr_cfg.get('min_trades', 10))
+            _n_trials = max(1, len(all_wf_results))
+            dsr_rejected_ids: set = set()
+            try:
+                import numpy as _np_dsr
+                from src.strategy.graduation_gate import compute_dsr as _compute_dsr
+                _dsr_scored = 0
+                for s, wf, ts, tes, het, ov, tv, tev in all_wf_results:
+                    if s.id not in mc_passed_ids or wf is None:
+                        continue
+                    _tr = wf.get('test_results')
+                    _tl = getattr(_tr, 'trades', None) if _tr is not None else None
+                    if _tl is None:
+                        continue
+                    if hasattr(_tl, 'to_dict'):
+                        _tl = _tl.to_dict('records') if not _tl.empty else []
+                    _rets = []
+                    for _t in _tl:
+                        _r = (_t.get('Return') if isinstance(_t, dict) else getattr(_t, 'Return', None))
+                        if _r is None and isinstance(_t, dict):
+                            _r = _t.get('return') or _t.get('pnl_pct')
+                        if _r is not None:
+                            try:
+                                _rets.append(float(_r))
+                            except (TypeError, ValueError):
+                                pass
+                    _nobs = len(_rets)
+                    if _nobs < _dsr_min_trades or tes is None or tes <= 0:
+                        # Can't deflate a non-positive / tiny-sample Sharpe; leave as-is.
+                        if s.metadata is not None:
+                            s.metadata['wf_dsr'] = None
+                        continue
+                    _arr = _np_dsr.array(_rets, dtype=float)
+                    _mu, _sd = float(_arr.mean()), float(_arr.std(ddof=1)) if _nobs > 1 else 0.0
+                    if _sd > 1e-9:
+                        _z = (_arr - _mu) / _sd
+                        _skew = float(_np_dsr.mean(_z ** 3))
+                        _kurt = float(_np_dsr.mean(_z ** 4))
+                    else:
+                        _skew, _kurt = 0.0, 3.0
+                    _dsr = _compute_dsr(float(tes), _n_trials, _nobs, _skew, _kurt)
+                    _dsr_scored += 1
+                    if s.metadata is not None:
+                        s.metadata['wf_dsr'] = round(_dsr, 4)
+                        s.metadata['wf_dsr_n_trials'] = _n_trials
+                    if _dsr_enabled and _dsr < _dsr_min:
+                        dsr_rejected_ids.add(s.id)
+                _before = len(mc_passed_ids)
+                if _dsr_enabled and dsr_rejected_ids:
+                    mc_passed_ids -= dsr_rejected_ids
+                logger.info(
+                    f"DSR gate ({'ENABLED' if _dsr_enabled else 'observe-only'}, "
+                    f"n_trials={_n_trials}, min_dsr={_dsr_min}): scored {_dsr_scored} mc-passed strategies, "
+                    f"{len(dsr_rejected_ids)} below threshold "
+                    f"({'filtered' if _dsr_enabled else 'would filter'}). "
+                    f"pass-rate {_before}→{len(mc_passed_ids)}"
+                )
+            except Exception as _dsr_err:
+                logger.debug(f"DSR gate skipped (non-fatal): {_dsr_err}")
+
             # Pass 1: Direction-aware thresholds
             # The TEST period is more recent and more relevant for live trading.
             # Train Sharpe matters for confirming the strategy isn't random, but
@@ -2576,16 +2661,22 @@ class StrategyProposer:
                 _is_crypto_accept = _csym in _crypto_set_accept
                 _cintv = str((s.metadata or {}).get('interval', '1d') if getattr(s, 'metadata', None) else '1d').lower()
                 if s.id not in mc_passed_ids:
+                    _is_dsr = s.id in dsr_rejected_ids
+                    _rej_reason = "dsr_filtered" if _is_dsr else "mc_bootstrap_filtered"
+                    _rej_md = {"train_sharpe": ts, "test_sharpe": tes}
+                    if _is_dsr and getattr(s, 'metadata', None):
+                        _rej_md["dsr"] = s.metadata.get('wf_dsr')
+                        _rej_md["n_trials"] = s.metadata.get('wf_dsr_n_trials')
                     _decision_rows.append({
                         "stage": "wf_rejected", "decision": "rejected",
                         "strategy_id": s.id, "template": (s.metadata or {}).get('template_name') or s.name,
                         "symbol": (s.symbols[0] if s.symbols else None),
                         "direction": self._detect_strategy_direction(s),
                         "market_regime": market_regime,
-                        "score": tes, "reason": "mc_bootstrap_filtered",
-                        "metadata": {"train_sharpe": ts, "test_sharpe": tes},
+                        "score": tes, "reason": _rej_reason,
+                        "metadata": _rej_md,
                     })
-                    continue  # Filtered by Monte Carlo bootstrap
+                    continue  # Filtered by Monte Carlo bootstrap or DSR gate
                 if wf is None:
                     continue  # Loaded from 4-tuple disk cache — no wf_results dict
                 # Per-bar overfit (ov) AND the rolling per-bar trade count (het) are
