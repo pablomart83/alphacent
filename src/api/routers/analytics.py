@@ -5255,3 +5255,44 @@ async def observability_gate_scoreboard_recompute(
     _gate_scoreboard_thread = _gs_threading.Thread(target=_run, name="gate-scoreboard", daemon=True)
     _gate_scoreboard_thread.start()
     return {"success": True, "message": "Gate scoreboard recompute started"}
+
+
+# ── SL/TP improvement recommendations (Tier 1, MAE/MFE → SL/TP) ────────────
+# Proposals only. Generated daily + on demand; surfaced for CIO review. The
+# approve/reject/revert actions (Path A application) live alongside.
+
+_rec_recompute_thread: Optional[_gs_threading.Thread] = None
+
+
+@router.get("/recommendations")
+async def list_recommendations(
+    status: str = Query("pending", regex="^(pending|applied|rejected|reverted|all)$"),
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """List improvement recommendations (default: pending)."""
+    from src.models.orm import ImprovementRecommendationORM
+    q = db.query(ImprovementRecommendationORM)
+    if status != "all":
+        q = q.filter(ImprovementRecommendationORM.status == status)
+    rows = q.order_by(ImprovementRecommendationORM.created_at.desc()).limit(500).all()
+    return {"status": status, "count": len(rows), "recommendations": [r.to_dict() for r in rows]}
+
+
+@router.post("/recommendations/recompute")
+async def recompute_recommendations(username: str = Depends(get_current_user)):
+    """Manually trigger the MAE/MFE → SL/TP recommender (background thread)."""
+    global _rec_recompute_thread
+    if _rec_recompute_thread is not None and _rec_recompute_thread.is_alive():
+        return {"success": False, "message": "Recommender already running"}
+
+    def _run():
+        try:
+            from src.analytics.sl_tp_recommender import compute_and_store
+            compute_and_store()
+        except Exception as e:
+            logger.error(f"SL/TP recommender recompute failed: {e}", exc_info=True)
+
+    _rec_recompute_thread = _gs_threading.Thread(target=_run, name="sltp-recommender", daemon=True)
+    _rec_recompute_thread.start()
+    return {"success": True, "message": "SL/TP recommender started"}

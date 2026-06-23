@@ -1395,3 +1395,74 @@ class WfValidationLedgerORM(Base):
             "validation_count": self.validation_count,
             "source": self.source,
         }
+
+
+class ImprovementRecommendationORM(Base):
+    """Tier-1 improvement recommendations — the approval rail's pending queue.
+
+    A data-driven, evidence-backed PROPOSAL produced by an analytics job
+    (e.g. the MAE/MFE → SL/TP recommender). NOTHING here is applied
+    automatically: a recommendation sits 'pending' until the CIO approves it
+    via the approval rail (Path A), at which point the running system reads the
+    override and applies it live (no deploy). LIVE recommendations are visibly
+    gated and require explicit approval.
+
+    rec_type:   'sl_tp' (stop/target) — extensible to other parameter classes.
+    scope_type: 'symbol' (per-pair, maps to live_strategies params) |
+                'template_asset_class' (template default for an asset class).
+    scope_key:  the unique target key, e.g. 'SOXL' or 'ADX Trend::stocks'.
+    status:     'pending' | 'applied' | 'rejected' | 'reverted'.
+    """
+    __tablename__ = "improvement_recommendations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    rec_type = Column(String(40), nullable=False, default="sl_tp")
+    scope_type = Column(String(40), nullable=False)   # 'symbol' | 'template_asset_class'
+    scope_key = Column(String(160), nullable=False, index=True)
+    symbol = Column(String(40), nullable=True)
+    template_name = Column(String(200), nullable=True)
+    asset_class = Column(String(40), nullable=True)
+    account_type = Column(String(20), nullable=True)  # 'demo' | 'live' | None (research/default)
+
+    current_sl = Column(Float, nullable=True)
+    proposed_sl = Column(Float, nullable=True)
+    current_tp = Column(Float, nullable=True)
+    proposed_tp = Column(Float, nullable=True)
+
+    n_trades = Column(Integer, nullable=True)
+    summary = Column(String, nullable=True)            # one-line human rationale
+    evidence = Column(_RawJSON, nullable=True)         # mae/mfe percentiles, capture, etc.
+
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewer = Column(String(80), nullable=True)
+    applied_at = Column(DateTime, nullable=True)
+    reverted_at = Column(DateTime, nullable=True)
+    notes = Column(String, nullable=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "rec_type": self.rec_type,
+            "scope_type": self.scope_type,
+            "scope_key": self.scope_key,
+            "symbol": self.symbol,
+            "template_name": self.template_name,
+            "asset_class": self.asset_class,
+            "account_type": self.account_type,
+            "current_sl": self.current_sl,
+            "proposed_sl": self.proposed_sl,
+            "current_tp": self.current_tp,
+            "proposed_tp": self.proposed_tp,
+            "n_trades": self.n_trades,
+            "summary": self.summary,
+            "evidence": self.evidence,
+            "status": self.status,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "reviewer": self.reviewer,
+            "applied_at": self.applied_at.isoformat() if self.applied_at else None,
+            "reverted_at": self.reverted_at.isoformat() if self.reverted_at else None,
+            "notes": self.notes,
+        }

@@ -2469,6 +2469,16 @@ class MonitoringService:
         except Exception as e:
             logger.warning(f"  gate scoreboard compute failed (non-critical): {e}")
 
+        # 1d. SL/TP recommendations (Tier 1, MAE/MFE → SL/TP). Proposals only —
+        # persisted to improvement_recommendations as 'pending' for CIO review
+        # (Path A). Never auto-applied.
+        try:
+            from src.analytics.sl_tp_recommender import compute_and_store as _rec_compute
+            _rec_res = _rec_compute()
+            logger.info(f"  SL/TP recommender: {_rec_res.get('pending_written')} pending recommendation(s)")
+        except Exception as e:
+            logger.warning(f"  SL/TP recommender failed (non-critical): {e}")
+
         # 1c. Backfill LIVE execution slippage from eToro ground truth (Option B).
         # Production close paths journal exits with the close-decision price and never
         # capture eToro's actual executed close rate, so exit_slippage was 100% NULL.
