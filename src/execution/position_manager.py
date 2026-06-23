@@ -65,14 +65,19 @@ class PositionManager:
     # IMPORTANT: These are percentage-based FLOORS. The actual trail distance is
     # max(distance_pct * price, ATR_MULTIPLIER * daily_ATR) to prevent penny-stop
     # whipsaws on high-priced instruments. See check_trailing_stops() for ATR logic.
+    # Retuned 2026-06-23 from the trailing-stop ladder backtest (635 TSL-exit
+    # trades, 90d): the prior wide ladder gave back ~6 points from peak (avg MFE
+    # +5.3% → realized ≈0%; leveraged peak +9% → −4%). Tightening activation +
+    # distance lifted backtested per-trade return +0.50 pts overall (+1.95 leveraged)
+    # and win-rate (stock 48→58%, etf 67→78%). Distance is the give-back driver.
     TRAILING_STOP_PARAMS = {
-        "stock":          {"activation": 0.05, "distance": 0.07},
-        "etf":            {"activation": 0.04, "distance": 0.05},
-        "leveraged_etf":  {"activation": 0.10, "distance": 0.12},  # 3x ETFs: wide stops
-        "crypto":         {"activation": 0.08, "distance": 0.10},
-        "forex":          {"activation": 0.02, "distance": 0.03},
-        "commodity":      {"activation": 0.05, "distance": 0.07},
-        "index":          {"activation": 0.04, "distance": 0.05},
+        "stock":          {"activation": 0.035, "distance": 0.04},
+        "etf":            {"activation": 0.03,  "distance": 0.035},
+        "leveraged_etf":  {"activation": 0.06,  "distance": 0.07},   # was 0.10/0.12 — never engaged before reversal
+        "crypto":         {"activation": 0.06,  "distance": 0.07},
+        "forex":          {"activation": 0.018, "distance": 0.022},
+        "commodity":      {"activation": 0.04,  "distance": 0.05},
+        "index":          {"activation": 0.03,  "distance": 0.035},
     }
 
     # Breakeven stop thresholds — move SL to entry price when profit reaches this level.
@@ -85,13 +90,13 @@ class PositionManager:
     # could have been avoided. Moving SL to breakeven at +3% costs nothing and
     # eliminates the "gave back a winner" scenario entirely.
     BREAKEVEN_STOP_PARAMS = {
-        "stock":          0.03,
-        "etf":            0.025,
-        "leveraged_etf":  0.06,   # 3x ETFs: need 6% move before locking breakeven
-        "crypto":         0.05,
-        "forex":          0.015,
-        "commodity":      0.03,
-        "index":          0.025,
+        "stock":          0.02,
+        "etf":            0.015,
+        "leveraged_etf":  0.03,   # was 0.06 — too high; leveraged reversed before locking
+        "crypto":         0.035,
+        "forex":          0.01,
+        "commodity":      0.02,
+        "index":          0.015,
     }
 
     # Profit lock-in thresholds — move SL to entry + lock_pct when profit reaches this level.
@@ -107,13 +112,13 @@ class PositionManager:
     #   +5%  → SL to entry + 2% (lock in 2% profit)
     #   +7.5%+ → trailing stop takes over, follows price at 7% distance
     PROFIT_LOCK_PARAMS = {
-        "stock":          {"trigger": 0.05, "lock": 0.02},
-        "etf":            {"trigger": 0.04, "lock": 0.015},
-        "leveraged_etf":  {"trigger": 0.10, "lock": 0.04},  # At +10%, lock in +4%
-        "crypto":         {"trigger": 0.08, "lock": 0.03},
-        "forex":          {"trigger": 0.025,"lock": 0.01},
-        "commodity":      {"trigger": 0.05, "lock": 0.02},
-        "index":          {"trigger": 0.04, "lock": 0.015},
+        "stock":          {"trigger": 0.03, "lock": 0.012},
+        "etf":            {"trigger": 0.025,"lock": 0.01},
+        "leveraged_etf":  {"trigger": 0.05, "lock": 0.025},  # was 0.10/0.04 — lock the +5% band
+        "crypto":         {"trigger": 0.05, "lock": 0.02},
+        "forex":          {"trigger": 0.018,"lock": 0.008},
+        "commodity":      {"trigger": 0.035,"lock": 0.015},
+        "index":          {"trigger": 0.025,"lock": 0.01},
     }
 
     # ATR multiplier for minimum trail distance, per asset class.
@@ -130,13 +135,13 @@ class PositionManager:
     #   high-vol regimes (CPI days etc.), which is what we want.
     # - Indices: 1.5x — ~1% ATR, 1.5x keeps trails near the 5% fixed distance.
     ATR_MULTIPLIER_BY_ASSET_CLASS = {
-        "stock":          2.0,
-        "etf":            2.0,
-        "leveraged_etf":  1.5,  # 3x ETFs: ATR already ~6-10%, 2x produces 12-20% stops
-        "crypto":         1.5,
-        "forex":          1.0,
-        "commodity":      2.0,
-        "index":          1.5,
+        "stock":          1.25,
+        "etf":            1.25,
+        "leveraged_etf":  1.0,   # 3x ETFs: ATR ~6-10%; even 1.0x is a wide stop
+        "crypto":         1.25,
+        "forex":          0.9,
+        "commodity":      1.5,
+        "index":          1.25,
     }
     # Legacy single-value multiplier kept for any external callers that read it.
     ATR_TRAIL_MULTIPLIER = 2.0
