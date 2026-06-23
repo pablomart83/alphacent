@@ -6,6 +6,41 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-23 (Auto) — TIER-1 ALL SIX RECOMMENDATIONS SHIPPED: price-history features (meta-label re-proof STILL negative), per-gate observability scoreboard, MAE/MFE→SL/TP recommender, DSR gate (observe-only), full Path-A approval rail + frontend. Deployed, verified, pushed across 6 commits. One change → deploy → verify discipline throughout.**
+
+Executed the prior session's recommended next steps end-to-end. Headline: the meta-label veto is conclusively dead, but the OTHER work (gate scoreboard + MAE/MFE recs + DSR + approval rail) is real, deployed value. **Nothing auto-applies to live — recommendations are proposals; the DSR gate is observe-only; approvals are CIO-gated via the rail.**
+
+### 1. Price-history features → meta-label re-proof (commit `acdb693`..ml1.1.0) — HONEST NEGATIVE, leave disabled
+Added 12 pre-entry OHLC features to `src/ml/meta_label_trainer.py` (`build_price_features`: `ph_n_bars`, dir-signed `ph_mom_5/10/20`, `ph_dist_sma20/50`, `ph_sma_slope_10`, plus `ph_realized_vol_20`, `ph_atr_pct_14`, `ph_rsi_14`, `ph_range_pos_20`, `ph_gap_last`). `FEATURE_SPEC_VERSION` ml1.0.0→**ml1.1.0**; train/serve parity preserved (`build_price_features` is pure, used by both paths; `ctx_from_trade` passes `price_history`). Verified `price_history` ends at entry (median |last_close−entry|=1.25% vs first 25.8%) — no leakage.
+- **Re-proof on EC2 (3531 trades):** stocks AUC **0.463** (lift −0.050, sep −0.0046 — blocks winners); etfs AUC **0.488** (lift −0.032, sep −0.0023); commodities/indices tiny-n AUC<0.4; forex/crypto SKIP (n<120). **Two independent feature enrichments now both at/below random.** Conclusion: the meta-label-as-veto has no edge — almost certainly because the conviction components are already the entry gate and the strategies are already WF/MC-validated, leaving no residual signal. **Do NOT wire shadow/enforce.** Meta-label state-grid frontend is moot. `scripts/verify_meta_label_edge.py` re-runs it.
+
+### 2. Per-gate observability scoreboard (commits backend+frontend) — DEPLOYED, the high-value finding
+`src/analytics/gate_scoreboard.py` measures, per canonical gate, the **direction-aware N-bar forward return of the signals it BLOCKED vs the cohort that PASSED all gates** (apples-to-apples counterfactual from `historical_price_cache`, since blocked signals never trade). `separation = passed − blocked`; positive ⇒ gate blocks worse signals (helps), negative ⇒ blocks better signals (hurts). Capacity gates (balance/dedup/exposure) labelled `capacity` (they don't predict quality). Precomputed in `_run_daily_sync` + manual recompute — never on the request path. Snapshot cached to `config/.gate_scoreboard.json`.
+- Added `signal_decisions.account_type` (additive column + index, live ALTER) + threaded through all decision writers (demo/live verified populating).
+- Endpoints: `GET /analytics/observability/gate-scoreboard` (instant, cached), `POST .../recompute`. Frontend: **GateScoreboard panel in Guard → Gates tab**. Proof: `scripts/verify_gate_scoreboard.py`.
+- **FINDINGS (14d, 40k forward-returns; gross returns are regime-inflated in this uptrend, so read SEPARATION not level):** DEMO passed cohort +6.13% 5d-fwd / 81% win. **Conviction threshold HELPS** (sep +0.024 — blocks +3.7% signals while passing +6.1%). **PULLBACK gate HURTS** (sep −0.0043; it's the biggest blocker at 16k blocks and blocks signals averaging +6.6% vs +6.1% passed — i.e. blocking winners in this regime, matching the steering note that it blocks 78–92% of trend LONGs). LIVE volume ~0 in 14d. **→ CIO action candidate: relax/regime-scope the pullback gate; the conviction gate is earning its keep.**
+
+### 3. MAE/MFE → SL/TP recommender (commit) — DEPLOYED, proposals only
+`src/analytics/sl_tp_recommender.py` generalises `diagnose_symbol_edge.py` into a daily+manual job. Over closed trades with TRACKED excursions (MAE/MFE are FRACTIONS; only ~451/3538 tracked, since ~May), per **symbol** and per **(template, asset_class)**: WIDEN SL when winners' MAE p75 > current stop or premature stop-outs >15%; TIGHTEN when MAE p90 ≪ stop; RAISE TP when MFE p50 ≫ TP / capture <50%. Bounded by `sl_cap_pct`. Writes `improvement_recommendations` (pending). Endpoints `GET /analytics/recommendations`, `POST .../recompute`; daily in `_run_daily_sync`. Proof: `scripts/verify_sl_tp_recommendations.py`.
+- **5 pending recs verified:** AMD widen 6%→7.5%, MU 6%→8.4%, ENPH tighten 6%→1.2%, ADX Trend Following::stocks 6%→9% (cap), Keltner Channel Breakout::stocks 6%→7.9%. **SOXL correctly produced NO rec** (its live SL is already 15% from the prior fix — the engine doesn't re-widen an already-correct stop), validating the SOXL stop logic generalised to the high-vol semis cohort.
+
+### 4. Deflated Sharpe Ratio gate at WF (commit) — OBSERVE-ONLY
+In `strategy_proposer` after the MC block: corrects each strategy's OOS test Sharpe for multiple-testing bias using `compute_dsr` (n_trials = combos WF-tested this cycle). Stores `s.metadata['wf_dsr']` ALWAYS (surfaces beside MC p5). **`backtest.walk_forward.dsr_gate.enabled` defaults FALSE** (observe-only): logs "scored N, K would filter, pass-rate B→A" without rejecting. When enabled, removes DSR<min from the pass set; wf_rejected reason distinguishes `dsr_filtered` vs `mc_bootstrap_filtered`. Verified `compute_dsr` discriminates (Sharpe 0.3→DSR 0.24, 0.8→0.93, 1.5→0.999). **Open: calibrate `min_dsr` from the logged distribution before flipping `enabled: true`** (test-Sharpe annualisation vs DSR's assumption is uncalibrated — observe first).
+
+### 5. Approval rail (Path A) + frontend (commits backend+frontend) — DEPLOYED, CIO-gated
+- `template_param_overrides` table + `src/analytics/param_overrides.py`: the running proposer reads ACTIVE overrides each cycle (`resolve_override`, cached ~60s) and applies SL/TP bounded by `sl_cap` — **inert until a row exists, no restart, instantly reversible**. Wired via `_finalize_risk_params` (asset-class floors → approved overrides).
+- `approve` → envelope-guarded (SL ≤ sl_cap); LIVE pairs update `live_strategies`, else write an active override; `reject`/`revert` with audit. Endpoints `POST /analytics/recommendations/{id}/approve|reject|revert`, `GET .../active-overrides`.
+- Frontend: **Recommendations panel in Strategies → Graduation** (evidence + Approve/Reject/Revert + Run-now; LIVE rows tagged). Verified the full apply→resolve→revert cycle on EC2 (left system clean, rec restored to pending).
+
+**WHAT THE CIO SHOULD DO NEXT (decisions, not code):**
+1. Review the **gate scoreboard** in Guard — the pullback gate is blocking winners in the current uptrend; decide whether to relax/regime-scope it.
+2. Review the **5 SL/TP recommendations** in Graduation and approve the sound ones (AMD/MU/ADX-stocks widen are well-evidenced; ENPH tighten is conservative).
+3. Let the **DSR observe-only** log accrue over a few proposal cycles, then set `min_dsr` from the real distribution and flip `enabled: true`.
+
+**Verified live state:** service healthy across all restarts; new tables `improvement_recommendations` + `template_param_overrides` created; `signal_decisions.account_type` populating; no new errors (only pre-existing FMP rate-limit warnings). All read-only proof scripts present: `verify_meta_label_edge.py`, `verify_gate_scoreboard.py`, `verify_sl_tp_recommendations.py`.
+
+---
+
 **SESSION 2026-06-22 (Opus 4.8) — TIER-1 LEARN-FROM-TRADES, STEP 1: META-LABEL PROVE-FIRST FOUNDATION shipped (read-only) + HONEST NEGATIVE EDGE FINDING. Deployed read-only, run on live data, pushed (commit `1286cdf`). NOT wired to any live path.**
 
 Built the prove-first foundation for the meta-label filter and ran it against all realized trades BEFORE any inference/enforcement wiring (per the mandated rollout: train → prove (CV) → shadow → enforce). 
