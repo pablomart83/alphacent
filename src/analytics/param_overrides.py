@@ -71,11 +71,26 @@ def invalidate_cache() -> None:
         _CACHE_TS = 0.0
 
 
+# Asset-class aliases — the registry uses plural forms ('stocks', 'etfs',
+# 'indices', 'commodities') while the proposer's _get_asset_class returns
+# singular ('stock', 'etf', 'index', 'commodity'). Recommendations are keyed
+# with the registry (plural) form; the proposer looks up with the singular
+# form. Resolve must tolerate BOTH so a template×asset-class override binds
+# regardless of which side produced the asset_class string.
+_AC_ALIASES = {
+    "stock": "stocks", "stocks": "stock",
+    "etf": "etfs", "etfs": "etf",
+    "index": "indices", "indices": "index",
+    "commodity": "commodities", "commodities": "commodity",
+}
+
+
 def resolve_override(
     symbol: str, template_name: Optional[str], asset_class: Optional[str],
 ) -> Optional[Dict[str, float]]:
     """Return {'sl_pct', 'tp_pct'} for the most specific active override, or
-    None. Symbol-scope wins over template×asset-class scope."""
+    None. Symbol-scope wins over template×asset-class scope. The template key
+    is tried with both the given asset_class AND its singular/plural alias."""
     overrides = get_active_overrides()
     if not overrides:
         return None
@@ -84,10 +99,13 @@ def resolve_override(
         o = overrides[sym]
         return {"sl_pct": o.get("sl_pct"), "tp_pct": o.get("tp_pct")}
     if template_name and asset_class:
-        key = f"{template_name}::{asset_class}"
-        if key in overrides:
-            o = overrides[key]
-            return {"sl_pct": o.get("sl_pct"), "tp_pct": o.get("tp_pct")}
+        for ac in (asset_class, _AC_ALIASES.get(asset_class)):
+            if not ac:
+                continue
+            key = f"{template_name}::{ac}"
+            if key in overrides:
+                o = overrides[key]
+                return {"sl_pct": o.get("sl_pct"), "tp_pct": o.get("tp_pct")}
     return None
 
 
