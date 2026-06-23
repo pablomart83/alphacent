@@ -2,10 +2,13 @@ import { ErrorState } from '@/components/primitives'
 import { classifyError } from '@/lib/errors'
 import { useSystemHealth } from '../useGuardData'
 import { GateStatusGrid } from './GateStatusGrid'
+import { GateScoreboard } from './GateScoreboard'
 
 /**
  * GatesTab — one card per trading gate from /control/system-health.trading_gates[].
- * Cards are sorted so blocking gates float to the top and pulse.
+ * Cards are sorted so blocking gates float to the top and pulse. Below the live
+ * gate state, the Gate Scoreboard shows the blocked-vs-passed forward-return
+ * counterfactual per gate (which gates actually help vs hurt).
  */
 export function GatesTab() {
   const health = useSystemHealth()
@@ -22,8 +25,9 @@ export function GatesTab() {
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto px-3 py-3">
+    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-0)] overflow-auto px-3 py-3 gap-4">
       <GateStatusGrid gates={health.data?.trading_gates} loading={health.isLoading} />
+      <GateScoreboard />
     </div>
   )
 }

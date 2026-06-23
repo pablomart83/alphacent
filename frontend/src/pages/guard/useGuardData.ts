@@ -240,6 +240,64 @@ export function useSystemHealth() {
   })
 }
 
+/* ──── Gate scoreboard (Tier 1 observability) ──── */
+
+export interface GateScoreboardRow {
+  gate: string
+  label: string
+  edge_gate: boolean
+  blocked_n: number
+  blocked_with_fwd: number
+  blocked_mean_fwd: number | null
+  blocked_win_rate: number | null
+  passed_mean_fwd: number | null
+  passed_win_rate: number | null
+  separation: number | null
+  verdict: 'helps' | 'hurts' | 'neutral' | 'capacity' | 'insufficient_data' | string
+}
+
+export interface GateScoreboardAccount {
+  passed: { n: number; mean_fwd: number | null; median_fwd: number | null; win_rate: number | null }
+  gates: GateScoreboardRow[]
+}
+
+export interface GateScoreboardPayload {
+  available: boolean
+  computing?: boolean
+  message?: string
+  computed_at?: string
+  lookback_days?: number
+  horizon_bars?: number
+  compute_seconds?: number
+  coverage?: { decisions: number; with_forward_return: number; symbols: number }
+  accounts?: Record<string, GateScoreboardAccount>
+  notes?: string
+}
+
+export function useGateScoreboard() {
+  return useQuery<GateScoreboardPayload>({
+    queryKey: ['gate-scoreboard'],
+    queryFn: () => api.get<GateScoreboardPayload>('/analytics/observability/gate-scoreboard'),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+export function useRecomputeGateScoreboard() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ success: boolean; message: string }>(
+        '/analytics/observability/gate-scoreboard/recompute',
+        {},
+      ),
+    onSuccess: () => {
+      // Give the background thread a moment, then refetch a few times.
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['gate-scoreboard'] }), 4000)
+    },
+  })
+}
+
 /* ──── Mutations ──── */
 
 export function useUpdateRiskLimits() {
