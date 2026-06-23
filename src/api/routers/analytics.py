@@ -5296,3 +5296,43 @@ async def recompute_recommendations(username: str = Depends(get_current_user)):
     _rec_recompute_thread = _gs_threading.Thread(target=_run, name="sltp-recommender", daemon=True)
     _rec_recompute_thread.start()
     return {"success": True, "message": "SL/TP recommender started"}
+
+
+# ── Approval rail actions (Path A) ─────────────────────────────────────────
+
+
+@router.post("/recommendations/{rec_id}/approve")
+async def approve_recommendation(rec_id: int, username: str = Depends(get_current_user)):
+    """Approve + apply a recommendation (Path A). Live pairs update
+    live_strategies; template/paper scope writes an active param override the
+    proposer reads next cycle. Envelope-guarded (SL ≤ sl_cap)."""
+    from src.analytics.param_overrides import apply_recommendation
+    res = apply_recommendation(rec_id, reviewer=username or "cio")
+    return res
+
+
+@router.post("/recommendations/{rec_id}/reject")
+async def reject_recommendation_ep(rec_id: int, username: str = Depends(get_current_user)):
+    from src.analytics.param_overrides import reject_recommendation
+    return reject_recommendation(rec_id, reviewer=username or "cio")
+
+
+@router.post("/recommendations/{rec_id}/revert")
+async def revert_recommendation_ep(rec_id: int, username: str = Depends(get_current_user)):
+    """Revert an applied recommendation: deactivate its override (instantly
+    inert next cycle). live_strategies changes are flagged for manual revert."""
+    from src.analytics.param_overrides import revert_recommendation
+    return revert_recommendation(rec_id, reviewer=username or "cio")
+
+
+@router.get("/recommendations/active-overrides")
+async def list_active_overrides(
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db_session),
+):
+    """List currently-active Path-A parameter overrides (audit view)."""
+    from src.models.orm import TemplateParamOverrideORM
+    rows = db.query(TemplateParamOverrideORM).filter(
+        TemplateParamOverrideORM.status == "active"
+    ).order_by(TemplateParamOverrideORM.created_at.desc()).all()
+    return {"count": len(rows), "overrides": [r.to_dict() for r in rows]}

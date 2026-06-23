@@ -1466,3 +1466,50 @@ class ImprovementRecommendationORM(Base):
             "reverted_at": self.reverted_at.isoformat() if self.reverted_at else None,
             "notes": self.notes,
         }
+
+
+class TemplateParamOverrideORM(Base):
+    """Path-A parameter overrides applied by the RUNNING system (no deploy).
+
+    When the CIO approves an improvement_recommendation whose target is not a
+    live pair (a template×asset-class default, or a paper symbol), the approval
+    writes an ACTIVE row here. The proposer reads active overrides each cycle
+    (cached, ~60s) and applies them to the SL/TP it assigns — bounded by
+    sl_caps. Reverting sets status='reverted' (instantly inert next cycle).
+
+    scope_type: 'symbol' | 'template_asset_class'  (matches the recommendation)
+    scope_key:  'SOXL' | 'ADX Trend Following::stocks'
+    status:     'active' | 'reverted'
+    """
+    __tablename__ = "template_param_overrides"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    scope_type = Column(String(40), nullable=False)
+    scope_key = Column(String(160), nullable=False, index=True)
+    symbol = Column(String(40), nullable=True)
+    template_name = Column(String(200), nullable=True)
+    asset_class = Column(String(40), nullable=True)
+    sl_pct = Column(Float, nullable=True)
+    tp_pct = Column(Float, nullable=True)
+    status = Column(String(20), nullable=False, default="active", index=True)
+    source_recommendation_id = Column(Integer, nullable=True)
+    created_by = Column(String(80), nullable=True)
+    reverted_at = Column(DateTime, nullable=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "scope_type": self.scope_type,
+            "scope_key": self.scope_key,
+            "symbol": self.symbol,
+            "template_name": self.template_name,
+            "asset_class": self.asset_class,
+            "sl_pct": self.sl_pct,
+            "tp_pct": self.tp_pct,
+            "status": self.status,
+            "source_recommendation_id": self.source_recommendation_id,
+            "created_by": self.created_by,
+            "reverted_at": self.reverted_at.isoformat() if self.reverted_at else None,
+        }
