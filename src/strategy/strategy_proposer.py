@@ -1651,16 +1651,21 @@ class StrategyProposer:
 
         return risk_config
 
-    def _apply_approved_param_overrides(self, risk_config: RiskConfig, symbol: str, strategy) -> RiskConfig:
+    def _apply_approved_param_overrides(self, risk_config: RiskConfig, symbol: str, strategy, template_name: Optional[str] = None) -> RiskConfig:
         """Apply a CIO-approved SL/TP override (Path A) to this strategy's risk
         config, if one is active for its symbol or template×asset-class. Read
         live each cycle (cached ~60s) so approvals take effect with no restart.
-        Inert when no override exists. Bounded by sl_caps. Fail-safe."""
+        Inert when no override exists. Bounded by sl_caps. Fail-safe.
+
+        `template_name` is passed explicitly by callers (metadata isn't set on the
+        strategy yet at construction time); it falls back to metadata/name only
+        if not provided."""
         try:
             from src.analytics.param_overrides import resolve_override
             from src.risk.sl_caps import sl_cap_pct
-            meta = getattr(strategy, 'metadata', None) or {}
-            template_name = meta.get('template_name') or getattr(strategy, 'name', None)
+            if not template_name:
+                meta = getattr(strategy, 'metadata', None) or {}
+                template_name = meta.get('template_name') or getattr(strategy, 'name', None)
             asset_class = self._get_asset_class(symbol)
             ov = resolve_override(symbol, template_name, asset_class)
             if not ov:
@@ -1684,13 +1689,14 @@ class StrategyProposer:
             logger.debug(f"Approved param override skipped for {symbol}: {e}")
         return risk_config
 
-    def _finalize_risk_params(self, strategy, primary_symbol: Optional[str]):
+    def _finalize_risk_params(self, strategy, primary_symbol: Optional[str], template_name: Optional[str] = None):
         """Asset-class floors then CIO-approved Path-A overrides. Single point
-        so all proposal sites apply overrides identically."""
+        so all proposal sites apply overrides identically. `template_name` is
+        passed explicitly (strategy.metadata isn't populated yet at construction)."""
         if not primary_symbol:
             return strategy.risk_params
         rc = self._apply_asset_class_overrides(strategy.risk_params, primary_symbol)
-        rc = self._apply_approved_param_overrides(rc, primary_symbol, strategy)
+        rc = self._apply_approved_param_overrides(rc, primary_symbol, strategy, template_name=template_name)
         return rc
 
     def _load_trading_symbols(self) -> List[str]:
@@ -4078,7 +4084,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         # Apply asset-class-specific risk parameter overrides
         primary_symbol = symbols[0] if symbols else None
         asset_class = self._get_asset_class(primary_symbol) if primary_symbol else "stock"
-        strategy.risk_params = self._finalize_risk_params(strategy, primary_symbol)
+        strategy.risk_params = self._finalize_risk_params(strategy, primary_symbol, template_name=template.name)
 
         # Add template metadata
         if not hasattr(strategy, 'metadata') or strategy.metadata is None:
@@ -4197,7 +4203,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         # Apply asset-class-specific risk parameter overrides
         primary_symbol = symbols[0] if symbols else None
         asset_class = self._get_asset_class(primary_symbol) if primary_symbol else "stock"
-        strategy.risk_params = self._finalize_risk_params(strategy, primary_symbol)
+        strategy.risk_params = self._finalize_risk_params(strategy, primary_symbol, template_name=template.name)
 
         # Add template to metadata for walk-forward analysis
         if not hasattr(strategy, 'metadata') or strategy.metadata is None:
@@ -7386,7 +7392,7 @@ Generate a CORRECTED strategy that addresses all errors:"""
         # Apply asset-class-specific risk parameter overrides
         primary_symbol = symbols[0] if symbols else None
         asset_class = self._get_asset_class(primary_symbol) if primary_symbol else "stock"
-        strategy.risk_params = self._finalize_risk_params(strategy, primary_symbol)
+        strategy.risk_params = self._finalize_risk_params(strategy, primary_symbol, template_name=template.name)
 
         # Add metadata
         if not hasattr(strategy, 'metadata') or strategy.metadata is None:
