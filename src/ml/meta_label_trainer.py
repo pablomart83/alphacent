@@ -57,7 +57,9 @@ logger = logging.getLogger(__name__)
 # Artifact / feature-spec version. Bump when FEATURE_ORDER or the encodings
 # change so a stale serve-side artifact is detected rather than silently
 # producing garbage.
-FEATURE_SPEC_VERSION = "ml1.0.0"
+#   ml1.0.0 — 22 decision-time features (conviction + breakdown + fundamentals)
+#   ml1.1.0 — + 12 pre-entry price-history features (momentum/trend/vol/structure)
+FEATURE_SPEC_VERSION = "ml1.1.0"
 
 MODEL_DIR_DEFAULT = "models/ml"
 
@@ -117,6 +119,147 @@ FEATURE_ORDER: List[str] = [
     "f_revenue_growth",
     "f_earnings_surprise",
 ]
+
+# Pre-entry price-history features (ml1.1.0). Computed from the ~60-bar OHLC
+# window that ENDS at the entry bar (verified: last bar ≈ entry, no post-entry
+# leakage). These describe the market structure the trade was entered into —
+# momentum/trend/slope are SIGNED by trade direction (positive = the pre-entry
+# move was favourable to the trade), while volatility/range/RSI are raw regime
+# descriptors (the model also sees `direction_long`, so it can learn
+# direction-specific behaviour of the raw ones). Every one is knowable at the
+# entry decision, so there is no leakage.
+PRICE_FEATURE_ORDER: List[str] = [
+    "ph_n_bars",          # availability / sample-size signal (0 when no history)
+    "ph_mom_5",           # signed return over last 5 bars
+    "ph_mom_10",          # signed return over last 10 bars
+    "ph_mom_20",          # signed return over last 20 bars
+    "ph_dist_sma20",      # signed close-vs-SMA20 distance
+    "ph_dist_sma50",      # signed close-vs-SMA50 distance
+    "ph_sma_slope_10",    # signed slope of SMA10
+    "ph_realized_vol_20", # stdev of last-20 close-to-close returns (unsigned)
+    "ph_atr_pct_14",      # mean true-range / close over last 14 (unsigned)
+    "ph_rsi_14",          # Wilder RSI(14) on closes (0-100, unsigned)
+    "ph_range_pos_20",    # position in last-20 high/low range (0=low,1=high)
+    "ph_gap_last",        # signed overnight gap into the entry bar
+]
+
+# The model trains and serves on conviction/fundamental features followed by
+# the price-history block, in this exact concatenated order.
+FEATURE_ORDER = FEATURE_ORDER + PRICE_FEATURE_ORDER
+
+
+def _bar_val(bar: Any, key: str) -> float:
+    """Read an OHLC field from a dict bar (train: trade_metadata) or an object
+    bar (serve: MarketData). Returns NaN when absent/unparseable."""
+    if isinstance(bar, dict):
+        v = bar.get(key)
+    else:
+        v = getattr(bar, key, None)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def build_price_features(price_history: Any, is_long: bool) -> Dict[str, float]:
+    """Pure pre-entry price-structure features — the price half of train/serve
+    parity. `price_history` is an oldest→newest list of OHLC bars ending at the
+    entry bar (dicts at train time, MarketData objects at serve time). `is_long`
+    signs the directional features so "favourable pre-entry move" is always
+    positive regardless of LONG/SHORT.
+
+    Defensive by construction: a missing/short history yields NaN for the
+    features it can't compute (imputed to the train median downstream) while
+    still reporting `ph_n_bars`, so the model can learn from missingness.
+    """
+    nan = float("nan")
+    feats: Dict[str, float] = {name: nan for name in PRICE_FEATURE_ORDER}
+
+    bars = price_history if isinstance(price_history, (list, tuple)) else []
+    closes = [c for c in (_bar_val(b, "close") for b in bars) if not np.isnan(c)]
+    feats["ph_n_bars"] = float(len(closes))
+    if len(closes) < 3:
+        return feats
+
+    highs = [_bar_val(b, "high") for b in bars]
+    lows = [_bar_val(b, "low") for b in bars]
+    opens = [_bar_val(b, "open") for b in bars]
+    c = np.array(closes, dtype=float)
+    n = len(c)
+    sign = 1.0 if is_long else -1.0
+
+    def mom(k: int) -> float:
+        if n > k and c[-1 - k] > 0:
+            return sign * (c[-1] / c[-1 - k] - 1.0)
+        return nan
+
+    feats["ph_mom_5"] = mom(5)
+    feats["ph_mom_10"] = mom(10)
+    feats["ph_mom_20"] = mom(20)
+
+    def dist_sma(k: int) -> float:
+        if n >= k:
+            sma = float(np.mean(c[-k:]))
+            if sma > 0:
+                return sign * (c[-1] / sma - 1.0)
+        return nan
+
+    feats["ph_dist_sma20"] = dist_sma(20)
+    feats["ph_dist_sma50"] = dist_sma(50)
+
+    # SMA10 slope: SMA10 now vs SMA10 five bars ago.
+    if n >= 15:
+        sma_now = float(np.mean(c[-10:]))
+        sma_prev = float(np.mean(c[-15:-5]))
+        if sma_prev > 0:
+            feats["ph_sma_slope_10"] = sign * (sma_now / sma_prev - 1.0)
+
+    # Realized vol: stdev of last-20 close-to-close returns (unsigned).
+    if n >= 6:
+        rets = np.diff(c[-21:]) / c[-21:-1] if n >= 21 else np.diff(c) / c[:-1]
+        rets = rets[np.isfinite(rets)]
+        if len(rets) >= 3:
+            feats["ph_realized_vol_20"] = float(np.std(rets, ddof=1))
+
+    # ATR%: mean true range over last 14 bars / last close (unsigned).
+    if n >= 2:
+        tr_list: List[float] = []
+        for i in range(1, n):
+            hi, lo, pc = highs[i], lows[i], closes[i - 1]
+            if any(np.isnan(x) for x in (hi, lo, pc)):
+                continue
+            tr_list.append(max(hi - lo, abs(hi - pc), abs(lo - pc)))
+        if tr_list and c[-1] > 0:
+            atr = float(np.mean(tr_list[-14:]))
+            feats["ph_atr_pct_14"] = atr / c[-1]
+
+    # Wilder RSI(14) on closes (unsigned, 0-100).
+    if n >= 15:
+        diffs = np.diff(c[-15:])
+        gains = np.clip(diffs, 0, None)
+        losses = -np.clip(diffs, None, 0)
+        avg_gain = float(np.mean(gains))
+        avg_loss = float(np.mean(losses))
+        if avg_loss == 0:
+            feats["ph_rsi_14"] = 100.0 if avg_gain > 0 else 50.0
+        else:
+            rs = avg_gain / avg_loss
+            feats["ph_rsi_14"] = 100.0 - (100.0 / (1.0 + rs))
+
+    # Position in the last-20 high/low range (0=at low, 1=at high; unsigned).
+    if n >= 5:
+        win_high = [highs[i] for i in range(max(0, n - 20), n) if not np.isnan(highs[i])]
+        win_low = [lows[i] for i in range(max(0, n - 20), n) if not np.isnan(lows[i])]
+        if win_high and win_low:
+            hi, lo = max(win_high), min(win_low)
+            if hi > lo:
+                feats["ph_range_pos_20"] = (c[-1] - lo) / (hi - lo)
+
+    # Overnight gap into the entry bar: (open_last - close_prev)/close_prev, signed.
+    if n >= 2 and not np.isnan(opens[-1]) and closes[-2] > 0:
+        feats["ph_gap_last"] = sign * ((opens[-1] - closes[-2]) / closes[-2])
+
+    return feats
 
 
 def _regime_family(regime: Optional[str]) -> Optional[str]:
@@ -197,6 +340,10 @@ def build_feature_row(ctx: Dict[str, Any]) -> Dict[str, float]:
         "f_revenue_growth": num("f_revenue_growth"),
         "f_earnings_surprise": num("f_earnings_surprise"),
     }
+
+    # Pre-entry price-history block (ml1.1.0). Signed by trade direction.
+    is_long = direction in ("long", "buy", "enter_long")
+    row.update(build_price_features(ctx.get("price_history"), is_long))
     return row
 
 
@@ -260,6 +407,7 @@ def ctx_from_trade(row: Dict[str, Any]) -> Dict[str, Any]:
         "f_debt_to_equity": fund.get("debt_to_equity"),
         "f_revenue_growth": fund.get("revenue_growth"),
         "f_earnings_surprise": earnings_surprise,
+        "price_history": md.get("price_history"),
     }
 
 
