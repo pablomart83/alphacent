@@ -5196,3 +5196,62 @@ async def get_conviction_calibration(
         recommendation=recommendation,
         data_window_days=days,
     )
+
+
+# ── Gate scoreboard (Tier 1 observability) ─────────────────────────────────
+# Per-gate blocked-vs-passed forward-return counterfactual. Heavy to compute
+# (price fetch per symbol seen), so it is precomputed off the request path
+# (daily sync + manual trigger) and served from a cached snapshot. NEVER run
+# the aggregate inline on a request — that caused the slow-Guard regression.
+
+import threading as _gs_threading
+import time as _gs_time
+
+_gate_scoreboard_thread: Optional[_gs_threading.Thread] = None
+_gate_scoreboard_started_at: Optional[float] = None
+
+
+@router.get("/observability/gate-scoreboard")
+async def observability_gate_scoreboard(username: str = Depends(get_current_user)):
+    """Return the cached per-gate scoreboard snapshot (instant — no compute).
+
+    Each gate reports, per account: how many entry signals it blocked, the
+    forward-return of the blocked cohort vs the cohort that cleared all gates,
+    and a verdict (helps / hurts / neutral). 'hurts' means the gate is blocking
+    signals that would have done BETTER than the ones we let through.
+    """
+    from src.analytics.gate_scoreboard import get_snapshot
+    snap = get_snapshot()
+    running = _gate_scoreboard_thread is not None and _gate_scoreboard_thread.is_alive()
+    if snap is None:
+        return {"available": False, "computing": running,
+                "message": "No scoreboard computed yet — trigger a recompute or wait for daily sync."}
+    return {"available": True, "computing": running, **snap}
+
+
+@router.post("/observability/gate-scoreboard/recompute")
+async def observability_gate_scoreboard_recompute(
+    lookback_days: int = Query(14, ge=1, le=60),
+    horizon_bars: int = Query(5, ge=1, le=20),
+    username: str = Depends(get_current_user),
+):
+    """Manually trigger a scoreboard recompute in a background thread."""
+    global _gate_scoreboard_thread, _gate_scoreboard_started_at
+
+    if _gate_scoreboard_thread is not None and _gate_scoreboard_thread.is_alive():
+        return {"success": False, "message": "Scoreboard recompute already running"}
+
+    def _run():
+        global _gate_scoreboard_started_at
+        try:
+            from src.analytics.gate_scoreboard import compute_and_store
+            compute_and_store(lookback_days=lookback_days, horizon_bars=horizon_bars)
+        except Exception as e:
+            logger.error(f"Gate scoreboard recompute failed: {e}", exc_info=True)
+        finally:
+            _gate_scoreboard_started_at = None
+
+    _gate_scoreboard_started_at = _gs_time.time()
+    _gate_scoreboard_thread = _gs_threading.Thread(target=_run, name="gate-scoreboard", daemon=True)
+    _gate_scoreboard_thread.start()
+    return {"success": True, "message": "Gate scoreboard recompute started"}

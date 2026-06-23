@@ -1195,6 +1195,11 @@ class SignalDecisionORM(Base):
     decision = Column(String, nullable=False)  # 'accepted' | 'rejected' | 'emitted' | 'blocked'
     reason = Column(String, nullable=True)  # human-readable short reason
     score = Column(Float, nullable=True)
+    # Account the decision was made for. 'demo' (PAPER) | 'live' | NULL (legacy
+    # rows written before this column / writers that don't yet pass it). Lets the
+    # gate scoreboard split blocked-vs-passed realized edge per account (the gates
+    # are account-asymmetric: C1 VIX / C3 trend-consistency / BTC-trend are LIVE-only).
+    account_type = Column(String, nullable=True, index=True)
     decision_metadata = Column(JSON, nullable=True)  # Free-form (sharpe, conviction, gate_name, etc.)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -1211,6 +1216,7 @@ class SignalDecisionORM(Base):
             "decision": self.decision,
             "reason": self.reason,
             "score": self.score,
+            "account_type": self.account_type,
             "metadata": self.decision_metadata,
         }
 

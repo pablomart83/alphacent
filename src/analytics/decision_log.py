@@ -118,6 +118,7 @@ def record_decision(
     score: Optional[float] = None,
     reason: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    account: Optional[str] = None,
 ) -> None:
     """Fire-and-forget single-row write. Never raises."""
     try:
@@ -139,6 +140,7 @@ def record_decision(
                 decision=decision,
                 reason=(reason[:500] if reason else None),
                 score=score,
+                account_type=account,
                 decision_metadata=metadata,
             )
             session.add(row)
@@ -181,6 +183,7 @@ def record_batch(rows: Iterable[Dict[str, Any]]) -> None:
                     decision=r["decision"],
                     reason=(reason[:500] if reason else None),
                     score=r.get("score"),
+                    account_type=r.get("account") or r.get("account_type"),
                     decision_metadata=r.get("metadata"),
                 ))
             session.bulk_save_objects(orm_rows)

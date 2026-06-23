@@ -2695,6 +2695,7 @@ class TradingScheduler:
                                             direction=_dir, template=getattr(_strat_obj, 'name', None),
                                             score=score, reason=reason,
                                             metadata={'account_type': 'live', 'template': _smeta.get('template_name')},
+                                            account='live',
                                         )
                                     except Exception:
                                         pass
@@ -4037,6 +4038,7 @@ class TradingScheduler:
                     "action": action_val,
                     "source": "trading_scheduler._log_signal_decision",
                 },
+                account="demo",
             )
         except Exception as e:
             # Never raise — analytics writes must not break trading.

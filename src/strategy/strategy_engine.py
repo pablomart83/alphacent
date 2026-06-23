@@ -5847,6 +5847,7 @@ class StrategyEngine:
                             reason=reason_text,
                             score=score,
                             metadata=extra_md,
+                            account=account_type,
                         )
                     except Exception:
                         pass  # never let observability break signal gen
@@ -6124,6 +6125,7 @@ class StrategyEngine:
                         "score": sig_meta.get('conviction_score'),
                         "reason": (getattr(sig, 'reasoning', '') or '')[:300],
                         "metadata": {"confidence": getattr(sig, 'confidence', None)},
+                        "account": account_type,
                     })
                 record_batch(rows)
             except Exception as _dl_err:

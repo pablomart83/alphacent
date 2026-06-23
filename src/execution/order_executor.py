@@ -153,7 +153,8 @@ class OrderExecutor:
                 vix_gate_reason = self._check_vix_entry_gate(normalized_symbol)
                 if vix_gate_reason:
                     self._log_decision(signal, normalized_symbol, stage="gate_blocked",
-                                       decision="blocked", reason=f"vix_gate: {vix_gate_reason}")
+                                       decision="blocked", reason=f"vix_gate: {vix_gate_reason}",
+                                       account=account_type)
                     raise OrderExecutionError(
                         f"VIX gate blocked LONG entry for {normalized_symbol}: "
                         f"{vix_gate_reason}. Signal discarded."
@@ -175,7 +176,8 @@ class OrderExecutor:
                 btc_gate_reason = self._check_btc_trend_gate(normalized_symbol)
                 if btc_gate_reason:
                     self._log_decision(signal, normalized_symbol, stage="gate_blocked",
-                                       decision="blocked", reason=f"btc_trend_gate: {btc_gate_reason}")
+                                       decision="blocked", reason=f"btc_trend_gate: {btc_gate_reason}",
+                                       account=account_type)
                     raise OrderExecutionError(
                         f"BTC-trend gate blocked crypto LONG entry for {normalized_symbol}: "
                         f"{btc_gate_reason}. Signal discarded."
@@ -200,7 +202,8 @@ class OrderExecutor:
                 gate_reason = self._check_trend_consistency_gate(normalized_symbol, signal.action)
                 if gate_reason:
                     self._log_decision(signal, normalized_symbol, stage="gate_blocked",
-                                       decision="blocked", reason=f"trend_consistency: {gate_reason}")
+                                       decision="blocked", reason=f"trend_consistency: {gate_reason}",
+                                       account=account_type)
                     raise OrderExecutionError(
                         f"Trend-consistency gate blocked {signal.action.value} for "
                         f"{normalized_symbol}: {gate_reason}. Signal discarded."
@@ -546,7 +549,8 @@ class OrderExecutor:
             raise OrderExecutionError(f"Failed to execute signal: {e}")
 
     def _log_decision(self, signal, symbol: str, *, stage: str, decision: str,
-                      reason: Optional[str] = None, score: Optional[float] = None) -> None:
+                      reason: Optional[str] = None, score: Optional[float] = None,
+                      account: Optional[str] = None) -> None:
         """Fire-and-forget decision-log write. Never raises."""
         try:
             from src.analytics.decision_log import record_decision
@@ -563,6 +567,7 @@ class OrderExecutor:
                 score=score if score is not None else meta.get('conviction_score'),
                 reason=reason,
                 metadata={k: v for k, v in meta.items() if k in ('conviction_score', 'wf_test_sharpe', 'template_name')},
+                account=account,
             )
         except Exception:  # silent-ok: decision-log analytics is fire-and-forget; must never affect execution
             pass  # silent-ok

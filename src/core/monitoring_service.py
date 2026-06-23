@@ -2459,6 +2459,16 @@ class MonitoringService:
         except Exception as e:
             logger.warning(f"  signal_decisions prune failed (non-critical): {e}")
 
+        # 1c. Gate scoreboard (Tier 1 observability). Recompute the per-gate
+        # blocked-vs-passed forward-return counterfactual daily so the Guard
+        # scoreboard reflects the latest 14d. Heavy (price fetch per symbol) —
+        # runs here in the daily job, never on the request path.
+        try:
+            from src.analytics.gate_scoreboard import compute_and_store as _gs_compute
+            _gs_compute()
+        except Exception as e:
+            logger.warning(f"  gate scoreboard compute failed (non-critical): {e}")
+
         # 1c. Backfill LIVE execution slippage from eToro ground truth (Option B).
         # Production close paths journal exits with the close-decision price and never
         # capture eToro's actual executed close rate, so exit_slippage was 100% NULL.
