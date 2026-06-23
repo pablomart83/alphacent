@@ -75,8 +75,31 @@ def _default_sl_tp(symbol: str, asset_class: str) -> Tuple[float, float]:
     return _DEFAULT_SL_TP.get(asset_class, (0.06, 0.15))
 
 
+def _active_override_sl_tp(session, scope_key: str) -> Optional[Tuple[float, float]]:
+    """(sl, tp) from the ACTIVE template_param_override for this scope_key, or
+    None. So a recommendation whose change is ALREADY APPLIED is not re-proposed
+    every run — 'current' must reflect what is actually in effect."""
+    try:
+        from sqlalchemy import text
+        row = session.execute(text("""
+            SELECT sl_pct, tp_pct FROM template_param_overrides
+            WHERE scope_key = :k AND status = 'active'
+            ORDER BY id DESC LIMIT 1
+        """), {"k": scope_key}).fetchone()
+        if row and row[0]:
+            return float(row[0]), float(row[1] or 0.0)
+    except Exception as e:
+        logger.debug("active override lookup failed for %s: %s", scope_key, e)
+    return None
+
+
 def _current_sl_tp(session, symbol: str, asset_class: str) -> Tuple[float, float, str]:
-    """(sl, tp, source). Per-pair live params win; else asset-class default."""
+    """(sl, tp, source). Precedence: active param override > per-pair live params
+    > asset-class default. The override must win so applied recommendations
+    aren't re-proposed."""
+    ov = _active_override_sl_tp(session, symbol.upper())
+    if ov:
+        return ov[0], ov[1], "active_override"
     try:
         from sqlalchemy import text
         row = session.execute(text("""
@@ -265,17 +288,24 @@ def compute_recommendations(
         for (tmpl, ac), coh in by_template_ac.items():
             if len(coh) < min_trades:
                 continue
-            # Representative cap/current for the class (no symbol → class default).
-            cur_sl, cur_tp = _default_sl_tp("", ac)
+            scope_key = f"{tmpl}::{ac}"
+            # "Current" reflects an applied override if one exists, so an
+            # already-applied recommendation is not re-proposed every run.
             cap = {"crypto": 0.15, "forex": 0.04, "indices": 0.09,
                    "commodities": 0.10, "etfs": 0.09, "stocks": 0.09}.get(ac, 0.10)
+            ov = _active_override_sl_tp(session, scope_key)
+            if ov:
+                cur_sl, cur_tp = ov
+            else:
+                cur_sl, cur_tp = _default_sl_tp("", ac)
             rec = _analyse_cohort(coh, cur_sl, cur_tp, cap)
             if rec:
                 rec.update({
                     "rec_type": "sl_tp", "scope_type": "template_asset_class",
-                    "scope_key": f"{tmpl}::{ac}", "symbol": None,
+                    "scope_key": scope_key, "symbol": None,
                     "template_name": tmpl, "asset_class": ac,
-                    "account_type": None, "current_source": "asset_class_default",
+                    "account_type": None,
+                    "current_source": ("active_override" if ov else "asset_class_default"),
                 })
                 recs.append(rec)
     finally:
