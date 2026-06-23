@@ -1273,3 +1273,69 @@ export function assetClassForSymbol(symbol: string, explicit?: string | null): s
   if (/^(EUR|GBP|USD|JPY|AUD|CAD|CHF|NZD)(EUR|GBP|USD|JPY|AUD|CAD|CHF|NZD)$/.test(s)) return 'forex'
   return 'stock'
 }
+
+
+/* ═════════════════════════════════════════════════════════════════════
+ *  Improvement recommendations (Tier 1 MAE/MFE → SL/TP approval rail)
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export interface RecommendationRow {
+  id: number
+  created_at: string
+  rec_type: string
+  scope_type: 'symbol' | 'template_asset_class' | string
+  scope_key: string
+  symbol: string | null
+  template_name: string | null
+  asset_class: string | null
+  account_type: string | null
+  current_sl: number | null
+  proposed_sl: number | null
+  current_tp: number | null
+  proposed_tp: number | null
+  n_trades: number | null
+  summary: string | null
+  evidence: Record<string, number> | null
+  status: 'pending' | 'applied' | 'rejected' | 'reverted' | string
+  reviewer: string | null
+}
+
+interface RecommendationsPayload {
+  status: string
+  count: number
+  recommendations: RecommendationRow[]
+}
+
+export function useRecommendations(status: string = 'pending') {
+  return useQuery<RecommendationsPayload>({
+    queryKey: ['recommendations', status],
+    queryFn: () => api.get<RecommendationsPayload>(`/analytics/recommendations?status=${status}`),
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+}
+
+export function useRecommendationAction() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, action }: { id: number; action: 'approve' | 'reject' | 'revert' }) =>
+      api.post<{ success: boolean; message: string }>(
+        `/analytics/recommendations/${id}/${action}`,
+        {},
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+    },
+  })
+}
+
+export function useRecomputeRecommendations() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ success: boolean; message: string }>('/analytics/recommendations/recompute', {}),
+    onSuccess: () => {
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['recommendations'] }), 5000)
+    },
+  })
+}

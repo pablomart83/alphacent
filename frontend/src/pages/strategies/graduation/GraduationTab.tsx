@@ -21,6 +21,7 @@ import { GraduationQueueTable } from './GraduationQueueTable'
 import { GraduationCard } from './GraduationCard'
 import { ActiveLiveTable, LiveStrategyDetailPanel } from './ActiveLiveTable'
 import { ApproachingGraduationPanel } from './ApproachingGraduationPanel'
+import { RecommendationsPanel } from './RecommendationsPanel'
 import { toast } from 'sonner'
 import { notifyError } from '@/lib/errors'
 
@@ -188,6 +189,8 @@ export function GraduationTab() {
       <div className="px-2 pb-2 border-t border-[var(--border-subtle)]">
         <ApproachingGraduationPanel />
       </div>
+
+      <RecommendationsPanel />
 
       <RetiredSection />
     </div>
