@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 # Persisted snapshot so the endpoint is instant and survives restarts.
 _SNAPSHOT_PATH = Path("config/.gate_scoreboard.json")
 _SNAPSHOT: Optional[Dict[str, Any]] = None
+_SNAPSHOT_MTIME: float = 0.0  # mtime of the file the in-memory snapshot was loaded from
 _LOCK = threading.Lock()
 
 # Forward-return horizon (trading days / daily bars). 5 ≈ one trading week — a
@@ -394,30 +395,35 @@ def compute_gate_scoreboard(
 # --- snapshot persistence / access ---------------------------------------
 
 def set_snapshot(snapshot: Dict[str, Any]) -> None:
-    global _SNAPSHOT
+    global _SNAPSHOT, _SNAPSHOT_MTIME
     with _LOCK:
         _SNAPSHOT = snapshot
         try:
             _SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
             with open(_SNAPSHOT_PATH, "w") as f:
                 json.dump(snapshot, f)
+            _SNAPSHOT_MTIME = _SNAPSHOT_PATH.stat().st_mtime
         except Exception as e:
             logger.debug("gate_scoreboard: persist failed: %s", e)
 
 
 def get_snapshot() -> Optional[Dict[str, Any]]:
-    global _SNAPSHOT
+    """Return the latest snapshot. Reloads from disk when the file is newer than
+    the in-memory copy, so a snapshot written by ANY process (daily-sync worker,
+    the recompute endpoint, or the read-only verify script) is reflected in the
+    API/UI without a restart."""
+    global _SNAPSHOT, _SNAPSHOT_MTIME
     with _LOCK:
-        if _SNAPSHOT is not None:
-            return _SNAPSHOT
         try:
             if _SNAPSHOT_PATH.exists():
-                with open(_SNAPSHOT_PATH) as f:
-                    _SNAPSHOT = json.load(f)
-                    return _SNAPSHOT
+                mtime = _SNAPSHOT_PATH.stat().st_mtime
+                if _SNAPSHOT is None or mtime > _SNAPSHOT_MTIME:
+                    with open(_SNAPSHOT_PATH) as f:
+                        _SNAPSHOT = json.load(f)
+                    _SNAPSHOT_MTIME = mtime
         except Exception as e:
             logger.debug("gate_scoreboard: load failed: %s", e)
-    return None
+        return _SNAPSHOT
 
 
 def compute_and_store(
