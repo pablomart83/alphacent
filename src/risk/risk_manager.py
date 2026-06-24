@@ -733,11 +733,11 @@ class RiskManager:
                     f"${MINIMUM_ORDER_SIZE_POST:.0f} for {signal.symbol} — bumping to minimum"
                 )
                 position_size = MINIMUM_ORDER_SIZE_POST
-            if not self.check_position_limits(signal.symbol, position_size, account, positions):
+            if not self.check_position_limits(signal.symbol, position_size, account, positions, is_live=is_live):
                 return ValidationResult(
                     is_valid=False,
                     position_size=0.0,
-                    reason=f"Position would exceed max position size limit of {self.config.max_position_size_pct:.1%}"
+                    reason=f"Position would exceed max position size limit of {self._effective_position_cap_pct(is_live):.1%}"
                 )
 
             # Pre-trade portfolio VaR check (3.1)
@@ -1638,12 +1638,41 @@ class RiskManager:
             return None
 
 
+    def _effective_position_cap_pct(self, is_live: bool = False) -> float:
+        """Max single-symbol position size as a fraction of equity.
+
+        DEMO uses self.config.max_position_size_pct (15%). LIVE honors the
+        configured live_trading.symbol_cap_pct (default 20%) instead of the demo
+        value — the live gate was inheriting the tighter demo 15%, which conflicts
+        with the 20% symbol cap actually configured for the live book (and matches
+        the 20% cap calculate_position_size already sizes to). Cached 5 min."""
+        if not is_live:
+            return self.config.max_position_size_pct
+        import time as _t
+        cached = getattr(self, "_live_pos_cap_cache", None)
+        if cached and (_t.time() - cached[1] < 300):
+            return cached[0]
+        cap = 0.20
+        try:
+            import yaml as _y
+            from pathlib import Path as _P
+            _p = _P("config/autonomous_trading.yaml")
+            if _p.exists():
+                with open(_p) as _f:
+                    _c = _y.safe_load(_f) or {}
+                cap = float(_c.get("live_trading", {}).get("symbol_cap_pct", 0.20))
+        except Exception:
+            cap = 0.20
+        self._live_pos_cap_cache = (cap, _t.time())
+        return cap
+
     def check_position_limits(
         self,
         symbol: str,
         position_size: float,
         account: AccountInfo,
-        positions: List[Position]
+        positions: List[Position],
+        is_live: bool = False
     ) -> bool:
         """
         Check if new position would exceed position size limits.
@@ -1653,13 +1682,15 @@ class RiskManager:
             position_size: Size of the new position in dollars
             account: Account information
             positions: Current positions
+            is_live: LIVE pass — use the configured live symbol cap (20%) instead
+                     of the demo max_position_size_pct (15%).
 
         Returns:
             True if within limits, False otherwise
         """
         # Check if position size exceeds max position size (based on equity)
         portfolio_value = getattr(account, 'equity', None) or account.balance
-        max_position_value = portfolio_value * self.config.max_position_size_pct
+        max_position_value = portfolio_value * self._effective_position_cap_pct(is_live)
         
         # Check existing position in this symbol (all positions including external)
         existing_position_value = 0.0
