@@ -1193,19 +1193,36 @@ class TradingScheduler:
                             ).lower() if strategy.metadata else '1d'
                             _is_daily = _interval in ('1d', '1day', 'daily')
                             _is_momentum = ('momentum' in _tmpl_lower) or ('momentum' in _strat_type_lower)
-                            _deep_oversold_dip = (
-                                _rsi5 < _DEEP_OVERSOLD_RSI
-                                and _is_daily
-                                and _is_broad_trend
-                                and not _is_intraday_aggressive
-                                and not _is_momentum
+                            # A daily broad-trend strategy that is not intraday-aggressive
+                            # and not momentum is the cohort the regime-scope backtest
+                            # showed recovers edge when exempted in a dip.
+                            _daily_trend_dip_eligible = (
+                                _is_daily and _is_broad_trend
+                                and not _is_intraday_aggressive and not _is_momentum
                             )
-                            if _deep_oversold_dip:
+                            _deep_oversold_dip = (_rsi5 < _DEEP_OVERSOLD_RSI and _daily_trend_dip_eligible)
+                            # CONFIRMED-UPTREND DIP-BUY EXEMPTION (2026-06-24, gate-scoreboard
+                            # driven): in a confirmed medium-term uptrend (broad-market 50d ≥
+                            # +3%) a moderate 5d dip is a buy-the-dip, not a place to sit out.
+                            # Backtest: this cohort returned +6.5% fwd / 78% win (sep +2.1% vs
+                            # passed) over 2,367 blocked signals. Exempt DAILY trend-following
+                            # only; intraday/momentum stay blocked (they were far weaker), and
+                            # the whole exemption is gated on confirmed_uptrend so it does NOT
+                            # fire in ranging/down regimes (gate keeps its protective value).
+                            _confirmed_uptrend_dip = (
+                                bool(_pullback_state.get('confirmed_uptrend')) and _daily_trend_dip_eligible
+                            )
+                            if _deep_oversold_dip or _confirmed_uptrend_dip:
                                 _block = False
+                                _exempt_why = (
+                                    f"deep-oversold (RSI5={_rsi5:.0f}<{_DEEP_OVERSOLD_RSI:.0f})"
+                                    if _deep_oversold_dip else
+                                    f"confirmed uptrend (50d={_pullback_state.get('trend_50d', 0):.1%})"
+                                )
                                 logger.info(
-                                    f"[Pullback gate] deep-oversold dip exemption: allowing daily "
-                                    f"trend entry {strategy.name} (5d={_pullback_state.get('change_5d', 0):.1%}, "
-                                    f"RSI(5)={_rsi5:.0f} < {_DEEP_OVERSOLD_RSI:.0f}) — historical bounce edge"
+                                    f"[Pullback gate] dip-buy exemption ({_exempt_why}): allowing daily "
+                                    f"trend entry {strategy.name} (5d={_pullback_state.get('change_5d', 0):.1%}) "
+                                    f"— evidence-based dip-buy edge"
                                 )
                             else:
                                 _block = _is_intraday_aggressive or _is_broad_trend

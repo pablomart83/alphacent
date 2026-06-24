@@ -1680,10 +1680,11 @@ class MarketStatisticsAnalyzer:
 
         try:
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=30)  # 30 days enough for 5d/10d + RSI(5)
+            start_date = end_date - timedelta(days=90)  # 90d enough for 5d/10d/RSI + 50d trend
 
             changes_5d = []
             changes_10d = []
+            changes_50d = []
             rsi_5_values = []
 
             for symbol in symbols:
@@ -1706,6 +1707,10 @@ class MarketStatisticsAnalyzer:
                         changes_5d.append((current - closes[-5]) / closes[-5])
                     if len(closes) >= 10:
                         changes_10d.append((current - closes[-10]) / closes[-10])
+                    # 50-day change — higher-timeframe trend for the confirmed-uptrend
+                    # dip-buy exemption (see check below). closes[-51] = 50 bars ago.
+                    if len(closes) >= 51:
+                        changes_50d.append((current - closes[-51]) / closes[-51])
 
                     # RSI(5) — fast RSI for short-term momentum
                     if len(closes) >= 7:
@@ -1736,6 +1741,13 @@ class MarketStatisticsAnalyzer:
             avg_5d = sum(changes_5d) / len(changes_5d)
             avg_10d = sum(changes_10d) / len(changes_10d) if changes_10d else avg_5d
             avg_rsi5 = sum(rsi_5_values) / len(rsi_5_values) if rsi_5_values else 50.0
+            # Higher-timeframe (50d) broad-market trend. A short-term pullback
+            # inside a confirmed medium-term uptrend is a dip-buy, not a place to
+            # sit out — gate scoreboard + regime-scope backtest (2026-06-24):
+            # daily trend-following LONGs blocked here returned +6.5% fwd / 78% win
+            # (sep +2.1% vs passed). Threshold +3% mirrors the backtest.
+            avg_50d = sum(changes_50d) / len(changes_50d) if changes_50d else 0.0
+            confirmed_uptrend = bool(changes_50d) and avg_50d >= 0.03
 
             # Pullback detection thresholds:
             # Mild:     5d < -1.0% AND RSI(5) < 50
@@ -1772,6 +1784,8 @@ class MarketStatisticsAnalyzer:
                 "change_5d": avg_5d,
                 "change_10d": avg_10d,
                 "rsi_5": avg_rsi5,
+                "trend_50d": avg_50d,
+                "confirmed_uptrend": confirmed_uptrend,
                 "reason": reason,
             }
 
