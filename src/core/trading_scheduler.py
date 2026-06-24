@@ -2949,6 +2949,38 @@ class TradingScheduler:
                                                 )
                                                 _regime_sl_mult = 1.0
 
+                                            # CONFIRMED-UPTREND DIP-BUY SOFTENING (2026-06-24, live analog of
+                                            # the demo pullback-gate exemption). In a confirmed broad-market
+                                            # uptrend (50d>=3%), a moderate 5d dip is a buy-the-dip for a DAILY
+                                            # trend-following LONG, not deterioration. The 0.60x moderate
+                                            # tightening would noise-stop the dip-buy before it recovers
+                                            # (gate-scoreboard cohort: +6.5% fwd / 78% win). Floor the multiplier
+                                            # at 0.75x for that cohort — SOFTER, not removed (still 25% tighter).
+                                            # Intraday/momentum and SHORTs keep the full tightening; inert
+                                            # outside confirmed uptrends (capital-preservation intent preserved).
+                                            try:
+                                                if (_regime_sl_mult < 0.75
+                                                        and bool(_pullback_state.get('confirmed_uptrend'))
+                                                        and _lsig.action == _LiveSignalAction.ENTER_LONG):
+                                                    _lmeta = getattr(_strat_obj, 'metadata', {}) or {}
+                                                    _ltmpl = str(_lmeta.get('template_name', '') or getattr(_strat_obj, 'name', '')).lower()
+                                                    _ltype = str(_lmeta.get('strategy_type', '') or '').lower()
+                                                    _lintv = str(_lmeta.get('interval', '1d') or '1d').lower()
+                                                    _l_daily = _lintv in ('1d', '1day', 'daily')
+                                                    _l_broad = (any(k in _ltmpl for k in ('ema ribbon', 'adx', 'trend following', 'trend_following'))
+                                                                or 'trend_following' in _ltype)
+                                                    _l_intraday = any(k in _ltmpl for k in ('breakout', 'momentum', 'vwap trend', 'atr dynamic', 'opening range'))
+                                                    _l_momentum = ('momentum' in _ltmpl) or ('momentum' in _ltype)
+                                                    if _l_daily and _l_broad and not _l_intraday and not _l_momentum:
+                                                        logger.info(
+                                                            f"[Pullback/NEW-02] confirmed-uptrend dip-buy: softening live "
+                                                            f"SL tightening for {_live_sym} {getattr(_strat_obj, 'name', '')} "
+                                                            f"(mult {_regime_sl_mult:.2f}→0.75, 50d={_pullback_state.get('trend_50d', 0):.1%})"
+                                                        )
+                                                        _regime_sl_mult = 0.75
+                                            except Exception as _dipsoft_err:
+                                                logger.debug(f"dip-buy softening skipped for {_live_sym}: {_dipsoft_err}")
+
                                             if _regime_sl_mult < 1.0:
                                                 logger.info(
                                                     f"[NEW-02] Live SL/TP tightened: {_live_sym} "
