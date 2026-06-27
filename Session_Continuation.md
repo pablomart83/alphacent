@@ -6,6 +6,35 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-27 (Auto) — WEEKLY AUDIT of the 9 changes shipped 06-20→27. Read-only review; nothing changed. Full report: `AUDIT_REPORT_2026-06-27.md`.**
+
+**Verdict: all 9 changes deployed and behaving as designed; no regressions. The week was a LOSING week driven by a market pullback (SPY ~−3.4%, regime flipped trending_up_weak→ranging_low_vol), NOT by the changes — and the TSL retune (#6) mitigated the give-back. The confirmed-uptrend has ENDED, so #7/#8 are now correctly inert and their uptrend-calibrated evidence is temporarily stale.**
+
+Per-change status (evidence in the report):
+- **#1 meta-label** — re-proof re-run live (3,531 trades): stocks AUC 0.513, etfs 0.542, rest <0.4; all NO EDGE. Not imported on any hot path, no persisted model. DEPLOYED & CORRECTLY DORMANT. Don't revisit.
+- **#2 scoreboard** — snapshot fresh (19:06 today), off request-path, reload-on-newer works. Conviction=HELPS still; Pullback now `insufficient_data` (blocks collapsed 16k→652). Passed-cohort fwd return flipped +6.13%→**−1.57%** (caught the pullback). `account_type` populates on signal/gate stages; minor gap: NULL on `order_filled`/partial `order_submitted`. WORKING.
+- **#3 recommender** — pending clean (ENPH/MU + new CAT/XLK/2 ETF tightens); no dup pending; ADX/Keltner NOT re-appearing (45cc670 works); SOXL no-rec. New recs are aggressive tightens (1–4% SL) — do NOT bulk-approve. WORKING.
+- **#4 DSR** — observe-only firing every cycle, NOT rejecting. **would-filter = 0 EVERY cycle at min_dsr=0.9** → enabling is a no-op (redundant with MC). Recalibrate higher or shelve; do NOT flip enabled at 0.9.
+- **#5 approval rail** — overrides match (ADX 9%, Keltner 7.94%, AMD live 7.5%), one active/scope, revert works. Binding PROVEN LIVE (resolve_override + strategy "ADX Trend Following C LONG" 06-23 carries SL=0.09/TP=0.225). WORKING. (No recent binding log = rotation + no ADX/Keltner stock strategy persisted 06-24→27.)
+- **#6 TSL retune** (deployed 06-23 15:39 UTC) — give-back HALVED: PRE n=92 MFE+5.09%/realized−1.60%/win26%/51 peaked-then-loss → POST n=80 MFE+2.72%/realized−0.69%/win36%/25. errors=0/3,900 cycles. No whipsaw spike. Confound: short post-window in weaker regime. WORKING; re-measure after an uptrend leg.
+- **#7 pullback exemption / #8 live softening** — DEPLOYED but INERT BY REGIME (regime left confirmed-uptrend → never fired; correct). Unproven-live; capture first firings next uptrend before relaxing further.
+- **#9 20% cap** — WORKS: pre-fix 15% blocks all on 06-23, none after; live cap now 20% (`symbol_cap_exhausted` $2073); demo unchanged. FINDING: **MU 3 open live positions ~$2,362 ≈ 23% > 20% cap** (cumulative-enforcement gap across cycles), all underwater.
+
+Performance (06-20→27): DEMO **−$4,047** (594 trades, 36.4% win) vs prior +$10,795 (278, 48.9%); LIVE **−$116** (5 trades) vs +$98. DEMO equity −4.4%, LIVE −5.7% (mostly unrealized). Pullback-driven. Live book net-negative lifetime (~−$560; only PANW +$187).
+
+Errors (none from the 9 changes): (a) daily fundamental-exit `InFailedSqlTransaction` ~12:36 — sector-rotation `pending_closure` on aborted session, **silent failure**, pre-existing back to 06-01, **needs session_scope fix (P1)**; (b) 06-22 00:15 UniqueViolation burst ×13 = restart/reconcile A3 cascade, self-resolved, demo-only; (c) size-estimate endpoint `Position.__init__()` broken (strategies.py:4538), not hot path; (d) SPY weekend 1h errors only 06-21/22, none 06-27 (last week's fix holding).
+
+**CIO TODO (decisions, not code):** (1) trim/monitor live MU (23% concentration into a ranging regime); (2) approve MU SL widen if desired, HOLD the aggressive tighten recs (ENPH/CAT/XLK/ETF) until re-evaluated outside the pullback; (3) DSR — recalibrate min_dsr or shelve, don't enable at 0.9; (4) re-validate #6/#7/#8 in the next uptrend.
+
+**FIXES SHIPPED THIS SESSION (deployed + verified + pushed, commits `fedd078`/`d1b3bca`/`853e44a`/`c3bb9a9`):**
+- **Fundamental-exit `InFailedSqlTransaction` (root-caused + fixed).** Root cause was NOT a generic session issue: `regime_history.regime_changed` is an Integer(0/1) column and the stability query used `== True`, which on Postgres errors `operator does not exist: integer = boolean`, aborting the txn; the `except` swallowed it without rollback and defaulted `regime_stable=True`, poisoning the session so the daily 12:36 `pending_closure` commit always failed. Fixed `== 1` + `session.rollback()` in except + default `regime_stable=False` on error. **Behavior resumption:** sector-rotation fundamental exits will now actually persist on profitable positions when the regime has been stable ≥3d. Live book currently holds no XLY/XLV/XLE so live is unaffected; mainly affects the demo sandbox. Verified: `regime_changed = 1` query now executes; service healthy; no new errors. (Next natural exercise: 12:36 UTC daily run.)
+- **`account_type` threading** on `order_submitted` (order_executor) + `order_filled` (order_monitor) decision writers — scoreboard funnel rows will no longer be NULL for those stages. (Runtime confirmation pending market open / next fills.)
+- **Size-estimate endpoint crash** — `Position(...)` was missing `realized_pnl`/`opened_at`/`etoro_position_id`; added. (`strategies.py` get_size_estimate.)
+- **#6 stale TSL docstrings** corrected to the deployed retune values (comments only).
+- NOT changed (CIO decisions, not bugs): MU concentration, DSR enable, SL/TP rec approvals.
+
+---
+
 **SESSION 2026-06-23 (Auto) — TIER-1 ALL SIX RECOMMENDATIONS SHIPPED: price-history features (meta-label re-proof STILL negative), per-gate observability scoreboard, MAE/MFE→SL/TP recommender, DSR gate (observe-only), full Path-A approval rail + frontend. Deployed, verified, pushed across 6 commits. One change → deploy → verify discipline throughout.**
 
 Executed the prior session's recommended next steps end-to-end. Headline: the meta-label veto is conclusively dead, but the OTHER work (gate scoreboard + MAE/MFE recs + DSR + approval rail) is real, deployed value. **Nothing auto-applies to live — recommendations are proposals; the DSR gate is observe-only; approvals are CIO-gated via the rail.**
