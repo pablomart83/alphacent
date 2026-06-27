@@ -1435,6 +1435,7 @@ class OrderMonitor:
                                 market_regime=_regime,
                                 score=_conviction,
                                 reason=f"etoro_order={order.etoro_order_id} slippage={order.slippage}",
+                                account=getattr(order, 'account_type', 'demo') or 'demo',
                                 metadata={
                                     "fill_price": order.filled_price,
                                     "expected_price": order.expected_price,

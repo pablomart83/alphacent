@@ -536,7 +536,8 @@ class OrderExecutor:
 
             # Decision-log write — successful submission path
             self._log_decision(signal, normalized_symbol, stage="order_submitted",
-                               decision="accepted", reason=f"order_id={order.id}")
+                               decision="accepted", reason=f"order_id={order.id}",
+                               account=account_type)
 
             return order
 
