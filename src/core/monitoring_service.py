@@ -4439,7 +4439,14 @@ class MonitoringService:
                     stability_window = datetime.utcnow() - timedelta(days=3)
                     recent_changes = session.query(RegimeHistoryORM).filter(
                         RegimeHistoryORM.detected_at >= stability_window,
-                        RegimeHistoryORM.regime_changed == True,
+                        # regime_changed is an Integer (0/1) column — compare to 1, NOT
+                        # the Python bool True. On PostgreSQL `regime_changed == True`
+                        # emits `regime_changed = true`, which fails with
+                        # "operator does not exist: integer = boolean", aborting the
+                        # transaction. That swallowed error (below) then poisoned the
+                        # whole method's session and the final pending_closure commit
+                        # failed daily — sector-rotation fundamental exits never persisted.
+                        RegimeHistoryORM.regime_changed == 1,
                     ).count()
                     regime_stable = (recent_changes == 0)
                     if not regime_stable:
@@ -4448,9 +4455,16 @@ class MonitoringService:
                             f"suppressing sector rotation exits (regime not stable)"
                         )
                 except Exception as _re:
-                    # If we can't check stability, default to stable=True (don't suppress)
-                    regime_stable = True
-                    logger.debug(f"Could not check regime stability: {_re}")
+                    # Roll back so a failed stability query cannot leave the session in
+                    # an aborted state and break the pending_closure commit below.
+                    try:
+                        session.rollback()
+                    except Exception:
+                        pass
+                    # Can't verify stability → suppress sector-rotation exits (the guard
+                    # exists to avoid whipsaw; when uncertain, don't act).
+                    regime_stable = False
+                    logger.warning(f"Could not check regime stability — suppressing sector rotation exits: {_re}")
 
             for pos in open_positions:
                 symbol = pos.symbol
