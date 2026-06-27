@@ -86,8 +86,8 @@ class PositionManager:
     # Set lower than trailing stop activation so there's always a profit-protection
     # window between breakeven and the trailing stop taking over.
     #
-    # Rationale: a position that reaches +3% and then reverses to -6% is a loss that
-    # could have been avoided. Moving SL to breakeven at +3% costs nothing and
+    # Rationale: a position that reaches +2% and then reverses to -6% is a loss that
+    # could have been avoided. Moving SL to breakeven at +2% costs nothing and
     # eliminates the "gave back a winner" scenario entirely.
     BREAKEVEN_STOP_PARAMS = {
         "stock":          0.02,
@@ -101,16 +101,16 @@ class PositionManager:
 
     # Profit lock-in thresholds — move SL to entry + lock_pct when profit reaches this level.
     # Fires between breakeven stop and trailing stop activation.
-    # Ensures a position that moves +5% and reverses still closes with a profit.
+    # Ensures a position that moves up and reverses still closes with a profit.
     #
-    # Without this, the gap between breakeven (+3%) and trailing stop activation (+7.5%)
-    # means a position can go +6% then reverse to 0% and close at breakeven — you made
-    # nothing on a 6% move. The profit lock closes that gap.
+    # Without this, the gap between breakeven (+2%) and trailing stop activation (+3.5%)
+    # means a position can run up then reverse to 0% and close at breakeven — you made
+    # nothing on the move. The profit lock closes that gap.
     #
-    # Three-stage ladder (stocks):
-    #   +3%  → SL to entry (breakeven)
-    #   +5%  → SL to entry + 2% (lock in 2% profit)
-    #   +7.5%+ → trailing stop takes over, follows price at 7% distance
+    # Three-stage ladder (stocks, post-2026-06-23 retune):
+    #   +2%   → SL to entry (breakeven)
+    #   +3%   → SL to entry + 1.2% (lock in profit)
+    #   +3.5%+ → trailing stop takes over, follows price at 4% distance
     PROFIT_LOCK_PARAMS = {
         "stock":          {"trigger": 0.03, "lock": 0.012},
         "etf":            {"trigger": 0.025,"lock": 0.01},
@@ -126,14 +126,15 @@ class PositionManager:
     # This prevents penny-stop whipsaws on high-priced instruments where a fixed
     # percentage produces a stop within normal intraday noise.
     #
-    # Per-class tuning rationale:
-    # - Stocks/commodities: 2.0x — high intraday noise, wide stop protects from whipsaw.
-    # - ETFs: 2.0x — diversified but still subject to sector-driven intraday moves.
-    # - Crypto: 1.5x — ATR is already ~5%, 2x produces 10%+ stops that erode edge.
-    # - Forex: 1.0x — ATR is tight (~0.5-1%), 2x would produce 1-2% stops eating into
-    #   the 2-3% fixed distance; 1x means ATR only lifts above the fixed 3% in
-    #   high-vol regimes (CPI days etc.), which is what we want.
-    # - Indices: 1.5x — ~1% ATR, 1.5x keeps trails near the 5% fixed distance.
+    # Per-class tuning rationale (post-2026-06-23 retune — multipliers hauled in
+    # to cut give-back; trail distance now lifts off ATR sooner):
+    # - Stocks/ETFs: 1.25x — enough to clear normal intraday noise without giving
+    #   back a wide ATR band before the trail engages.
+    # - Crypto: 1.25x — ATR is already ~5%; a low multiple keeps stops from ballooning.
+    # - Forex: 0.9x — ATR is tight (~0.5-1%); <1x keeps the ATR floor below the
+    #   fixed distance except in high-vol regimes (CPI days etc.).
+    # - Commodity: 1.5x — wider intraday ranges warrant a bit more room.
+    # - Indices: 1.25x — ~1% ATR, keeps trails near the fixed distance.
     ATR_MULTIPLIER_BY_ASSET_CLASS = {
         "stock":          1.25,
         "etf":            1.25,
