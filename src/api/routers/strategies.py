@@ -4545,6 +4545,9 @@ async def get_size_estimate(
                 entry_price=float(p.entry_price or 0),
                 current_price=float(p.current_price or p.entry_price or 0),
                 unrealized_pnl=float(p.unrealized_pnl or 0),
+                realized_pnl=float(p.realized_pnl or 0),
+                opened_at=p.opened_at,
+                etoro_position_id=p.etoro_position_id or '',
                 stop_loss=float(p.stop_loss) if p.stop_loss else None,
                 take_profit=float(p.take_profit) if p.take_profit else None,
                 invested_amount=float(p.invested_amount) if getattr(p, 'invested_amount', None) else None,  # A1: canonical dollar field
