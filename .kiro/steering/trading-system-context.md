@@ -344,7 +344,7 @@ Never silent-no-op; every cycle produces this line so outages surface in one `ta
 - Components: ADX(14) of SPY (40pts) + ATR/price inverted (30pts) + 5-day consistency (20pts) + VIX (10pts)
 - Grades: High (>70) / Normal (40-70) / Choppy (<40)
 - Actions: score < 40 → position sizing -30%, trend templates -50% weight, trend/momentum LONG entries blocked
-- Persisted in `equity_snapshots` (market_quality_score, market_quality_grade). **Known issue:** persistence path in `_save_hourly_equity_snapshot` wraps MQS computation in `except: pass`; recent snapshots have NULL values because the computation is silently failing. Investigation open (see Session_Continuation).
+- Persisted in `equity_snapshots` (market_quality_score, market_quality_grade). The earlier `except: pass` that silently swallowed MQS-compute errors was fixed (G-34, May 12): the compute is now wrapped in `except Exception: logger.warning(...)` with an MDM-singleton fallback, and recent snapshots populate MQS reliably (verified 2026-06-28: 0 NULL over 7d, e.g. 81.2/high). Not an open issue.
 
 ### Directional Quotas (trending_up regimes)
 - `trending_up`: min_long 80%, min_short 5%

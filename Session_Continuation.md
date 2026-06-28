@@ -35,9 +35,20 @@ Systematic null scan of orders/positions/trade_journal for B3-style silent gaps:
 - **`trade_journal` MAE/MFE 84% NULL** — documented (tracked only since ~May); the SL/TP recommender already only uses tracked rows.
 - **positions** essentially clean (open positions 0 nulls; closed have tiny invested_amount(12)/price_updated_at(150) gaps — not material).
 - **equity_snapshots MQS** clean (old NULL issue resolved).
-- `signal_decisions.account_type` on order_filled/order_submitted fixed forward this session (historical rows still NULL — low value to backfill).
+- `signal_decisions.account_type` on order_filled/order_submitted fixed forward this session; historical rows backfilled 2026-06-28 (4444 rows from linked orders; 4 unmatched remain).
 
 
+### Pre-existing bug sweep (2026-06-28) — "fix everything you found"
+After the NULL scan, fixed every genuine bug/data-integrity issue surfaced (CIO *decisions* like directional quotas / strategy suppression / DSR threshold were NOT touched). All deployed + verified; commits `1569aa7` `3fe9332` `94e67a8`:
+- **(A) trade_journal.market_regime NULL (~14% recent):** single-point fallback in `log_entry` — when caller passes None, look up the regime active AT entry_time from `regime_history` (correct for real-time AND backfilled-old entries). Covers all journaling paths.
+- **(B) conviction_score NULL (~8%):** NOT fabricated (would be bad data); the primary order_monitor path already populates it; residual is paths without signal context — left best-effort.
+- **(C) orders.filled_price NULL on FILLED entries:** orders.py cancel-when-already-filled marked FILLED without filled_price → now recovers from eToro positions payload / expected_price. Backfilled 119 from matched position entry_price (coverage → 99.7%).
+- **(D) positions.invested_amount NULL on close:** create paths didn't set it. Forward fix sets it from the ENTRY ORDER's dollar quantity (order_executor) / `etoro_pos.invested_amount` (order_monitor) — explicitly NOT `position.quantity` (SHARES per typed-notional; `quantity*price` on a dollar-valued row would falsely inflate exposure >$1M). Backfilled 12 via shares×entry_price (all confirmed share-like). 0 NULL now.
+- **(F) MQS `except: pass`:** STALE — already fixed May (G-34); corrected the contradictory steering note (line 347).
+- **(G) order_failed decision stage:** was LIVE-only; now also recorded on demo execute_signal except + order_monitor async-fail, so eToro rejections are visible in the funnel.
+- **(H) eToro short-restricted instruments:** new `src/risk/short_restrictions.py` — self-healing denylist (TTL 30d, `config/.short_restricted.json`). Records an instrument when eToro rejects a SELL with "disallowed for Sell"; `execute_signal` skips ENTER_SHORT on restricted names instead of re-submitting a rejected-every-cycle order. Fail-open.
+
+### Still open (decisions / watch — NOT defects)
 - **DSR `min_trades` lower** to catch A4-style low-trade regime-luck (after observing the enabled gate a few cycles).
 - **G5 live divergence** (ARM/SOXL/SOXX/DIA) — regime-confounded by the pullback; re-check after regime normalizes, don't retire on a down week.
 - **#7/#8 dip-buy exemptions** — unproven live (regime left confirmed-uptrend); capture first firings next uptrend.
