@@ -1659,7 +1659,8 @@ class IntelAnalyst:
                        SUM(CASE WHEN sd.stage = 'gate_blocked' THEN 1 ELSE 0 END) as blocked,
                        SUM(CASE WHEN sd.stage = 'order_submitted' THEN 1 ELSE 0 END) as submitted,
                        ARRAY_AGG(DISTINCT sd.reason) FILTER (WHERE sd.stage = 'gate_blocked') as all_reasons,
-                       COALESCE(s.strategy_metadata->>'interval', '1d') as interval
+                       COALESCE(s.strategy_metadata->>'interval', '1d') as interval,
+                       MAX(sd.timestamp) FILTER (WHERE sd.stage = 'gate_blocked') as last_block
                 FROM signal_decisions sd
                 LEFT JOIN strategies s ON s.id = sd.strategy_id
                 WHERE sd.timestamp > NOW() - INTERVAL '{lookback_days} days'
@@ -1707,7 +1708,21 @@ class IntelAnalyst:
         )
 
         findings = []
+        # Recency guard: a "permanent loop" must be CURRENTLY looping. A one-time
+        # block burst that was since fixed (e.g. the 06-22 paper_size_below_minimum
+        # blocks resolved by the floor-to-minimum change the same day) otherwise
+        # lingers as a P1 for the full lookback window — the documented "stale E5
+        # noise" failure mode. Require at least one gate block within the recent
+        # sub-window; skip strategies whose last block predates it.
+        from datetime import datetime as _dt, timedelta as _td
+        RECENT_BLOCK_DAYS = 2
+        recent_cutoff = _dt.now() - _td(days=RECENT_BLOCK_DAYS)
         for row in rows:
+            last_block = row[6] if len(row) > 6 else None
+            if last_block is not None and last_block < recent_cutoff:
+                # Loop stopped — last block is older than the recency window.
+                continue
+
             all_reasons = row[4] or []
             if not isinstance(all_reasons, list):
                 all_reasons = [all_reasons] if all_reasons else []
