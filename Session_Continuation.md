@@ -28,7 +28,16 @@
 
 **D) LIVE cumulative per-symbol cap — VETO not shrink (commit `5fdf1be`):** root cause of the MU ~23%>20% stack = sizing pipeline SHRINKS to headroom but the LIVE pass uses the fixed CIO size & ignores the shrink → partial-headroom overshoots across cycles. Added `RiskManager.check_live_symbol_cap` (open live positions + account-scoped pending + CIO size vs `equity×symbol_cap_pct`) + hard VETO in the live-fill routing before `execute_signal` (honors "never shrink below CIO; skip instead"). Added optional `account_type` filter to `_get_pending_entry_exposure` (live check ignores demo pending). Fail-open. Not triggered this cycle (no breaching live signal); MU positions left as-is per CIO ("hold MU").
 
-### Still open (decisions / watch — NOT defects)
+### Other NULL-coverage scan (2026-06-28) — done after B3
+Systematic null scan of orders/positions/trade_journal for B3-style silent gaps:
+- **`orders.fill_time_seconds` — FIXED (B3-sibling, commit `c024a7a`).** Same root cause: only set on order_monitor's poll path, NULL on inline-confirmed fills (62%). Added duration calc on the scheduler inline-fill path + backfilled history via SQL (1759 rows; entry-fill coverage 62%→99%). 388 rows >900s are deferred fills (raw convention, matches order_monitor; latency metric should filter >900s).
+- **`trade_journal.market_regime` (36% NULL) and `conviction_score` (15% NULL)** — mostly LEGACY and improving: regime ~100% NULL pre-May → 14% in June; conviction 30%→8%. Not active gaps; left as-is (recent residual is specific exit paths / external positions).
+- **`trade_journal` MAE/MFE 84% NULL** — documented (tracked only since ~May); the SL/TP recommender already only uses tracked rows.
+- **positions** essentially clean (open positions 0 nulls; closed have tiny invested_amount(12)/price_updated_at(150) gaps — not material).
+- **equity_snapshots MQS** clean (old NULL issue resolved).
+- `signal_decisions.account_type` on order_filled/order_submitted fixed forward this session (historical rows still NULL — low value to backfill).
+
+
 - **DSR `min_trades` lower** to catch A4-style low-trade regime-luck (after observing the enabled gate a few cycles).
 - **G5 live divergence** (ARM/SOXL/SOXX/DIA) — regime-confounded by the pullback; re-check after regime normalizes, don't retire on a down week.
 - **#7/#8 dip-buy exemptions** — unproven live (regime left confirmed-uptrend); capture first firings next uptrend.
