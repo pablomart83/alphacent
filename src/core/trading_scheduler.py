@@ -2103,6 +2103,28 @@ class TradingScheduler:
                                         if positions_data:
                                             order_orm.filled_price = positions_data[0].get("open_rate") or positions_data[0].get("entry_price") or order.expected_price
 
+                                        # B3 fix: compute execution slippage on this inline fill path.
+                                        # This is the dominant entry-fill path (the scheduler confirms
+                                        # fills right after placement); it previously set filled_price
+                                        # but never slippage, so orders marked FILLED here were never
+                                        # re-processed by order_monitor.check_submitted_orders (which
+                                        # only polls PENDING orders) — leaving ~62% of fills with NULL
+                                        # slippage. Use the same canonical helper as order_monitor so
+                                        # the computation (directional, fractional, drift-guarded) is
+                                        # consistent across both fill paths.
+                                        try:
+                                            if order_orm.filled_price and order_orm.expected_price:
+                                                from src.analytics.trade_journal import compute_execution_slippage as _ces
+                                                order_orm.slippage = _ces(
+                                                    expected_price=order_orm.expected_price,
+                                                    filled_price=order_orm.filled_price,
+                                                    order_side=order.side.value if hasattr(order.side, 'value') else str(order.side),
+                                                    submitted_at=order_orm.submitted_at,
+                                                    filled_at=order_orm.filled_at,
+                                                )
+                                        except Exception as _slip_err:
+                                            logger.debug(f"Could not compute slippage for order {order_orm.id}: {_slip_err}")
+
                                         if not etoro_position_id:
                                             # Fetch positions and match by symbol
                                             etoro_positions = self._etoro_client.get_positions()
