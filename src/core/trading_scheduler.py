@@ -2141,6 +2141,18 @@ class TradingScheduler:
                                         except Exception as _slip_err:
                                             logger.debug(f"Could not compute slippage for order {order_orm.id}: {_slip_err}")
 
+                                        # B3-sibling: fill_time_seconds was also only set on the
+                                        # order_monitor poll path, so inline-confirmed fills had it
+                                        # NULL (62%). Compute the submit→fill duration here too
+                                        # (raw, matching order_monitor's convention).
+                                        try:
+                                            if order_orm.submitted_at and order_orm.filled_at:
+                                                order_orm.fill_time_seconds = (
+                                                    order_orm.filled_at - order_orm.submitted_at
+                                                ).total_seconds()
+                                        except Exception as _ft_err:
+                                            logger.debug(f"Could not compute fill_time for order {order_orm.id}: {_ft_err}")
+
                                         if not etoro_position_id:
                                             # Fetch positions and match by symbol
                                             etoro_positions = self._etoro_client.get_positions()
