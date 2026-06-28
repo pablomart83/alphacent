@@ -986,6 +986,31 @@ class OrderMonitor:
                                     failed_count += 1
                                     # Invalidate order cache on state change
                                     self.invalidate_order_cache(order.etoro_order_id)
+                                    # Observability + short-restriction learning (2026-06-28):
+                                    # surface the failure in the decision funnel (order_failed)
+                                    # and, if eToro rejected a SELL with "disallowed for Sell",
+                                    # remember the instrument so we stop re-emitting shorts on it.
+                                    try:
+                                        from src.analytics.decision_log import record_decision as _rec_of
+                                        _ometa = order.order_metadata if isinstance(getattr(order, 'order_metadata', None), dict) else {}
+                                        _oside = str(getattr(order.side, 'value', order.side)).upper() if getattr(order, 'side', None) else ''
+                                        _rec_of(
+                                            stage="order_failed", decision="error",
+                                            strategy_id=order.strategy_id, symbol=order.symbol,
+                                            template=_ometa.get('template_name'),
+                                            direction=('short' if _oside in ('SELL', 'SHORT') else 'long'),
+                                            market_regime=_ometa.get('market_regime'),
+                                            reason=f"etoro_error {error_code}: {str(error_message)[:160]}",
+                                            account=getattr(order, 'account_type', 'demo') or 'demo',
+                                        )
+                                        from src.risk.short_restrictions import (
+                                            looks_like_short_disallowed as _lsd,
+                                            record_short_restriction as _rsr,
+                                        )
+                                        if _oside in ('SELL', 'SHORT') and _lsd(str(error_message)):
+                                            _rsr(order.symbol)
+                                    except Exception:
+                                        pass
                                     # Part 2 fix (2026-05-18): delete the optimistic position row
                                     # that was written at order-submit time. If eToro rejected the
                                     # order (e.g. 604 insufficient funds), the position was never

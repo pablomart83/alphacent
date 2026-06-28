@@ -134,7 +134,27 @@ class OrderExecutor:
         
         logger.info(f"Executing signal: {signal.action.value} {normalized_symbol} (size: {position_size})")
 
-        # C1 (2026-05-01): VIX Signal-Time Gate.
+        # Short-restriction gate (2026-06-28): some eToro instruments reject SELL
+        # entries ("opening position is disallowed for Sell positions of this
+        # instrument"). We learn these from past rejections (see _submit_order) and
+        # skip re-emitting shorts on them rather than submitting an order that will
+        # be rejected every cycle. Applies to ENTER_SHORT only; fail-open.
+        if signal.action == SignalAction.ENTER_SHORT:
+            try:
+                from src.risk.short_restrictions import is_short_restricted
+                if is_short_restricted(normalized_symbol):
+                    self._log_decision(signal, normalized_symbol, stage="gate_blocked",
+                                       decision="blocked", reason="short_restricted_instrument",
+                                       account=account_type)
+                    raise OrderExecutionError(
+                        f"{normalized_symbol} is short-restricted on eToro "
+                        f"(disallows Sell entries) — skipping ENTER_SHORT"
+                    )
+            except OrderExecutionError:
+                raise
+            except Exception as _sr_err:
+                logger.debug(f"short-restriction check failed for {normalized_symbol}: {_sr_err} — proceeding")
+
         # Block new LONG entries when VIX > 25 AND VIX_5d change > +15%.
         # Reference: Bilello research — post-VIX-spike 1yr forward S&P return
         # averaged only 4.4%; vol spikes mark turning points.
@@ -883,6 +903,18 @@ class OrderExecutor:
         except EToroAPIError as e:
             logger.error(f"Failed to submit order {order.id}: {e}")
             order.status = OrderStatus.FAILED
+            # Learn eToro short-restrictions: if this was a SELL rejected with
+            # "disallowed for Sell", remember the instrument so we stop
+            # re-emitting shorts on it (self-heals after a TTL). Fail-safe.
+            try:
+                from src.risk.short_restrictions import (
+                    looks_like_short_disallowed, record_short_restriction,
+                )
+                _is_sell = str(getattr(order.side, 'value', order.side)).upper() in ('SELL', 'SHORT')
+                if _is_sell and looks_like_short_disallowed(str(e)):
+                    record_short_restriction(order.symbol)
+            except Exception:
+                pass
             raise OrderExecutionError(f"Failed to submit order: {e}")
 
     def track_order(self, order_id: str, wait_for_fill: bool = True) -> OrderStatus:

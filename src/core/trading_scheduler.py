@@ -2304,6 +2304,28 @@ class TradingScheduler:
                                 logger.warning(f"Gate blocked signal for {signal.symbol}: {e}")
                             else:
                                 logger.error(f"Failed to execute signal for {signal.symbol}: {e}")
+                                # Surface genuine order failures in the decision funnel
+                                # (order_failed stage). Previously only the legacy
+                                # REJECTED signal_decision was written, so eToro
+                                # rejections (e.g. "disallowed for Sell") were invisible
+                                # in the observability funnel. Fire-and-forget.
+                                try:
+                                    from src.analytics.decision_log import record_decision as _rec_failed
+                                    _sig_meta_f = getattr(signal, 'metadata', None) or {}
+                                    _rec_failed(
+                                        stage="order_failed",
+                                        decision="error",
+                                        strategy_id=getattr(signal, 'strategy_id', None),
+                                        template=_sig_meta_f.get('template_name') or strategy.name,
+                                        symbol=signal.symbol,
+                                        direction=('long' if 'LONG' in str(getattr(signal, 'action', '')) else 'short'),
+                                        market_regime=_sig_meta_f.get('market_regime'),
+                                        reason=str(e)[:200],
+                                        account='demo',
+                                        metadata={"strategy_name": strategy.name},
+                                    )
+                                except Exception:
+                                    pass
                             signals_rejected += 1
                             self._log_signal_decision(
                                 session=session,
