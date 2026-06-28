@@ -369,6 +369,7 @@ class OrderMonitor:
                         take_profit=etoro_pos.take_profit,
                         closed_at=None,
                         account_type=self.account_type,
+                        invested_amount=getattr(etoro_pos, 'invested_amount', None),
                     )
                     # A3: isolate each create in a SAVEPOINT. An orphan position that
                     # maps to an already-open (strategy_id, symbol, account_type) — via
@@ -1328,7 +1329,8 @@ class OrderMonitor:
                                                 etoro_position_id=etoro_pos.etoro_position_id,
                                                 stop_loss=etoro_pos.stop_loss or order.stop_price,
                                                 take_profit=etoro_pos.take_profit or order.take_profit_price,
-                                                closed_at=None
+                                                closed_at=None,
+                                                invested_amount=getattr(etoro_pos, 'invested_amount', None),
                                             )
                                             try:
                                                 with session.begin_nested():

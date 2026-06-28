@@ -562,6 +562,15 @@ async def cancel_order(
                         order_orm.status = OrderStatus.FILLED
                         order_orm.filled_at = datetime.utcnow()
                         order_orm.filled_quantity = order_orm.quantity
+                        # Set filled_price (was left NULL here, contributing to the
+                        # NULL-filled_price-on-FILLED-entry rows): take it from the
+                        # eToro positions payload, else fall back to expected_price.
+                        if order_orm.filled_price is None:
+                            _pos_list = status_data.get("positions") or []
+                            _fp = None
+                            if _pos_list and isinstance(_pos_list, list):
+                                _fp = _pos_list[0].get("open_rate") or _pos_list[0].get("entry_price")
+                            order_orm.filled_price = _fp or order_orm.expected_price
                         session.commit()
                         return CancelOrderResponse(
                             success=False,

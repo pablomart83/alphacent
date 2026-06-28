@@ -1257,7 +1257,8 @@ class OrderExecutor:
                     etoro_position_id=position.etoro_position_id,
                     stop_loss=position.stop_loss,
                     take_profit=position.take_profit,
-                    closed_at=position.closed_at
+                    closed_at=position.closed_at,
+                    invested_amount=order.quantity,  # entry order quantity is the DOLLAR notional (typed-notional rule); position.quantity is SHARES
                 )
                 session.add(position_orm)
                 session.commit()
@@ -1391,7 +1392,8 @@ class OrderExecutor:
                     etoro_position_id=position.etoro_position_id,
                     stop_loss=position.stop_loss,
                     take_profit=position.take_profit,
-                    closed_at=position.closed_at
+                    closed_at=position.closed_at,
+                    invested_amount=order.quantity,  # entry order quantity is the DOLLAR notional (typed-notional rule); position.quantity is SHARES
                 )
                 session.add(position_orm)
                 session.commit()
