@@ -6,6 +6,39 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-28 (Auto) — POST-AUDIT FIXES SHIPPED (audit defects + Intel B3/D7/E5) + DSR gate ENABLED + LIVE cap-veto. All deployed & pushed. 2 verifications are time/market-gated (see "DO FIRST").**
+
+### ⚠️ DO FIRST next session (two gated verifications — not failures, just couldn't observe yet)
+1. **Fundamental-exit fix behavioral confirm.** The daily check runs on a 24h timer that RESETS to "now" on every service restart (by design — skip-on-startup). Today's restarts (last 11:46 UTC) pushed the next natural run to **~2026-06-29 11:46 UTC**. Confirm it then: `grep "Fundamental exit check complete" logs/*.log` → expect `checked=N flagged=M` with **no `Error in fundamental exit check`**. Root cause was fixed + verified (see below), this is just the behavioral tick.
+2. **B3 slippage + `account_type` on real fills.** Sunday cycle produced zero fills (equity market closed). On Monday's first fills, confirm new `orders.slippage` is populated (was 62% NULL) and `signal_decisions` `order_submitted`/`order_filled` rows carry `account_type` (demo/live).
+
+### What shipped this session (all deployed + pushed; origin/main = `5fdf1be`)
+**A) Audit defects (commits `fedd078` `d1b3bca` `853e44a` `c3bb9a9`, prior session — now confirmed deployed):**
+- **Fundamental-exit `InFailedSqlTransaction` (daily, silent).** Root cause was a TYPE bug, not a generic session issue: `regime_history.regime_changed` is Integer(0/1) but the stability query used `== True` → Postgres `operator does not exist: integer = boolean` → aborted txn → `except` swallowed it w/o rollback AND defaulted `regime_stable=True` → poisoned session → daily 12:36 `pending_closure` commit always failed. Fixed `== 1` + `session.rollback()` in except + default `regime_stable=False` on error. **Behavior resumption:** sector-rotation fundamental exits now actually persist (profitable positions, regime stable ≥3d). Live book has no XLY/XLV/XLE so live unaffected; demo sandbox only. Query verified clean vs live DB.
+- **`account_type` threaded** on `order_submitted` (order_executor) + `order_filled` (order_monitor) decision writers (were NULL).
+- **Size-estimate endpoint** `Position.__init__` missing `realized_pnl`/`opened_at`/`etoro_position_id` — added.
+- **#6 TSL docstrings** corrected to the 06-23 retune values (comments only).
+
+**B) Intel findings B3 / D7 / E5 (commits `af103e0` B3, `dc3ad8a` E5; D7 data-only) — all marked RESOLVED in `system_findings`:**
+- **B3 (slippage NULL on 62% of fills):** root cause = the `trading_scheduler` inline-fill path (dominant entry path; confirms fills right after placement) set `filled_price` but never slippage, and those orders are marked FILLED so `order_monitor.check_submitted_orders` (polls PENDING only) never computed it. Added `compute_execution_slippage` call there (same canonical helper). Fixed forward (historical NULLs won't backfill).
+- **D7 (14 duplicate 1d bars):** were LEGACY April rows (un-normalized 04:00/22:00 UTC timestamps) for COPPER/OIL/GER40. Active writer already normalizes 1d→midnight + upserts on `uq_historical_symbol_date_interval`, so no code change. Deleted the 14 legacy rows keeping the canonical midnight twin (NOT MIN(id) — the Intel-suggested SQL would've kept the stale row). 0 dup groups now (221240→221226).
+- **E5 (6 "permanent loop" strategies):** the loop was ALREADY fixed by `0bd4341` (06-22 floor-to-minimum); the E5 CHECK lingered on stale pre-fix `paper_size_below_minimum` blocks (all 06-22). Added a **recency guard** to the check (skip if last gate_block >2 days old) so a resolved burst doesn't linger as P1. Re-ran Intel: open E5 6→0 (93 resolved).
+
+**C) DSR gate — ENABLED (calibrated):** `wf_dsr` distribution (67 scored) is bimodal — robust cluster ≥0.95 (42) vs fragile tail <0.90 (23), sparse gap at 0.90. Set `backtest.walk_forward.dsr_gate.enabled: true` at `min_dsr=0.9` (yaml is EC2-authoritative + gitignored — change is on EC2 only). VERIFIED enforcing: `DSR gate (ENABLED, n_trials=192, min_dsr=0.9): scored 27 … 17 below threshold (filtered). pass-rate 147→130` — prunes the fragile tail, breadth intact (only touches ≥10-trade scoreable strategies), no errors. Filters more now than the observe-only runs because the choppy regime produces more regime-luck — gate working as intended. **WATCH** over a few cycles it doesn't over-tighten. **CAVEAT:** A4 regime-luck findings (3-7 trades) are below DSR `min_trades=10` → still unscored; lowering `min_trades` to reach them is a deliberate follow-up (observe first).
+
+**D) LIVE cumulative per-symbol cap — VETO not shrink (commit `5fdf1be`):** root cause of the MU ~23%>20% stack = sizing pipeline SHRINKS to headroom but the LIVE pass uses the fixed CIO size & ignores the shrink → partial-headroom overshoots across cycles. Added `RiskManager.check_live_symbol_cap` (open live positions + account-scoped pending + CIO size vs `equity×symbol_cap_pct`) + hard VETO in the live-fill routing before `execute_signal` (honors "never shrink below CIO; skip instead"). Added optional `account_type` filter to `_get_pending_entry_exposure` (live check ignores demo pending). Fail-open. Not triggered this cycle (no breaching live signal); MU positions left as-is per CIO ("hold MU").
+
+### Still open (decisions / watch — NOT defects)
+- **DSR `min_trades` lower** to catch A4-style low-trade regime-luck (after observing the enabled gate a few cycles).
+- **G5 live divergence** (ARM/SOXL/SOXX/DIA) — regime-confounded by the pullback; re-check after regime normalizes, don't retire on a down week.
+- **#7/#8 dip-buy exemptions** — unproven live (regime left confirmed-uptrend); capture first firings next uptrend.
+- **Short book thin** — directional quotas OFF, short floor unenforced, some instruments eToro-short-restricted; decision pending.
+- Lower priority: G7 (SMA Trend Momentum long in trending_up_weak 29% WR — suppression candidate), wire `order_failed` decision stage (short-rejections currently rotate out of logs invisibly).
+
+---
+
+## ⚡ PRIOR KICKOFF — WEEKLY AUDIT 2026-06-27
+
 **SESSION 2026-06-27 (Auto) — WEEKLY AUDIT of the 9 changes shipped 06-20→27. Read-only review; nothing changed. Full report: `AUDIT_REPORT_2026-06-27.md`.**
 
 **Verdict: all 9 changes deployed and behaving as designed; no regressions. The week was a LOSING week driven by a market pullback (SPY ~−3.4%, regime flipped trending_up_weak→ranging_low_vol), NOT by the changes — and the TSL retune (#6) mitigated the give-back. The confirmed-uptrend has ENDED, so #7/#8 are now correctly inert and their uptrend-calibrated evidence is temporarily stale.**
