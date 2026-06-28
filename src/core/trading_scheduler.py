@@ -1878,6 +1878,22 @@ class TradingScheduler:
                                                         continue
                                                     _live_size = float(_approval.position_size) / _mirror
 
+                                                # Cumulative per-symbol cap VETO (LIVE): the CIO size is
+                                                # fixed and the sizing pipeline only SHRINKS to headroom
+                                                # (which the live pass ignores), so a partial-headroom
+                                                # case must SKIP the entry rather than overshoot the 20%
+                                                # symbol cap — the mechanism behind the MU ~23% stack.
+                                                # Account-scoped; fail-open if account info is missing.
+                                                if self._risk_manager is not None and _live_account_info is not None:
+                                                    _cap_ok, _cap_reason = self._risk_manager.check_live_symbol_cap(
+                                                        _sig_sym, _live_size, _live_account_info, _live_pos_dcs
+                                                    )
+                                                    if not _cap_ok:
+                                                        logger.info(
+                                                            f"Live fill routing: {_cap_reason} — skipping entry"
+                                                        )
+                                                        continue
+
                                                 # Execute with CIO-approved SL/TP
                                                 _live_order = self._live_order_executor.execute_signal(
                                                     signal=signal,

@@ -312,6 +312,7 @@ class RiskManager:
     def _get_pending_entry_exposure(
         self,
         symbol: str,
+        account_type: Optional[str] = None,
     ) -> tuple[float, set, int]:
         """Return pending (not-yet-filled) entry exposure for a symbol.
 
@@ -383,6 +384,7 @@ class RiskManager:
                             OrderStatus.PENDING.value,
                             OrderStatus.PARTIALLY_FILLED.value,
                         ]),
+                        *([OrderORM.account_type == account_type] if account_type else []),
                     )
                     .all()
                 )
@@ -1708,6 +1710,61 @@ class RiskManager:
             return False
 
         return True
+
+    def check_live_symbol_cap(
+        self,
+        symbol: str,
+        intended_size: float,
+        account: AccountInfo,
+        positions: List[Position],
+    ) -> tuple[bool, str]:
+        """Hard per-symbol cap VETO for the LIVE pass.
+
+        The sizing pipeline's symbol cap (calculate_position_size Step 6) SHRINKS
+        a new position to the remaining headroom. That is correct for DEMO/PAPER,
+        but the LIVE pass uses the fixed CIO `position_size` and cannot consume a
+        partial headroom — so when headroom is positive but smaller than the CIO
+        order, validate_signal does NOT veto (it returns a shrunk advisory size),
+        the live pass places the FULL CIO order anyway, and the symbol overshoots
+        its cap. This stacked 3 live MU entries to ~23% vs the 20% cap (across
+        cycles, each entry seeing < full prior exposure).
+
+        Per the LIVE invariant (never shrink below CIO size; reposition is the
+        only resize), the right action is to VETO the entry when
+        `existing + pending + intended_size > symbol_cap`, not shrink it.
+
+        Counts open LIVE positions on the symbol + pending LIVE entry orders
+        (account-scoped, so demo pending never inflates the live check).
+        Fail-open: on any error returns (True, ...) — a check bug must not block
+        a CIO-approved live entry.
+        """
+        try:
+            equity = getattr(account, 'equity', None) or account.balance
+            if not equity or equity <= 0:
+                return True, "live_symbol_cap: equity unavailable (fail-open)"
+            cap_pct = self._effective_position_cap_pct(is_live=True)
+            symbol_cap = equity * cap_pct
+            existing = sum(
+                self._get_position_value(p)
+                for p in positions
+                if p.symbol == symbol
+                and p.closed_at is None
+                and not getattr(p, 'pending_closure', False)
+            )
+            pending, _, pending_n = self._get_pending_entry_exposure(symbol, account_type='live')
+            projected = existing + pending + float(intended_size or 0.0)
+            if projected > symbol_cap:
+                return False, (
+                    f"live_symbol_cap_veto ({symbol}: existing=${existing:.0f} + "
+                    f"pending=${pending:.0f} ({pending_n}) + new=${intended_size:.0f} "
+                    f"= ${projected:.0f} > cap ${symbol_cap:.0f} @ {cap_pct:.0%} of "
+                    f"${equity:.0f})"
+                )
+            return True, "live_symbol_cap ok"
+        except Exception as e:
+            logger.warning(f"check_live_symbol_cap failed for {symbol}: {e} — fail-open")
+            return True, "live_symbol_cap check error (fail-open)"
+
     def check_symbol_concentration(
         self,
         symbol: str,
