@@ -246,6 +246,31 @@ class TradeJournal:
         if order_side is not None:
             enriched_metadata["order_side"] = order_side
 
+        # Regime backfill: if the caller didn't supply market_regime (some fill
+        # paths — order_executor._handle_*_fill with an empty order.metadata, and
+        # the sync-close path when no order matches the ±10min window — pass None),
+        # recover the regime that was ACTIVE AT entry_time from regime_history.
+        # This is correct for both real-time fills (latest regime) and backfilled
+        # old entries (the regime as of that historical entry), unlike using the
+        # current regime blindly. Fail-safe: leave None on any error.
+        if market_regime is None and entry_time is not None:
+            try:
+                from src.models.orm import RegimeHistoryORM
+                _rs = self.database.get_session()
+                try:
+                    _rrow = (
+                        _rs.query(RegimeHistoryORM.current_regime)
+                        .filter(RegimeHistoryORM.detected_at <= entry_time)
+                        .order_by(RegimeHistoryORM.detected_at.desc())
+                        .first()
+                    )
+                    if _rrow and _rrow[0]:
+                        market_regime = _rrow[0]
+                finally:
+                    _rs.close()
+            except Exception as _reg_err:
+                logger.debug(f"Regime backfill for {trade_id} failed: {_reg_err}")
+
         session = self.database.get_session()
         try:
             # Check for existing entry to avoid UNIQUE constraint violation
