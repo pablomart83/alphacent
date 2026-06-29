@@ -4556,7 +4556,11 @@ async def get_size_estimate(
         ]
 
         # Run the pipeline
-        risk_manager = RiskManager()
+        # RiskManager requires a RiskConfig (was called with no args → TypeError on
+        # this endpoint). Build the LIVE risk config the same way control.py does.
+        from src.models.enums import TradingMode as _TM
+        _rm_cfg = get_config().load_risk_config(_TM.LIVE)
+        risk_manager = RiskManager(_rm_cfg)
         risk_manager._last_sizing_reason = None
         recommended_size_virtual = risk_manager.calculate_position_size(
             signal=signal,
