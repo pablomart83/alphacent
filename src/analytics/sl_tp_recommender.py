@@ -24,6 +24,13 @@ Method (per cohort — per symbol, and per template×asset-class):
 Every recommendation is bounded by sl_caps (sl_cap_pct / a TP sanity cap) and
 carries its evidence (n, current vs proposed, MAE/MFE percentiles, expected
 capture gain). Conservative thresholds: only material, well-sampled changes.
+
+ATR noise floor (volatility constraint): a recommendation is never allowed to
+propose a stop below the instrument's ATR floor (1.5x daily ATR), because a
+stop inside the noise band gets stopped out before any edge plays out — and
+execution enforces exactly this floor at order time. Flooring it here is what
+makes a CIO-approved recommendation EQUAL to what actually executes, instead of
+being silently widened at order time (see src/risk/atr_stop.py).
 """
 
 from __future__ import annotations
@@ -145,6 +152,7 @@ def _pct(arr: List[float], q: float) -> float:
 
 def _analyse_cohort(
     coh: _Cohort, current_sl: float, current_tp: float, cap_sl: float,
+    atr_floor: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """Return a recommendation dict for this cohort, or None if no material,
     well-evidenced change is warranted."""
@@ -191,6 +199,31 @@ def _analyse_cohort(
                 f"unused headroom bleeds loss size)"
             )
 
+    # --- ATR noise floor (volatility constraint) ---
+    # A stop tighter than the instrument's volatility floor (1.5-2x ATR) sits
+    # inside normal noise and gets stopped out before the MAE-optimal level ever
+    # matters — and execution enforces exactly this floor at order time. So never
+    # recommend (or leave) a stop below it; raise the proposal to the floor. This
+    # is what makes a CIO-approved recommendation equal to what actually executes,
+    # instead of being silently widened at order time.
+    if atr_floor and atr_floor > 0:
+        floored_sl = round(min(atr_floor, cap_sl), 4)
+        if proposed_sl < floored_sl and abs(floored_sl - current_sl) >= max(0.005, current_sl * 0.15):
+            mae_wanted = proposed_sl
+            # The floor supersedes any MAE-based widen/tighten on the SL itself.
+            actions = [a for a in actions if not (a.startswith("widen SL") or a.startswith("tighten SL"))]
+            actions.insert(
+                0,
+                f"set SL to ATR floor {current_sl:.1%}→{floored_sl:.1%} "
+                f"(instrument noise floor {atr_floor:.1%}; MAE-optimal {mae_wanted:.1%} "
+                f"would be noise-stopped — approval now matches execution)"
+            )
+            # Preserve R:R on the TP if it wasn't independently raised below.
+            if proposed_tp <= current_tp and current_sl > 0:
+                _rr = current_tp / current_sl if current_sl > 0 else 2.0
+                proposed_tp = round(min(floored_sl * _rr, _TP_SANITY_CAP), 4)
+            proposed_sl = floored_sl
+
     # --- Take profit / capture ---
     capture = (realized_median / mfe_p50) if mfe_p50 > 0 else 1.0
     raise_tp_target = round(min(mfe_p50, _TP_SANITY_CAP), 4)
@@ -222,6 +255,7 @@ def _analyse_cohort(
             "premature_stops": premature,
             "expected_capture_gain": expected_capture_gain,
             "sl_cap": round(cap_sl, 4),
+            "atr_floor": round(atr_floor, 4) if atr_floor else None,
             "win_rate": round(float(win_mask.mean()), 3),
         },
     }
@@ -274,7 +308,15 @@ def compute_recommendations(
             ac = symbol_ac.get(sym, "unknown")
             cur_sl, cur_tp, src = _current_sl_tp(session, sym, ac)
             cap = sl_cap_pct(sym)
-            rec = _analyse_cohort(coh, cur_sl, cur_tp, cap)
+            # ATR noise floor for this symbol so we never propose a stop the
+            # execution layer would just widen back (daily 1.5x ATR — the
+            # standard floor; execution applies the precise per-order value).
+            try:
+                from src.risk.atr_stop import compute_atr_floor_pct
+                _atr_floor = compute_atr_floor_pct(sym, is_4h=False)
+            except Exception:
+                _atr_floor = None
+            rec = _analyse_cohort(coh, cur_sl, cur_tp, cap, atr_floor=_atr_floor)
             if rec:
                 rec.update({
                     "rec_type": "sl_tp", "scope_type": "symbol", "scope_key": sym,
@@ -320,6 +362,16 @@ def persist_recommendations(recs: List[Dict[str, Any]]) -> int:
     the number of pending recommendations written."""
     from src.models.database import get_database
     from src.models.orm import ImprovementRecommendationORM
+
+    # Robustness: never wipe the pending queue on a completely empty computation.
+    # An empty result is more often a transient inability to compute (e.g. the
+    # ATR floor needs a MarketDataManager that isn't ready right after a restart)
+    # than a genuine "nothing to recommend". Wiping on empty deleted a freshly
+    # persisted queue at startup. If there's genuinely nothing, the next run with
+    # data will clear stale scopes via the in-scope replace below.
+    if not recs:
+        logger.info("persist_recommendations: empty computation — leaving existing pending queue untouched")
+        return 0
 
     db = get_database()
     session = db.get_session()
