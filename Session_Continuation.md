@@ -6,6 +6,27 @@
 
 ## ⚡ NEXT SESSION KICKOFF
 
+**SESSION 2026-06-29 (Auto, Mon) — Monday live review + SL/TP architecture fix.**
+
+Verified this session (all confirmed working live): fundamental-exit fix (06-29 13:57 `80 checked, 7 flagged`, NO InFailedSqlTransaction; 7 closures all DEMO sector-rotation — live unaffected); B3 slippage + fill_time + account_type all populating on today's live fills (6/6); no regressions from the bug sweep (service up since Sun deploy). Fixed a surfaced bug: size-estimate endpoint `RiskManager()` missing `config` → now loads LIVE risk config (`152624f`).
+
+**Live perf (Mon):** equity ~$10,177 (+1.8% vs $10k base) but down today −$228 realized on 6 morning semis stop-outs (MU −9.2%/−10.8%, AMD −7%/−3.5%); MU/AMD open positions' trailing stops locked +profit. Demo −$2,442. Regime still risk-off (scoreboard passed-fwd −1.8%, conviction=helps).
+
+**MAIN FIX — ATR-aware SL/TP recommender (`4ec0493`):** Discovered the approved recommender SLs were NOT what executed. Chain: `get_live_approval` → `_approval.sl_pct` (AMD 7.5%, MU 8.82%) → `execute_signal` → **ATR-minimum-stop floor (1.5× daily / 2.0× 4H ATR, clamped to 9% stocks / 20% lev / 15% crypto)** silently widened sub-floor stops to ~9%. So approving a recommendation didn't change execution → recommender pointless for sub-floor stops.
+- **Design (agreed w/ CIO):** ATR floor is a real volatility constraint (not a fallback) — a stop tighter than ~1.5× ATR gets noise-stopped. PAPER uses the ATR-floored template default (and its MAE/MFE feeds graduation). At graduation the dashboard shows a paper-derived (ATR-aware) recommended SL/TP; CIO approves; live recommender refines on-the-go; execution honors the approved value (which is now ATR-aware by construction).
+- **Implemented:** new `src/risk/atr_stop.py` (shared floor, faithful to execute_signal's logic) → recommender now clamps every proposed SL up to the floor (`max(MAE_optimal, ATR_floor)`), surfacing `set SL to ATR floor` recs. **`execute_signal` left UNCHANGED** (its floor is correct; the bug was the recommender proposing un-executable values). Guarded `persist_recommendations` to NOT wipe the pending queue on an empty (MDM-unavailable) computation.
+- **10 pending ATR-aware recs now queued for CIO approval** (approval will = execution): AMD 7.5→9%, ARM 6→9%, CAT 2.9→6.4%, ENPH 1.2→9%, SMH 6→8.1%, SOXL 15→20%, SOXX 6→9%, TQQQ 6→12.9%, TXN 6→8.6%, XLK 4.1→5.4%. **These are all WIDENING to the noise floor** (the prior tight/aggressive values were being silently widened anyway). Approving them aligns stored config with execution reality.
+
+**Open / next:**
+- **CIO: review & approve the 10 ATR-aware SL recs** (Graduation → Recommendations panel). After approval, `live_strategies`/overrides will match execution; no more silent widening.
+- DSR enforcement still pending the next proposer run (~daily cadence; last Sun 19:24). Confirm it filters sanely.
+- Live MU/AMD effective stops ~9% (now the *approved* value once recs applied) — sizing on high-vol semis is the CIO's call (concentration de-prioritized: book is newly graduating).
+- SPY 1h historical errors persist (pre-existing data-pipeline noise, not in scope).
+
+---
+
+## ⚡ PRIOR KICKOFF — 2026-06-28
+
 **SESSION 2026-06-28 (Auto) — POST-AUDIT FIXES SHIPPED (audit defects + Intel B3/D7/E5) + DSR gate ENABLED + LIVE cap-veto. All deployed & pushed. 2 verifications are time/market-gated (see "DO FIRST").**
 
 ### ⚠️ DO FIRST next session (two gated verifications — not failures, just couldn't observe yet)
