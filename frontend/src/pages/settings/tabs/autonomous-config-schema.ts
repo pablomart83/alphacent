@@ -42,6 +42,7 @@ export const AUTONOMOUS_SECTIONS = [
   'Vol scaling',
   'Rejection blacklist',
   'Regime dormancy',
+  'Regime authority',
 ] as const
 
 export const AUTONOMOUS_FIELDS: FieldDef[] = [
@@ -849,5 +850,18 @@ export const AUTONOMOUS_FIELDS: FieldDef[] = [
     min: 7,
     max: 365,
     help: 'A dormant strategy older than this is flagged for re-validation when woken (its edge may have drifted).',
+  },
+
+  // Regime authority (debounce of the raw sub-regime classifier)
+  {
+    key: 'regime_authority_confirm_days',
+    label: 'Confirm days',
+    section: 'Regime authority',
+    type: 'int',
+    suffix: 'd',
+    min: 1,
+    max: 30,
+    help: 'A new raw sub-regime must persist this many consecutive trading days before it becomes the official regime the system acts on. Debounces the raw classifier (which flips every ~1-2 days). Tuned: 5 → ~13 confirmed changes/yr, ~3.4-week median dwell; 7 → ~8/yr, ~4-week.',
+    gates: 'RegimeAuthority logs / regime_history confirmed changes',
   },
 ]

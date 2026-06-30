@@ -1067,6 +1067,7 @@ class AutonomousConfigResponse(BaseModel):
     regime_dormancy_wake_confirm_days: int = 3
     regime_dormancy_min_dwell_days: int = 2
     regime_dormancy_max_warm_age_days: int = 60
+    regime_authority_confirm_days: int = 5
 
     # ─── Autonomous schedule ────────────────────────────────────────────
     schedule_hour: int = 15
@@ -1205,6 +1206,7 @@ class AutonomousConfigRequest(BaseModel):
     regime_dormancy_wake_confirm_days: Optional[int] = None
     regime_dormancy_min_dwell_days: Optional[int] = None
     regime_dormancy_max_warm_age_days: Optional[int] = None
+    regime_authority_confirm_days: Optional[int] = None
 
     # Autonomous schedule
     schedule_hour: Optional[int] = None
@@ -1275,6 +1277,7 @@ async def get_autonomous_config(
     regime_detection = full_config.get('regime_detection', {}) or {}
     portfolio_var = pm.get('portfolio_var', {}) or {}
     regime_dormancy = full_config.get('regime_dormancy', {}) or {}
+    regime_authority = full_config.get('regime_authority', {}) or {}
     market_regime = full_config.get('market_regime', {}) or {}
 
     # Helper: yaml decimal fraction (0-1) → API percentage (0-100)
@@ -1434,6 +1437,7 @@ async def get_autonomous_config(
         regime_dormancy_wake_confirm_days=int(regime_dormancy.get('wake_confirm_days', 3)),
         regime_dormancy_min_dwell_days=int(regime_dormancy.get('min_dwell_days', 2)),
         regime_dormancy_max_warm_age_days=int(regime_dormancy.get('max_warm_age_days', 60)),
+        regime_authority_confirm_days=int(regime_authority.get('confirm_days', 5)),
 
         # Autonomous schedule
         schedule_hour=int(autonomous_schedule.get('hour', 15)),
@@ -1526,6 +1530,7 @@ async def update_autonomous_config(
     full_config['position_management'].setdefault('vol_scaling', {})
     full_config['alpha_edge'].setdefault('rejection_blacklist', {})
     full_config.setdefault('regime_dormancy', {})
+    full_config.setdefault('regime_authority', {})
 
     # Shortcuts
     a = full_config['autonomous']
@@ -1550,6 +1555,7 @@ async def update_autonomous_config(
     ae = full_config['alpha_edge']
     rbl = ae['rejection_blacklist']
     rd_cfg = full_config['regime_dormancy']
+    ra_cfg = full_config['regime_authority']
 
     # Helper: percentage (API) → decimal fraction (yaml)
     def to_frac(v):
@@ -1714,6 +1720,8 @@ async def update_autonomous_config(
         rd_cfg['min_dwell_days'] = request.regime_dormancy_min_dwell_days
     if request.regime_dormancy_max_warm_age_days is not None:
         rd_cfg['max_warm_age_days'] = request.regime_dormancy_max_warm_age_days
+    if request.regime_authority_confirm_days is not None:
+        ra_cfg['confirm_days'] = request.regime_authority_confirm_days
 
     # ─── Autonomous schedule ────────────────────────────────────────────
     if request.schedule_hour is not None:
