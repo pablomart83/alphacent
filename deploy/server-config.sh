@@ -99,6 +99,9 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/alphacent
 EnvironmentFile=/home/ubuntu/alphacent/.env.production
+# Cap glibc malloc arenas: threaded numpy/pandas/numba process; default
+# (~8 x ncpu) arenas bloat RSS. 2 cuts steady RSS with negligible CPU cost.
+Environment=MALLOC_ARENA_MAX=2
 ExecStart=/home/ubuntu/alphacent/venv/bin/uvicorn src.api.app:app --host 127.0.0.1 --port 8000 --workers 1
 Restart=always
 RestartSec=10
