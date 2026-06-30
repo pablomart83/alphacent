@@ -39,6 +39,7 @@ _DEFAULTS = {
     "wake_confirm_days": 3,      # regime stable ≥ this before waking a match
     "min_dwell_days": 2,         # min time in a state before toggling again
     "max_warm_age_days": 60,     # older validation ⇒ flag for re-validation on wake
+    "max_dormant_days": 90,      # dormant longer than this w/o waking ⇒ bench-expire (retire)
 }
 
 _CFG_CACHE: Optional[Dict[str, Any]] = None
@@ -122,6 +123,27 @@ def _days_in_state(meta: Optional[dict], key: str) -> Optional[float]:
         return (datetime.now() - datetime.fromisoformat(ts)).total_seconds() / 86400.0
     except Exception:
         return None
+
+
+def dormant_age_days(meta: Optional[dict]) -> Optional[float]:
+    """How many days the strategy has been continuously dormant (since dormant_since)."""
+    return _days_in_state(meta, "dormant_since")
+
+
+def is_bench_expired(meta: Optional[dict]) -> bool:
+    """True if a dormant strategy has been benched longer than max_dormant_days
+    without waking — its regime never recurred, so its validation is stale and it
+    should be retired rather than kept warm indefinitely. False if not dormant or
+    no dormant_since timestamp (don't expire on missing data)."""
+    try:
+        if not (meta or {}).get("regime_dormant"):
+            return False
+        age = dormant_age_days(meta)
+        if age is None:
+            return False
+        return age > _int("max_dormant_days")
+    except Exception:
+        return False
 
 
 def dwell_satisfied(meta: Optional[dict]) -> bool:

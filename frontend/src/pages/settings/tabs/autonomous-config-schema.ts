@@ -851,6 +851,16 @@ export const AUTONOMOUS_FIELDS: FieldDef[] = [
     max: 365,
     help: 'A dormant strategy older than this is flagged for re-validation when woken (its edge may have drifted).',
   },
+  {
+    key: 'regime_dormancy_max_dormant_days',
+    label: 'Max dormant age (bench expiry)',
+    section: 'Regime dormancy',
+    type: 'int',
+    suffix: 'd',
+    min: 7,
+    max: 730,
+    help: 'A strategy dormant longer than this WITHOUT its regime recurring is retired (bench expiry) — its validation is stale and re-proposing fresh beats keeping it warm. Default 90.',
+  },
 
   // Regime authority (debounce of the raw sub-regime classifier)
   {

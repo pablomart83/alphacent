@@ -1067,6 +1067,7 @@ class AutonomousConfigResponse(BaseModel):
     regime_dormancy_wake_confirm_days: int = 3
     regime_dormancy_min_dwell_days: int = 2
     regime_dormancy_max_warm_age_days: int = 60
+    regime_dormancy_max_dormant_days: int = 90
     regime_authority_confirm_days: int = 5
 
     # ─── Autonomous schedule ────────────────────────────────────────────
@@ -1206,6 +1207,7 @@ class AutonomousConfigRequest(BaseModel):
     regime_dormancy_wake_confirm_days: Optional[int] = None
     regime_dormancy_min_dwell_days: Optional[int] = None
     regime_dormancy_max_warm_age_days: Optional[int] = None
+    regime_dormancy_max_dormant_days: Optional[int] = None
     regime_authority_confirm_days: Optional[int] = None
 
     # Autonomous schedule
@@ -1437,6 +1439,7 @@ async def get_autonomous_config(
         regime_dormancy_wake_confirm_days=int(regime_dormancy.get('wake_confirm_days', 3)),
         regime_dormancy_min_dwell_days=int(regime_dormancy.get('min_dwell_days', 2)),
         regime_dormancy_max_warm_age_days=int(regime_dormancy.get('max_warm_age_days', 60)),
+        regime_dormancy_max_dormant_days=int(regime_dormancy.get('max_dormant_days', 90)),
         regime_authority_confirm_days=int(regime_authority.get('confirm_days', 5)),
 
         # Autonomous schedule
@@ -1720,6 +1723,8 @@ async def update_autonomous_config(
         rd_cfg['min_dwell_days'] = request.regime_dormancy_min_dwell_days
     if request.regime_dormancy_max_warm_age_days is not None:
         rd_cfg['max_warm_age_days'] = request.regime_dormancy_max_warm_age_days
+    if request.regime_dormancy_max_dormant_days is not None:
+        rd_cfg['max_dormant_days'] = request.regime_dormancy_max_dormant_days
     if request.regime_authority_confirm_days is not None:
         ra_cfg['confirm_days'] = request.regime_authority_confirm_days
 

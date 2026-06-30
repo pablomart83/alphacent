@@ -1230,9 +1230,34 @@ class AutonomousStrategyManager:
                         continue  # Approved and waiting for signal — keep
 
                     # Regime-dormant strategies are validated edges parked until their
-                    # regime returns — never garbage-collect them (design 2026-06-30).
+                    # regime returns — keep them, EXCEPT once they exceed the bench-expiry
+                    # (max_dormant_days): their regime never recurred, so the validation is
+                    # stale and re-proposing fresh beats keeping it warm. Expire = delete
+                    # with a recorded reason (the WF ledger preserves the validation for
+                    # re-proposal).
                     if meta.get('regime_dormant'):
-                        continue
+                        try:
+                            from src.strategy import regime_dormancy as _rd_exp
+                            if _rd_exp.is_bench_expired(meta):
+                                age = _rd_exp.dormant_age_days(meta)
+                                max_dd = _rd_exp._int("max_dormant_days")
+                                meta['retirement_reason'] = (
+                                    f"Dormant bench-expiry: dormant {int(age)}d > {max_dd}d "
+                                    f"without its regime recurring — stale validation, retired"
+                                )
+                                meta['retired_at'] = datetime.now().isoformat()
+                                s.strategy_metadata = meta
+                                from sqlalchemy.orm.attributes import flag_modified as _fm_exp
+                                _fm_exp(s, 'strategy_metadata')
+                                logger.info(
+                                    f"    🛑 Bench-expiring dormant strategy {s.name}: "
+                                    f"{int(age)}d > {max_dd}d"
+                                )
+                                stale_strategies.append(s)
+                                continue
+                        except Exception as _exp_err:
+                            logger.debug(f"bench-expiry check failed for {s.name}: {_exp_err}")
+                        continue  # within bench window — keep warm
 
                     if meta.get('demoted_from_active'):
                         # Demoted from active (health=0 or decay=0) — respect TTL
