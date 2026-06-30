@@ -4007,6 +4007,12 @@ class StrategyEngine:
         """
         indicators = {}
 
+        # Avoid building expensive trace strings (sorted key lists, dict/list
+        # reprs) on the hot backtest path when the engine logger is muted
+        # (default WARNING in prod — see logging_config). Computed once here;
+        # guards the verbose INFO traces below so their args aren't evaluated.
+        _trace = logger.isEnabledFor(logging.INFO)
+
         # Get indicator list from strategy rules
         indicator_list = strategy.rules.get("indicators", [])
 
@@ -4432,9 +4438,10 @@ class StrategyEngine:
                             f"falling back to defaults"
                         )
 
-                logger.info(f"  Method: {method_name}")
-                logger.info(f"  Parameters: {params}")
-                logger.info(f"  Expected keys: {expected_keys}")
+                if _trace:
+                    logger.info(f"  Method: {method_name}")
+                    logger.info(f"  Parameters: {params}")
+                    logger.info(f"  Expected keys: {expected_keys}")
 
                 # Call indicator library
                 result, key = self.indicator_library.calculate(
@@ -4473,8 +4480,9 @@ class StrategyEngine:
                                     f"keys: Upper/Middle/Lower_Band_{bb_p}_{bb_s}"
                                 )
                         # COMPREHENSIVE LOGGING
-                        bb_keys = [k for k in indicators.keys() if 'Band' in k or 'BBANDS' in k]
-                        logger.info(f"  All BB keys available: {sorted(bb_keys)}")
+                        if _trace:
+                            bb_keys = [k for k in indicators.keys() if 'Band' in k or 'BBANDS' in k]
+                            logger.info(f"  All BB keys available: {sorted(bb_keys)}")
 
                     elif indicator_name == "MACD":
                         indicators["MACD_12_26_9"] = result['macd']
@@ -4555,13 +4563,14 @@ class StrategyEngine:
                     indicators[key] = val.reindex(df.index)
 
         # COMPREHENSIVE LOGGING: Log final indicators dict keys
-        logger.info(f"")
-        logger.info(f"=" * 80)
-        logger.info(f"INDICATOR CALCULATION COMPLETE")
-        logger.info(f"Total indicators calculated: {len(indicators)}")
-        logger.info(f"Final indicator keys available: {sorted(indicators.keys())}")
-        logger.info(f"=" * 80)
-        
+        if _trace:
+            logger.info("")
+            logger.info("=" * 80)
+            logger.info("INDICATOR CALCULATION COMPLETE")
+            logger.info(f"Total indicators calculated: {len(indicators)}")
+            logger.info(f"Final indicator keys available: {sorted(indicators.keys())}")
+            logger.info("=" * 80)
+
         return indicators
 
     def _compute_cross_asset_for_strategy(
