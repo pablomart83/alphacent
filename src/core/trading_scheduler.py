@@ -2550,12 +2550,13 @@ class TradingScheduler:
                         effective_ttl_cycles = backtested_ttl_cycles
                         effective_hard_ttl_days = hard_ttl_days
                     else:
-                        # Daily strategies (crypto and non-crypto): 7-day hard TTL.
-                        # A daily strategy fires 3-7 signals/month — in 3 days it may
-                        # see 0 entry conditions and get retired before it can trade.
-                        # 7 days gives a full week of market sessions to find a signal.
+                        # Daily strategies (crypto and non-crypto). A validated daily
+                        # strategy fires only ~3-7 signals/MONTH, and in a mismatched
+                        # regime its setup may be absent for weeks — 7 days was far too
+                        # short and was churning validated edges. Give them a full month
+                        # to find a signal before parking (not deleting) them.
                         effective_ttl_cycles = backtested_ttl_cycles
-                        effective_hard_ttl_days = 7
+                        effective_hard_ttl_days = 30
 
                     # Check hard wall-clock backstop
                     # Use demoted_at if available (strategy was previously active and got
@@ -2574,11 +2575,17 @@ class TradingScheduler:
 
                     if cycles >= effective_ttl_cycles or days_since_reference >= effective_hard_ttl_days:
                         reason = f"TTL expired: {cycles} signal cycles without trade (limit={effective_ttl_cycles}, interval={strat_interval})" if cycles >= effective_ttl_cycles else f"Hard TTL: {days_since_reference} days since {'demotion' if demoted_at_str else 'creation'} (limit={effective_hard_ttl_days}d for {strat_interval})"
-                        s_orm.status = StrategyStatus.RETIRED
-                        s_orm.retired_at = datetime.now()
-                        # Always record WHY (retirement reason must never be blank).
-                        meta['retirement_reason'] = reason
-                        meta['retired_at'] = s_orm.retired_at.isoformat()
+                        # This loop is activation_approved-only — these are VALIDATED
+                        # edges. A validated strategy that hasn't traded is waiting for
+                        # its setup/regime, not dead. PARK it as dormant (preserved,
+                        # excluded from signal gen, bench-expires at max_dormant_days,
+                        # woken when its regime returns once dormancy is enabled) instead
+                        # of deleting it. Was: status=RETIRED → cleanup deletion (the
+                        # churn that was destroying validated edges).
+                        meta['regime_dormant'] = True
+                        meta['dormant_reason'] = f"Parked (no trade): {reason}"
+                        meta['dormant_since'] = datetime.now().isoformat()
+                        meta['signal_cycles_without_trade'] = 0
                         s_orm.strategy_metadata = meta
                         try:
                             from sqlalchemy.orm.attributes import flag_modified as _fm
@@ -2586,7 +2593,7 @@ class TradingScheduler:
                         except Exception:
                             pass
                         expired_count += 1
-                        logger.info(f"  ⏰ Retired BACKTESTED strategy {s_orm.name}: {reason}")
+                        logger.info(f"  💤 Parked validated BACKTESTED strategy {s_orm.name} as dormant (no trade): {reason}")
 
                 if expired_count > 0:
                     session.commit()
