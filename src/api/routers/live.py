@@ -235,6 +235,20 @@ async def update_live_strategy(
     if body.position_size is not None:
         if body.position_size <= 0:
             raise HTTPException(status_code=422, detail="position_size must be > 0")
+        # Guardrail: the new size must clear the per-symbol eToro minimum at the
+        # current mirror ratio, else live orders for this pair get rejected (720).
+        try:
+            from src.risk.etoro_min_order import (
+                validate_cio_position_size as _vcps,
+                get_live_mirror_ratio as _glmr,
+            )
+            _err = _vcps(ls.symbol, body.position_size, _glmr())
+            if _err:
+                raise HTTPException(status_code=422, detail=_err)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
         ls.position_size = body.position_size
         changes.append(f"position_size={body.position_size:.0f}")
     if body.sl_pct is not None:

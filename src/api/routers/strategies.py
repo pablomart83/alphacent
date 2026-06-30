@@ -4624,6 +4624,21 @@ async def graduate_strategy(
     true before any live fills fire.
     """
     from src.strategy.graduation_gate import approve_graduation as _approve
+    # Guardrail: reject a CIO size that can't clear the per-symbol eToro minimum
+    # (accounting for the mirror ratio). Prevents graduating a pair whose live
+    # order would be rejected by eToro every cycle (e.g. USDCAD <$127 real).
+    try:
+        from src.risk.etoro_min_order import (
+            validate_cio_position_size as _vcps,
+            get_live_mirror_ratio as _glmr,
+        )
+        _err = _vcps(request.symbol, request.position_size, _glmr())
+        if _err:
+            raise HTTPException(status_code=422, detail=_err)
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # validator must never block on its own bug
     try:
         result = _approve(
             session=session,

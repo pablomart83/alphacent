@@ -1010,6 +1010,17 @@ class OrderMonitor:
                                         )
                                         if _oside in ('SELL', 'SHORT') and _lsd(str(error_message)):
                                             _rsr(order.symbol)
+                                        # Self-healing minimum-order learning (2026-06-30):
+                                        # when eToro rejects for a below-minimum amount,
+                                        # learn the real per-instrument minimum so future
+                                        # PAPER orders floor to it and the graduation
+                                        # guardrail validates against it.
+                                        from src.risk.etoro_min_order import (
+                                            looks_like_min_order_violation as _lmv,
+                                            record_observed_minimum as _rom,
+                                        )
+                                        if _lmv(str(error_message)):
+                                            _rom(order.symbol, str(error_message))
                                     except Exception:
                                         pass
                                     # Part 2 fix (2026-05-18): delete the optimistic position row
