@@ -118,7 +118,7 @@ class LoggingConfig:
         log_dir: Path = Path("logs"),
         log_level: LogSeverity = LogSeverity.INFO,
         max_bytes: int = 10 * 1024 * 1024,  # 10 MB
-        backup_count: int = 100,  # 100 × 10MB = 1GB main log = ~36-48h history at current rate
+        backup_count: int = 10,  # 10 × 10MB = 100MB main log = ~4-5h history at current rate
         console_output: bool = True
     ):
         """
@@ -191,10 +191,10 @@ class LoggingConfig:
         # ── Component-specific logs: routed by module name prefix ────────────
         # Each component file captures INFO+ from its own source modules.
         # e.g. strategy.log gets everything from src.strategy.*, src.analytics.*, src.ml.*
-        # Component logs are for targeted debugging. Matched to main-log retention
-        # (50 backups × 10MB = 500MB per component) so cross-component investigation
+        # Component logs are for targeted debugging. Kept to a bounded window
+        # (10 backups × 10MB = 100MB per component) so cross-component investigation
         # spans the same time window as the main audit trail.
-        component_backup_count = 50
+        component_backup_count = 10
         for component in LogComponent:
             handler = logging.handlers.RotatingFileHandler(
                 log_dir / f"{component.value}.log",
