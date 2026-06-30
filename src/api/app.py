@@ -7,6 +7,7 @@ Validates: Requirements 16.1, 16.6
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Callable
 
@@ -24,8 +25,13 @@ from src.api.middleware import AuthenticationMiddleware
 from src.api.dependencies import init_dependencies
 from src.models.database import init_database, get_database
 
-# Setup logging
-LoggingConfig.initialize()
+# Setup logging.
+# Under systemd, stdout is already captured by journald and forwarded to
+# rsyslog (/var/log/syslog). Our own console StreamHandler would then duplicate
+# every log line into syslog (the bulk of the 5GB /var/log seen on 2026-06-30).
+# Disable console output under systemd; keep it for interactive/local runs.
+_under_systemd = "JOURNAL_STREAM" in os.environ
+LoggingConfig.initialize(console_output=not _under_systemd)
 logger = logging.getLogger(__name__)
 
 # Global instances
