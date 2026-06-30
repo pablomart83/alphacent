@@ -155,6 +155,27 @@ class OrderExecutor:
             except Exception as _sr_err:
                 logger.debug(f"short-restriction check failed for {normalized_symbol}: {_sr_err} — proceeding")
 
+        # Repeatable-rejection cooldown (2026-06-30): if this (symbol, account)
+        # entry was recently rejected by eToro for an unchanged condition (e.g.
+        # below-minimum 720), skip re-submitting it until the cooldown expires or
+        # the CIO updates the size (which clears it). Stops the every-cycle retry
+        # loop (observed: live USDCAD ~45×/day). ENTRY actions only; fail-open.
+        if signal.action in (SignalAction.ENTER_LONG, SignalAction.ENTER_SHORT):
+            try:
+                from src.risk.order_rejection_cooldown import is_on_cooldown as _on_cd
+                if _on_cd(normalized_symbol, account_type):
+                    self._log_decision(signal, normalized_symbol, stage="gate_blocked",
+                                       decision="blocked", reason="order_rejection_cooldown",
+                                       account=account_type)
+                    raise OrderExecutionError(
+                        f"{normalized_symbol} ({account_type}) on order-rejection cooldown "
+                        f"(recent unchanged broker rejection) — skipping entry"
+                    )
+            except OrderExecutionError:
+                raise
+            except Exception as _cd_err:
+                logger.debug(f"order-rejection cooldown check failed for {normalized_symbol}: {_cd_err} — proceeding")
+
         # Block new LONG entries when VIX > 25 AND VIX_5d change > +15%.
         # Reference: Bilello research — post-VIX-spike 1yr forward S&P return
         # averaged only 4.4%; vol spikes mark turning points.

@@ -251,6 +251,13 @@ async def update_live_strategy(
             pass
         ls.position_size = body.position_size
         changes.append(f"position_size={body.position_size:.0f}")
+        # The size changed — clear any order-rejection cooldown for this pair so
+        # the corrected size takes effect immediately (don't wait out the TTL).
+        try:
+            from src.risk.order_rejection_cooldown import clear as _clear_cd
+            _clear_cd(ls.symbol, "live")
+        except Exception:
+            pass
     if body.sl_pct is not None:
         if not (0 < body.sl_pct < 1):
             raise HTTPException(status_code=422, detail="sl_pct must be between 0 and 1 (e.g. 0.06 = 6%)")

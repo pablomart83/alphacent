@@ -1021,6 +1021,12 @@ class OrderMonitor:
                                         )
                                         if _lmv(str(error_message)):
                                             _rom(order.symbol, str(error_message))
+                                            # Suppress re-submission of this entry until
+                                            # the size changes or the cooldown expires
+                                            # (stops the every-cycle below-min retry loop).
+                                            if str(getattr(order, 'order_action', '') or '').lower() == 'entry':
+                                                from src.risk.order_rejection_cooldown import record_rejection as _rrej
+                                                _rrej(order.symbol, getattr(order, 'account_type', 'demo') or 'demo')
                                     except Exception:
                                         pass
                                     # Part 2 fix (2026-05-18): delete the optimistic position row
