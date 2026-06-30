@@ -6278,6 +6278,18 @@ class MonitoringService:
                     StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.BACKTESTED])
                 ).all()
 
+                # Never sleep a strategy that is MID-TRADE: sleeping excludes it from
+                # signal generation, which would abandon its EXIT signals and leave its
+                # open positions managed only by position-level SL/TP/TSL. A
+                # regime-mismatched strategy holding positions must keep running until
+                # it is flat (it's already cycling toward BACKTESTED); only THEN is it
+                # a sleep candidate. Build the set of strategies with open positions.
+                from src.models.orm import PositionORM as _PosORM
+                open_pos_ids = {
+                    sid for (sid,) in session.query(_PosORM.strategy_id)
+                    .filter(_PosORM.closed_at.is_(None)).distinct().all()
+                }
+
                 for s in strategies:
                     meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
                     template_name = meta.get('template_name')
@@ -6299,8 +6311,16 @@ class MonitoringService:
                             f"{current_regime_str} matches"
                             + (" [flagged for re-validation: stale]" if needs_reval else "")
                         )
-                    # SLEEP: active + now incompatible + regime stable
+                    # SLEEP: active + now incompatible + regime stable + FLAT (no open
+                    # positions — never bench a strategy mid-trade and abandon its exits).
                     elif (not dormant) and (not compatible) and stable_for_sleep:
+                        if s.id in open_pos_ids:
+                            result["skipped_open_positions"] = result.get("skipped_open_positions", 0) + 1
+                            logger.debug(
+                                f"[RegimeDormancy] SLEEP deferred for {s.name}: holds open "
+                                f"positions — will sleep once flat"
+                            )
+                            continue
                         reason = (f"Regime dormancy: template '{template_name}' not valid for "
                                   f"{current_regime_str} — sleeping (kept for when its regime returns)")
                         _rd.mark_dormant(meta, current_regime_str, reason)
@@ -6313,7 +6333,8 @@ class MonitoringService:
                 logger.info(
                     f"[RegimeDormancy] regime={current_regime_str} stable(sleep/wake)="
                     f"{stable_for_sleep}/{stable_for_wake}: checked {result['checked']}, "
-                    f"slept {result['slept']}, woken {result['woken']}"
+                    f"slept {result['slept']}, woken {result['woken']}, "
+                    f"sleep-deferred (open positions) {result.get('skipped_open_positions', 0)}"
                 )
             finally:
                 session.close()
