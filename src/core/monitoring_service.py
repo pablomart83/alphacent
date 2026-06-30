@@ -216,6 +216,12 @@ class MonitoringService:
         self._last_known_regime: Optional[str] = None
         self._last_regime_check: float = 0
         self._regime_check_interval = 1800  # 30 minutes
+        # Market-level regime_history recorder — runs every 30min at top level
+        # (decoupled from the 6h zombie-gated retire/dormancy block) so the
+        # regime-stability signal that dormancy + the fundamental-exit guard read
+        # is actually populated. Init 0 → records on the first cycle after startup.
+        self._last_regime_record: float = 0
+        self._regime_record_interval = 1800  # 30 minutes
 
         # Hourly equity snapshot — captures portfolio value every hour for
         # intraday equity curve resolution in the UI. Init to 0 so the
@@ -449,7 +455,17 @@ class MonitoringService:
                     logger.error(f"Error evaluating alerts: {e}")
             
             return  # Skip all other monitoring operations
-        
+
+        # Record market-level regime every 30min (populates regime_history for the
+        # dormancy + fundamental-exit stability gates). Top-level + own timer so it
+        # is NOT coupled to the 6h zombie block that gates regime-retirement.
+        if now - self._last_regime_record >= self._regime_record_interval:
+            try:
+                self._record_market_regime_periodic()
+            except Exception as e:
+                logger.debug(f"Periodic regime record failed: {e}")
+            self._last_regime_record = now
+
         # Process pending orders (fast path - immediate submission)
         if now - self._last_pending_check >= self.pending_orders_interval:
             try:
@@ -5950,6 +5966,9 @@ class MonitoringService:
             if current_regime_str == 'unknown':
                 return result
 
+            # (regime_history is now populated by the top-level periodic recorder
+            # `_record_market_regime_periodic`, decoupled from this 6h-gated path.)
+
             # Regime DORMANCY (design 2026-06-30): when enabled, regime-mismatched
             # but validated strategies are put to SLEEP (kept, excluded from signal
             # gen) and WOKEN when their regime returns — instead of being retired +
@@ -6076,6 +6095,102 @@ class MonitoringService:
             result["errors"].append(str(e))
 
         return result
+
+    def _ensure_market_data_manager(self):
+        """Return a usable MarketDataManager, constructing + registering one if the
+        lazy price-sync init hasn't run yet (e.g. shortly after restart). Mirrors
+        the construction in the price-sync path so detect_sub_regime can read the
+        SPY/QQQ/DIA daily bars from the historical cache. Returns None on failure."""
+        mdm = getattr(self, '_market_data', None)
+        if mdm is not None:
+            return mdm
+        try:
+            from src.data.market_data_manager import get_market_data_manager
+            mdm = get_market_data_manager()
+            if mdm is not None:
+                return mdm
+        except Exception:
+            pass
+        try:
+            from src.data.market_data_manager import MarketDataManager, set_market_data_manager
+            try:
+                from src.core.config_loader import load_config
+                config = load_config()
+            except Exception:
+                import yaml
+                from pathlib import Path
+                config = yaml.safe_load(Path("config/autonomous_trading.yaml").read_text()) or {}
+            mdm = MarketDataManager(self.etoro_client, config=config)
+            self._market_data = mdm
+            set_market_data_manager(mdm)
+            logger.info("[RegimeHistory] constructed MarketDataManager for regime recording")
+            return mdm
+        except Exception as e:
+            logger.warning(f"[RegimeHistory] could not obtain MarketDataManager: {e}")
+            return None
+
+    def _record_market_regime_periodic(self) -> None:
+        """Detect the current market regime and persist a MARKET-level
+        regime_history row. Called every 30min from the monitoring loop. The
+        regime-stability gates (dormancy + fundamental-exit sector-rotation) read
+        this table; it was empty because its only legacy writer is never called.
+        Fail-safe: never raises."""
+        try:
+            from src.strategy.market_analyzer import MarketStatisticsAnalyzer
+            _mdm = self._ensure_market_data_manager()
+            if _mdm is None:
+                logger.warning("[RegimeHistory] periodic: no market data manager available — skipping")
+                return
+            sub_regime, _, _, _ = MarketStatisticsAnalyzer(_mdm).detect_sub_regime()
+            regime_str = sub_regime.value
+            if regime_str and regime_str != 'unknown':
+                self._record_market_regime(regime_str)
+            else:
+                logger.warning(f"[RegimeHistory] periodic: detect_sub_regime returned '{regime_str}' — not recording")
+        except Exception as e:
+            logger.warning(f"_record_market_regime_periodic failed: {e}", exc_info=True)
+
+    def _record_market_regime(self, current_regime_str: str) -> None:
+        """Persist a MARKET-level regime_history row each detection so the
+        regime-stability gate (dormancy + fundamental-exit guard) has data.
+        regime_changed=1 when the regime differs from the last persisted MARKET
+        row (survives restarts, unlike the in-memory _last_known_regime).
+        Fail-safe: never raises into the caller."""
+        try:
+            from src.models.orm import RegimeHistoryORM
+            session = self.db.get_session()
+            try:
+                last = session.query(RegimeHistoryORM).filter(
+                    RegimeHistoryORM.strategy_id == 'MARKET'
+                ).order_by(RegimeHistoryORM.detected_at.desc()).first()
+                prev_regime = last.current_regime if last else None
+                changed = 1 if (prev_regime is not None and prev_regime != current_regime_str) else 0
+                row = RegimeHistoryORM(
+                    strategy_id='MARKET',
+                    detected_at=datetime.now(),
+                    activation_regime=(prev_regime or current_regime_str),
+                    current_regime=current_regime_str,
+                    regime_changed=changed,
+                    change_type='market_regime_transition' if changed else None,
+                )
+                session.add(row)
+                session.commit()
+                if changed:
+                    logger.info(
+                        f"[RegimeHistory] MARKET regime transition {prev_regime} → "
+                        f"{current_regime_str} recorded"
+                    )
+                else:
+                    logger.debug(
+                        f"[RegimeHistory] MARKET row written: {current_regime_str} (no change)"
+                    )
+            except Exception as _e:
+                session.rollback()
+                logger.warning(f"[RegimeHistory] record failed: {_e}", exc_info=True)
+            finally:
+                session.close()
+        except Exception as e:
+            logger.debug(f"[RegimeHistory] record_market_regime error: {e}")
 
     def _evaluate_regime_dormancy(self, current_regime_str: str) -> Dict:
         """Regime dormancy evaluator (design 2026-06-30) — runs only when
