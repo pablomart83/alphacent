@@ -607,6 +607,9 @@ class AutonomousStrategyManager:
             signals_generated = 0
             signals_rejected = 0
             orders_submitted = 0
+            signals_passed = 0
+            orders_filled = 0
+            orders_rejected = 0
             promoted_to_paper = 0  # Strategies actually activated (BACKTESTED→PAPER) this cycle
             newly_approved = stats["strategies_activated"]  # Count of strategies approved as BACKTESTED
 
@@ -644,6 +647,10 @@ class AutonomousStrategyManager:
                     orders_submitted = sig_result.get("orders_submitted", 0)
                     promoted_to_paper = sig_result.get("promoted_to_paper", 0)
                     signals_raw = sig_result.get("signals_raw", signals_generated)
+                    # Capture signals-passed (post-coordination) + fills for the cycle row.
+                    signals_passed = sig_result.get("signals_coordinated", signals_generated)
+                    orders_filled = sig_result.get("orders_filled", 0)
+                    orders_rejected = sig_result.get("orders_rejected", 0)
 
                     scheduler._last_signal_check = _time.time()
 
@@ -708,6 +715,14 @@ class AutonomousStrategyManager:
             # activated = strategies that passed activation criteria → BACKTESTED status
             # promoted_to_paper = strategies that got their first order executed → DEMO status
             stats["strategies_activated_to_paper"] = promoted_to_paper
+            # Signal/order counts from Stage 7b — persist so the cycle row reflects
+            # what actually happened (was a writeback gap: row showed 0 even when
+            # signals/orders fired).
+            stats["signals_generated"] = signals_generated
+            stats["signals_passed"] = signals_passed
+            stats["orders_submitted"] = orders_submitted
+            stats["orders_filled"] = orders_filled
+            stats["orders_rejected"] = orders_rejected
             self._update_cycle_run(cycle_id, "completed", cycle_end, cycle_duration, stats, {
                 "symbols_checked": symbols_checked,
                 "avg_sharpe": cycle_avg_sharpe,
@@ -1170,6 +1185,12 @@ class AutonomousStrategyManager:
                 run.promoted_to_paper = stats.get("strategies_activated_to_paper", 0)  # got first order → PAPER
                 run.total_active = extra.get("total_active", 0)
                 run.total_backtested = extra.get("total_backtested", 0)
+                # Signal/order results from Stage 7b (previously never written → always 0)
+                run.signals_generated = stats.get("signals_generated", 0)
+                run.signals_passed = stats.get("signals_passed", 0)
+                run.orders_submitted = stats.get("orders_submitted", 0)
+                run.orders_filled = stats.get("orders_filled", 0)
+                run.orders_rejected = stats.get("orders_rejected", 0)
                 run.errors = stats.get("errors", []) if stats.get("errors") else None
                 session.commit()
                 logger.info(f"Updated cycle run {cycle_id} in DB: status={status}")
