@@ -5950,6 +5950,21 @@ class MonitoringService:
             if current_regime_str == 'unknown':
                 return result
 
+            # Regime DORMANCY (design 2026-06-30): when enabled, regime-mismatched
+            # but validated strategies are put to SLEEP (kept, excluded from signal
+            # gen) and WOKEN when their regime returns — instead of being retired +
+            # deleted. Delegates to a stability-gated evaluator and bypasses the
+            # change-gated retire path below. Default OFF → retire behavior unchanged.
+            try:
+                from src.strategy import regime_dormancy as _rd
+                if _rd.is_enabled():
+                    return self._evaluate_regime_dormancy(current_regime_str)
+            except Exception as _rd_err:
+                logger.warning(
+                    f"[RegimeDormancy] evaluation failed ({_rd_err}) — falling back to "
+                    f"standard regime-retirement path"
+                )
+
             # Check if regime changed since last run
             regime_changed = (self._last_known_regime is not None and
                               self._last_known_regime != current_regime_str)
@@ -6060,6 +6075,99 @@ class MonitoringService:
             logger.error(f"[RegimeRetire] Error: {e}", exc_info=True)
             result["errors"].append(str(e))
 
+        return result
+
+    def _evaluate_regime_dormancy(self, current_regime_str: str) -> Dict:
+        """Regime dormancy evaluator (design 2026-06-30) — runs only when
+        `regime_dormancy.enabled`. Replaces regime-mismatch RETIREMENT with
+        SLEEP/WAKE: regime-mismatched validated strategies are put to sleep
+        (kept, `regime_dormant=True`, skipped by signal gen + exempt from
+        cleanup) and woken when their regime returns. Stability-gated (only acts
+        when the regime has held for the configured confirm window) so it does
+        not flap at regime boundaries. Never touches LIVE. Fail-safe."""
+        result = {"checked": 0, "slept": 0, "woken": 0, "regime": current_regime_str, "errors": []}
+        try:
+            from src.models.orm import StrategyORM
+            from src.models.enums import StrategyStatus
+            from sqlalchemy.orm.attributes import flag_modified
+            from src.strategy.strategy_templates import StrategyTemplateLibrary, MarketRegime
+            from src.strategy import regime_dormancy as _rd
+
+            try:
+                current_regime_enum = MarketRegime(current_regime_str)
+            except ValueError:
+                logger.warning(f"[RegimeDormancy] Unknown regime enum: {current_regime_str}")
+                return result
+
+            # Valid template set for the current regime (+ parent fallback) — same
+            # construction as the retire path so sleep/wake use identical semantics.
+            lib = StrategyTemplateLibrary()
+            valid_templates = {t.name for t in lib.get_templates_for_regime(current_regime_enum)}
+            parent_regime_map = {
+                'ranging_low_vol': 'ranging', 'ranging_high_vol': 'ranging',
+                'trending_up_strong': 'trending_up', 'trending_up_weak': 'trending_up',
+                'trending_down_strong': 'trending_down', 'trending_down_weak': 'trending_down',
+            }
+            parent_name = parent_regime_map.get(current_regime_str)
+            if parent_name:
+                try:
+                    for t in lib.get_templates_for_regime(MarketRegime(parent_name)):
+                        valid_templates.add(t.name)
+                except ValueError:
+                    pass
+
+            session = self.db.get_session()
+            try:
+                stable_for_sleep = _rd.is_regime_stable(session, _rd._int("sleep_confirm_days"))
+                stable_for_wake = _rd.is_regime_stable(session, _rd._int("wake_confirm_days"))
+
+                # PAPER + BACKTESTED (never LIVE — CIO-managed real capital).
+                strategies = session.query(StrategyORM).filter(
+                    StrategyORM.status.in_([StrategyStatus.PAPER, StrategyStatus.BACKTESTED])
+                ).all()
+
+                for s in strategies:
+                    meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
+                    template_name = meta.get('template_name')
+                    if not template_name or meta.get('strategy_category') == 'alpha_edge':
+                        continue  # legacy/manual + Alpha Edge keep their own regime logic
+                    result["checked"] += 1
+                    compatible = template_name in valid_templates
+                    dormant = _rd.is_dormant(meta)
+
+                    # WAKE: dormant + now compatible + regime stable + min dwell elapsed
+                    if dormant and compatible and stable_for_wake and _rd.dwell_satisfied(meta):
+                        needs_reval = _rd.needs_revalidation_on_wake(meta)
+                        _rd.mark_awake(meta, current_regime_str, needs_reval)
+                        s.strategy_metadata = meta
+                        flag_modified(s, 'strategy_metadata')
+                        result["woken"] += 1
+                        logger.info(
+                            f"[RegimeDormancy] WAKE {s.name} ({template_name}) — regime "
+                            f"{current_regime_str} matches"
+                            + (" [flagged for re-validation: stale]" if needs_reval else "")
+                        )
+                    # SLEEP: active + now incompatible + regime stable
+                    elif (not dormant) and (not compatible) and stable_for_sleep:
+                        reason = (f"Regime dormancy: template '{template_name}' not valid for "
+                                  f"{current_regime_str} — sleeping (kept for when its regime returns)")
+                        _rd.mark_dormant(meta, current_regime_str, reason)
+                        s.strategy_metadata = meta
+                        flag_modified(s, 'strategy_metadata')
+                        result["slept"] += 1
+                        logger.info(f"[RegimeDormancy] SLEEP {s.name}: {reason}")
+
+                session.commit()
+                logger.info(
+                    f"[RegimeDormancy] regime={current_regime_str} stable(sleep/wake)="
+                    f"{stable_for_sleep}/{stable_for_wake}: checked {result['checked']}, "
+                    f"slept {result['slept']}, woken {result['woken']}"
+                )
+            finally:
+                session.close()
+        except Exception as e:
+            logger.error(f"[RegimeDormancy] Error: {e}", exc_info=True)
+            result["errors"].append(str(e))
         return result
 
     def _demote_idle_strategies(self) -> None:

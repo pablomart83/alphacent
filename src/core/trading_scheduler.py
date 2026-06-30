@@ -333,6 +333,12 @@ class TradingScheduler:
                 meta = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
                 if meta.get('pending_retirement') or meta.get('superseded'):
                     return False
+                # Regime dormancy (design 2026-06-30): a strategy asleep because its
+                # regime isn't current must not generate signals. It stays validated
+                # and is woken (flag cleared) when its regime returns. Only ever set
+                # when regime_dormancy.enabled; a no-op otherwise.
+                if meta.get('regime_dormant'):
+                    return False
                 # Regime gate cooldown: bull market gate stamped this strategy for 4h
                 # after closing a SHORT in a bullish regime. Without this, the strategy
                 # immediately re-enters the same SHORT next cycle — infinite loop.

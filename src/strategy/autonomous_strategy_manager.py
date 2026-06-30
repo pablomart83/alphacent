@@ -1229,6 +1229,11 @@ class AutonomousStrategyManager:
                     if meta.get('activation_approved'):
                         continue  # Approved and waiting for signal — keep
 
+                    # Regime-dormant strategies are validated edges parked until their
+                    # regime returns — never garbage-collect them (design 2026-06-30).
+                    if meta.get('regime_dormant'):
+                        continue
+
                     if meta.get('demoted_from_active'):
                         # Demoted from active (health=0 or decay=0) — respect TTL
                         ttl_days = meta.get('demotion_ttl_days', 14)
