@@ -510,6 +510,15 @@ def cleanup_removed_symbols(removed_symbols: list) -> Dict[str, int]:
                     if strategy.status != StrategyStatus.RETIRED:
                         strategy.status = StrategyStatus.RETIRED
                         strategy.retired_at = datetime.now()
+                        try:
+                            _m = strategy.strategy_metadata if isinstance(strategy.strategy_metadata, dict) else {}
+                            _m['retirement_reason'] = f"All referenced symbols removed from tradeable universe: {sorted(overlap)}"
+                            _m['retired_at'] = strategy.retired_at.isoformat()
+                            strategy.strategy_metadata = _m
+                            from sqlalchemy.orm.attributes import flag_modified as _fm
+                            _fm(strategy, 'strategy_metadata')
+                        except Exception:
+                            pass
                         strategies_retired += 1
                         logger.info(
                             f"Retired strategy {strategy.id} ({strategy.name}) — "

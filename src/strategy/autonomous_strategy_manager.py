@@ -1265,6 +1265,17 @@ class AutonomousStrategyManager:
 
                     for s in stale_strategies:
                         old_status = s.status.value if hasattr(s.status, "value") else str(s.status)
+                        # Safety net: a RETIRED strategy must always carry a reason.
+                        # Flag any that slip through reason-less so the offending path
+                        # can be traced (we require a reason "always").
+                        if old_status == "RETIRED":
+                            _m = s.strategy_metadata if isinstance(s.strategy_metadata, dict) else {}
+                            if not (_m.get("retirement_reason") or _m.get("regime_retirement_reason")
+                                    or _m.get("pending_retirement_reason")):
+                                logger.warning(
+                                    f"    ⚠ Deleting RETIRED strategy with NO recorded reason: "
+                                    f"{s.name} ({s.id}) — retirement path failed to record a reason"
+                                )
                         logger.info(f"    Deleting: {s.name} (status: {old_status})")
                         session.delete(s)
                         stats["strategies_cleaned"] += 1
@@ -2598,6 +2609,14 @@ class AutonomousStrategyManager:
                             if not meta.get('activation_approved'):
                                 strat_orm.status = StrategyStatus.RETIRED
                                 strat_orm.retired_at = datetime.now()
+                                meta['retirement_reason'] = 'Failed activation thresholds (not approved this cycle)'
+                                meta['retired_at'] = strat_orm.retired_at.isoformat()
+                                strat_orm.strategy_metadata = meta
+                                try:
+                                    from sqlalchemy.orm.attributes import flag_modified as _fm
+                                    _fm(strat_orm, 'strategy_metadata')
+                                except Exception:
+                                    pass
                                 retired_in_eval += 1
                 eval_session.commit()
                 if retired_in_eval > 0:

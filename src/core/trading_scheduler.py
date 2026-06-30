@@ -2495,6 +2495,17 @@ class TradingScheduler:
                             if trapped_cycles >= 3:
                                 s_orm.status = StrategyStatus.RETIRED
                                 s_orm.retired_at = datetime.now()
+                                meta['retirement_reason'] = (
+                                    f"Watchlist-trapped on primary symbol {primary_symbol} "
+                                    f"({trapped_cycles} consecutive cycles with primary blocked)"
+                                )
+                                meta['retired_at'] = s_orm.retired_at.isoformat()
+                                s_orm.strategy_metadata = meta
+                                try:
+                                    from sqlalchemy.orm.attributes import flag_modified as _fm
+                                    _fm(s_orm, 'strategy_metadata')
+                                except Exception:
+                                    pass
                                 expired_count += 1
                                 logger.info(
                                     f"  🚫 Retired BACKTESTED strategy {s_orm.name}: "
@@ -2565,6 +2576,15 @@ class TradingScheduler:
                         reason = f"TTL expired: {cycles} signal cycles without trade (limit={effective_ttl_cycles}, interval={strat_interval})" if cycles >= effective_ttl_cycles else f"Hard TTL: {days_since_reference} days since {'demotion' if demoted_at_str else 'creation'} (limit={effective_hard_ttl_days}d for {strat_interval})"
                         s_orm.status = StrategyStatus.RETIRED
                         s_orm.retired_at = datetime.now()
+                        # Always record WHY (retirement reason must never be blank).
+                        meta['retirement_reason'] = reason
+                        meta['retired_at'] = s_orm.retired_at.isoformat()
+                        s_orm.strategy_metadata = meta
+                        try:
+                            from sqlalchemy.orm.attributes import flag_modified as _fm
+                            _fm(s_orm, 'strategy_metadata')
+                        except Exception:
+                            pass
                         expired_count += 1
                         logger.info(f"  ⏰ Retired BACKTESTED strategy {s_orm.name}: {reason}")
 

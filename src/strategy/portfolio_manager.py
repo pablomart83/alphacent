@@ -1861,6 +1861,15 @@ class PortfolioManager:
                 if 'momentum' in strategy_type.lower() or 'trend' in strategy_type.lower():
                     # Retire strategy (no PAUSED status available)
                     strategy_orm.status = StrategyStatus.RETIRED
+                    strategy_orm.retired_at = datetime.now()
+                    metadata['retirement_reason'] = f'Trend reversal detected: {change_type}'
+                    metadata['retired_at'] = strategy_orm.retired_at.isoformat()
+                    strategy_orm.strategy_metadata = metadata
+                    try:
+                        from sqlalchemy.orm.attributes import flag_modified as _fm
+                        _fm(strategy_orm, 'strategy_metadata')
+                    except Exception:
+                        pass
 
                     adjustment = {
                         'timestamp': datetime.now().isoformat(),
