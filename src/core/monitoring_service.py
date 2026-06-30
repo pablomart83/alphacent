@@ -5969,21 +5969,38 @@ class MonitoringService:
             # (regime_history is now populated by the top-level periodic recorder
             # `_record_market_regime_periodic`, decoupled from this 6h-gated path.)
 
-            # Regime DORMANCY (design 2026-06-30): when enabled, regime-mismatched
-            # but validated strategies are put to SLEEP (kept, excluded from signal
-            # gen) and WOKEN when their regime returns — instead of being retired +
-            # deleted. Delegates to a stability-gated evaluator and bypasses the
-            # change-gated retire path below. Default OFF → retire behavior unchanged.
+            # Regime DORMANCY (design 2026-06-30) REPLACES destructive regime-mismatch
+            # RETIREMENT. Two states, neither of which deletes a validated edge:
+            #   • enabled  → sleep/wake evaluator (kept, excluded from signal gen,
+            #                woken when its regime returns).
+            #   • disabled → NO-OP. We deliberately do NOT fall through to the old
+            #                destructive retire path: doing so would re-delete the
+            #                strategies we just restored as dormant and resume the
+            #                very churn dormancy exists to stop. So during the
+            #                transition (dormant off) we simply stop retiring on
+            #                regime mismatch — and do not yet auto-wake.
             try:
                 from src.strategy import regime_dormancy as _rd
                 if _rd.is_enabled():
                     return self._evaluate_regime_dormancy(current_regime_str)
-            except Exception as _rd_err:
-                logger.warning(
-                    f"[RegimeDormancy] evaluation failed ({_rd_err}) — falling back to "
-                    f"standard regime-retirement path"
+                logger.debug(
+                    "[RegimeRetire] dormancy disabled — regime-mismatch retirement "
+                    "neutralized (no-op); strategies are kept, not retired"
                 )
+                result["neutralized"] = True
+                return result
+            except Exception as _rd_err:
+                # Fail SAFE: on any error, do NOT retire (the old behavior deleted
+                # validated edges). Skip this pass rather than fall through.
+                logger.warning(
+                    f"[RegimeDormancy] evaluation failed ({_rd_err}) — skipping "
+                    f"regime pass (no retirement)"
+                )
+                result["errors"].append(str(_rd_err))
+                return result
 
+            # NOTE: the legacy change-gated regime-retirement below is now
+            # UNREACHABLE (retained for reference only — the redesign replaced it).
             # Check if regime changed since last run
             regime_changed = (self._last_known_regime is not None and
                               self._last_known_regime != current_regime_str)
