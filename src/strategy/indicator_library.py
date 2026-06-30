@@ -24,20 +24,27 @@ class CacheKey:
     indicator: str
     params: str  # JSON string of parameters
     data_len: int  # Length of the data used
-    data_start: str  # ISO date of first bar — prevents collision when two strategies
-                     # fetch the same symbol with different date ranges but same bar count
-    
+    data_start: str  # ISO timestamp (full, incl. time) of first bar
+    data_end: str    # ISO timestamp (full, incl. time) of last bar.
+                     # (data_len, data_start, data_end) together fingerprint the exact
+                     # bar set, so the SAME symbol at different intervals (1h/4h/1d) —
+                     # which can otherwise yield the same bar count starting on the same
+                     # date — cannot collide. This makes cross-strategy cache reuse safe
+                     # within a cycle (removing the need to clear the cache per strategy).
+
     def __hash__(self):
-        return hash((self.symbol, self.indicator, self.params, self.data_len, self.data_start))
-    
+        return hash((self.symbol, self.indicator, self.params, self.data_len,
+                     self.data_start, self.data_end))
+
     def __eq__(self, other):
         if not isinstance(other, CacheKey):
             return False
-        return (self.symbol == other.symbol and 
-                self.indicator == other.indicator and 
+        return (self.symbol == other.symbol and
+                self.indicator == other.indicator and
                 self.params == other.params and
                 self.data_len == other.data_len and
-                self.data_start == other.data_start)
+                self.data_start == other.data_start and
+                self.data_end == other.data_end)
 
 
 class IndicatorLibrary:
@@ -80,17 +87,21 @@ class IndicatorLibrary:
         Raises:
             ValueError: If indicator name is not recognized
         """
-        # Create cache key — include data length AND start date to prevent stale results
-        # from a different date range that happens to have the same bar count.
-        # Example: 4H ADX SOXL (170d window) and 4H EMA Ribbon SOXL LIVE (220d window)
-        # both produce 299 bars from the DB but cover different date ranges.
+        # Create cache key — include data length AND full start/end timestamps to
+        # uniquely fingerprint the bar set. data_len alone can't distinguish two
+        # ranges with the same bar count; a date-only start can't distinguish the
+        # same symbol at different intervals (1h/4h/1d) that share a start date and
+        # bar count. (len, full start ts, full end ts) closes both gaps, making
+        # cross-strategy reuse within a cycle correct.
         params_str = json.dumps(params, sort_keys=True)
         try:
-            data_start = str(data.index[0].date()) if len(data) > 0 else ""
+            data_start = data.index[0].isoformat() if len(data) > 0 else ""
+            data_end = data.index[-1].isoformat() if len(data) > 0 else ""
         except Exception:
             data_start = ""
+            data_end = ""
         cache_key = CacheKey(symbol=symbol, indicator=indicator_name, params=params_str,
-                             data_len=len(data), data_start=data_start)
+                             data_len=len(data), data_start=data_start, data_end=data_end)
         
         # Generate standardized indicator key name
         standardized_key = self._get_standardized_key(indicator_name, params)

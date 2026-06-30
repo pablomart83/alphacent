@@ -2079,7 +2079,21 @@ class StrategyProposer:
                 progress_callback(f"Walk-forward validation on {len(dsl_strategies)} DSL strategies...", 92)
             import math
             all_wf_results = []  # (strategy, wf_results, train_sharpe, test_sharpe, has_enough_trades, is_overfitted, train_sharpe_valid, test_sharpe_valid)
-            
+
+            # Clear indicator + price caches ONCE at the start of WF validation
+            # (previously done per-strategy inside the loop). With the strengthened
+            # indicator cache key (symbol+indicator+params+len+full start_ts+full
+            # end_ts) and the interval-scoped price cache key, reuse across strategies
+            # is collision-safe — so per-strategy clearing only wasted CPU recomputing
+            # identical indicators for strategies that share a symbol+window (e.g. the
+            # many strategies on SPY/AAPL with the same WF window). Clearing once per
+            # cycle preserves correctness, enables intra-cycle reuse, and still bounds
+            # memory to a single cycle's working set.
+            if hasattr(strategy_engine, 'indicator_library'):
+                strategy_engine.indicator_library.clear_cache()
+            if hasattr(strategy_engine, 'market_data') and hasattr(strategy_engine.market_data, '_historical_memory_cache'):
+                strategy_engine.market_data._historical_memory_cache.clear()
+
             for wf_idx, strategy in enumerate(dsl_strategies):
                 # Emit walk-forward sub-progress
                 if progress_callback:
@@ -2126,12 +2140,11 @@ class StrategyProposer:
                             )
                             continue
                     
-                    # Clear indicator and data caches before each strategy to prevent
-                    # shape mismatch errors when different symbols have different data lengths
-                    if hasattr(strategy_engine, 'indicator_library'):
-                        strategy_engine.indicator_library.clear_cache()
-                    if hasattr(strategy_engine.market_data, '_historical_memory_cache'):
-                        strategy_engine.market_data._historical_memory_cache.clear()
+                    # NOTE: indicator/price caches are cleared ONCE before this loop
+                    # (not per-strategy). The strengthened indicator cache key and the
+                    # interval-scoped price cache key make cross-strategy reuse safe, so
+                    # shared symbols/windows are computed once per cycle, not once per
+                    # strategy. Do NOT reintroduce a per-strategy clear here.
 
                     # Per-strategy WF window — single source of truth in
                     # backtest.walk_forward.asset_class_windows (yaml) via
