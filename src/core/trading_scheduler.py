@@ -1584,6 +1584,15 @@ class TradingScheduler:
                         # skip cleanly (symbol budget genuinely exhausted — not a tradeable
                         # size, and an expected condition, not an ERROR).
                         _demo_min_floor = float(getattr(self._order_executor, '_min_position_size', 1000.0) or 1000.0)
+                        # Instrument-aware: never floor below the per-symbol eToro
+                        # minimum (CFDs = $1000; self-healing learned mins can exceed
+                        # the flat paper floor). max() so the paper flat ($1000) still
+                        # wins for ordinary cash names.
+                        try:
+                            from src.risk.etoro_min_order import etoro_min_order_amount as _emoa_floor
+                            _demo_min_floor = max(_demo_min_floor, _emoa_floor(_sig_sym))
+                        except Exception:
+                            pass
                         if 0 < validation_result.position_size < _demo_min_floor:
                             _acct_eq_floor = getattr(account_info, 'equity', None) or getattr(account_info, 'balance', 0) or 0
                             _avail_bal_floor = getattr(account_info, 'balance', 0) or 0

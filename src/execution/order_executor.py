@@ -432,8 +432,18 @@ class OrderExecutor:
                                             elif old_sl > 0 and stop_loss_pct > old_sl:
                                                 size_scale = old_sl / stop_loss_pct
                                                 old_size = position_size
+                                                # Floor to the per-instrument eToro minimum
+                                                # (canonical source; CFDs=$1000, cash=$10,
+                                                # plus self-healing learned mins) so the
+                                                # SL-widen rescale never produces a sub-min
+                                                # order. Was a stale hardcoded $2000.
+                                                try:
+                                                    from src.risk.etoro_min_order import etoro_min_order_amount as _emoa_rs
+                                                    _rs_floor = _emoa_rs(normalized_symbol)
+                                                except Exception:
+                                                    _rs_floor = 1000.0
                                                 position_size = max(
-                                                    2000.0,  # never go below $2K minimum (matches risk_manager floor)
+                                                    _rs_floor,
                                                     round(position_size * size_scale, 2)
                                                 )
                                                 logger.info(
