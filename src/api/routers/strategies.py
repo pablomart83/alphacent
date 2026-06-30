@@ -4584,12 +4584,27 @@ async def get_size_estimate(
             _mirror_ratio = 0.10
         recommended_size_real = recommended_size_virtual * _mirror_ratio
 
+        # Per-symbol eToro minimum (so the CIO graduation form can show + enforce
+        # the floor). min_real = instrument_min × mirror_ratio.
+        try:
+            from src.risk.etoro_min_order import (
+                etoro_min_order_amount as _emoa,
+                min_real_size_for_symbol as _mrss,
+            )
+            _etoro_min_virtual = _emoa(symbol)
+            _etoro_min_real_val = _mrss(symbol, _mirror_ratio)
+        except Exception:
+            _etoro_min_virtual = None
+            _etoro_min_real_val = None
+
         return {
             "strategy_id": strategy_id,
             "symbol": symbol,
             "recommended_size": round(recommended_size_real, 0),
             "recommended_size_virtual": round(recommended_size_virtual, 0),
             "mirror_ratio": _mirror_ratio,
+            "etoro_min_virtual": _etoro_min_virtual,
+            "etoro_min_real": round(_etoro_min_real_val, 2) if _etoro_min_real_val is not None else None,
             "account_equity": account.equity,
             "account_balance": account.balance,
             "reason": reason,

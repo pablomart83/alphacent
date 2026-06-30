@@ -79,13 +79,18 @@ export function GraduationCard({
   const sizeEstimateQuery = useQuery({
     queryKey: ['size-estimate', row.strategy_id, row.symbol],
     queryFn: () =>
-      api.get<{ recommended_size: number; account_equity: number; reason: string | null }>(
+      api.get<{ recommended_size: number; account_equity: number; reason: string | null; etoro_min_real?: number | null; etoro_min_virtual?: number | null }>(
         `/strategies/${row.strategy_id}/size-estimate?symbol=${encodeURIComponent(row.symbol)}`
       ),
     staleTime: 60_000,
     retry: false,
   })
   const pipelineSize = sizeEstimateQuery.data?.recommended_size ?? null
+  // Per-symbol eToro minimum (CFDs like forex/index/commodity = $1000 virtual,
+  // ~$127 real at the mirror ratio). Takes precedence over the generic floor so
+  // the CIO can't graduate a pair eToro would reject (error 720) every cycle.
+  const etoroMinReal = sizeEstimateQuery.data?.etoro_min_real ?? null
+  const etoroMinVirtual = sizeEstimateQuery.data?.etoro_min_virtual ?? null
 
   const convictionThreshold =
     (isCrypto
@@ -117,13 +122,18 @@ export function GraduationCard({
   }, [row.strategy_id, row.symbol, defaultSize, defaultSl, defaultTp, convictionThreshold])
 
   const virtualAmount = positionSize / mirrorRatio
-  const minSize = (defaults?.min_order_size ?? 200) * mirrorRatio
+  const genericMinSize = (defaults?.min_order_size ?? 200) * mirrorRatio
+  // The effective floor is the GREATER of the generic config min and the
+  // per-symbol eToro instrument minimum (CFDs are $1000 virtual).
+  const minSize = Math.max(genericMinSize, etoroMinReal ?? 0)
   const maxSize = (defaults?.max_order_size ?? 1500) * mirrorRatio
   const symbolCapPctUi = (defaults?.symbol_cap_pct ?? 0.2) * 100
 
   const sizeWarning =
     positionSize < minSize
-      ? `Below min order size $${minSize.toFixed(0)} real`
+      ? (etoroMinReal != null && minSize === etoroMinReal
+          ? `${row.symbol} min is $${minSize.toFixed(2)} real ($${(etoroMinVirtual ?? 0).toFixed(0)} virtual) — eToro rejects smaller orders`
+          : `Below min order size $${minSize.toFixed(0)} real`)
       : positionSize > maxSize
         ? `Above max order size $${maxSize.toFixed(0)} real`
         : null
