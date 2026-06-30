@@ -16,6 +16,7 @@ Log files:
 
 import logging
 import logging.handlers
+import os
 import sys
 from datetime import datetime
 from enum import Enum
@@ -227,6 +228,24 @@ class LoggingConfig:
         # default (useful signal when Yahoo blacklists us or we have DNS
         # issues).
         logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+        # ── Quiet verbose first-party backtest tracing ───────────────────────
+        # strategy_engine emits ~94% of all log volume: per-indicator and
+        # per-DSL-parse trace lines ("Processing indicator", "  Method:",
+        # "  Expected keys:", "  ✓ Calculated successfully", "=" * 80
+        # separators, blank lines) left at INFO from development
+        # ("COMPREHENSIVE LOGGING"). At ~362 strategies/cycle this is tens of
+        # thousands of lines per cycle on the hot backtest path — wasted CPU
+        # (LogRecord build + fan-out across every file handler) and disk I/O,
+        # for diagnostics no operator reads in steady state. Pin to WARNING so
+        # indicator-calc failures (logger.error) and unknown-indicator
+        # warnings (logger.warning) still surface; only the INFO trace chorus
+        # is suppressed. Lift to INFO/DEBUG via LOG_LEVEL_STRATEGY_ENGINE when
+        # deep-diving the backtest engine (no redeploy needed).
+        _engine_level = os.getenv("LOG_LEVEL_STRATEGY_ENGINE", "WARNING").upper()
+        logging.getLogger("src.strategy.strategy_engine").setLevel(
+            getattr(logging, _engine_level, logging.WARNING)
+        )
 
         cls._initialized = True
 
