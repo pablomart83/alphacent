@@ -28,7 +28,7 @@ The system has three lifecycle stages with different objectives. Every gate, siz
 **Operating rule for every change touching gates, sizing or risk:**
 
 1. Before adding or modifying a gate, decide which stages it should affect.
-2. PAPER: relaxed entry gates, flat sizing (already $5,000), fewer rejections, more breadth. Treat it as a data-collection sandbox.
+2. PAPER: relaxed entry gates, flat sizing (`paper_trading.flat_position_size`, currently **$1,000** — small flat size = more concurrent positions = more graduation data breadth), fewer rejections, more breadth. Treat it as a data-collection sandbox.
 3. LIVE: the full 11-step sizing pipeline, full `validate_signal` portfolio risk, vol-scaled sizing under the CIO `position_size` cap.
 4. RESEARCH: strict statistical bars (WF, MC, ex-post 730d, DSR — when implemented).
 5. If a gate must apply to multiple stages, parameterise by stage (`paper_trading.*` and `live_trading.*` blocks in YAML, branched by `account_type` in code).
@@ -285,7 +285,11 @@ Frontend (React/Vite) → Nginx (SSL/443) → Backend (FastAPI/uvicorn)
 - Uptrend SHORT templates: SL 4%, TP 8-10% (wider — trending market noise)
 
 ### Position Sizing (post Apr 29 overhaul)
-- `BASE_RISK_PCT`: 0.6% of equity per trade | `CONFIDENCE_FLOOR`: 0.50 | `MINIMUM_ORDER_SIZE`: $5,000
+- `BASE_RISK_PCT`: 0.6% of equity per trade | `CONFIDENCE_FLOOR`: 0.50
+- Minimum order size is **per-account + per-instrument**, NOT a single flat number:
+  - PAPER/DEMO floor: `paper_trading.min_order_size` (currently **$1,000**); paper flat size `paper_trading.flat_position_size` is also **$1,000**.
+  - LIVE floor: `live_trading.min_order_size` (currently **$200**); LIVE sizes are CIO-set at graduation (real $), converted to virtual via `÷ mirror_ratio`.
+  - **eToro per-instrument minimum** (`src/risk/etoro_min_order.py`, canonical): **$1,000** for CFDs (forex / index / commodity / leveraged ETF), ~$10 for cash stocks/ETFs/crypto, plus a self-healing learned layer fed by eToro 720 rejections (`config/.etoro_min_overrides.json`). PAPER floors route through this (`max(paper_flat, etoro_min(symbol))`); the graduation dashboard + live-update endpoints reject (422) a CIO size whose virtual amount (`real / mirror`) can't clear it (e.g. USDCAD needs ≥ $127 real at 0.127 mirror). Repeated below-min rejections trigger an entry cooldown (`src/risk/order_rejection_cooldown.py`, 4h TTL, cleared on size update) to stop the every-cycle 720 retry loop.
 - Symbol cap: 5% | Sector soft cap: 30% | Portfolio heat cap: 30%
 - Vol scaling: 0.10x–1.50x (target vol 16%)
 - Drawdown sizing: 50% reduction >5% DD, 75% reduction >10% DD (30d rolling peak)
