@@ -41,6 +41,7 @@ export const AUTONOMOUS_SECTIONS = [
   'Conviction-tier sizing',
   'Vol scaling',
   'Rejection blacklist',
+  'Regime dormancy',
 ] as const
 
 export const AUTONOMOUS_FIELDS: FieldDef[] = [
@@ -798,5 +799,55 @@ export const AUTONOMOUS_FIELDS: FieldDef[] = [
     min: 1,
     max: 365,
     help: 'Days on the blacklist before re-evaluation — regime changes can shorten this early.',
+  },
+
+  // Regime dormancy (sleep/wake regime-mismatched validated strategies)
+  {
+    key: 'regime_dormancy_enabled',
+    label: 'Regime dormancy',
+    section: 'Regime dormancy',
+    type: 'bool',
+    help: 'Sleep regime-mismatched-but-validated strategies (kept, no signals) and wake them when their regime returns — instead of retiring + deleting. Never touches LIVE. KEEP OFF until the regime-flip backtest validates it (design §7).',
+    gates: 'RegimeDormancy logs / Library "Dormant" filter',
+  },
+  {
+    key: 'regime_dormancy_sleep_confirm_days',
+    label: 'Sleep confirm days',
+    section: 'Regime dormancy',
+    type: 'int',
+    suffix: 'd',
+    min: 1,
+    max: 30,
+    help: 'Regime must be stable ≥ this many days before a mismatched strategy is put to sleep (anti-flap).',
+  },
+  {
+    key: 'regime_dormancy_wake_confirm_days',
+    label: 'Wake confirm days',
+    section: 'Regime dormancy',
+    type: 'int',
+    suffix: 'd',
+    min: 1,
+    max: 30,
+    help: 'Regime must be stable ≥ this many days before a dormant strategy is woken.',
+  },
+  {
+    key: 'regime_dormancy_min_dwell_days',
+    label: 'Min dwell days',
+    section: 'Regime dormancy',
+    type: 'int',
+    suffix: 'd',
+    min: 0,
+    max: 30,
+    help: 'Minimum time in a state before toggling again — prevents oscillation at a regime boundary.',
+  },
+  {
+    key: 'regime_dormancy_max_warm_age_days',
+    label: 'Max warm age',
+    section: 'Regime dormancy',
+    type: 'int',
+    suffix: 'd',
+    min: 7,
+    max: 365,
+    help: 'A dormant strategy older than this is flagged for re-validation when woken (its edge may have drifted).',
   },
 ]

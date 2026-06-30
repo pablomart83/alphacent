@@ -1060,6 +1060,14 @@ class AutonomousConfigResponse(BaseModel):
     vol_scaling_max_symbol_pct: float = 5.0    # percentage (yaml: 0.05)
     vol_scaling_sector_soft_cap_pct: float = 30.0  # percentage (yaml: 0.3)
 
+    # ─── Regime dormancy (sleep/wake regime-mismatched validated strategies) ──
+    # OFF by default — requires the regime-flip backtest before enabling.
+    regime_dormancy_enabled: bool = False
+    regime_dormancy_sleep_confirm_days: int = 5
+    regime_dormancy_wake_confirm_days: int = 3
+    regime_dormancy_min_dwell_days: int = 2
+    regime_dormancy_max_warm_age_days: int = 60
+
     # ─── Autonomous schedule ────────────────────────────────────────────
     schedule_hour: int = 15
     schedule_minute: int = 15
@@ -1191,6 +1199,13 @@ class AutonomousConfigRequest(BaseModel):
     vol_scaling_max_symbol_pct: Optional[float] = None
     vol_scaling_sector_soft_cap_pct: Optional[float] = None
 
+    # Regime dormancy
+    regime_dormancy_enabled: Optional[bool] = None
+    regime_dormancy_sleep_confirm_days: Optional[int] = None
+    regime_dormancy_wake_confirm_days: Optional[int] = None
+    regime_dormancy_min_dwell_days: Optional[int] = None
+    regime_dormancy_max_warm_age_days: Optional[int] = None
+
     # Autonomous schedule
     schedule_hour: Optional[int] = None
     schedule_minute: Optional[int] = None
@@ -1259,6 +1274,7 @@ async def get_autonomous_config(
     rejection_bl = alpha_edge.get('rejection_blacklist', {}) or {}
     regime_detection = full_config.get('regime_detection', {}) or {}
     portfolio_var = pm.get('portfolio_var', {}) or {}
+    regime_dormancy = full_config.get('regime_dormancy', {}) or {}
     market_regime = full_config.get('market_regime', {}) or {}
 
     # Helper: yaml decimal fraction (0-1) → API percentage (0-100)
@@ -1413,6 +1429,11 @@ async def get_autonomous_config(
         vol_scaling_max_scale=float(vol_scaling.get('max_scale', 1.50)),
         vol_scaling_max_symbol_pct=pct(vol_scaling.get('max_symbol_pct'), 5.0),
         vol_scaling_sector_soft_cap_pct=pct(vol_scaling.get('sector_soft_cap_pct'), 30.0),
+        regime_dormancy_enabled=bool(regime_dormancy.get('enabled', False)),
+        regime_dormancy_sleep_confirm_days=int(regime_dormancy.get('sleep_confirm_days', 5)),
+        regime_dormancy_wake_confirm_days=int(regime_dormancy.get('wake_confirm_days', 3)),
+        regime_dormancy_min_dwell_days=int(regime_dormancy.get('min_dwell_days', 2)),
+        regime_dormancy_max_warm_age_days=int(regime_dormancy.get('max_warm_age_days', 60)),
 
         # Autonomous schedule
         schedule_hour=int(autonomous_schedule.get('hour', 15)),
@@ -1504,6 +1525,7 @@ async def update_autonomous_config(
     full_config['position_management'].setdefault('conviction_tier_sizing', {})
     full_config['position_management'].setdefault('vol_scaling', {})
     full_config['alpha_edge'].setdefault('rejection_blacklist', {})
+    full_config.setdefault('regime_dormancy', {})
 
     # Shortcuts
     a = full_config['autonomous']
@@ -1527,6 +1549,7 @@ async def update_autonomous_config(
     sched = full_config['autonomous_schedule']
     ae = full_config['alpha_edge']
     rbl = ae['rejection_blacklist']
+    rd_cfg = full_config['regime_dormancy']
 
     # Helper: percentage (API) → decimal fraction (yaml)
     def to_frac(v):
@@ -1679,6 +1702,18 @@ async def update_autonomous_config(
         vs_pm['max_symbol_pct'] = to_frac(request.vol_scaling_max_symbol_pct)
     if request.vol_scaling_sector_soft_cap_pct is not None:
         vs_pm['sector_soft_cap_pct'] = to_frac(request.vol_scaling_sector_soft_cap_pct)
+
+    # ─── Regime dormancy ────────────────────────────────────────────────
+    if request.regime_dormancy_enabled is not None:
+        rd_cfg['enabled'] = request.regime_dormancy_enabled
+    if request.regime_dormancy_sleep_confirm_days is not None:
+        rd_cfg['sleep_confirm_days'] = request.regime_dormancy_sleep_confirm_days
+    if request.regime_dormancy_wake_confirm_days is not None:
+        rd_cfg['wake_confirm_days'] = request.regime_dormancy_wake_confirm_days
+    if request.regime_dormancy_min_dwell_days is not None:
+        rd_cfg['min_dwell_days'] = request.regime_dormancy_min_dwell_days
+    if request.regime_dormancy_max_warm_age_days is not None:
+        rd_cfg['max_warm_age_days'] = request.regime_dormancy_max_warm_age_days
 
     # ─── Autonomous schedule ────────────────────────────────────────────
     if request.schedule_hour is not None:
