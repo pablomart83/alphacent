@@ -165,6 +165,62 @@ def main():
           "redeploys — vs dormancy waking the kept, already-validated edge instantly. "
           "The shorter+more frequent the recurrence, the larger dormancy's edge.")
 
+    # ── Debounce tuning: how many CONFIRMED regimes result at each confirm_days ──
+    # Apply the confirmed-regime state machine over the per-trading-day raw series
+    # and report the resulting (much smaller) episode count, dwell, and changes/yr.
+    # Goal: pick the smallest confirm_days that yields a handful of changes/year with
+    # multi-week dwells (a human-legible regime timeline), so the official regime the
+    # whole system acts on is stable instead of flipping every ~2 days.
+    raw_seq = [r for _, r in regime_by_day]
+    n_years = max(1e-9, len(raw_seq) / 252.0)
+
+    def debounce(seq, confirm_days):
+        """Confirmed-regime state machine (same logic as regime_authority.step):
+        a new raw reading must persist `confirm_days` consecutive days to promote."""
+        official = seq[0]
+        candidate = None
+        streak = 0
+        confirmed = [official]
+        changes = 0
+        for raw in seq[1:]:
+            if raw == official:
+                candidate, streak = None, 0
+            elif raw == candidate:
+                streak += 1
+                if streak >= confirm_days:
+                    official = candidate
+                    candidate, streak = None, 0
+                    changes += 1
+            else:
+                candidate, streak = raw, 1
+            confirmed.append(official)
+        return confirmed, changes
+
+    def episodes_of(seq):
+        eps, cur, ln = [], seq[0], 1
+        for r in seq[1:]:
+            if r == cur:
+                ln += 1
+            else:
+                eps.append((cur, ln)); cur, ln = r, 1
+        eps.append((cur, ln))
+        return eps
+
+    print("\n=== DEBOUNCE TUNING (confirmed-regime state machine) ===")
+    print(f"{'confirm_days':>12} {'confirmed_changes':>18} {'changes/yr':>11} "
+          f"{'episodes':>9} {'med_dwell_d':>12} {'longest_dwell_d':>16}")
+    raw_eps = episodes_of(raw_seq)
+    print(f"{'raw (0)':>12} {'—':>18} {len(raw_eps)/n_years:>11.1f} {len(raw_eps):>9} "
+          f"{int(np.median([l for _,l in raw_eps])):>12} {max(l for _,l in raw_eps):>16}")
+    for cd in (2, 3, 5, 7, 10):
+        conf, changes = debounce(raw_seq, cd)
+        eps = episodes_of(conf)
+        dwells = [l for _, l in eps]
+        print(f"{cd:>12} {changes:>18} {changes/n_years:>11.1f} {len(eps):>9} "
+              f"{int(np.median(dwells)):>12} {max(dwells):>16}")
+    print("\nPICK: smallest confirm_days giving a few changes/yr with multi-week median "
+          "dwell — that becomes regime_authority.confirm_days (evidence-based default).")
+
 
 if __name__ == "__main__":
     main()

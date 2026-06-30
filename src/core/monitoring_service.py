@@ -6144,18 +6144,27 @@ class MonitoringService:
             sub_regime, _, _, _ = MarketStatisticsAnalyzer(_mdm).detect_sub_regime()
             regime_str = sub_regime.value
             if regime_str and regime_str != 'unknown':
-                self._record_market_regime(regime_str)
+                # Debounce the noisy raw reading into the CONFIRMED official regime
+                # (regime_authority) — this is what the whole system should act on.
+                # Persist the OFFICIAL regime; regime_changed reflects a CONFIRMED
+                # promotion, so is_regime_stable becomes meaningful.
+                try:
+                    from src.strategy import regime_authority as _ra
+                    official, changed = _ra.step(regime_str)
+                    self._record_market_regime(official or regime_str, changed=changed)
+                except Exception as _ra_err:
+                    logger.warning(f"[RegimeAuthority] step failed ({_ra_err}) — recording raw")
+                    self._record_market_regime(regime_str)
             else:
                 logger.warning(f"[RegimeHistory] periodic: detect_sub_regime returned '{regime_str}' — not recording")
         except Exception as e:
             logger.warning(f"_record_market_regime_periodic failed: {e}", exc_info=True)
 
-    def _record_market_regime(self, current_regime_str: str) -> None:
-        """Persist a MARKET-level regime_history row each detection so the
-        regime-stability gate (dormancy + fundamental-exit guard) has data.
-        regime_changed=1 when the regime differs from the last persisted MARKET
-        row (survives restarts, unlike the in-memory _last_known_regime).
-        Fail-safe: never raises into the caller."""
+    def _record_market_regime(self, current_regime_str: str, changed: Optional[bool] = None) -> None:
+        """Persist a MARKET-level regime_history row. `current_regime_str` is the
+        CONFIRMED official regime; `changed` (from regime_authority) marks a
+        confirmed promotion. When `changed` is None, falls back to comparing to the
+        last persisted row. Fail-safe: never raises into the caller."""
         try:
             from src.models.orm import RegimeHistoryORM
             session = self.db.get_session()
@@ -6164,18 +6173,21 @@ class MonitoringService:
                     RegimeHistoryORM.strategy_id == 'MARKET'
                 ).order_by(RegimeHistoryORM.detected_at.desc()).first()
                 prev_regime = last.current_regime if last else None
-                changed = 1 if (prev_regime is not None and prev_regime != current_regime_str) else 0
+                if changed is None:
+                    changed_flag = 1 if (prev_regime is not None and prev_regime != current_regime_str) else 0
+                else:
+                    changed_flag = 1 if changed else 0
                 row = RegimeHistoryORM(
                     strategy_id='MARKET',
                     detected_at=datetime.now(),
                     activation_regime=(prev_regime or current_regime_str),
                     current_regime=current_regime_str,
-                    regime_changed=changed,
-                    change_type='market_regime_transition' if changed else None,
+                    regime_changed=changed_flag,
+                    change_type='market_regime_transition' if changed_flag else None,
                 )
                 session.add(row)
                 session.commit()
-                if changed:
+                if changed_flag:
                     logger.info(
                         f"[RegimeHistory] MARKET regime transition {prev_regime} → "
                         f"{current_regime_str} recorded"
@@ -6207,6 +6219,14 @@ class MonitoringService:
             from sqlalchemy.orm.attributes import flag_modified
             from src.strategy.strategy_templates import StrategyTemplateLibrary, MarketRegime
             from src.strategy import regime_dormancy as _rd
+            from src.strategy import regime_authority as _ra
+
+            # Act on the CONFIRMED official regime (debounced), not the raw reading
+            # passed in — the raw value flips every ~2 days and would thrash sleep/wake.
+            official = _ra.current_official()
+            if official:
+                current_regime_str = official
+            result["regime"] = current_regime_str
 
             try:
                 current_regime_enum = MarketRegime(current_regime_str)
