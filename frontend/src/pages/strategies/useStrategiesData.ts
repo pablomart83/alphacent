@@ -136,6 +136,9 @@ export interface StrategyRow {
   allocated_capital?: number | null
   /** True when this strategy has an active live_strategies authorization row. */
   is_live_authorized?: boolean | null
+  /** True when validated but asleep because its regime isn't current (regime dormancy). */
+  regime_dormant?: boolean | null
+  dormant_reason?: string | null
 }
 
 export interface StrategiesPayload {

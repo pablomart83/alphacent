@@ -382,6 +382,10 @@ class StrategyResponse(BaseModel):
     allocated_capital: Optional[float] = None  # equity * allocation_pct
     # Graduation: whether this strategy has an active live_strategies authorization
     is_live_authorized: bool = False
+    # Regime dormancy: True = validated but asleep because its regime isn't current
+    # (excluded from signal gen, kept warm). Surfaced for the Library "Dormant" filter.
+    regime_dormant: bool = False
+    dormant_reason: Optional[str] = None
 
 
 class StrategiesResponse(BaseModel):
@@ -986,6 +990,8 @@ async def get_strategies(
             deployed_capital=round(deployed_cap, 2),
             allocated_capital=allocated_cap,
             is_live_authorized=strategy_id in live_authorized_ids,
+            regime_dormant=bool(metadata.get("regime_dormant")),
+            dormant_reason=metadata.get("dormant_reason"),
         ))
     
     return StrategiesResponse(

@@ -1,4 +1,4 @@
-import { Search, X, Zap, MoonStar, TrendingDown, TrendingUp, GraduationCap, Beaker, Sparkles, Star } from 'lucide-react'
+import { Search, X, Zap, MoonStar, TrendingDown, TrendingUp, GraduationCap, Beaker, Sparkles, Star, Pause } from 'lucide-react'
 import {
   Input,
   Select,
@@ -19,6 +19,7 @@ export type QuickPillId =
   | 'promoted-today'
   | 'activated-today'
   | 'live-today'
+  | 'dormant'
 
 export interface LibraryFilters {
   search: string
@@ -104,6 +105,12 @@ const QUICK_PILLS: Array<{
     label: 'Live today',
     icon: Star,
     description: 'Strategies that graduated to live trading today',
+  },
+  {
+    id: 'dormant',
+    label: 'Dormant',
+    icon: Pause,
+    description: 'Validated but asleep — regime not current (kept warm, no signals until its regime returns)',
   },
 ]
 

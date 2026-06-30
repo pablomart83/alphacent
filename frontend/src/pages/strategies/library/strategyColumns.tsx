@@ -132,6 +132,7 @@ export function buildStrategyColumns(
         const status = row.original.status
         const variant = STATUS_VARIANT[status] ?? 'muted'
         const isLive = row.original.is_live_authorized
+        const isDormant = row.original.regime_dormant
         return (
           <div className="flex items-center gap-1">
             <Badge variant={variant} size="sm">
@@ -141,6 +142,11 @@ export function buildStrategyColumns(
               <Badge variant="live" size="sm" className="gap-0.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-current animate-pulse" />
                 LIVE
+              </Badge>
+            )}
+            {isDormant && (
+              <Badge variant="muted" size="sm" title={row.original.dormant_reason ?? 'Asleep — regime not current'}>
+                Dormant
               </Badge>
             )}
           </div>

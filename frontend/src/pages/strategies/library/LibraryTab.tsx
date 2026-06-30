@@ -68,6 +68,7 @@ function parsePills(raw: string | null): QuickPillId[] {
     'promoted-today',
     'activated-today',
     'live-today',
+    'dormant',
   ]
   return raw
     .split(',')
@@ -605,6 +606,7 @@ function applyFilters(rows: StrategyRow[], filters: LibraryFilters): StrategyRow
       if (pill === 'promoted-today' && !isPromotedToday(r)) return false
       if (pill === 'activated-today' && !isActivatedToday(r)) return false
       if (pill === 'live-today' && !isLiveToday(r)) return false
+      if (pill === 'dormant' && !r.regime_dormant) return false
     }
     return true
   })
