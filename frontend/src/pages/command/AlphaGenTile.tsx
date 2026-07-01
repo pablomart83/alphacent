@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { SectionLabel } from '@/components/layout'
+import { StatInline } from '@/components/primitives'
 import { cn, formatPercentage } from '@/lib/utils'
 import { useAlphaGeneration } from './useCommandData'
 
@@ -49,13 +50,7 @@ function ReturnCell({
   isPercent?: boolean
 }) {
   const tone =
-    value == null ? 'neutral' : value > 0 ? 'up' : value < 0 ? 'down' : 'neutral'
-  const color =
-    tone === 'up'
-      ? 'var(--pnl-up)'
-      : tone === 'down'
-        ? 'var(--pnl-down)'
-        : 'var(--text-0)'
+    loading || value == null ? 'strong' : value > 0 ? 'up' : value < 0 ? 'down' : 'strong'
 
   const display = loading
     ? '…'
@@ -66,14 +61,12 @@ function ReturnCell({
       : '—'
 
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[9px] uppercase tracking-wider text-[var(--text-3)]">{label}</span>
-      <span
-        className="mono tabular-nums text-[15px] font-bold"
-        style={{ color: loading ? 'var(--text-3)' : color }}
-      >
-        {display}
-      </span>
-    </div>
+    <StatInline
+      label={label}
+      value={display}
+      size="md"
+      tone={tone}
+      valueColor={loading ? 'var(--text-3)' : undefined}
+    />
   )
 }

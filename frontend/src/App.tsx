@@ -11,6 +11,7 @@ import { setAuthErrorHandler } from '@/services/auth-events'
 import { wsManager } from '@/services/websocket'
 
 const Command = lazy(() => import('./pages/command/Command').then((m) => ({ default: m.Command })))
+const Observatory = lazy(() => import('./pages/observatory/Observatory').then((m) => ({ default: m.Observatory })))
 const Book = lazy(() => import('./pages/book/Book').then((m) => ({ default: m.Book })))
 const Strategies = lazy(() => import('./pages/strategies/Strategies').then((m) => ({ default: m.Strategies })))
 const Guard = lazy(() => import('./pages/guard/Guard').then((m) => ({ default: m.Guard })))
@@ -71,6 +72,14 @@ function AppRoutes() {
           element={
             <Suspense fallback={<PageFallback />}>
               <Book />
+            </Suspense>
+          }
+        />
+        <Route
+          path="observatory"
+          element={
+            <Suspense fallback={<PageFallback />}>
+              <Observatory />
             </Suspense>
           }
         />

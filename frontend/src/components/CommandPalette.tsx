@@ -18,6 +18,7 @@ import {
   Settings as SettingsIcon,
   Shield,
   Sun,
+  Telescope,
   TerminalSquare,
   TrendingUp,
   History,
@@ -69,6 +70,17 @@ const COMMANDS: CommandItem[] = [
     icon: Briefcase,
     run: ({ navigate, close }) => {
       navigate('/book')
+      close()
+    },
+  },
+  {
+    id: 'nav-observatory',
+    label: 'Go to Observatory',
+    keywords: 'observatory fund overview lifecycle research paper live command center attention',
+    section: 'Navigate',
+    icon: Telescope,
+    run: ({ navigate, close }) => {
+      navigate('/observatory')
       close()
     },
   },

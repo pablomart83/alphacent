@@ -1,38 +1,10 @@
-import { cn } from '@/lib/utils'
+import { StatTile } from '@/components/primitives'
+import { formatAge } from '@/lib/utils'
 import type { IntelSummary } from './useIntelData'
-import { formatAge } from './useIntelData'
 
 interface Props {
   summary: IntelSummary | undefined
   loading: boolean
-}
-
-interface TileProps {
-  label: string
-  value: number | string
-  color: string
-  bg: string
-  pulse?: boolean
-}
-
-function Tile({ label, value, color, bg, pulse }: TileProps) {
-  return (
-    <div
-      className="flex flex-col gap-1 px-4 py-3 rounded border border-[var(--border-subtle)]"
-      style={{ background: bg }}
-    >
-      <span
-        className={cn(
-          'text-2xl font-bold mono tabular-nums',
-          pulse && typeof value === 'number' && value > 0 && 'animate-pulse',
-        )}
-        style={{ color }}
-      >
-        {value}
-      </span>
-      <span className="text-[10px] text-[var(--text-3)] uppercase tracking-wide">{label}</span>
-    </div>
-  )
 }
 
 export function IntelSummaryTiles({ summary, loading }: Props) {
@@ -60,36 +32,49 @@ export function IntelSummaryTiles({ summary, loading }: Props) {
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-5 gap-2">
-        <Tile
+        <StatTile
+          className="px-4 py-3 gap-1"
+          layout="value-top"
+          size="lg"
           label="P0 Open"
           value={s.p0_open}
-          color="var(--pnl-down)"
+          valueColor="var(--pnl-down)"
           bg={s.p0_open > 0 ? 'rgba(239,68,68,0.10)' : 'var(--bg-1)'}
-          pulse={s.p0_open > 0}
+          pulseValue={s.p0_open > 0}
         />
-        <Tile
+        <StatTile
+          className="px-4 py-3 gap-1"
+          layout="value-top"
+          size="lg"
           label="P1 Open"
           value={s.p1_open}
-          color="var(--status-warning)"
+          valueColor="var(--status-warning)"
           bg={s.p1_open > 0 ? 'rgba(245,158,11,0.10)' : 'var(--bg-1)'}
         />
-        <Tile
+        <StatTile
+          className="px-4 py-3 gap-1"
+          layout="value-top"
+          size="lg"
           label="P2 Open"
           value={s.p2_open}
-          color="#eab308"
+          valueColor="#eab308"
           bg={s.p2_open > 0 ? 'rgba(234,179,8,0.08)' : 'var(--bg-1)'}
         />
-        <Tile
+        <StatTile
+          className="px-4 py-3 gap-1"
+          layout="value-top"
+          size="lg"
           label="Opportunities"
           value={s.opportunities_open}
-          color="var(--accent-primary)"
-          bg="var(--bg-1)"
+          valueColor="var(--accent-primary)"
         />
-        <Tile
+        <StatTile
+          className="px-4 py-3 gap-1"
+          layout="value-top"
+          size="lg"
           label="Resolved 7d"
           value={s.resolved_this_week}
-          color="var(--pnl-up)"
-          bg="var(--bg-1)"
+          valueColor="var(--pnl-up)"
         />
       </div>
 

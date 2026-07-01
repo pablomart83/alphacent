@@ -110,6 +110,15 @@
   --shell-bottom-h: 120px;
   --panel-header-h: 32px;
 
+  /* Breakpoints (min-width). Canonical scale — mirrored in lib/design-tokens.ts
+     as the BREAKPOINTS constant for JS/matchMedia use (CSS vars can't be read
+     inside @media queries, so the two must stay in sync). */
+  --bp-sm: 640px;
+  --bp-md: 768px;
+  --bp-lg: 1024px;
+  --bp-xl: 1440px;
+  --bp-2xl: 1920px;
+
   /* Motion */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-flash: 400ms;

@@ -14,6 +14,8 @@ import {
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { Breakpoint } from '@/lib/design-tokens'
+import { useBreakpoint } from '@/hooks/useBreakpoint'
 import { Skeleton } from './Skeleton'
 
 export interface DataTableProps<TData extends object> {
@@ -53,6 +55,16 @@ export interface DataTableProps<TData extends object> {
   className?: string
   bodyClassName?: string
 
+  /**
+   * Responsive stacked-card mode. When the viewport is below `stackBelow` and a
+   * `mobileCard` renderer is provided, the fixed-width table is replaced with a
+   * single-column stack of cards so it stays legible on phones without the
+   * whole page scrolling horizontally. Opt-in and fully backward-compatible:
+   * with neither prop set, behaviour is unchanged.
+   */
+  mobileCard?: (row: TData, index: number) => ReactNode
+  stackBelow?: Breakpoint
+
   /** Exposes the TanStack Table instance — use for imperative operations. */
   onReady?: (table: TableInstance<TData>) => void
 }
@@ -82,10 +94,14 @@ export function DataTable<TData extends object>({
   loadMoreThresholdPx = 400,
   className,
   bodyClassName,
+  mobileCard,
+  stackBelow,
   onReady,
 }: DataTableProps<TData>) {
   const shouldVirtualize = virtualized ?? data.length > 100
   const rowHeight = estimatedRowHeight ?? DENSITY_ROW_H[density]
+  const { below } = useBreakpoint()
+  const useCards = !!mobileCard && !!stackBelow && below(stackBelow)
 
   const table = useReactTable({
     data,
@@ -132,6 +148,50 @@ export function DataTable<TData extends object>({
   }
 
   const colCount = table.getAllLeafColumns().length
+
+  // Responsive stacked-card mode — replaces the table on narrow viewports.
+  if (useCards) {
+    return (
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className={cn('h-full min-h-0 overflow-auto bg-[var(--bg-1)]', className)}
+      >
+        {loading && rows.length === 0 ? (
+          <div className="flex flex-col gap-2 p-2">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-16" />
+            ))}
+          </div>
+        ) : rows.length === 0 ? (
+          emptyState
+        ) : (
+          <div className="flex flex-col gap-2 p-2">
+            {rows.map((row) => {
+              const clickable = !!onRowClick
+              return (
+                <div
+                  key={row.id}
+                  data-row-id={row.id}
+                  onClick={clickable ? () => onRowClick!(row.original) : undefined}
+                  className={cn(
+                    'rounded-[4px] border border-[var(--border-subtle)] bg-[var(--bg-2)] p-2.5',
+                    clickable && 'cursor-pointer active:bg-[var(--bg-hover)]',
+                    activeRowId === row.id && 'border-[var(--accent-primary)]',
+                  )}
+                >
+                  {mobileCard!(row.original, row.index)}
+                </div>
+              )
+            })}
+            {hasMore && (
+              <div className="py-2 text-center text-[10px] text-[var(--text-3)]">Scroll for more…</div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   const body = (() => {
     if (loading && rows.length === 0) {

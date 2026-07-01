@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { Rocket } from 'lucide-react'
 import { SectionLabel } from '@/components/layout'
+import { StatInline } from '@/components/primitives'
 import { cn, formatCurrency, formatNumber } from '@/lib/utils'
 import { useLiveSummary } from '@/pages/book/useBookData'
 
@@ -90,20 +91,11 @@ function Stat({
   tone?: 'up' | 'down' | 'neutral'
 }) {
   return (
-    <div>
-      <div className="text-[9px] uppercase tracking-wider text-[var(--text-3)]">{label}</div>
-      <div
-        className={cn(
-          'mono tabular-nums text-[11px] font-medium',
-          tone === 'up'
-            ? 'text-[var(--pnl-up)]'
-            : tone === 'down'
-              ? 'text-[var(--pnl-down)]'
-              : 'text-[var(--text-1)]',
-        )}
-      >
-        {value}
-      </div>
-    </div>
+    <StatInline
+      label={label}
+      value={value}
+      size="sm"
+      tone={tone === 'neutral' ? 'default' : tone}
+    />
   )
 }

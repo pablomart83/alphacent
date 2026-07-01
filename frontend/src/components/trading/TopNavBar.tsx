@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
   { path: '/', label: 'Command', shortcut: 'G C' },
+  { path: '/observatory', label: 'Observatory', shortcut: 'G O' },
   { path: '/book', label: 'Book', shortcut: 'G B' },
   { path: '/strategies', label: 'Strategies', shortcut: 'G S' },
   { path: '/guard', label: 'Guard', shortcut: 'G G' },

@@ -129,3 +129,25 @@ export function pnlColor(value: number, epsilon = 0.0001): string {
   if (Math.abs(value) < epsilon) return colors.pnlFlat
   return value > 0 ? colors.pnlUp : colors.pnlDown
 }
+
+/**
+ * Canonical responsive breakpoint scale (min-width, px). Mirrors the `--bp-*`
+ * CSS variables in styles/tokens.css. Use these for matchMedia / JS layout
+ * decisions (via the `useBreakpoint` hook) — CSS variables cannot be read
+ * inside `@media` queries, so JS-driven responsiveness reads from here.
+ *
+ *   sm  640  — large phone / small tablet portrait
+ *   md  768  — tablet
+ *   lg  1024 — small desktop / tablet landscape
+ *   xl  1440 — desktop / wall monitor
+ *   2xl 1920 — ultra-wide
+ */
+export const BREAKPOINTS = {
+  sm: 640,
+  md: 768,
+  lg: 1024,
+  xl: 1440,
+  '2xl': 1920,
+} as const
+
+export type Breakpoint = keyof typeof BREAKPOINTS

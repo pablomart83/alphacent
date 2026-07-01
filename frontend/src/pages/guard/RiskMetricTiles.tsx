@@ -1,6 +1,6 @@
 import { MetricGrid, SectionLabel } from '@/components/layout'
-import { Skeleton } from '@/components/primitives'
-import { cn, formatCurrency, formatPercentage } from '@/lib/utils'
+import { Skeleton, StatTile } from '@/components/primitives'
+import { formatCurrency, formatPercentage } from '@/lib/utils'
 import {
   pctOfLimit,
   type RiskLimitsPayload,
@@ -98,14 +98,29 @@ export function RiskMetricTiles({
             const limit = t.formatLimit && limits ? t.formatLimit(limits) : null
             const progress = t.progress && limits ? t.progress(metrics, limits) : null
             const highlighted = !!highlightKey && !!t.reasonMatches?.test(highlightKey)
+            const sublabel =
+              limit == null ? undefined : (
+                <>
+                  of {limit}
+                  {progress != null && (
+                    <>
+                      {' · '}
+                      <span style={{ color: limitBarColor(progress) }}>{progress.toFixed(0)}%</span>
+                    </>
+                  )}
+                </>
+              )
             return (
-              <Tile
+              <StatTile
                 key={t.key}
                 label={t.label}
                 value={value}
-                limit={limit}
+                size="md"
+                sublabel={sublabel}
                 progress={progress}
-                highlighted={highlighted}
+                progressVariant="limit"
+                highlight={highlighted}
+                title={t.label}
               />
             )
           })}
@@ -115,58 +130,9 @@ export function RiskMetricTiles({
   )
 }
 
-interface TileProps {
-  label: string
-  value: string
-  limit: string | null
-  progress: number | null
-  highlighted: boolean
-}
-
-function Tile({ label, value, limit, progress, highlighted }: TileProps) {
-  const barColor =
-    progress == null
-      ? 'var(--text-3)'
-      : progress >= 90
-        ? 'var(--pnl-down)'
-        : progress >= 60
-          ? 'var(--status-warning)'
-          : 'var(--pnl-up)'
-  return (
-    <div
-      className={cn(
-        'rounded-[3px] border border-[var(--border-subtle)] bg-[var(--bg-1)] p-2 transition-colors',
-        highlighted &&
-          'border-[var(--status-warning)] bg-[color-mix(in_oklab,var(--status-warning)_6%,var(--bg-1))] animate-pulse',
-      )}
-    >
-      <div className="text-[9px] uppercase tracking-wider text-[var(--text-3)] truncate" title={label}>
-        {label}
-      </div>
-      <div className="mono tabular-nums text-[14px] text-[var(--text-0)] mt-0.5">
-        {value}
-      </div>
-      {limit && (
-        <div className="text-[9px] text-[var(--text-3)] mt-0.5 mono tabular-nums">
-          of {limit}
-          {progress != null && (
-            <span className="ml-1">
-              · <span style={{ color: barColor }}>{progress.toFixed(0)}%</span>
-            </span>
-          )}
-        </div>
-      )}
-      {progress != null && (
-        <div className="h-1 rounded-[1px] bg-[var(--bg-0)] overflow-hidden mt-1">
-          <div
-            style={{
-              width: `${Math.max(0, Math.min(100, progress))}%`,
-              backgroundColor: barColor,
-            }}
-            className="h-full transition-[width]"
-          />
-        </div>
-      )}
-    </div>
-  )
+/** Threshold colour matching StatTile's 'limit' progress variant. */
+function limitBarColor(progress: number): string {
+  if (progress >= 90) return 'var(--pnl-down)'
+  if (progress >= 60) return 'var(--status-warning)'
+  return 'var(--pnl-up)'
 }

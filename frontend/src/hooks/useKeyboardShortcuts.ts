@@ -5,7 +5,7 @@ import { useCommandPalette, useUiOverlays } from '@/stores'
 /**
  * Registers global keyboard shortcuts.
  *
- * Navigation: g then c/b/s/g/r (matching the 5 surfaces) + g , for settings.
+ * Navigation: g then c/o/b/s/g/r (surfaces) + g , for settings.
  * Utility:    ⌘K / Ctrl+K opens the command palette.
  *             ?            toggles the shortcut help overlay.
  */
@@ -57,6 +57,7 @@ export function useKeyboardShortcuts() {
         const k = e.key.toLowerCase()
         const routes: Record<string, string> = {
           c: '/',
+          o: '/observatory',
           b: '/book',
           s: '/strategies',
           g: '/guard',

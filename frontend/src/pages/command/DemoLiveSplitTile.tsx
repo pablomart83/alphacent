@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { SectionLabel } from '@/components/layout'
+import { StatInline } from '@/components/primitives'
 import { cn, formatCurrency, formatNumber } from '@/lib/utils'
 import { api } from '@/services/api'
 import type { LiveSummary } from '@/pages/book/useBookData'
@@ -168,20 +169,11 @@ function Stat({
   tone?: 'up' | 'down' | 'neutral'
 }) {
   return (
-    <div>
-      <div className="text-[var(--text-3)] uppercase tracking-wider">{label}</div>
-      <div
-        className={cn(
-          'mono tabular-nums text-[10px] font-medium',
-          tone === 'up'
-            ? 'text-[var(--pnl-up)]'
-            : tone === 'down'
-              ? 'text-[var(--pnl-down)]'
-              : 'text-[var(--text-1)]',
-        )}
-      >
-        {value}
-      </div>
-    </div>
+    <StatInline
+      label={label}
+      value={value}
+      size="xs"
+      tone={tone === 'neutral' ? 'default' : tone}
+    />
   )
 }

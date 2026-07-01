@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/services/api'
+import { formatAge as formatAgeCanonical } from '@/lib/utils'
 
 /* ═══════════════════════════════════════════════════════════════════
  *  Intel page data hooks
@@ -199,13 +200,10 @@ export function categoryLabel(cat: string): string {
   return labels[cat] ?? cat
 }
 
-export function formatAge(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const ts = iso.endsWith('Z') ? iso : iso + 'Z'
-  const diff = Date.now() - new Date(ts).getTime()
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
-}
+/**
+ * Re-export of the canonical age formatter (lib/utils) so existing intel
+ * imports (`from './useIntelData'`) keep working. The previous divergent local
+ * copy (minute-granularity, naive `+ 'Z'`) has been removed in favour of the
+ * shared implementation, which also renders sub-minute ages and handles epochs.
+ */
+export const formatAge = formatAgeCanonical
