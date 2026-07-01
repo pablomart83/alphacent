@@ -28,7 +28,7 @@ export function BacktestZone() {
 
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2">
         <StatTile
           label="WF pass rate"
           value={wfPassRate == null ? '—' : formatPercentage(wfPassRate, { precision: 0, signed: false })}

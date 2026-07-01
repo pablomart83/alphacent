@@ -1,4 +1,6 @@
 import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/services/api'
 import { useTradingMode } from '@/stores'
 import type { EquityInterval, EquityPeriod } from '@/components/trading/EquityChart'
 import {
@@ -7,7 +9,6 @@ import {
   useLiveSummary,
   usePerformanceAnalytics,
   usePipelineCounts,
-  useSpyBenchmark,
 } from '@/pages/command/useCommandData'
 import {
   useAdvancedRisk,
@@ -19,29 +20,24 @@ import {
 
 /**
  * Observatory data layer — a thin composition over the EXISTING page hooks.
- *
- * Deliberately adds no new backend surface: every field the Observatory shows
- * is already served by an endpoint the other pages consume, and because the
- * query keys match, TanStack Query dedupes the fetches across pages. This keeps
- * metric logic in one place (the backend analytics functions) and means the
- * Observatory can never drift from Command/Guard/Book.
+ * Adds no new backend surface; query keys match the other pages so TanStack
+ * Query dedupes every fetch. Metric logic stays server-side.
  */
 
 export interface FundOverview {
   equity: number | null
   todayPnl: number | null
   todayPnlPct: number | null
-  monthReturnPct: number | null
   weekReturnPct: number | null
+  monthReturnPct: number | null
+  allTimeReturnPct: number | null
   unrealizedPnl: number | null
   availableCash: number | null
   sharpe: number | null
   sortino: number | null
   maxDrawdownPct: number | null
   currentDrawdownPct: number | null
-  /** Gross exposure as % of equity (invested / equity). */
   grossExposurePct: number | null
-  /** Portfolio exposure limit as % (from risk limits), for the progress bar. */
   exposureLimitPct: number | null
   netExposurePct: number | null
   winRate30d: number | null
@@ -52,13 +48,41 @@ export interface FundOverview {
   regimeDescription: string | null
   liveEnabled: boolean
   liveAuthorisations: number
-  /** Most-recent successful data touch (ISO) — drives the freshness dot. */
   dataUpdatedAt: number | null
   lastSyncAt: string | null
   systemState: string | null
+  /** Equity series (active account) for the header sparkline. */
+  equitySeries: number[]
 }
 
-function pct(value: number | null | undefined): number | null {
+export interface AccountSplit {
+  demoEquity: number | null
+  demoOpenPositions: number | null
+  demoUnrealized: number | null
+  liveVirtualEquity: number | null
+  liveRealEquity: number | null
+  liveOpenPositions: number | null
+  liveTodayReal: number | null
+  liveEnabled: boolean
+}
+
+interface DemoMini {
+  account_equity: number
+  total_unrealized_pnl: number
+  quick_stats: { open_positions: number }
+}
+
+/** DEMO account NAV — independent of the toggle so the split always shows both. */
+function useDemoNav() {
+  return useQuery<DemoMini>({
+    queryKey: ['dashboard-mini', 'DEMO'],
+    queryFn: () => api.get<DemoMini>('/account/dashboard/summary', { mode: 'DEMO', interval: '1d' }),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  })
+}
+
+function num(value: number | null | undefined): number | null {
   return value == null || Number.isNaN(value) ? null : value
 }
 
@@ -67,9 +91,8 @@ export function useObservatoryData(period: EquityPeriod, interval: EquityInterva
 
   const dashboard = useDashboardSummary(interval)
   const performance = usePerformanceAnalytics(period, interval)
-  const spy = useSpyBenchmark(period, true)
-  const spyAll = useSpyBenchmark('ALL', true)
   const live = useLiveSummary()
+  const demoNav = useDemoNav()
   const risk = useRiskMetrics()
   const riskLimits = useRiskLimits()
   const advancedRisk = useAdvancedRisk()
@@ -85,16 +108,16 @@ export function useObservatoryData(period: EquityPeriod, interval: EquityInterva
     const l = riskLimits.data
     const adv = advancedRisk.data
 
-    const today = d?.pnl_periods?.find((x) => x.label === 'Today')
-    const week = d?.pnl_periods?.find((x) => x.label === 'Week')
-    const month = d?.pnl_periods?.find((x) => x.label === 'Month')
+    const period_ = (label: string) => d?.pnl_periods?.find((x) => x.label === label)
+    const today = period_('Today')
+    const week = period_('This Week')
+    const month = period_('This Month')
+    const allTime = period_('All-Time')
 
     const equity = d?.account_equity ?? null
     const invested = d?.total_invested ?? null
     const grossExposurePct =
       equity != null && equity > 0 && invested != null ? (invested / equity) * 100 : null
-
-    // Risk-limit max_portfolio_exposure is a fraction (e.g. 0.3). Normalise to %.
     const exposureLimitPct =
       l?.max_portfolio_exposure != null
         ? l.max_portfolio_exposure <= 1
@@ -106,19 +129,20 @@ export function useObservatoryData(period: EquityPeriod, interval: EquityInterva
       equity,
       todayPnl: today?.pnl_absolute ?? null,
       todayPnlPct: today?.pnl_percent ?? null,
-      weekReturnPct: pct(week?.pnl_percent),
-      monthReturnPct: pct(month?.pnl_percent),
+      weekReturnPct: num(week?.pnl_percent),
+      monthReturnPct: num(month?.pnl_percent),
+      allTimeReturnPct: num(allTime?.pnl_percent),
       unrealizedPnl: d?.total_unrealized_pnl ?? null,
       availableCash: d?.available_cash ?? null,
-      sharpe: pct(p?.sharpe_ratio),
-      sortino: pct(p?.sortino_ratio),
+      sharpe: num(p?.sharpe_ratio),
+      sortino: num(p?.sortino_ratio),
       maxDrawdownPct: p?.max_drawdown != null ? -Math.abs(p.max_drawdown) : null,
       currentDrawdownPct: r?.current_drawdown != null ? -Math.abs(r.current_drawdown) : null,
       grossExposurePct,
       exposureLimitPct,
       netExposurePct: adv?.directional_exposure?.net_pct ?? null,
       winRate30d: d?.quick_stats?.win_rate_30d ?? null,
-      alphaVsSpyPct: pct(p?.alpha_vs_spy),
+      alphaVsSpyPct: num(p?.alpha_vs_spy),
       regime: d?.market_regime?.current_regime ?? null,
       regimeConfidence: autonomous.data?.market_confidence ?? null,
       regimeDataQuality: autonomous.data?.data_quality ?? null,
@@ -128,6 +152,7 @@ export function useObservatoryData(period: EquityPeriod, interval: EquityInterva
       dataUpdatedAt: dashboard.dataUpdatedAt || null,
       lastSyncAt: dataSync.data?.last_sync_at ?? null,
       systemState: systemStatus.data?.state ?? null,
+      equitySeries: (d?.equity_curve ?? []).map((pt) => pt.equity).filter((v) => Number.isFinite(v)),
     }
   }, [
     dashboard.data,
@@ -142,14 +167,27 @@ export function useObservatoryData(period: EquityPeriod, interval: EquityInterva
     systemStatus.data,
   ])
 
+  const split = useMemo<AccountSplit>(
+    () => ({
+      demoEquity: demoNav.data?.account_equity ?? null,
+      demoOpenPositions: demoNav.data?.quick_stats?.open_positions ?? null,
+      demoUnrealized: demoNav.data?.total_unrealized_pnl ?? null,
+      liveVirtualEquity: live.data?.virtual_equity ?? null,
+      liveRealEquity: live.data?.real_equity ?? null,
+      liveOpenPositions: live.data?.open_positions ?? null,
+      liveTodayReal: live.data?.today_pnl_real ?? null,
+      liveEnabled: Boolean(live.data?.live_enabled),
+    }),
+    [demoNav.data, live.data],
+  )
+
   return {
     mode,
     overview,
+    split,
     queries: {
       dashboard,
       performance,
-      spy,
-      spyAll,
       live,
       risk,
       riskLimits,

@@ -27,7 +27,7 @@ export function ResearchZone({
   regimeDescription,
 }: ResearchZoneProps) {
   return (
-    <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 [&>*]:rounded-[3px] [&>*]:border [&>*]:border-[var(--border-subtle)] [&>*]:!border-b">
+    <div className="flex flex-col gap-2 [&>*]:rounded-[3px] [&>*]:border [&>*]:border-[var(--border-subtle)]">
       <RegimeBlock
         regime={regime}
         confidence={regimeConfidence}

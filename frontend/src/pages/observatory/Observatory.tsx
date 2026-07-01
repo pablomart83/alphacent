@@ -3,14 +3,10 @@ import { useSearchParams } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useBreakpoint } from '@/hooks/useBreakpoint'
 import type { EquityInterval, EquityPeriod } from '@/components/trading/EquityChart'
-import { EquityPanel } from '@/pages/command/EquityPanel'
 import { useObservatoryData } from './useObservatoryData'
 import { FundHeader } from './FundHeader'
-import { AttentionRail } from './AttentionRail'
-import { StageSection } from './StageSection'
-import { SignalFeed } from '@/components/trading/SignalFeed'
-import { OrderFillsTicker } from '@/components/trading/OrderFillsTicker'
-import { PanelHeader } from '@/components/layout'
+import { Panel } from './Panel'
+import { AlertsPanel } from './AlertsPanel'
 import { ResearchZone } from './zones/ResearchZone'
 import { BacktestZone } from './zones/BacktestZone'
 import { PaperZone } from './zones/PaperZone'
@@ -18,90 +14,43 @@ import { LiveZone } from './zones/LiveZone'
 
 const PERIOD_SET: EquityPeriod[] = ['1W', '1M', '3M', '6M', '1Y', 'ALL']
 const INTERVAL_SET: EquityInterval[] = ['1d', '4h', '1h']
+const isPeriod = (v: string | null): v is EquityPeriod => !!v && (PERIOD_SET as string[]).includes(v)
+const isInterval = (v: string | null): v is EquityInterval => !!v && (INTERVAL_SET as string[]).includes(v)
 
-function isPeriod(v: string | null): v is EquityPeriod {
-  return !!v && (PERIOD_SET as string[]).includes(v)
-}
-function isInterval(v: string | null): v is EquityInterval {
-  return !!v && (INTERVAL_SET as string[]).includes(v)
-}
-
-type MobileTab = 'overview' | 'research' | 'backtest' | 'paper' | 'live' | 'activity'
+type MobileTab = 'live' | 'alerts' | 'paper' | 'research' | 'backtest'
 const MOBILE_TABS: { id: MobileTab; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
+  { id: 'live', label: 'Live' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'paper', label: 'Paper' },
   { id: 'research', label: 'Research' },
   { id: 'backtest', label: 'Backtest' },
-  { id: 'paper', label: 'Paper' },
-  { id: 'live', label: 'Live' },
-  { id: 'activity', label: 'Activity' },
 ]
 
-const STAGE_ACCENT = {
+const ACCENT = {
   research: 'var(--accent-secondary)',
   backtest: 'var(--accent-primary)',
   paper: 'var(--account-demo)',
   live: 'var(--account-live)',
+  alerts: 'var(--status-warning)',
 } as const
 
 export function Observatory() {
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams] = useSearchParams()
   const { isDesktop } = useBreakpoint()
+  const [mobileTab, setMobileTab] = useState<MobileTab>('live')
 
-  const [period, setPeriod] = useState<EquityPeriod>(
-    isPeriod(searchParams.get('period')) ? (searchParams.get('period') as EquityPeriod) : '3M',
-  )
-  const [interval, setInterval] = useState<EquityInterval>(
-    isInterval(searchParams.get('interval')) ? (searchParams.get('interval') as EquityInterval) : '1d',
-  )
-  const [showBenchmark, setShowBenchmark] = useState(true)
-  const [showRealized, setShowRealized] = useState(true)
-  const [showDrawdown, setShowDrawdown] = useState(true)
-  const [percentMode, setPercentMode] = useState(true)
-  const [mobileTab, setMobileTab] = useState<MobileTab>('overview')
+  // Period/interval only feed the analytics window (Sharpe/returns); no chart here.
+  const period: EquityPeriod = isPeriod(searchParams.get('period')) ? (searchParams.get('period') as EquityPeriod) : '3M'
+  const interval: EquityInterval = isInterval(searchParams.get('interval')) ? (searchParams.get('interval') as EquityInterval) : '1d'
+
+  const { overview, split, mode, queries } = useObservatoryData(period, interval)
+  const { dashboard, autonomous, pipeline } = queries
 
   useEffect(() => {
-    const next = new URLSearchParams(searchParams)
-    next.set('period', period)
-    next.set('interval', interval)
-    setSearchParams(next, { replace: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period, interval])
+    document.title = 'Observatory · AlphaCent'
+  }, [])
 
-  const { overview, queries } = useObservatoryData(period, interval)
-  const { dashboard, performance, spy, spyAll, autonomous, pipeline } = queries
-
-  const hero = (
-    <EquityPanel
-      dashboard={dashboard.data}
-      analytics={performance.data}
-      spy={spy.data}
-      isLoadingDashboard={dashboard.isLoading || dashboard.isFetching}
-      isLoadingAnalytics={performance.isLoading || performance.isFetching}
-      error={dashboard.error ?? performance.error}
-      onRetry={() => {
-        dashboard.refetch()
-        performance.refetch()
-      }}
-      period={period}
-      onPeriodChange={setPeriod}
-      interval={interval}
-      onIntervalChange={setInterval}
-      showBenchmark={showBenchmark}
-      onShowBenchmarkChange={setShowBenchmark}
-      showRealized={showRealized}
-      onShowRealizedChange={setShowRealized}
-      showDrawdown={showDrawdown}
-      onShowDrawdownChange={setShowDrawdown}
-      percentMode={percentMode}
-      onPercentModeChange={setPercentMode}
-      fullscreen={false}
-      onFullscreenToggle={() => {}}
-      inceptionSpyBase={spyAll.data?.data?.[0]?.close}
-      inceptionEquityBase={spyAll.data?.inception_equity_base ?? undefined}
-    />
-  )
-
-  const researchZone = (
+  const researchContent = (
     <ResearchZone
       autonomousStatus={autonomous.data}
       pipelineCounts={pipeline.counts}
@@ -112,83 +61,73 @@ export function Observatory() {
       regimeDescription={overview.regimeDescription}
     />
   )
+  const alertsContent = (
+    <AlertsPanel dataUpdatedAt={overview.dataUpdatedAt} lastSyncAt={overview.lastSyncAt} systemState={overview.systemState} />
+  )
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--bg-0)]">
-      <FundHeader overview={overview} loading={dashboard.isLoading} />
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-0)]">
+      <FundHeader overview={overview} split={split} mode={mode} loading={dashboard.isLoading} />
 
       {isDesktop ? (
-        /* ── Desktop / wall-monitor: main lifecycle column + sticky attention rail ── */
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">
-          <main className="min-h-0 overflow-y-auto">
-            <div className="h-[380px] border-b border-[var(--border-subtle)]">{hero}</div>
-            <StageSection title="Research" hint="idea generation" accent={STAGE_ACCENT.research}>
-              {researchZone}
-            </StageSection>
-            <StageSection title="Backtest / Walk-forward" hint="statistical validation" accent={STAGE_ACCENT.backtest}>
-              <BacktestZone />
-            </StageSection>
-            <StageSection title="Paper" hint="DEMO · data collection" accent={STAGE_ACCENT.paper}>
-              <PaperZone />
-            </StageSection>
-            <StageSection title="Live" hint="real capital · alpha" accent={STAGE_ACCENT.live}>
-              <LiveZone />
-            </StageSection>
-          </main>
-          <aside className="min-h-0 border-l border-[var(--border-default)]">
-            <AttentionRail />
-          </aside>
+        /* Fitted command board — the PAGE does not scroll; panels scroll internally. */
+        <div className="grid min-h-0 flex-1 grid-cols-3 grid-rows-[minmax(0,3fr)_minmax(0,2fr)] gap-2 overflow-hidden p-2">
+          <Panel title="Live · real capital" accent={ACCENT.live} className="col-span-2" badge={<AccountBadge mode="LIVE" />}>
+            <LiveZone />
+          </Panel>
+          <Panel title="Alerts" accent={ACCENT.alerts}>
+            {alertsContent}
+          </Panel>
+          <Panel title="Research · pipeline" accent={ACCENT.research}>
+            {researchContent}
+          </Panel>
+          <Panel title="Backtest / walk-forward" accent={ACCENT.backtest}>
+            <BacktestZone />
+          </Panel>
+          <Panel title="Paper · data collection" accent={ACCENT.paper} badge={<AccountBadge mode="DEMO" />}>
+            <PaperZone />
+          </Panel>
         </div>
       ) : (
-        /* ── Mobile / tablet: attention-first, then segmented stage nav ── */
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="border-b border-[var(--border-default)]">
-            <AttentionRail showFeeds={false} />
-          </div>
-
-          {/* Sticky segmented stage nav */}
-          <div className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b border-[var(--border-default)] bg-[var(--bg-0)] px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        /* Mobile: sticky segmented tabs, attention-first (Live, Alerts first). */
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-default)] bg-[var(--bg-0)] px-2 py-1.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {MOBILE_TABS.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => setMobileTab(t.id)}
                 className={cn(
-                  'shrink-0 rounded-[3px] px-3 py-1.5 text-[11px] font-medium min-h-[36px] transition-colors',
-                  mobileTab === t.id
-                    ? 'bg-[var(--accent-primary)] text-white'
-                    : 'bg-[var(--bg-2)] text-[var(--text-2)] hover:bg-[var(--bg-hover)]',
+                  'min-h-[38px] shrink-0 rounded-[3px] px-3 text-[11px] font-medium transition-colors',
+                  mobileTab === t.id ? 'bg-[var(--accent-primary)] text-white' : 'bg-[var(--bg-2)] text-[var(--text-2)]',
                 )}
               >
                 {t.label}
               </button>
             ))}
           </div>
-
-          <div className="p-2">
-            {mobileTab === 'overview' && <div className="h-[420px]">{hero}</div>}
-            {mobileTab === 'research' && researchZone}
-            {mobileTab === 'backtest' && <BacktestZone />}
-            {mobileTab === 'paper' && <PaperZone />}
+          <div className="min-h-0 flex-1 overflow-y-auto p-2">
             {mobileTab === 'live' && <LiveZone />}
-            {mobileTab === 'activity' && (
-              <div className="space-y-2">
-                <div className="h-[340px] rounded-[3px] border border-[var(--border-subtle)] overflow-hidden">
-                  <PanelHeader title="Signals">
-                    <SignalFeed />
-                  </PanelHeader>
-                </div>
-                <div className="h-[340px] rounded-[3px] border border-[var(--border-subtle)] overflow-hidden">
-                  <PanelHeader title="Fills · slippage">
-                    <OrderFillsTicker />
-                  </PanelHeader>
-                </div>
-              </div>
-            )}
+            {mobileTab === 'alerts' && alertsContent}
+            {mobileTab === 'paper' && <PaperZone />}
+            {mobileTab === 'research' && researchContent}
+            {mobileTab === 'backtest' && <BacktestZone />}
           </div>
         </div>
       )}
     </div>
+  )
+}
+
+function AccountBadge({ mode }: { mode: 'LIVE' | 'DEMO' }) {
+  const color = mode === 'LIVE' ? 'var(--account-live)' : 'var(--account-demo)'
+  return (
+    <span
+      className="rounded-[2px] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+      style={{ color, background: `color-mix(in oklab, ${color} 14%, transparent)` }}
+    >
+      {mode}
+    </span>
   )
 }
 
